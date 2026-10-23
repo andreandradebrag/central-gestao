@@ -33,8 +33,13 @@ EP_TOKEN=$(secreta "Cole o API Token do Easypanel")
 [ -n "$EP_TOKEN" ] || { erro "Token vazio."; exit 1; }
 
 DOMINIO=$(pergunta "Domínio do sistema" "app.inaservicos.com.br")
-echo; echo "Repositório do GitHub com os arquivos (ex.: inaservicos/central-gestao)."
-REPO=$(pergunta "Dono/repositório")
+echo; echo "Repositório do GitHub com os arquivos, no formato dono/nome."
+while :; do
+  REPO=$(pergunta "Dono/repositório" "andreandradebrag/central-gestao")
+  REPO="${REPO#https://github.com/}"; REPO="${REPO%.git}"; REPO="${REPO%/}"
+  [[ "$REPO" == */* ]] && break
+  erro "Informe dono e nome juntos, por exemplo: andreandradebrag/central-gestao"
+done
 RAMO=$(pergunta "Ramo (branch)" "main")
 PRIVADO=$(pergunta "O repositório é privado? (s/n)" "s")
 GH_TOKEN=""
@@ -85,10 +90,20 @@ TRPC = {'createProject': 'projects.createProject', 'createAppService': 'services
         'updateAppSourceGithub': 'services.app.updateSourceGithub', 'updateAppBuild': 'services.app.updateBuild', 'updateAppEnv': 'services.app.updateEnv',
         'createMount': 'services.app.createMount', 'createDomain': 'domains.createDomain', 'deployAppService': 'services.app.deployService'}
 falhas = []
-def passo(nome, op, corpo, ja_existe_ok=True):
+ARQ = '/opt/central/instalacao.json'
+try: feitos = set(json.load(open(ARQ)).get('feitos', []))
+except Exception:
+    feitos = set()
+    if os.path.exists('/opt/central/instalacao.txt'):  # 1ª execução (versão anterior) já criou os volumes
+        feitos = {'fiscal: dados permanentes', 'fiscal: pasta do certificado', 'gestao: dados permanentes', 'gestao: pasta do certificado'}
+def guardar(): json.dump({'feitos': sorted(feitos), 'falhas': falhas}, open(ARQ, 'w'), ensure_ascii=False, indent=1)
+def passo(nome, op, corpo, ja_existe_ok=True, uma_vez=False):
+    if uma_vez and nome in feitos: print('\033[0;32m✔ ' + nome + ' (já feito antes)\033[0m'); return True
     ok, msg = chamar(op, corpo)
-    if ok or (ja_existe_ok and ('already' in msg.lower() or 'exist' in msg.lower())): print('\033[0;32m✔ ' + nome + '\033[0m'); return True
-    print('\033[0;31m✖ ' + nome + ': ' + msg + '\033[0m'); falhas.append(nome); return False
+    m = msg.lower()
+    if ok or (ja_existe_ok and ('already' in m or 'exist' in m or 'not allowed to create more projects' in m)):
+        print('\033[0;32m✔ ' + nome + '\033[0m'); feitos.add(nome); guardar(); return True
+    print('\033[0;31m✖ ' + nome + ': ' + msg + '\033[0m'); falhas.append(nome); guardar(); return False
 
 P = 'central'
 repo = E['REPO'].strip().strip('/')
@@ -103,14 +118,16 @@ env_gestao = '\n'.join(['PORT=3000', 'DATA_DIR=/data', f'FISCAL_URL=http://{P}_f
                         'BB_CLIENT_ID=', 'BB_CLIENT_SECRET=', 'BB_APP_KEY=', 'BB_CERT_PATH=/certs/bb.pfx', f"BB_CERT_SENHA={E['CERT_SENHA']}", 'BANCOS_INTERVALO_MIN=180'])
 passo('fiscal: variáveis', 'updateAppEnv', {'projectName': P, 'serviceName': 'fiscal', 'env': env_fiscal}, False)
 passo('gestao: variáveis', 'updateAppEnv', {'projectName': P, 'serviceName': 'gestao', 'env': env_gestao}, False)
-passo('fiscal: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'volume', 'name': 'fiscal-dados', 'mountPath': '/data'}})
-passo('fiscal: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'bind', 'hostPath': '/opt/central/certs', 'mountPath': '/certs'}})
-passo('gestao: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'volume', 'name': 'gestao-dados', 'mountPath': '/data'}})
-passo('gestao: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'bind', 'hostPath': '/opt/central/certs', 'mountPath': '/certs'}})
-passo('Domínio ' + E['DOMINIO'] + ' com HTTPS', 'createDomain', {'host': E['DOMINIO'], 'https': True, 'path': '/', 'destinationType': 'service', 'serviceDestination': {'projectName': P, 'serviceName': 'gestao', 'port': 3000, 'protocol': 'http'}})
+passo('fiscal: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'volume', 'name': 'fiscal-dados', 'mountPath': '/data'}}, uma_vez=True)
+passo('fiscal: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'bind', 'hostPath': '/opt/central/certs', 'mountPath': '/certs'}}, uma_vez=True)
+passo('gestao: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'volume', 'name': 'gestao-dados', 'mountPath': '/data'}}, uma_vez=True)
+passo('gestao: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'bind', 'hostPath': '/opt/central/certs', 'mountPath': '/certs'}}, uma_vez=True)
+import secrets, string
+dom_id = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(12))
+passo('Domínio ' + E['DOMINIO'] + ' com HTTPS', 'createDomain', {'id': dom_id, 'host': E['DOMINIO'], 'https': True, 'path': '/', 'wildcard': False, 'middlewares': [], 'certificateResolver': '',
+      'destinationType': 'service', 'serviceDestination': {'projectName': P, 'serviceName': 'gestao', 'port': 3000, 'protocol': 'http', 'path': '/'}}, uma_vez=True)
 passo('Deploy do conector fiscal', 'deployAppService', {'projectName': P, 'serviceName': 'fiscal'}, False)
 passo('Deploy do sistema', 'deployAppService', {'projectName': P, 'serviceName': 'gestao'}, False)
-open('/opt/central/instalacao.txt', 'w').write('falhas=' + ','.join(falhas) + '\n')
 sys.exit(1 if falhas else 0)
 PY
 echo
