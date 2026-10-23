@@ -126,8 +126,8 @@ import secrets, string
 dom_id = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(12))
 passo('Domínio ' + E['DOMINIO'] + ' com HTTPS', 'createDomain', {'id': dom_id, 'host': E['DOMINIO'], 'https': True, 'path': '/', 'wildcard': False, 'middlewares': [], 'certificateResolver': '',
       'destinationType': 'service', 'serviceDestination': {'projectName': P, 'serviceName': 'gestao', 'port': 3000, 'protocol': 'http', 'path': '/'}}, uma_vez=True)
-passo('Deploy do conector fiscal', 'deployAppService', {'projectName': P, 'serviceName': 'fiscal'}, False)
-passo('Deploy do sistema', 'deployAppService', {'projectName': P, 'serviceName': 'gestao'}, False)
+passo('Deploy do conector fiscal', 'deployAppService', {'projectName': P, 'serviceName': 'fiscal', 'forceRebuild': False}, False)
+passo('Deploy do sistema', 'deployAppService', {'projectName': P, 'serviceName': 'gestao', 'forceRebuild': False}, False)
 sys.exit(1 if falhas else 0)
 PY
 echo
