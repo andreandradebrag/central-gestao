@@ -98,7 +98,7 @@ def passo(nome, op, corpo, ja_existe_ok=True, uma_vez=False):
     if uma_vez and nome in feitos: print('\033[0;32m✔ ' + nome + ' (já feito antes)\033[0m'); return True
     ok, msg = chamar(op, corpo)
     m = msg.lower()
-    ja = ('already exist' in m or 'já existe' in m) and 'not exist' not in m and "n't exist" not in m
+    ja = ('already exist' in m or 'already used' in m or 'já existe' in m) and 'not exist' not in m and "n't exist" not in m
     if ok or (ja_existe_ok and ja):
         print('\033[0;32m✔ ' + nome + '\033[0m'); feitos.add(nome); guardar(); return True
     print('\033[0;31m✖ ' + nome + ': ' + msg + '\033[0m'); falhas.append(nome); guardar(); return False
