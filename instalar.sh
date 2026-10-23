@@ -7,7 +7,7 @@
 # O que faz:
 #   1. Confere o Easypanel e pede o token da API dele (Easypanel › Settings › Users › API Token).
 #   2. Pergunta o domínio (app.inaservicos.com.br), o repositório do GitHub e os dados do certificado A1.
-#   3. Prepara /opt/central/certs (certificado do conector fiscal e cópia para o extrato do Banco do Brasil).
+#   3. Prepara /opt/central/certs (certificado do conector fiscal) e /opt/central/bb (pasta só do extrato do BB, vazia até ligar o BB).
 #   4. Cria no Easypanel o projeto "central" com os serviços "fiscal" e "gestao": origem no GitHub,
 #      Dockerfile, variáveis de ambiente, volumes, pasta do certificado e domínio com HTTPS.
 #   5. Faz o primeiro deploy e mostra o endereço para criar a conta do dono.
@@ -54,7 +54,7 @@ CNPJ=$(pergunta "CNPJ da empresa (só números)" "")
 UF=$(pergunta "UF" "SP")
 AMB=$(pergunta "Ambiente da SEFAZ: 2 = homologação (teste), 1 = produção" "2")
 
-mkdir -p /opt/central/certs
+mkdir -p /opt/central/certs /opt/central/bb && chmod 700 /opt/central/certs
 if [ ! -f /opt/central/certs/certificado.pfx ]; then
   aviso "Certificado A1 não encontrado em /opt/central/certs/certificado.pfx."
   echo "Você pode enviar depois (veja o LEIA-ME, seção 2) e rodar este instalador de novo; o sistema sobe sem ele."
@@ -62,8 +62,8 @@ if [ ! -f /opt/central/certs/certificado.pfx ]; then
 else
   CERT_SENHA=$(secreta "Senha do certificado A1")
   chown 10001 /opt/central/certs/certificado.pfx && chmod 400 /opt/central/certs/certificado.pfx
-  cp -f /opt/central/certs/certificado.pfx /opt/central/certs/bb.pfx && chown 1000 /opt/central/certs/bb.pfx && chmod 400 /opt/central/certs/bb.pfx
-  ok "Certificado preparado (conector fiscal e extrato do Banco do Brasil)."
+  rm -f /opt/central/certs/bb.pfx
+  ok "Certificado preparado para o conector fiscal. (Para o extrato do BB, veja o LEIA-ME 7.2.)"
 fi
 FISCAL_TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 
@@ -116,13 +116,13 @@ for svc, pasta in (('fiscal', '/fiscal'), ('gestao', '/gestao')):
     passo(f'{svc}: build pelo Dockerfile', 'updateAppBuild', {'projectName': P, 'serviceName': svc, 'build': {'type': 'dockerfile', 'file': 'Dockerfile'}}, False)
 env_fiscal = '\n'.join([f"CNPJ={E['CNPJ']}", f"UF={E['UF']}", f"AMBIENTE={E['AMB']}", 'CERT_PATH=/certs/certificado.pfx', f"CERT_SENHA={E['CERT_SENHA']}", f"FISCAL_TOKEN={E['FISCAL_TOKEN']}", 'INTERVALO_MIN=60', 'AUTO_CIENCIA=1', 'NFSE_ADN=1'])
 env_gestao = '\n'.join(['PORT=3000', 'DATA_DIR=/data', f'FISCAL_URL=http://{P}_fiscal:8000', f"FISCAL_TOKEN={E['FISCAL_TOKEN']}", 'ANTHROPIC_API_KEY=', 'SOLIDES_TOKEN=', 'SOLIDES_INTERVALO_MIN=15',
-                        'BB_CLIENT_ID=', 'BB_CLIENT_SECRET=', 'BB_APP_KEY=', 'BB_CERT_PATH=/certs/bb.pfx', f"BB_CERT_SENHA={E['CERT_SENHA']}", 'BANCOS_INTERVALO_MIN=180', f"APP_URL=https://{E['DOMINIO']}", 'SMTP_HOST=', 'SMTP_PORT=465', 'SMTP_USUARIO=', 'SMTP_SENHA=', 'SMTP_REMETENTE='])
+                        'BB_CLIENT_ID=', 'BB_CLIENT_SECRET=', 'BB_APP_KEY=', 'BB_CERT_PATH=/certs/bb.pfx', 'BB_CERT_SENHA=', 'BANCOS_INTERVALO_MIN=180', f"APP_URL=https://{E['DOMINIO']}", 'SMTP_HOST=', 'SMTP_PORT=465', 'SMTP_USUARIO=', 'SMTP_SENHA=', 'SMTP_REMETENTE='])
 passo('fiscal: variáveis', 'updateAppEnv', {'projectName': P, 'serviceName': 'fiscal', 'env': env_fiscal}, False)
 passo('gestao: variáveis', 'updateAppEnv', {'projectName': P, 'serviceName': 'gestao', 'env': env_gestao}, False)
 passo('fiscal: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'volume', 'name': 'fiscal-dados', 'mountPath': '/data'}}, uma_vez=True)
 passo('fiscal: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'bind', 'hostPath': '/opt/central/certs', 'mountPath': '/certs'}}, uma_vez=True)
 passo('gestao: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'volume', 'name': 'gestao-dados', 'mountPath': '/data'}}, uma_vez=True)
-passo('gestao: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'bind', 'hostPath': '/opt/central/certs', 'mountPath': '/certs'}}, uma_vez=True)
+passo('gestao: pasta do certificado', 'createMount', {'projectName': P, 'serviceName': 'gestao', 'values': {'type': 'bind', 'hostPath': '/opt/central/bb', 'mountPath': '/certs'}}, uma_vez=True)
 import secrets, string
 dom_id = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(12))
 passo('Domínio ' + E['DOMINIO'] + ' com HTTPS', 'createDomain', {'id': dom_id, 'host': E['DOMINIO'], 'https': True, 'path': '/', 'wildcard': False, 'middlewares': [], 'certificateResolver': '',

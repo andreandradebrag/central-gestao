@@ -145,10 +145,11 @@ Sem token, a tela continua aceitando o relatório exportado da Sólides (Excel o
 2. Anote **Client ID**, **Client Secret** e **developer_application_key** (chave do aplicativo).
 3. O BB exige o certificado A1 da empresa na conexão. Na VPS, faça uma cópia para o serviço gestao:
    ```bash
-   cp /opt/central/certs/certificado.pfx /opt/central/certs/bb.pfx
-   chown 1000 /opt/central/certs/bb.pfx && chmod 400 /opt/central/certs/bb.pfx
+   mkdir -p /opt/central/bb
+   cp /opt/central/certs/certificado.pfx /opt/central/bb/bb.pfx
+   chown 1000 /opt/central/bb/bb.pfx && chmod 400 /opt/central/bb/bb.pfx
    ```
-   No serviço **gestao**, em Mounts, adicione o Bind: host `/opt/central/certs`, caminho `/certs` (no Compose isso já vem pronto).
+   No serviço **gestao**, em Mounts, o Bind deve ser host `/opt/central/bb`, caminho `/certs` (nunca a pasta `/opt/central/certs`, que é só do conector fiscal). Assim o sistema só enxerga o certificado quando o extrato do BB for ligado.
 4. No serviço **gestao** › Environment: `BB_CLIENT_ID`, `BB_CLIENT_SECRET`, `BB_APP_KEY`, `BB_CERT_PATH=/certs/bb.pfx` e `BB_CERT_SENHA`. Clique em **Deploy**.
 5. No sistema, em Conciliação bancária › **Extrato automático**: em cada conta do BB escolha "API do Banco do Brasil", informe agência e conta (sem dígito), **Testar conexão** e **Salvar e buscar agora**.
 

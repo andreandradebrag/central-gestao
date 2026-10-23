@@ -2,3 +2,13 @@
 *.pfx
 *.p12
 certs/
+*.pem
+*.key
+*.crt
+*.db
+*.sqlite
+*.sqlite3
+backup-banco-*
+__pycache__/
+*.pyc
+data/

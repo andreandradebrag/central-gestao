@@ -51,7 +51,7 @@ services:
       NFSE_ADN: ${NFSE_ADN:-1}
     volumes:
       - fiscal-dados:/data
-      - /opt/central/certs:/certs:ro
+      - /opt/central/bb:/certs:ro
     # sem "ports": o conector fica só na rede interna, acessível apenas pelo serviço gestao
 
 volumes:

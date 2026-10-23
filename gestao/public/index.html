@@ -5453,7 +5453,7 @@ function chSync(){
     const onM=(kind,map)=>snap=>{
       const first=!CH.primed.has(kind+u);
       const keep=new Set();
-      snap.docs.forEach(d=>{const o=Object.assign({id:d.id},d.data()),k=u+'/'+d.id;keep.add(k);const old=map.get(k);map.set(k,Object.assign(o,{_a:u,_k:k}));
+      snap.docs.forEach(d=>{const o=Object.assign({},d.data(),{id:d.id}),k=u+'/'+d.id;keep.add(k);const old=map.get(k);map.set(k,Object.assign(o,{_a:u,_k:k}));
         if(kind==='m'&&!first&&!old&&!CH.seen.has(k))chNovo(map.get(k));CH.seen.add(k);});
       Array.from(map.keys()).forEach(k=>{if(k.startsWith(u+'/')&&!keep.has(k))map.delete(k);});
       CH.primed.add(kind+u);schedule();
@@ -5625,7 +5625,7 @@ A.chRespX=()=>{chUi.resp='';render();};
 A.chEdit=d=>{const m=CH.msgs.get(d.k);if(!m||m._a!==chMe())return;chUi.edit=d.k;chUi.resp='';chUi.draft[chUi.conv]=m.txt||'';render();const t=$('#chatTxt');if(t){t.focus();}};
 A.chEditX=()=>{chUi.edit='';chUi.draft[chUi.conv]='';render();};
 A.chApagar=d=>{const m=CH.msgs.get(d.k);if(!m||m._a!==chMe())return;confirmBox('Apagar esta mensagem para todos?',()=>{const n=Object.assign({},m,{del:true,txt:'',men:[]});delete n.anx;delete n.resp;chWrite('m',n);},'Apagar',true);};
-A.chRemover=d=>{const m=CH.msgs.get(d.k);if(!m||!me.owner)return;confirmBox('Remover a mensagem de '+nameOf(m._a)+'? Ela some para todos.',()=>{const n=Object.assign({},m,{del:true,rem:chMe(),txt:'',men:[]});delete n.anx;chWriteOther(m._a,n);},'Remover',true);};
+A.chRemover=d=>{const m=CH.msgs.get(d.k);if(!m||!me.owner)return;confirmBox('Remover a mensagem de '+esc(nameOf(m._a))+'? Ela some para todos.',()=>{const n=Object.assign({},m,{del:true,rem:chMe(),txt:'',men:[]});delete n.anx;chWriteOther(m._a,n);},'Remover',true);};
 A.chReac=d=>{
   const eu=chMe(),ja=Array.from(CH.msgs.values()).find(m=>m.k==='reac'&&m._a===eu&&m.alvo===d.k&&m.emo===d.e);
   if(ja)chWrite('m',{id:ja.id},true);
@@ -5719,7 +5719,7 @@ function ptColabSync(){
   const db=store.db,u=me.uid;
   try{
     dbWatch('ptc:d',db.collection('pt').doc(u),s=>{PTC.doc=s&&s.exists?Object.assign({},s.data()):null;schedule();},{live:true,prio:true});
-    ['m','aj','ci'].forEach(k=>dbWatch('ptc:'+k,db.collection('pt/'+u+'/'+k),sn=>{PTC[k]=new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())]));schedule();},{live:true,prio:true}));
+    ['m','aj','ci'].forEach(k=>dbWatch('ptc:'+k,db.collection('pt/'+u+'/'+k),sn=>{PTC[k]=new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})]));schedule();},{live:true,prio:true}));
   }catch(e){}
 }
 function ptInject(){
@@ -5749,7 +5749,7 @@ function ptAdminSync(){
     const u=f.usrId;if(PTA.subs.has(u))return;PTA.subs.add(u);
     try{
       dbWatch('pta:d:'+u,db.collection('pt').doc(u),s=>{PTA.doc.set(u,s&&s.exists?Object.assign({},s.data()):null);PTA.primed.add('d'+u);schedule();},{every:120000});
-      ['m','aj','ci'].forEach(k=>dbWatch('pta:'+k+':'+u,db.collection('pt/'+u+'/'+k),sn=>{PTA[k].set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())])));PTA.primed.add(k+u);schedule();},{every:k==='aj'?60000:120000}));
+      ['m','aj','ci'].forEach(k=>dbWatch('pta:'+k+':'+u,db.collection('pt/'+u+'/'+k),sn=>{PTA[k].set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})])));PTA.primed.add(k+u);schedule();},{every:k==='aj'?60000:120000}));
     }catch(e){}
   });
 }
@@ -6009,7 +6009,7 @@ A.agChat=d=>{
 A.agStatus=d=>{const r=get('reun',d.id);if(!r)return;
   const fz=()=>{put('reun',Object.assign(cl(r),{status:d.s}));toast(d.s==='cancelada'?'Reunião cancelada.':'Reunião marcada como realizada.','pos');closeModal();
     if(d.s==='cancelada'&&r.gcal&&r.gcal.id)agMcp('delete_event',{eventId:r.gcal.id,notificationLevel:'ALL'}).then(()=>toast('Evento removido da Agenda Google e convidados avisados.','pos')).catch(e=>toast(agMcpErr(e)+' Remova o evento na Agenda Google.','neg'));};
-  if(d.s==='cancelada')confirmBox('Cancelar a reunião "'+r.titulo+'"?'+(r.gcal&&r.gcal.id?' O evento da Agenda Google também será removido e os convidados avisados.':''),fz,'Cancelar reunião',true);else fz();};
+  if(d.s==='cancelada')confirmBox('Cancelar a reunião "'+esc(r.titulo)+'"?'+(r.gcal&&r.gcal.id?' O evento da Agenda Google também será removido e os convidados avisados.':''),fz,'Cancelar reunião',true);else fz();};
 A.agAta=d=>{const r=get('reun',d.id);if(!r)return;modal({title:'Ata · '+r.titulo,wide:true,body:'<label class="f"><span>Decisões, encaminhamentos e responsáveis</span><textarea id="agAtaT" rows="10">'+esc(r.ata||'')+'</textarea></label>',save:()=>{put('reun',Object.assign(cl(r),{ata:String(($('#agAtaT')||{}).value||'').slice(0,20000),status:r.status==='cancelada'?'cancelada':'realizada'}));toast('Ata salva.','pos');},saveLabel:'Salvar ata'});};
 /* ---------- integração com o Google Agenda (conector do Claude) ---------- */
 const AG_SRV='Google Calendar';
@@ -7291,7 +7291,7 @@ let IMP={fase:'arquivo',rows:[],plano:null,arq:'',avisos:[],filtro:'',op:{semTag
 async function impLerPdf(buf,prog){
   await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);
   try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
-  const doc=await window.pdfjsLib.getDocument({data:buf}).promise,pages=[];
+  const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:buf}).promise,pages=[];
   for(let i=1;i<=doc.numPages;i++){const p=await doc.getPage(i),tc=await p.getTextContent();pages.push({items:tc.items.filter(t=>t.str&&t.str.trim()).map(t=>({s:t.str,x:t.transform[4],y:t.transform[5],w:t.width}))});if(prog&&i%10===0)prog(i,doc.numPages);}
   return impPdfRows(pages);
 }
@@ -7997,7 +7997,7 @@ A.solFerias=d=>{const r=get('dpsol',d.id);if(!r)return;A.ferNovaPara({id:r.funcI
 COL_NOME.dpsol='Solicitação';
 /* lado do RH: lê a caixa "sl" de cada colaborador, cria as solicitações e consolida pesquisas e relatos sem identificar quem enviou */
 const PTS={subs:new Set(),sl:new Map(),primed:new Set()};
-RH_PRE.push(()=>{if(!ptAdminOk())return;ptLinked().forEach(f=>{const u=f.usrId;if(PTS.subs.has(u))return;PTS.subs.add(u);try{dbWatch('pts:'+u,store.db.collection('pt/'+u+'/sl'),sn=>{PTS.sl.set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())])));PTS.primed.add(u);schedule();},{every:120000});}catch(e){}});});
+RH_PRE.push(()=>{if(!ptAdminOk())return;ptLinked().forEach(f=>{const u=f.usrId;if(PTS.subs.has(u))return;PTS.subs.add(u);try{dbWatch('pts:'+u,store.db.collection('pt/'+u+'/sl'),sn=>{PTS.sl.set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})])));PTS.primed.add(u);schedule();},{every:120000});}catch(e){}});});
 RH_POST.push(()=>{if(!ptAdminOk())return;
   ptLinked().forEach(f=>{const u=f.usrId;if(!PTS.primed.has(u))return;const h=ptH(u);
     (PTS.sl.get(u)||new Map()).forEach(x=>{
@@ -8019,7 +8019,7 @@ RH_POST.push(()=>{if(!ptAdminOk())return;
   return o;};}
 /* lado do colaborador: lê a própria caixa "sl" e o espelho */
 const PTCS={on:false,sl:new Map()};
-RH_PRE.push(()=>{if(!isColab())return;if(!PTCS.on&&me.uid&&store.db){PTCS.on=true;try{dbWatch('ptcs',store.db.collection('pt/'+me.uid+'/sl'),sn=>{PTCS.sl=new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())]));schedule();},{live:true,prio:true});}catch(e){}}
+RH_PRE.push(()=>{if(!isColab())return;if(!PTCS.on&&me.uid&&store.db){PTCS.on=true;try{dbWatch('ptcs',store.db.collection('pt/'+me.uid+'/sl'),sn=>{PTCS.sl=new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})]));schedule();},{live:true,prio:true});}catch(e){}}
   S.dpsol=Array.from(PTCS.sl.values());applyPending('dpsol');reindex();});
 GROUP_OF_TAB.meu='ponto';
 const meuDoc=()=>isColab()?(PTC.doc||{}):null;
@@ -8974,7 +8974,7 @@ document.addEventListener('change',async e=>{
   try{const buf=await f.arrayBuffer();let r;
     if(/\.pdf$/i.test(f.name)||f.type==='application/pdf'){
       await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
-      const doc=await window.pdfjsLib.getDocument({data:buf}).promise,pages=[];
+      const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:buf}).promise,pages=[];
       for(let i=1;i<=doc.numPages;i++){const p=await doc.getPage(i),tc=await p.getTextContent();pages.push({items:tc.items.filter(x=>x.str&&x.str.trim()).map(x=>({s:x.str,x:x.transform[4],y:x.transform[5],w:x.width}))});if(i%5===0){EQI.prog='Lendo página '+i+' de '+doc.numPages+'…';const el=$('#eqiProg');if(el)el.textContent=EQI.prog;}}
       r=eqpPdfRows(pages);}
     else if(/\.xlsx?$/i.test(f.name)){await loadScript(XLSX_URL,()=>!!window.XLSX);const wb=window.XLSX.read(buf,{type:'array'}),ws=wb.Sheets[wb.SheetNames[0]];r={rows:eqiTabular(window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''})),avisos:[]};}
@@ -9137,7 +9137,7 @@ boot=async function(){
     let first=true;
     let ultimo='';
     dbWatch('col:'+c,db.collection(c),snap=>{
-      const novo=snap.docs.map(d=>Object.assign({id:d.id},d.data()));
+      const novo=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));
       /* consulta periódica sem mudança: não redesenha a tela */
       let j='';try{j=JSON.stringify(novo);}catch(e){j=String(Math.random());}
       if(!first&&j===ultimo)return;ultimo=j;
@@ -9501,7 +9501,7 @@ function waStSync(){
   if(!waDb()){if(!WA_ST.has(chMe())){try{WA_ST.set(chMe(),JSON.parse(localStorage.getItem(WA_ST_LS)||'[]'));}catch(e){WA_ST.set(chMe(),[]);}}return;}
   WA_ST.subs=WA_ST.subs||new Set();
   chUsers().forEach(u=>{if(WA_ST.subs.has(u))return;WA_ST.subs.add(u);const eu=u===chMe();
-    dbWatch('cms:'+u,store.db.collection('cm/'+u+'/s'),sn=>{const l=sn.docs.map(d=>Object.assign({id:d.id},d.data()));WA_ST.set(u,l);
+    dbWatch('cms:'+u,store.db.collection('cm/'+u+'/s'),sn=>{const l=sn.docs.map(d=>Object.assign({},d.data(),{id:d.id}));WA_ST.set(u,l);
       if(eu)l.filter(s=>Date.now()-(+s.ts||0)>=WA_ST_H).forEach(s=>{try{store.db.collection('cm/'+u+'/s').doc(s.id).delete().catch(()=>{});}catch(e){}});schedule();},{every:eu?60000:120000});});}
 RH_PRE.push(waStSync);
 async function waStPost(o){const id=uid(),s=Object.assign({id,ts:Date.now()},o);const eu=chMe();
@@ -9899,7 +9899,7 @@ document.addEventListener('change',async e=>{const t=e.target;if(!t||t.id!=='opp
   let sample=null;try{sample=window.claude&&window.claude.use?await window.claude.use('sample'):null;}catch(err){}
   if(!sample){st('A leitura por IA não está disponível nesta página ou neste aparelho.');return;}
   try{st('Lendo o PDF…');await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(err){}
-    const doc=await window.pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;let txt='';const n=Math.min(doc.numPages,60);
+    const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:await f.arrayBuffer()}).promise;let txt='';const n=Math.min(doc.numPages,60);
     for(let i=1;i<=n&&txt.length<150000;i++){const pg=await doc.getPage(i),tc=await pg.getTextContent();txt+='\n[página '+i+']\n'+tc.items.map(x=>x.str).join(' ');}
     txt=txt.replace(/\s+\n/g,'\n').replace(/[ \t]{2,}/g,' ').slice(0,150000);
     if(txt.replace(/\s|\[página \d+\]/g,'').length<200){st('Este PDF parece ser uma imagem escaneada, sem texto para ler. Preencha manualmente.');return;}
@@ -10220,7 +10220,7 @@ async function arqAbrir(id,nomeDado){
   if(ct==='application/pdf'){
     modal({title:nome,wide:true,nofocus:true,foot,body:'<div id="arqPdf"><p class="sub">Carregando páginas…</p></div>'});
     try{await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
-      const doc=await window.pdfjsLib.getDocument({data:new Uint8Array(await blob.arrayBuffer())}).promise,box=$('#arqPdf');if(!box)return;box.innerHTML='';
+      const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:new Uint8Array(await blob.arrayBuffer())}).promise,box=$('#arqPdf');if(!box)return;box.innerHTML='';
       for(let p=1;p<=Math.min(doc.numPages,25);p++){const pg=await doc.getPage(p),vp=pg.getViewport({scale:1.4}),cv=document.createElement('canvas');cv.width=vp.width;cv.height=vp.height;cv.style.cssText='width:100%;height:auto;border:1px solid var(--line);margin:0 0 8px;display:block';box.appendChild(cv);await pg.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;}
       if(doc.numPages>25)box.insertAdjacentHTML('beforeend','<p class="sub">Mostrando 25 de '+doc.numPages+' páginas. Baixe para ver o restante.</p>');
     }catch(e){const box=$('#arqPdf');if(box)box.innerHTML='<p class="sub">Não foi possível mostrar o PDF aqui. Use Baixar.</p>';}
@@ -11462,7 +11462,7 @@ A.pkRecarregar=()=>{PK.started=false;PK.ver='';pkLoad();toast('Recarregando o hi
 /* ===== v53: sugestões da parte 3 ===== */
 Object.assign(COL_NOME,{trein:'Treinamento mensal',treinc:'Conclusão de treinamento',epica:'Cadastro de CA',fapac:'Ação do plano FAP'});
 async function pdfTexto(buf,maxPag){await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
-  const doc=await window.pdfjsLib.getDocument({data:buf}).promise,out=[];const n=Math.min(doc.numPages,maxPag||200);
+  const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:buf}).promise,out=[];const n=Math.min(doc.numPages,maxPag||200);
   for(let i=1;i<=n;i++){const p=await doc.getPage(i),tc=await p.getTextContent();let last=null,s='';tc.items.forEach(t=>{if(!t.str)return;const y=Math.round(t.transform[5]);s+=(last!==null&&Math.abs(y-last)>2?'\n':(s&&!/\s$/.test(s)?' ':''))+t.str;last=y;});out.push(s);}
   return out;}
 async function iaTexto(prompt,tier){let s=null;try{s=window.claude&&window.claude.use?await window.claude.use('sample'):null;}catch(e){}
@@ -11659,8 +11659,8 @@ function treinEu(){if(isColab()){const f=(PTC.doc||{}).func||{};return {who:me.u
 function treinConcl(){const out=[];S.treinc.forEach(x=>out.push(x));TRC.byU.forEach(mp=>mp.forEach(x=>out.push(x)));if(isColab())TRC.mine.forEach(x=>out.push(x));const seen=new Set();return out.filter(x=>{const k=x.treinId+'|'+(x.funcId||x.who);if(seen.has(k))return false;seen.add(k);return true;});}
 const treinFeito=t=>{const eu=treinEu();return treinConcl().find(x=>x.treinId===t.id&&((eu.funcId&&x.funcId===eu.funcId)||x.who===eu.who));};
 RH_PRE.push(()=>{if(store.mode!=='db'||!store.db||!me.uid)return;
-  if(isColab()){if(!TRC.on){TRC.on=true;try{dbWatch('trc:me',store.db.collection('pt/'+me.uid+'/tc'),sn=>{TRC.mine=new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())]));schedule();},{every:60000});}catch(e){}}return;}
-  if(!(mayR('sst')||mayR('rh'))||!store.ready)return;ptLinked().forEach(f=>{const u=f.usrId;if(TRC.subs.has(u))return;TRC.subs.add(u);try{dbWatch('trc:'+u,store.db.collection('pt/'+u+'/tc'),sn=>{TRC.byU.set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())])));schedule();},{every:180000});}catch(e){}});});
+  if(isColab()){if(!TRC.on){TRC.on=true;try{dbWatch('trc:me',store.db.collection('pt/'+me.uid+'/tc'),sn=>{TRC.mine=new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})]));schedule();},{every:60000});}catch(e){}}return;}
+  if(!(mayR('sst')||mayR('rh'))||!store.ready)return;ptLinked().forEach(f=>{const u=f.usrId;if(TRC.subs.has(u))return;TRC.subs.add(u);try{dbWatch('trc:'+u,store.db.collection('pt/'+u+'/tc'),sn=>{TRC.byU.set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})])));schedule();},{every:180000});}catch(e){}});});
 const TREIN_TEMAS=['NR-6: uso, guarda e conservação do EPI','NR-35: trabalho em altura e uso do cinto paraquedista','NR-10: riscos elétricos e bloqueio de energia','NR-18: organização e segurança no canteiro de obras','NR-12: máquinas e ferramentas elétricas portáteis','NR-17: ergonomia e levantamento de peso','NR-23: prevenção e combate a incêndio','NR-33: espaço confinado','NR-11: transporte e movimentação de cargas','NR-1: percepção de risco e direito de recusa','NR-26: sinalização de segurança','Primeiros socorros no canteiro','Trabalho a quente: solda e corte','Prevenção de quedas de materiais','Saúde mental e respeito no trabalho','Ordem, limpeza e organização (5S) na obra','Uso seguro de escadas e andaimes','Riscos de calor e hidratação'];
 async function treinGerarIA(tema,ordem,mes){const ant=S.trein.slice(-24).map(t=>t.titulo).join('; ');
   const r=await iaTexto('Crie um treinamento curto de segurança do trabalho para trabalhadores de obra (construção civil, elétrica, ar-condicionado e estrutura metálica) de uma empresa brasileira, baseado nas Normas Regulamentadoras brasileiras vigentes. Tema: '+tema+'. Linguagem simples, frases curtas, sem jargão, como um vídeo de no máximo 3 minutos. Evite repetir estes temas recentes: '+(ant||'nenhum')+'.\nResponda SOMENTE com JSON neste formato:\n{"titulo":"","norma":"NR-xx","resumo":"1 frase","slides":[{"t":"título curto","txt":"até 30 palavras que aparecem na tela","nar":"até 55 palavras de narração falada","ico":"um emoji"}],"quiz":[{"p":"pergunta","o":["opção A","opção B","opção C"],"c":0}]}\nRegras: 6 a 8 slides; narração total entre 280 e 400 palavras; 3 perguntas no quiz com só uma correta (c é o índice 0, 1 ou 2); nada de marcas ou nomes de pessoas.','default');
@@ -12469,8 +12469,8 @@ const procCod=p=>p.codigo+' rev. '+String(+p.rev||0).padStart(2,'0');
 ui.procd={q:'',st:'',area:'',tipo:''};
 const PLC={byU:new Map(),subs:new Set(),mine:new Map(),on:false};
 RH_PRE.push(()=>{if(store.mode!=='db'||!store.db||!me.uid)return;
-  if(isColab()){if(!PLC.on){PLC.on=true;try{dbWatch('plc:me',store.db.collection('pt/'+me.uid+'/pl'),sn=>{PLC.mine=new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())]));schedule();},{every:90000});}catch(e){}}return;}
-  if(!(mayR('qual')||mayR('sst')||mayR('rh'))||!store.ready)return;ptLinked().forEach(f=>{const u=f.usrId;if(PLC.subs.has(u))return;PLC.subs.add(u);try{dbWatch('plc:'+u,store.db.collection('pt/'+u+'/pl'),sn=>{PLC.byU.set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({id:d.id},d.data())])));schedule();},{every:180000});}catch(e){}});});
+  if(isColab()){if(!PLC.on){PLC.on=true;try{dbWatch('plc:me',store.db.collection('pt/'+me.uid+'/pl'),sn=>{PLC.mine=new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})]));schedule();},{every:90000});}catch(e){}}return;}
+  if(!(mayR('qual')||mayR('sst')||mayR('rh'))||!store.ready)return;ptLinked().forEach(f=>{const u=f.usrId;if(PLC.subs.has(u))return;PLC.subs.add(u);try{dbWatch('plc:'+u,store.db.collection('pt/'+u+'/pl'),sn=>{PLC.byU.set(u,new Map(sn.docs.map(d=>[d.id,Object.assign({},d.data(),{id:d.id})])));schedule();},{every:180000});}catch(e){}});});
 function procLeituras(){const out=[];S.procl.forEach(x=>out.push(x));PLC.byU.forEach(m=>m.forEach(x=>out.push(x)));if(isColab())PLC.mine.forEach(x=>out.push(x));return out;}
 function procPublico(p){const fs=funcAtivos();if(p.publico!=='funcoes')return fs;const ks=String(p.funcoes||'').split(/[,;\n]/).map(s=>gsNorm(s.trim())).filter(Boolean);return fs.filter(f=>ks.some(k=>gsNorm(f.funcao||'').includes(k)));}
 function procLidoPor(p){const v=procVig(p);if(!v)return new Map();const m=new Map();procLeituras().filter(x=>x.procId===p.id&&+x.rev===v.rev).forEach(x=>{const k=x.funcId||x.who;if(!m.has(k))m.set(k,x);});return m;}
@@ -14605,7 +14605,7 @@ A.usrNovo=async()=>{
 };
 /* botão Sair no topo (sistema na VPS): todo mundo, inclusive Colaborador, consegue sair da conta */
 {const w1=whoHtml;whoHtml=function(){const h=w1();if(!window.__SELFHOST)return h;
-  return h+'<a class="btn sm" href="/sair" title="Sair da conta neste aparelho" style="margin-left:8px;align-self:center;text-decoration:none" onclick="return confirm(\'Sair do sistema neste aparelho?\')">Sair</a>';};}
+  return h+'<button class="btn sm" data-act="sairConta" title="Sair da conta neste aparelho" style="margin-left:8px;align-self:center">Sair</button>';};}
 /* Editar acesso: botão para mandar por e-mail o link de criar/redefinir senha */
 {const e0=A.usrEdit;A.usrEdit=async d=>{await e0(d);if(!window.__SELFHOST||!$('#f_cEmail'))return;if(!(await emailSondar()))return;
   const u=get('usr',d.id);if(!u||!$('#mf')||$('#mf [data-act=usrLinkSenha]'))return;
@@ -14641,7 +14641,7 @@ A.cotIaArq=()=>{const sel=$('#cotImpForn'),j=sel&&sel.value!==''?+sel.value:-1;c
     const c=cotChaves(cl(c0)),btn=$('[data-act=cotIaArq]');if(btn)btn.disabled=true;
     try{let txt='',imgs=[];
       if(/pdf$/i.test(arq.type)||/\.pdf$/i.test(arq.name)){cotIaSt('Abrindo o PDF…');await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
-        CIA.doc=await window.pdfjsLib.getDocument({data:await arq.arrayBuffer()}).promise;
+        CIA.doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:await arq.arrayBuffer()}).promise;
         for(let i=1;i<=Math.min(CIA.doc.numPages,20)&&txt.length<80000;i++){const pg=await CIA.doc.getPage(i),tc=await pg.getTextContent();let lin='',y=null;
           tc.items.forEach(x=>{const yy=Math.round(x.transform[5]);if(y!==null&&Math.abs(yy-y)>3)lin+='\n';else if(lin&&!lin.endsWith(' '))lin+=' ';lin+=x.str;y=yy;});txt+='\n[página '+i+']\n'+lin;}
         if(txt.replace(/\s|\[página \d+\]/g,'').length<150){cotIaSt('O PDF é escaneado (sem texto). Lendo as imagens das páginas…');imgs=await cotIaImagens(arq);txt='';}}
@@ -14720,9 +14720,19 @@ document.addEventListener('input',e=>{const t=e.target;if(!t||t.id!=='f_doc'||!t
     const ja=S.parc.filter(p=>digits(p.doc)===d&&p.id!==idAtual);if(ja.length&&dup)dup.innerHTML='<div class="note" style="margin-top:8px"><b>Já cadastrado:</b> '+ja.slice(0,3).map(p=>esc(p.nome||'sem nome')+' ('+esc(p.tipo||'')+')').join(' · ')+'. Confira para não duplicar.</div>';}});
 let PARC_ED='';{const pf=parcForm;parcForm=function(p){PARC_ED=p&&p.id||'';return pf.apply(this,arguments);};}
 
+/* ===== v88: revisão de segurança (telas) =====
+   Links com javascript:/data: não abrem; CSV exportado não executa fórmulas no Excel; o botão Sair usa a
+   confirmação do sistema (a página agora roda com política de conteúdo que bloqueia scripts embutidos). */
+document.addEventListener('click',e=>{const a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;const h=String(a.getAttribute('href')||'').trim().replace(/[\u0000- ]/g,'').toLowerCase();
+  if(/^(javascript|data|vbscript):/.test(h)){e.preventDefault();e.stopPropagation();toast('Link bloqueado por segurança.','neg');}},true);
+{const c0=csv;csv=function(rows){return c0((rows||[]).map(r=>Array.isArray(r)?r.map(v=>typeof v==='string'&&/^[=+\-@\t\r]/.test(v)&&!/^-?\d+([.,]\d+)?$/.test(v)?"'"+v:v):r));};}
+ACT_GROUP.sairConta=null;
+A.sairConta=()=>confirmBox('Sair do sistema neste aparelho?',()=>{location.href='/sair';},'Sair');
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='87',APP_DATA='2026-10-23';
+const APP_VER='88',APP_DATA='2026-10-23';
 const CHANGELOG=[
+  ['88','2026-10-23',['Segurança: o perfil escolhido em Usuários passa a valer também no servidor (dados de RH e Departamento Pessoal, integrações e gestão de contas).','Conversas privadas e de grupo do chat só chegam a quem participa; anexos só abrem para quem pode ver o registro que os cita.','Contas de nível Equipe só podem ser alteradas pelo dono; leitura de PDF e páginas do sistema com proteções extras contra arquivos maliciosos.']],
   ['87','2026-10-23',['Clientes e fornecedores: no sistema da VPS a busca de dados pelo CNPJ passa pelo servidor, sem depender da rede ou do navegador de cada pessoa.','Ao digitar um CPF, o sistema confere os dígitos e formata; ao digitar CPF ou CNPJ já cadastrado, avisa para não duplicar. (Dados de pessoa física não têm consulta pública.)']],
   ['86','2026-10-23',['Cotações: o orçamento do fornecedor em PDF (no formato dele) ou foto agora é lido pela IA. No mapa, clique em Importar resposta, escolha o fornecedor e Ler PDF ou foto com IA.','A tela de conferência mostra cada linha do orçamento ligada ao item do mapa, com preço unitário, frete, prazo, pagamento e validade; o que tiver dúvida aparece em amarelo e nada é gravado antes de você clicar em Lançar no mapa.','O orçamento original fica anexado ao mapa (link Orçamento original).']],
   ['85','2026-10-23',['Convite por e-mail: em Usuários › Novo usuário, marque Enviar convite e a pessoa recebe um link para criar a própria senha.','Esqueci minha senha na tela de login: a pessoa recebe por e-mail um link (válido por 1 hora) para criar uma senha nova.','Usuários › Editar ganhou o botão Enviar link de senha por e-mail. Funciona depois que o e-mail do sistema for configurado no servidor.']],
@@ -15040,7 +15050,7 @@ async function boot(){
     COLS.forEach(c=>{
       let first=true;
       db.collection(c).onSnapshot(snap=>{
-        S[c]=snap.docs.map(d=>Object.assign({id:d.id},d.data()));
+        S[c]=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));
         applyPending(c);reindex();
         if(first){first=false;done();}
         schedule();
