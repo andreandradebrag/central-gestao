@@ -139,7 +139,8 @@ const NIV_NOME = { owner: 'Dono', admin: 'Equipe (usa os módulos do perfil em U
 function pagContas(eu, msg, erro) {
   const cs = q.contas.all();
   const linhas = cs.map(c => '<tr><td><b>' + esc(c.nome || '—') + '</b><div style="color:var(--mut);font-size:12px">' + esc(c.email || 'sem e-mail') + (c.importado ? ' · importado' : '') + '</div></td><td>' + esc(NIV_NOME[c.nivel] || c.nivel) + '</td><td>' + (c.ativo ? (c.temSenha ? 'Ativa' : 'Sem senha') : 'Desativada') + '</td><td style="white-space:nowrap">' +
-    (c.id !== eu.id && (eu.nivel === 'owner' || c.nivel !== 'owner') ? '<form method="post" action="/contas/editar" style="display:inline"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="' + (c.ativo ? 'desativar' : 'ativar') + '">' + (c.ativo ? 'Desativar' : 'Ativar') + '</button></form> ' : '') +
+    (c.id !== eu.id && (eu.nivel === 'owner' || c.nivel !== 'owner') ? '<form method="post" action="/contas/editar" style="display:inline"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="' + (c.ativo ? 'desativar' : 'ativar') + '">' + (c.ativo ? 'Desativar' : 'Ativar') + '</button></form> ' +
+      '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Excluir a conta de acesso de ' + esc(String(c.nome || c.email || '').replace(/['"\\]/g, '')) + '? A pessoa não consegue mais entrar. O cadastro dela no sistema (funcionário, perfil, histórico) continua.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="excluir" style="color:var(--neg)">Excluir</button></form> ' : '') +
     (eu.nivel === 'owner' && c.importado && c.id !== eu.id ? '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Usar esta conta importada como a sua? Você passa a ver as conversas e registros dela.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="soueu">Sou eu</button></form>' : '') + '</td></tr>').join('');
   return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. As permissões de cada módulo continuam em Sistema › Usuários, dentro do sistema.</p>' +
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
@@ -281,6 +282,11 @@ async function rotear(req, res) {
     const f = form(await lerCorpo(req, 10000)), c = q.contaPorId.get(f.id); if (!c || c.id === conta.id) return redir(res, '/contas');
     if (f.acao === 'desativar' && c.nivel !== 'owner') { db.prepare('UPDATE contas SET ativo=0 WHERE id=?').run(c.id); db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id); }
     if (f.acao === 'ativar') db.prepare('UPDATE contas SET ativo=1 WHERE id=?').run(c.id);
+    if (f.acao === 'excluir') {
+      if (c.nivel === 'owner') return redir(res, '/contas?e=1&m=' + encodeURIComponent('A conta do dono não pode ser excluída.'));
+      db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id); db.prepare('DELETE FROM contas WHERE id=?').run(c.id);
+      return redir(res, '/contas?m=' + encodeURIComponent('Conta de acesso excluída.'));
+    }
     if (f.acao === 'soueu' && conta.nivel === 'owner' && c.importado) {
       db.exec('BEGIN'); try {
         db.prepare('DELETE FROM contas WHERE id=?').run(c.id);
