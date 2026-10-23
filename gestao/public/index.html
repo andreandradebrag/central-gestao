@@ -14592,11 +14592,14 @@ A.usrNovo=()=>{
       return false;
     }});
 };
+/* botão Sair no topo (sistema na VPS): todo mundo, inclusive Colaborador, consegue sair da conta */
+{const w1=whoHtml;whoHtml=function(){const h=w1();if(!window.__SELFHOST)return h;
+  return h+'<a class="btn sm" href="/sair" title="Sair da conta neste aparelho" style="margin-left:8px;align-self:center;text-decoration:none" onclick="return confirm(\'Sair do sistema neste aparelho?\')">Sair</a>';};}
 
 /* ===== v14: versão, novidades e tutoriais ===== */
 const APP_VER='84',APP_DATA='2026-10-23';
 const CHANGELOG=[
-  ['84','2026-10-23',['Sistema › Usuários › Novo usuário: cria o login (e-mail e senha provisória) e o perfil de uma vez, sem passar por Contas de acesso. O funcionário pode ser ligado na mesma tela.','Contas de acesso ganhou o botão Excluir (menos para a conta do dono).']],
+  ['84','2026-10-23',['Sistema › Usuários › Novo usuário: cria o login (e-mail e senha provisória) e o perfil de uma vez, sem passar por Contas de acesso. O funcionário pode ser ligado na mesma tela.','Contas de acesso ganhou o botão Excluir (menos para a conta do dono).','Botão Sair no topo da tela, ao lado do seu nome.']],
   ['83','2026-10-23',['Empréstimos a funcionários (Pessoas › Mais › Empréstimos): contrato para imprimir e assinar, parcelas sem juros ou com juros, desconto automático na folha (com autorização do art. 462 da CLT) ou pagamento direto, quitação antecipada e desconto do saldo na rescisão limitado a uma remuneração.','A liberação e os recebimentos entram no financeiro sem afetar o DRE.']],
   ['82','2026-10-23',['Extrato automático do Banco do Brasil: no sistema instalado na VPS, o extrato das contas do BB entra sozinho na conciliação algumas vezes por dia, sem baixar OFX. Em Conciliação bancária › Extrato automático, ligue a conta (agência e conta), teste a conexão e busque na hora.']],
   ['81','2026-10-23',['Nova tela de conciliação bancária: extrato à esquerda com a situação de cada linha (encontrado, aproximado, não encontrado, conciliado, ignorado) e, à direita, a sugestão e as ações da linha escolhida.','Ações por linha: conciliar, nova conta a pagar ou receber já preenchida (fornecedor sugerido pelo nome no extrato, categoria e obra das últimas compras), lançamento simples, transferência, buscar e associar vários títulos e ignorar com motivo.','Importar extrato: escolha a conta em cartões (com a data do último extrato) e veja o resumo do que entrou e do que falta revisar.']],
