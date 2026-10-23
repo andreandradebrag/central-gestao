@@ -200,7 +200,7 @@ async function ia(corpo) {
     const ult = msgs[msgs.length - 1];
     ult.content = corpo.images.slice(0, 8).map(im => ({ type: 'image', source: { type: 'base64', media_type: im.type || 'image/png', data: im.data } })).concat([{ type: 'text', text: ult.content }]);
   }
-  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: AI_MODELS[corpo.nivel < NIV.admin && corpo.modelTier === 'complex' ? 'default' : corpo.modelTier] || AI_MODELS.default, max_tokens: 8000, messages: msgs }) });
+  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: AI_MODELS[corpo.nivel < NIV.admin && corpo.modelTier === 'complex' ? 'default' : corpo.modelTier] || AI_MODELS.default, max_tokens: 16000, messages: msgs }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw { st: r.status === 429 ? 429 : 502, msg: (j.error && j.error.message) || 'Falha na IA.', code: r.status === 429 ? 'rate_limited' : 'upstream_error' };
   return { text: (j.content || []).filter(c => c.type === 'text').map(c => c.text).join(''), truncated: j.stop_reason === 'max_tokens' };
