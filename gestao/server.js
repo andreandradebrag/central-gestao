@@ -142,7 +142,7 @@ function pagContas(eu, msg, erro) {
     (c.id !== eu.id && (eu.nivel === 'owner' || c.nivel !== 'owner') ? '<form method="post" action="/contas/editar" style="display:inline"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="' + (c.ativo ? 'desativar' : 'ativar') + '">' + (c.ativo ? 'Desativar' : 'Ativar') + '</button></form> ' +
       '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Excluir a conta de acesso de ' + esc(String(c.nome || c.email || '').replace(/['"\\]/g, '')) + '? A pessoa não consegue mais entrar. O cadastro dela no sistema (funcionário, perfil, histórico) continua.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="excluir" style="color:var(--neg)">Excluir</button></form> ' : '') +
     (eu.nivel === 'owner' && c.importado && c.id !== eu.id ? '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Usar esta conta importada como a sua? Você passa a ver as conversas e registros dela.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="soueu">Sou eu</button></form>' : '') + '</td></tr>').join('');
-  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. As permissões de cada módulo continuam em Sistema › Usuários, dentro do sistema.</p>' +
+  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. Para cadastrar uma pessoa nova, prefira <b>Sistema › Usuários › Novo usuário</b>, dentro do sistema: lá você cria o login e o perfil de uma vez.</p>' +
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
     '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
     '<div class="card"><h2>Criar conta ou definir senha</h2><form method="post" action="/contas/salvar"><div class="row"><label>Conta<select name="id"><option value="">Nova conta</option>' + cs.filter(c => c.nivel !== 'owner' || c.id === eu.id).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Nome<input name="nome"></label></div><div class="row"><label>E-mail<input name="email" type="email"></label><label>Senha (mínimo 8)<input name="senha" type="password" minlength="8" autocomplete="new-password"></label><label>Nível<select name="nivel">' + ['admin', 'interact'].map(n => '<option value="' + n + '">' + NIV_NOME[n] + '</option>').join('') + '</select></label></div><button class="pri" type="submit">Salvar</button><p class="sub" style="margin:10px 0 0">Para uma conta existente, deixe em branco o que não quer mudar. Passe a senha à pessoa por um canal seguro; ela pode trocá-la depois em Minha senha.</p></form></div>' +
@@ -305,6 +305,17 @@ async function rotear(req, res) {
   if (p === '/migrar' && m === 'GET') { if (conta.nivel !== 'owner') return redir(res, '/'); return html(res, 200, pagMigrar(conta)); }
 
   /* ---- edição de contas pela tela Usuários (JSON, só administradores) ---- */
+  if (p === '/api/contas' && m === 'POST') {
+    if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { erro: 'Apenas administradores.' });
+    const b = await lerJson(req), nome = String(b.nome || '').trim().slice(0, 120), email = String(b.email || '').trim().toLowerCase().slice(0, 160), senha = String(b.senha || '');
+    if (!nome) return json(res, 400, { erro: 'Informe o nome.' });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { erro: 'E-mail inválido.' });
+    if (q.contaPorEmail.get(email)) return json(res, 400, { erro: 'Este e-mail já está em uso.' });
+    if (senha.length < 8) return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
+    const id = uid(), niv = ['admin', 'interact'].includes(b.nivel) ? b.nivel : 'interact';
+    q.contaNova.run(id, nome, email, hashSenha(senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
+    return json(res, 200, { ok: true, id });
+  }
   const mConta = p.match(/^\/api\/contas\/([A-Za-z0-9_-]{1,60})$/);
   if (mConta) {
     if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { erro: 'Apenas administradores.' });
