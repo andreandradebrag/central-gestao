@@ -90,25 +90,26 @@ TRPC = {'createProject': 'projects.createProject', 'createAppService': 'services
         'updateAppSourceGithub': 'services.app.updateSourceGithub', 'updateAppBuild': 'services.app.updateBuild', 'updateAppEnv': 'services.app.updateEnv',
         'createMount': 'services.app.createMount', 'createDomain': 'domains.createDomain', 'deployAppService': 'services.app.deployService'}
 falhas = []
-ARQ = '/opt/central/instalacao.json'
+ARQ = '/opt/central/instalacao-v2.json'
 try: feitos = set(json.load(open(ARQ)).get('feitos', []))
-except Exception:
-    feitos = set()
-    if os.path.exists('/opt/central/instalacao.txt'):  # 1ª execução (versão anterior) já criou os volumes
-        feitos = {'fiscal: dados permanentes', 'fiscal: pasta do certificado', 'gestao: dados permanentes', 'gestao: pasta do certificado'}
+except Exception: feitos = set()
 def guardar(): json.dump({'feitos': sorted(feitos), 'falhas': falhas}, open(ARQ, 'w'), ensure_ascii=False, indent=1)
 def passo(nome, op, corpo, ja_existe_ok=True, uma_vez=False):
     if uma_vez and nome in feitos: print('\033[0;32m✔ ' + nome + ' (já feito antes)\033[0m'); return True
     ok, msg = chamar(op, corpo)
     m = msg.lower()
-    if ok or (ja_existe_ok and ('already' in m or 'exist' in m or 'not allowed to create more projects' in m)):
+    ja = ('already exist' in m or 'já existe' in m) and 'not exist' not in m and "n't exist" not in m
+    if ok or (ja_existe_ok and ja):
         print('\033[0;32m✔ ' + nome + '\033[0m'); feitos.add(nome); guardar(); return True
     print('\033[0;31m✖ ' + nome + ': ' + msg + '\033[0m'); falhas.append(nome); guardar(); return False
 
 P = 'central'
 repo = E['REPO'].strip().strip('/')
 git_url = 'https://' + (E['GH_TOKEN'] + '@' if E['GH_TOKEN'] else '') + 'github.com/' + repo + '.git'
-passo('Projeto "central"', 'createProject', {'name': P})
+if not passo('Projeto "central"', 'createProject', {'name': P}):
+    print('\033[1;33m! O Easypanel não deixou criar o projeto pela API. Crie pelo painel: Projetos › Criar Projeto › nome: central.')
+    print('  Depois rode este instalador de novo (ele segue a partir daí).\033[0m')
+    sys.exit(1)
 for svc, pasta in (('fiscal', '/fiscal'), ('gestao', '/gestao')):
     passo(f'Serviço "{svc}"', 'createAppService', {'projectName': P, 'serviceName': svc})
     passo(f'{svc}: código do GitHub', 'updateAppSourceGit', {'projectName': P, 'serviceName': svc, 'repo': git_url, 'ref': E['RAMO'], 'path': pasta}, False)
