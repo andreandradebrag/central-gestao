@@ -116,7 +116,7 @@ for svc, pasta in (('fiscal', '/fiscal'), ('gestao', '/gestao')):
     passo(f'{svc}: build pelo Dockerfile', 'updateAppBuild', {'projectName': P, 'serviceName': svc, 'build': {'type': 'dockerfile', 'file': 'Dockerfile'}}, False)
 env_fiscal = '\n'.join([f"CNPJ={E['CNPJ']}", f"UF={E['UF']}", f"AMBIENTE={E['AMB']}", 'CERT_PATH=/certs/certificado.pfx', f"CERT_SENHA={E['CERT_SENHA']}", f"FISCAL_TOKEN={E['FISCAL_TOKEN']}", 'INTERVALO_MIN=60', 'AUTO_CIENCIA=1', 'NFSE_ADN=1'])
 env_gestao = '\n'.join(['PORT=3000', 'DATA_DIR=/data', f'FISCAL_URL=http://{P}_fiscal:8000', f"FISCAL_TOKEN={E['FISCAL_TOKEN']}", 'ANTHROPIC_API_KEY=', 'SOLIDES_TOKEN=', 'SOLIDES_INTERVALO_MIN=15',
-                        'BB_CLIENT_ID=', 'BB_CLIENT_SECRET=', 'BB_APP_KEY=', 'BB_CERT_PATH=/certs/bb.pfx', f"BB_CERT_SENHA={E['CERT_SENHA']}", 'BANCOS_INTERVALO_MIN=180'])
+                        'BB_CLIENT_ID=', 'BB_CLIENT_SECRET=', 'BB_APP_KEY=', 'BB_CERT_PATH=/certs/bb.pfx', f"BB_CERT_SENHA={E['CERT_SENHA']}", 'BANCOS_INTERVALO_MIN=180', f"APP_URL=https://{E['DOMINIO']}", 'SMTP_HOST=', 'SMTP_PORT=465', 'SMTP_USUARIO=', 'SMTP_SENHA=', 'SMTP_REMETENTE='])
 passo('fiscal: variáveis', 'updateAppEnv', {'projectName': P, 'serviceName': 'fiscal', 'env': env_fiscal}, False)
 passo('gestao: variáveis', 'updateAppEnv', {'projectName': P, 'serviceName': 'gestao', 'env': env_gestao}, False)
 passo('fiscal: dados permanentes', 'createMount', {'projectName': P, 'serviceName': 'fiscal', 'values': {'type': 'volume', 'name': 'fiscal-dados', 'mountPath': '/data'}}, uma_vez=True)

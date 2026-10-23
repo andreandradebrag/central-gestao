@@ -1,6 +1,6 @@
 FROM node:22-alpine
 WORKDIR /app
-COPY server.js shim.js solides.js bancos.js ./
+COPY server.js shim.js solides.js bancos.js email.js ./
 COPY public ./public
 ENV NODE_ENV=production PORT=3000 DATA_DIR=/data
 RUN mkdir -p /data && chown -R node:node /data /app

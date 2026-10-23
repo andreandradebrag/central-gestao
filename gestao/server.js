@@ -22,6 +22,8 @@ const AI_MODELS = {
   default: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
   complex: process.env.ANTHROPIC_MODEL_COMPLEX || 'claude-opus-5-5'
 };
+const APP_URL = (process.env.APP_URL || 'https://app.inaservicos.com.br').replace(/\/$/, '');
+const EMAIL = require('./email.js');
 const MAX_JSON = 40 * 1024 * 1024, MAX_BLOB = 25 * 1024 * 1024;
 fs.mkdirSync(path.join(DATA, 'blobs'), { recursive: true });
 fs.mkdirSync(path.join(DATA, 'tmp'), { recursive: true });
@@ -35,7 +37,8 @@ CREATE INDEX IF NOT EXISTS docs_parent ON docs(parent);
 CREATE TABLE IF NOT EXISTS contas(id TEXT PRIMARY KEY, nome TEXT, email TEXT UNIQUE, hash TEXT, nivel TEXT NOT NULL, ativo INTEGER NOT NULL DEFAULT 1, criado INTEGER, importado INTEGER DEFAULT 0, cor TEXT);
 CREATE TABLE IF NOT EXISTS sessoes(token TEXT PRIMARY KEY, conta TEXT NOT NULL, criado INTEGER, expira INTEGER);
 CREATE TABLE IF NOT EXISTS arquivos(id TEXT PRIMARY KEY, ct TEXT, tam INTEGER, por TEXT, criado INTEGER);
-CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT);`);
+CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS tokens_senha(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, tipo TEXT, expira INTEGER);`);
 const q = {
   docGet: db.prepare('SELECT data, ts FROM docs WHERE path=?'),
   docPut: db.prepare('INSERT INTO docs(path,parent,id,data,ts) VALUES(?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET data=excluded.data, ts=excluded.ts'),
@@ -119,6 +122,22 @@ const tentativas = new Map(), limitePub = new Map(), usoIa = new Map();
 /* IP real: o último endereço acrescentado pelo proxy (Traefik/Easypanel); o cliente não consegue forjar */
 const ipDe = req => { const x = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean); return x.length ? x[x.length - 1] : (req.socket.remoteAddress || ''); };
 setInterval(() => { const t = Date.now(); for (const [k, v] of tentativas) if ((v.ate || 0) < t && t - (v.em || 0) > 3600e3) tentativas.delete(k); for (const [k, v] of limitePub) if (t - v.ini > 3600e3) limitePub.delete(k); for (const [k, v] of usoIa) if (t - v.ini > 3600e3) usoIa.delete(k); }, 600e3).unref();
+/* links de criar/redefinir senha: o banco guarda só o hash do token; valem uma vez */
+const sha = t => crypto.createHash('sha256').update(String(t)).digest('hex');
+function criarLink(contaId, tipo, horas) {
+  const t = crypto.randomBytes(32).toString('base64url');
+  db.prepare('DELETE FROM tokens_senha WHERE conta=? OR expira<?').run(contaId, Date.now());
+  db.prepare('INSERT INTO tokens_senha(hash,conta,tipo,expira) VALUES(?,?,?,?)').run(sha(t), contaId, tipo, Date.now() + horas * 3600e3);
+  return APP_URL + '/senha/' + t;
+}
+async function enviarLink(c, tipo) {
+  const convite = tipo === 'convite', link = criarLink(c.id, tipo, convite ? 72 : 1);
+  const m = convite
+    ? EMAIL.modelo('Seu acesso à Central de Gestão', ['Olá, ' + (c.nome || '') + '.', 'Foi criado um acesso para você na Central de Gestão da INA Serviços. Clique no botão abaixo para criar a sua senha. Depois, entre em ' + APP_URL + ' com este e-mail (' + c.email + ') e a senha que você criou.'], 'Criar minha senha', link, 'O link vale por 72 horas e só pode ser usado uma vez. Se você não esperava este e-mail, ignore-o.')
+    : EMAIL.modelo('Redefinir sua senha', ['Olá, ' + (c.nome || '') + '.', 'Recebemos um pedido para redefinir a senha da sua conta na Central de Gestão. Clique no botão abaixo para criar uma senha nova.'], 'Criar nova senha', link, 'O link vale por 1 hora e só pode ser usado uma vez. Se não foi você que pediu, ignore este e-mail: sua senha continua a mesma.');
+  await EMAIL.enviar({ para: c.email, assunto: convite ? 'Seu acesso à Central de Gestão' : 'Redefinir sua senha · Central de Gestão', texto: m.texto, html: m.html });
+}
+const limiteEsqueci = new Map();
 function derrubarConexoes(contaId) { for (const [cid, c] of CONEX) if (c.conta.id === contaId) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } } }
 
 /* ---------------- páginas simples (login, contas, migração) ---------------- */
@@ -133,7 +152,7 @@ const pag = (t, corpo) => '<!doctype html><html lang="pt-BR"><head><meta charset
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function pagLogin(msg, setup) {
   return pag(setup ? 'Primeiro acesso' : 'Entrar', '<div class="card" style="max-width:420px;margin:40px auto"><h1>' + (setup ? 'Primeiro acesso' : 'Central de Gestão') + '</h1><p class="sub">' + (setup ? 'Crie a conta do dono do sistema. Ela pode criar as contas das outras pessoas depois.' : 'Entre com seu e-mail e senha.') + '</p>' + (msg ? '<div class="msg err">' + esc(msg) + '</div>' : '') +
-    '<form method="post" action="' + (setup ? '/setup' : '/login') + '">' + (setup ? '<label>Seu nome<input name="nome" required autocomplete="name"></label>' : '') + '<label>E-mail<input name="email" type="email" required autocomplete="username"></label><label>Senha<input name="senha" type="password" required minlength="' + (setup ? 8 : 1) + '" autocomplete="' + (setup ? 'new-password' : 'current-password') + '"></label><button class="pri" type="submit" style="width:100%">' + (setup ? 'Criar e entrar' : 'Entrar') + '</button></form></div>');
+    '<form method="post" action="' + (setup ? '/setup' : '/login') + '">' + (setup ? '<label>Seu nome<input name="nome" required autocomplete="name"></label>' : '') + '<label>E-mail<input name="email" type="email" required autocomplete="username"></label><label>Senha<input name="senha" type="password" required minlength="' + (setup ? 8 : 1) + '" autocomplete="' + (setup ? 'new-password' : 'current-password') + '"></label><button class="pri" type="submit" style="width:100%">' + (setup ? 'Criar e entrar' : 'Entrar') + '</button></form>' + (setup ? '' : '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/esqueci">Esqueci minha senha</a></p>') + '</div>');
 }
 const NIV_NOME = { owner: 'Dono', admin: 'Equipe (usa os módulos do perfil em Usuários)', interact: 'Colaborador (ponto, Minha área e chat)', view: 'Somente leitura (sem acesso aos dados)' };
 function pagContas(eu, msg, erro) {
@@ -146,6 +165,7 @@ function pagContas(eu, msg, erro) {
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
     '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
     '<div class="card"><h2>Criar conta ou definir senha</h2><form method="post" action="/contas/salvar"><div class="row"><label>Conta<select name="id"><option value="">Nova conta</option>' + cs.filter(c => c.nivel !== 'owner' || c.id === eu.id).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Nome<input name="nome"></label></div><div class="row"><label>E-mail<input name="email" type="email"></label><label>Senha (mínimo 8)<input name="senha" type="password" minlength="8" autocomplete="new-password"></label><label>Nível<select name="nivel">' + ['admin', 'interact'].map(n => '<option value="' + n + '">' + NIV_NOME[n] + '</option>').join('') + '</select></label></div><button class="pri" type="submit">Salvar</button><p class="sub" style="margin:10px 0 0">Para uma conta existente, deixe em branco o que não quer mudar. Passe a senha à pessoa por um canal seguro; ela pode trocá-la depois em Minha senha.</p></form></div>' +
+    '<div class="card"><h2>E-mail do sistema</h2><p class="sub" style="margin:0 0 10px">' + (EMAIL.configurado() ? 'Configurado. O sistema envia o convite de novo usuário e o link de "Esqueci minha senha".' : 'Ainda não configurado: preencha SMTP_HOST, SMTP_PORT, SMTP_USUARIO, SMTP_SENHA e SMTP_REMETENTE no serviço gestao do Easypanel e clique em Implantar.') + '</p>' + (EMAIL.configurado() ? '<form method="post" action="/contas/teste-email"><button type="submit">Enviar e-mail de teste para ' + esc(eu.email || '') + '</button></form>' : '') + '</div>' +
     '<div class="card"><h2>Minha senha</h2><form method="post" action="/contas/senha"><div class="row"><label>Senha atual<input name="atual" type="password" required autocomplete="current-password"></label><label>Nova senha<input name="nova" type="password" minlength="8" required autocomplete="new-password"></label></div><button type="submit">Trocar senha</button></form></div>');
 }
 function pagMigrar(eu, msg) {
@@ -255,6 +275,37 @@ async function rotear(req, res) {
     const ts = Date.now(); q.docPut.run('cotresp/' + tok, 'cotresp', tok, JSON.stringify(resp), ts); avisarDoc('set', 'cotresp/' + tok, resp, ts);
     return json(res, 200, { ok: true, resposta: semInterno(resp) });
   }
+  /* ---- esqueci minha senha / criar senha pelo link do e-mail (sem login) ---- */
+  if (p === '/esqueci') {
+    const caixa = (corpo) => html(res, 200, pag('Esqueci minha senha', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Esqueci minha senha</h1>' + corpo + '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/login">Voltar para o login</a></p></div>'));
+    if (m === 'GET') return caixa(EMAIL.configurado()
+      ? '<p class="sub">Digite o e-mail que você usa para entrar. Enviaremos um link para criar uma senha nova.</p><form method="post" action="/esqueci"><label>E-mail<input name="email" type="email" required autocomplete="username"></label><button class="pri" type="submit" style="width:100%">Enviar link</button></form>'
+      : '<div class="msg err">O envio de e-mail ainda não foi configurado neste sistema. Peça a um administrador para definir uma senha nova para você em Usuários › Editar.</div>');
+    if (m !== 'POST') return json(res, 405, { erro: 'Método não permitido.' });
+    const f = form(await lerCorpo(req, 10000)), email = String(f.email || '').trim().toLowerCase(), ip = ipDe(req);
+    const lim = limiteEsqueci.get(ip) || { n: 0, ini: Date.now() }; if (Date.now() - lim.ini > 3600e3) { lim.n = 0; lim.ini = Date.now(); } lim.n++; limiteEsqueci.set(ip, lim);
+    const le = limiteEsqueci.get('e:' + email) || { n: 0, ini: Date.now() }; if (Date.now() - le.ini > 3600e3) { le.n = 0; le.ini = Date.now(); } le.n++; limiteEsqueci.set('e:' + email, le);
+    const c = email ? q.contaPorEmail.get(email) : null;
+    if (c && c.ativo && c.email && lim.n <= 10 && le.n <= 3 && EMAIL.configurado()) enviarLink(c, 'redefinir').catch(e => console.error('[email] esqueci:', e.message));
+    await new Promise(r => setTimeout(r, 500));
+    return caixa('<div class="msg">Se este e-mail estiver cadastrado, você vai receber em alguns minutos um link para criar uma senha nova. Confira também a caixa de spam.</div>');
+  }
+  const mSenha = p.match(/^\/senha\/([A-Za-z0-9_-]{20,80})$/);
+  if (mSenha) {
+    const reg = db.prepare('SELECT * FROM tokens_senha WHERE hash=?').get(sha(mSenha[1])), c = reg && reg.expira > Date.now() ? q.contaPorId.get(reg.conta) : null;
+    const caixa = (corpo) => html(res, 200, pag('Criar senha', '<div class="card" style="max-width:420px;margin:40px auto"><h1>' + (reg && reg.tipo === 'convite' ? 'Criar sua senha' : 'Criar nova senha') + '</h1>' + corpo + '</div>'));
+    if (!c || !c.ativo) return caixa('<div class="msg err">Este link expirou ou já foi usado. Peça um novo em <a href="/esqueci">Esqueci minha senha</a> ou fale com um administrador.</div>');
+    const formH = erro => caixa((erro ? '<div class="msg err">' + esc(erro) + '</div>' : '') + '<p class="sub">Conta: <b>' + esc(c.email) + '</b></p><form method="post"><label>Nova senha (mínimo 8 caracteres)<input name="senha" type="password" minlength="8" required autocomplete="new-password"></label><label>Repita a senha<input name="senha2" type="password" minlength="8" required autocomplete="new-password"></label><button class="pri" type="submit" style="width:100%">Salvar senha</button></form>');
+    if (m === 'GET') return formH('');
+    if (m !== 'POST') return json(res, 405, { erro: 'Método não permitido.' });
+    const f = form(await lerCorpo(req, 10000));
+    if (String(f.senha || '').length < 8) return formH('A senha precisa ter pelo menos 8 caracteres.');
+    if (f.senha !== f.senha2) return formH('As duas senhas não são iguais.');
+    db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.senha), c.id);
+    db.prepare('DELETE FROM tokens_senha WHERE conta=?').run(c.id); db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id);
+    tentativas.delete('e:' + String(c.email || '').toLowerCase());
+    return html(res, 200, pag('Senha criada', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Senha salva</h1><div class="msg">Pronto. Agora entre com o seu e-mail e a senha nova.</div><a class="btn pri" href="/login" style="display:block;text-align:center">Ir para o login</a></div>'));
+  }
   const conta = contaDa(req);
   if (!conta) { if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 401, { erro: 'Entre novamente.' }); return redir(res, semContas ? '/setup' : '/login'); }
 
@@ -297,6 +348,11 @@ async function rotear(req, res) {
     }
     return redir(res, '/contas?m=' + encodeURIComponent('Atualizado.'));
   }
+  if (p === '/contas/teste-email' && m === 'POST') {
+    if (NIV[conta.nivel] < NIV.admin) return redir(res, '/');
+    try { const t = EMAIL.modelo('Teste de e-mail', ['Se você recebeu esta mensagem, o envio de e-mail da Central de Gestão está funcionando.'], 'Abrir o sistema', APP_URL, 'Mensagem automática de teste.'); await EMAIL.enviar({ para: conta.email, assunto: 'Teste de e-mail · Central de Gestão', texto: t.texto, html: t.html }); return redir(res, '/contas?m=' + encodeURIComponent('E-mail de teste enviado para ' + conta.email + '. Confira a caixa de entrada e o spam.')); }
+    catch (e) { return redir(res, '/contas?e=1&m=' + encodeURIComponent('Falha no envio: ' + e.message)); }
+  }
   if (p === '/contas/senha' && m === 'POST') {
     const f = form(await lerCorpo(req, 10000)), c = q.contaPorId.get(conta.id);
     if (!confere(f.atual, c.hash) || String(f.nova || '').length < 8) return redir(res, '/contas?e=1&m=' + encodeURIComponent('Senha atual incorreta ou nova senha curta.'));
@@ -311,10 +367,23 @@ async function rotear(req, res) {
     if (!nome) return json(res, 400, { erro: 'Informe o nome.' });
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { erro: 'E-mail inválido.' });
     if (q.contaPorEmail.get(email)) return json(res, 400, { erro: 'Este e-mail já está em uso.' });
-    if (senha.length < 8) return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
+    const convite = !!b.convite;
+    if (convite && !EMAIL.configurado()) return json(res, 400, { erro: 'O envio de e-mail não está configurado no servidor. Use a senha provisória.' });
+    if (!convite && senha.length < 8) return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
     const id = uid(), niv = ['admin', 'interact'].includes(b.nivel) ? b.nivel : 'interact';
-    q.contaNova.run(id, nome, email, hashSenha(senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
-    return json(res, 200, { ok: true, id });
+    q.contaNova.run(id, nome, email, convite ? null : hashSenha(senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
+    if (!convite) return json(res, 200, { ok: true, id });
+    try { await enviarLink({ id, nome, email }, 'convite'); return json(res, 200, { ok: true, id, convite: 'enviado' }); }
+    catch (e) { return json(res, 200, { ok: true, id, convite: 'falhou', erroEmail: e.message }); }
+  }
+  if (p === '/api/email/status' && m === 'GET') { if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { erro: 'Apenas administradores.' }); return json(res, 200, { configurado: EMAIL.configurado() }); }
+  const mLink = p.match(/^\/api\/contas\/([A-Za-z0-9_-]{1,60})\/link$/);
+  if (mLink && m === 'POST') {
+    if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { erro: 'Apenas administradores.' });
+    const c = q.contaPorId.get(mLink[1]); if (!c) return json(res, 404, { erro: 'Conta não encontrada.' });
+    if (c.nivel === 'owner' && c.id !== conta.id) return json(res, 403, { erro: 'Só o dono altera a própria conta.' });
+    if (!c.email) return json(res, 400, { erro: 'Esta conta não tem e-mail.' });
+    try { await enviarLink(c, c.hash ? 'redefinir' : 'convite'); return json(res, 200, { ok: true }); } catch (e) { return json(res, 502, { erro: e.message }); }
   }
   const mConta = p.match(/^\/api\/contas\/([A-Za-z0-9_-]{1,60})$/);
   if (mConta) {

@@ -168,3 +168,15 @@ O servidor busca o extrato a cada 3 horas (`BANCOS_INTERVALO_MIN`). Na primeira 
 cd fiscal && python -m unittest test_app.py    # assinatura XML, DistDFe, ADN e API (sem rede)
 ```
 O Dockerfile do `fiscal` roda esses testes no build.
+
+## 7.3. E-mail do sistema (convite de novo usuário e "Esqueci minha senha")
+
+No serviço **gestao › Ambiente** do Easypanel, preencha e clique em **Implantar**:
+
+- `SMTP_HOST` e `SMTP_PORT`: servidor de envio do provedor do e-mail. Hostinger: `smtp.hostinger.com` porta `465`. Google Workspace: `smtp.gmail.com` porta `465` (com senha de app). Microsoft 365: `smtp.office365.com` porta `587`. Outros: veja "SMTP" na central de ajuda do provedor.
+- `SMTP_USUARIO`: o e-mail completo (ex.: inaservicos@inaservicos.com.br). `SMTP_SENHA`: a senha desse e-mail (ou a senha de app).
+- `SMTP_REMETENTE`: como aparece para quem recebe, ex.: `INA Serviços <inaservicos@inaservicos.com.br>`.
+- `APP_URL`: endereço do sistema usado nos links (padrão `https://app.inaservicos.com.br`).
+
+Para conferir: **Contas de acesso › E-mail do sistema › Enviar e-mail de teste**.
+

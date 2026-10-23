@@ -21,6 +21,12 @@ services:
       PLUGGY_CLIENT_ID: ${PLUGGY_CLIENT_ID:-}
       PLUGGY_CLIENT_SECRET: ${PLUGGY_CLIENT_SECRET:-}
       BANCOS_INTERVALO_MIN: ${BANCOS_INTERVALO_MIN:-180}
+      APP_URL: ${APP_URL:-https://app.inaservicos.com.br}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USUARIO: ${SMTP_USUARIO:-}
+      SMTP_SENHA: ${SMTP_SENHA:-}
+      SMTP_REMETENTE: ${SMTP_REMETENTE:-}
     volumes:
       - gestao-dados:/data
       - /opt/central/certs:/certs:ro
