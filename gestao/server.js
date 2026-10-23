@@ -137,7 +137,7 @@ async function enviarLink(c, tipo) {
     : EMAIL.modelo('Redefinir sua senha', ['Olá, ' + (c.nome || '') + '.', 'Recebemos um pedido para redefinir a senha da sua conta na Central de Gestão. Clique no botão abaixo para criar uma senha nova.'], 'Criar nova senha', link, 'O link vale por 1 hora e só pode ser usado uma vez. Se não foi você que pediu, ignore este e-mail: sua senha continua a mesma.');
   await EMAIL.enviar({ para: c.email, assunto: convite ? 'Seu acesso à Central de Gestão' : 'Redefinir sua senha · Central de Gestão', texto: m.texto, html: m.html });
 }
-const limiteEsqueci = new Map();
+const limiteEsqueci = new Map(), cacheCnpj = new Map();
 function derrubarConexoes(contaId) { for (const [cid, c] of CONEX) if (c.conta.id === contaId) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } } }
 
 /* ---------------- páginas simples (login, contas, migração) ---------------- */
@@ -446,6 +446,21 @@ async function rotear(req, res) {
     if (NIV[conta.nivel] < NIV.admin && a.por !== conta.id && !q.blobVisivel.get('pt/' + conta.id, 'pt/' + conta.id + '/%', '%' + id + '%')) { res.writeHead(404); return res.end(); }
     const ct = String(a.ct || 'application/octet-stream').toLowerCase(), seguro = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|video\/(mp4|webm)|audio\/[a-z0-9.+-]+)$/.test(ct);
     res.writeHead(200, { 'content-type': seguro ? ct : 'application/octet-stream', 'content-length': a.tam, 'cache-control': 'private, max-age=86400', 'content-disposition': seguro ? 'inline' : 'attachment', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox" }); return fs.createReadStream(f).pipe(res);
+  }
+  /* consulta de CNPJ pelo servidor (dados públicos da Receita: BrasilAPI e CNPJ.ws), com cache de 24 h */
+  const mCnpj = p.match(/^\/api\/cnpj\/(brasilapi|cnpjws)\/(\d{14})$/);
+  if (mCnpj && m === 'GET') {
+    const chave = mCnpj[1] + mCnpj[2], ca = cacheCnpj.get(chave);
+    if (ca && Date.now() - ca.em < 864e5) { res.writeHead(ca.st, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(ca.corpo); }
+    const ip = ipDe(req), lim = limitePub.get('cnpj:' + ip) || { n: 0, ini: Date.now() }; if (Date.now() - lim.ini > 3600e3) { lim.n = 0; lim.ini = Date.now(); } lim.n++; limitePub.set('cnpj:' + ip, lim);
+    if (lim.n > 300) return json(res, 429, { erro: 'Muitas consultas nesta hora.' });
+    const url = mCnpj[1] === 'brasilapi' ? 'https://brasilapi.com.br/api/cnpj/v1/' + mCnpj[2] : 'https://publica.cnpj.ws/cnpj/' + mCnpj[2];
+    try {
+      const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'CentralGestao/1.0' }, signal: AbortSignal.timeout(10000) });
+      const corpo = await r.text(), st = r.status === 404 ? 404 : r.ok ? 200 : 502;
+      if (st !== 502) { cacheCnpj.set(chave, { st, corpo, em: Date.now() }); if (cacheCnpj.size > 5000) cacheCnpj.delete(cacheCnpj.keys().next().value); }
+      res.writeHead(st, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(st === 502 ? JSON.stringify({ erro: 'Consulta indisponível (' + r.status + ').' }) : corpo);
+    } catch (e) { return json(res, 502, { erro: 'Consulta indisponível agora.' }); }
   }
   if (p === '/api/ia' && m === 'POST') {
     if (NIV[conta.nivel] < NIV.interact) return json(res, 403, { code: 'not_granted', erro: 'Sem permissão para usar a IA.' });

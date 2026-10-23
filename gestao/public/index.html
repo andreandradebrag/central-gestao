@@ -14701,9 +14701,29 @@ A.cotIaLancar=async()=>{cotIaLer();const c0=get('cot',CIA.cotId);if(!c0){toast('
   c.forn.forEach((f,j)=>{const td=tr.children[j+1];if(td&&f.orcArq&&!td.querySelector('.cot-pdf'))td.insertAdjacentHTML('beforeend','<div class="sub cot-pdf"><a href="'+esc(f.orcArq.url||('/_blob/'+f.orcArq.id))+'" target="_blank" rel="noopener">Orçamento original ↗</a></div>');});};}
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{cotIaArq:'Lê o orçamento do fornecedor (PDF ou foto) com IA e mostra os preços para conferir antes de lançar no mapa.',cotIaLancar:'Grava no mapa os preços conferidos e anexa o orçamento original.'});
 
+/* ===== v87: busca por CNPJ pelo servidor e conferência de CPF/CNPJ nos cadastros =====
+   No sistema da VPS a consulta à Receita (BrasilAPI e CNPJ.ws) passa pelo próprio servidor: não depende de
+   bloqueador de anúncios, rede da empresa ou CORS do navegador. Se o servidor falhar, tenta direto do navegador.
+   CPF: não existe consulta pública de dados por CPF (só serviços pagos com contrato, ex.: Serpro); o sistema
+   confere os dígitos, formata e avisa se o CPF ou CNPJ já está cadastrado. */
+{const f0=window.fetch.bind(window);window.fetch=function(u,o){const s=String(u&&u.url||u);let m;
+  if(window.__SELFHOST&&(m=s.match(/^https:\/\/(brasilapi)\.com\.br\/api\/cnpj\/v1\/(\d{14})$/)||window.__SELFHOST&&(m=s.match(/^https:\/\/publica\.(cnpj)\.ws\/cnpj\/(\d{14})$/)))){
+    const fonte=m[1]==='cnpj'?'cnpjws':'brasilapi';
+    return f0('/api/cnpj/'+fonte+'/'+m[2],{credentials:'same-origin',signal:o&&o.signal}).then(r=>r.status===502||r.status===503?f0(u,o):r).catch(e=>{if(o&&o.signal&&o.signal.aborted)throw e;return f0(u,o);});}
+  return f0(u,o);};}
+document.addEventListener('input',e=>{const t=e.target;if(!t||t.id!=='f_doc'||!t.closest||!t.closest('#mb'))return;
+  const d=digits(t.value),box=$('#cnpjInfo');let dup=$('#docDup');if(!dup&&box){box.insertAdjacentHTML('beforebegin','<div id="docDup"></div>');dup=$('#docDup');}
+  if(dup)dup.innerHTML='';
+  if(d.length===11){if(!validCPF(d)){if(box)box.innerHTML='<p class="sub neg" style="margin:6px 0 0">CPF inválido. Confira os dígitos.</p>';return;}
+    t.value=fmtDoc(d);if(box)box.innerHTML='<p class="sub" style="margin:6px 0 0">CPF válido. Os dados de pessoa física não têm consulta pública: preencha nome e endereço.</p>';}
+  if((d.length===11&&validCPF(d))||(d.length===14&&validCNPJ(d))){const idAtual=PARC_ED||'';
+    const ja=S.parc.filter(p=>digits(p.doc)===d&&p.id!==idAtual);if(ja.length&&dup)dup.innerHTML='<div class="note" style="margin-top:8px"><b>Já cadastrado:</b> '+ja.slice(0,3).map(p=>esc(p.nome||'sem nome')+' ('+esc(p.tipo||'')+')').join(' · ')+'. Confira para não duplicar.</div>';}});
+let PARC_ED='';{const pf=parcForm;parcForm=function(p){PARC_ED=p&&p.id||'';return pf.apply(this,arguments);};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='86',APP_DATA='2026-10-23';
+const APP_VER='87',APP_DATA='2026-10-23';
 const CHANGELOG=[
+  ['87','2026-10-23',['Clientes e fornecedores: no sistema da VPS a busca de dados pelo CNPJ passa pelo servidor, sem depender da rede ou do navegador de cada pessoa.','Ao digitar um CPF, o sistema confere os dígitos e formata; ao digitar CPF ou CNPJ já cadastrado, avisa para não duplicar. (Dados de pessoa física não têm consulta pública.)']],
   ['86','2026-10-23',['Cotações: o orçamento do fornecedor em PDF (no formato dele) ou foto agora é lido pela IA. No mapa, clique em Importar resposta, escolha o fornecedor e Ler PDF ou foto com IA.','A tela de conferência mostra cada linha do orçamento ligada ao item do mapa, com preço unitário, frete, prazo, pagamento e validade; o que tiver dúvida aparece em amarelo e nada é gravado antes de você clicar em Lançar no mapa.','O orçamento original fica anexado ao mapa (link Orçamento original).']],
   ['85','2026-10-23',['Convite por e-mail: em Usuários › Novo usuário, marque Enviar convite e a pessoa recebe um link para criar a própria senha.','Esqueci minha senha na tela de login: a pessoa recebe por e-mail um link (válido por 1 hora) para criar uma senha nova.','Usuários › Editar ganhou o botão Enviar link de senha por e-mail. Funciona depois que o e-mail do sistema for configurado no servidor.']],
   ['84','2026-10-23',['Sistema › Usuários › Novo usuário: cria o login (e-mail e senha provisória) e o perfil de uma vez, sem passar por Contas de acesso. O funcionário pode ser ligado na mesma tela.','Contas de acesso ganhou o botão Excluir (menos para a conta do dono).','Botão Sair no topo da tela, ao lado do seu nome.']],
