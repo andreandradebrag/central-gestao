@@ -1,0 +1,4 @@
+.env
+*.pfx
+*.p12
+certs/

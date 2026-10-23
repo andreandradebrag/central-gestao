@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Pedido de cotação</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#14202e;--mut:#5d6b7c;--line:#d9dfe7;--accent:#1d4ed8;--accent-soft:#e8efff;--ok:#15803d;--bad:#b91c1c;--warn:#a16207}
+@media (prefers-color-scheme:dark){:root{--bg:#0e141c;--card:#16202b;--ink:#e7edf4;--mut:#9aa8b8;--line:#2a3747;--accent:#6b9bff;--accent-soft:#1b2a44;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:20px 16px 60px}
+header.top{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:16px}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--mut);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 16px}
+.kv b{display:block;font-size:12px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mut)}
+input,textarea,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+td.num,th.num{text-align:right;white-space:nowrap}
+.tw{overflow-x:auto}
+.it-desc{font-weight:600}
+.btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:10px 16px;cursor:pointer}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn:disabled{opacity:.6;cursor:default}
+.acts{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent)}
+.pill.bad{background:rgba(185,28,28,.12);color:var(--bad)}.pill.ok{background:rgba(21,128,61,.12);color:var(--ok)}
+.msg{padding:12px 14px;border-radius:10px;margin-bottom:14px;font-size:14px}
+.msg.ok{background:rgba(21,128,61,.12);color:var(--ok)}.msg.bad{background:rgba(185,28,28,.12);color:var(--bad)}.msg.info{background:var(--accent-soft);color:var(--ink)}
+.tot{font-size:18px;font-weight:700}
+textarea.code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+@media (max-width:720px){
+  table.itens thead{display:none}
+  table.itens tr{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;border-bottom:1px solid var(--line);padding:10px 0}
+  table.itens td{border:0;padding:0}
+  table.itens td.c-desc{grid-column:1/-1}
+  table.itens td[data-l]::before{content:attr(data-l);display:block;font-size:11px;color:var(--mut);text-transform:uppercase}
+  td.num{text-align:left}
+}
+</style>
+</head>
+<body>
+<main id="app"><p class="sub">Carregando o pedido de cotação…</p></main>
+<script>
+/* Página que o fornecedor usa para responder um pedido de cotação.
+   Online: lê e grava pelo servidor da empresa (endereço /cotacao/<código>).
+   Arquivo: os dados vêm embutidos e a resposta vira um código para devolver ao comprador. */
+(function(){
+var EMB=/*__COT_DATA__*/null;
+var app=document.getElementById('app'),D=null,R=null,TOK='',OFF=false,ENV=false;
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function money(v){return (+v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
+function q(v){return (+v||0).toLocaleString('pt-BR',{maximumFractionDigits:4});}
+function dt(s){if(!s)return '—';var p=String(s).slice(0,10).split('-');return esc(p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s);}
+function dts(t){try{return new Date(t).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'});}catch(e){return '';}}
+function num(s){s=String(s==null?'':s).trim();if(!s)return '';if(/,/.test(s))s=s.replace(/\./g,'').replace(',','.');var n=parseFloat(s);return isFinite(n)&&n>=0?n:'';}
+function fmtIn(n){return n===''||n==null?'':String(n).replace('.',',');}
+function vencido(){if(!D.prazoResp)return false;var h=new Date();var hoje=h.getFullYear()+'-'+('0'+(h.getMonth()+1)).slice(-2)+'-'+('0'+h.getDate()).slice(-2);return hoje>D.prazoResp;}
+function carregar(){
+  if(EMB){D=EMB.pub;TOK=EMB.tok;OFF=true;R=null;try{var s=localStorage.getItem('cot-resp-'+TOK);if(s)R=JSON.parse(s);}catch(e){}render();return;}
+  var m=location.pathname.match(/\/cotacao\/([A-Za-z0-9]{24,64})/);
+  if(!m){app.innerHTML='<div class="msg bad">Endereço de cotação inválido. Confira o link recebido.</div>';return;}
+  TOK=m[1];
+  fetch('/api/pub/cotacao/'+TOK,{cache:'no-store'}).then(function(r){return r.json().then(function(j){return {st:r.status,j:j};});}).then(function(x){
+    if(x.st!==200){app.innerHTML='<div class="msg bad">'+esc(x.j&&x.j.erro||'Pedido de cotação não encontrado.')+'</div>';return;}
+    D=x.j.pub;R=x.j.resposta||null;render();
+  }).catch(function(){app.innerHTML='<div class="msg bad">Não foi possível carregar o pedido. Verifique a conexão e recarregue a página.</div>';});
+}
+function render(){
+  document.title='Pedido de cotação nº '+D.numero+' · '+(D.empresa&&D.empresa.nome||'');
+  var fechada=D.status!=='aberta',r=R||{},ri=r.itens||[];
+  var aviso=fechada?'<div class="msg bad">Esta cotação foi encerrada pelo comprador. Não é mais possível enviar ou alterar a proposta.</div>':
+    r.em?'<div class="msg ok">'+(r.recusou?'Vocês informaram que não vão cotar':'Proposta recebida')+' em '+esc(dts(r.em))+'. '+(fechada?'':'Se precisar, altere e envie de novo até o fim do prazo.')+'</div>':
+    vencido()?'<div class="msg info">O prazo de resposta ('+dt(D.prazoResp)+') passou, mas a cotação ainda está aberta: a proposta ainda pode ser enviada.</div>':'';
+  var e=D.empresa||{};
+  var h='<header class="top"><div><h1>Pedido de cotação nº '+esc(D.numero)+'</h1><div class="sub">'+esc(e.nome||'')+(e.cnpj?' · CNPJ '+esc(e.cnpj):'')+(e.cidade?' · '+esc(e.cidade):'')+'</div></div><div>'+(fechada?'<span class="pill bad">Encerrada</span>':'<span class="pill">Aberta até '+dt(D.prazoResp)+'</span>')+'</div></header>'+aviso+
+  '<section class="card"><h2>Dados do pedido</h2><div class="grid">'+
+    '<div class="kv"><b>Para</b>'+esc(D.fornNome||'—')+'</div><div class="kv"><b>Data do pedido</b>'+dt(D.data)+'</div><div class="kv"><b>Responder até</b>'+dt(D.prazoResp)+'</div>'+(D.necessidade?'<div class="kv"><b>Necessidade</b>'+dt(D.necessidade)+'</div>':'')+
+    '<div class="kv"><b>Local de entrega</b>'+esc(D.localEntrega||'A combinar')+'</div>'+(e.contato?'<div class="kv"><b>Comprador</b>'+esc(e.contato)+'</div>':'')+(e.email||e.tel?'<div class="kv"><b>Contato</b>'+esc([e.email,e.tel].filter(Boolean).join(' · '))+'</div>':'')+
+  '</div>'+(D.condicoes?'<p style="margin:12px 0 0;white-space:pre-line">'+esc(D.condicoes)+'</p>':'')+'</section>'+
+  '<section class="card"><h2>Itens</h2><p class="sub" style="margin:-4px 0 10px">Informe o preço unitário de cada item. Deixe em branco o que não fornecem. Use a coluna Observação para marca, modelo, similar oferecido ou prazo diferente.</p><div class="tw"><table class="itens"><thead><tr><th>#</th><th>Item</th><th class="num">Qtd</th><th>Un.</th><th class="num">Preço unitário (R$)</th><th class="num">Total</th><th>Marca / observação</th></tr></thead><tbody>'+
+  D.itens.map(function(it,i){var x=ri[i]||{};return '<tr><td data-l="Item">'+(i+1)+'</td><td class="c-desc"><div class="it-desc">'+esc(it.desc)+'</div>'+(it.cod?'<div class="sub">Código: '+esc(it.cod)+'</div>':'')+(it.obs?'<div class="sub">'+esc(it.obs)+'</div>':'')+'</td><td class="num" data-l="Quantidade">'+q(it.qtd)+'</td><td data-l="Unidade">'+esc(it.un||'UN')+'</td><td class="num" data-l="Preço unitário (R$)"><input inputmode="decimal" data-i="'+i+'" data-k="preco" value="'+esc(fmtIn(x.preco))+'" placeholder="0,00" style="text-align:right;max-width:150px"'+(fechada?' disabled':'')+' aria-label="Preço unitário do item '+(i+1)+'"></td><td class="num" data-l="Total" id="tt'+i+'">—</td><td data-l="Marca / observação"><input data-i="'+i+'" data-k="obs" value="'+esc(x.obs||'')+'" maxlength="200"'+(fechada?' disabled':'')+' aria-label="Marca ou observação do item '+(i+1)+'"></td></tr>';}).join('')+
+  '</tbody></table></div></section>'+
+  '<section class="card"><h2>Condições da proposta</h2><div class="grid">'+
+    '<label>Frete (R$)<input id="frete" inputmode="decimal" value="'+esc(fmtIn(r.frete))+'" placeholder="0,00 se incluso"'+(fechada?' disabled':'')+'></label>'+
+    '<label>Prazo de entrega (dias corridos)<input id="prazo" inputmode="numeric" value="'+esc(r.prazo==null?'':r.prazo)+'"'+(fechada?' disabled':'')+'></label>'+
+    '<label>Condição de pagamento<input id="pgto" value="'+esc(r.pgto||'')+'" placeholder="ex.: 28 dias, boleto" maxlength="120"'+(fechada?' disabled':'')+'></label>'+
+    '<label>Validade da proposta (dias)<input id="validade" inputmode="numeric" value="'+esc(r.validade==null?'':r.validade)+'"'+(fechada?' disabled':'')+'></label>'+
+  '</div><label style="margin-top:10px">Observações gerais<textarea id="obs" rows="3" maxlength="1500"'+(fechada?' disabled':'')+'>'+esc(r.obsGeral||'')+'</textarea></label>'+
+  '<div class="grid" style="margin-top:10px"><label>Seu nome *<input id="nome" value="'+esc(r.nome||'')+'" maxlength="100" autocomplete="name"'+(fechada?' disabled':'')+'></label><label>E-mail<input id="email" type="email" value="'+esc(r.email||'')+'" maxlength="120" autocomplete="email"'+(fechada?' disabled':'')+'></label><label>Telefone / WhatsApp<input id="tel" value="'+esc(r.tel||'')+'" maxlength="40" autocomplete="tel"'+(fechada?' disabled':'')+'></label></div></section>'+
+  '<section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div class="sub">Total da proposta (itens + frete)</div><div class="tot" id="tot">R$ 0,00</div><div class="sub" id="nItens"></div></div>'+
+  (fechada?'':'<div class="acts"><button class="btn" id="bRec" type="button">Não vamos cotar</button><button class="btn pri" id="bEnv" type="button">'+(OFF?'Gerar resposta':(r.em&&!r.recusou?'Enviar proposta atualizada':'Enviar proposta'))+'</button></div>')+'</div><div id="out"></div></section>'+
+  '<p class="sub" style="text-align:center">Os dados informados aqui são usados somente para esta cotação.</p>';
+  app.innerHTML=h;calc();
+  var b=document.getElementById('bEnv');if(b)b.onclick=function(){enviar(false);};
+  var c=document.getElementById('bRec');if(c)c.onclick=function(){if(confirm('Confirmar que não vão cotar este pedido?'))enviar(true);};
+}
+function ler(){var it=D.itens.map(function(_,i){var p=app.querySelector('input[data-i="'+i+'"][data-k="preco"]'),o=app.querySelector('input[data-i="'+i+'"][data-k="obs"]');return {k:D.itens[i].k,preco:num(p&&p.value),obs:(o&&o.value||'').trim().slice(0,200)};});
+  function v(id){var e=document.getElementById(id);return e?e.value.trim():'';}
+  return {itens:it,frete:num(v('frete')),prazo:num(v('prazo')),pgto:v('pgto').slice(0,120),validade:num(v('validade')),obsGeral:v('obs').slice(0,1500),nome:v('nome').slice(0,100),email:v('email').slice(0,120),tel:v('tel').slice(0,40)};}
+function calc(){if(!D)return;var r=ler(),t=0,n=0;r.itens.forEach(function(x,i){var td=document.getElementById('tt'+i);if(x.preco!==''){var s=x.preco*(+D.itens[i].qtd||0);t+=s;n++;if(td)td.textContent=money(s);}else if(td)td.textContent='—';});
+  if(n&&r.frete!=='')t+=r.frete;var a=document.getElementById('tot');if(a)a.textContent=money(t);var b=document.getElementById('nItens');if(b)b.textContent=n+' de '+D.itens.length+' item(ns) com preço';}
+function enviar(recusou){var r=ler(),out=document.getElementById('out');r.recusou=!!recusou;
+  if(!r.nome){out.innerHTML='<div class="msg bad" style="margin-top:12px">Informe seu nome para enviar.</div>';var n=document.getElementById('nome');if(n)n.focus();return;}
+  if(!recusou&&!r.itens.some(function(x){return x.preco!=='';})){out.innerHTML='<div class="msg bad" style="margin-top:12px">Informe o preço de pelo menos um item, ou use “Não vamos cotar”.</div>';return;}
+  if(OFF){r.tok=TOK;r.em=Date.now();r.cot=D.numero;try{localStorage.setItem('cot-resp-'+TOK,JSON.stringify(r));}catch(e){}
+    var txt=JSON.stringify({tipo:'resposta-cotacao',v:1,resp:r});
+    out.innerHTML='<div class="msg ok" style="margin-top:12px">Resposta pronta. Envie o arquivo baixado (ou o código abaixo) para '+esc(D.empresa&&D.empresa.email||'o comprador')+'.</div><textarea class="code" rows="5" readonly>'+esc(txt)+'</textarea><div class="acts" style="margin-top:8px"><button class="btn" type="button" id="bCop">Copiar código</button><button class="btn pri" type="button" id="bBx">Baixar arquivo de resposta</button></div>';
+    var bx=function(){var bl=new Blob([txt],{type:'application/json'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download='resposta-cotacao-'+D.numero+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},5000);};
+    document.getElementById('bBx').onclick=bx;document.getElementById('bCop').onclick=function(){try{navigator.clipboard.writeText(txt);this.textContent='Copiado';}catch(e){}};bx();return;}
+  if(ENV)return;ENV=true;var b=document.getElementById('bEnv');if(b){b.disabled=true;b.textContent='Enviando…';}
+  fetch('/api/pub/cotacao/'+TOK,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(r)}).then(function(x){return x.json().then(function(j){return {st:x.status,j:j};});}).then(function(x){ENV=false;
+    if(x.st!==200){out.innerHTML='<div class="msg bad" style="margin-top:12px">'+esc(x.j&&x.j.erro||'Não foi possível enviar.')+'</div>';if(b){b.disabled=false;b.textContent='Enviar proposta';}return;}
+    R=x.j.resposta;render();window.scrollTo(0,0);
+  }).catch(function(){ENV=false;out.innerHTML='<div class="msg bad" style="margin-top:12px">Falha de conexão. Seus dados continuam na tela: tente de novo.</div>';if(b){b.disabled=false;b.textContent='Enviar proposta';}});}
+app.addEventListener('input',calc);
+carregar();
+})();
+</script>
+</body>
+</html>
