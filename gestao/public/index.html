@@ -14763,10 +14763,25 @@ A.solSyncAnoOk=async()=>{if(SOL.busy)return;const ano=+(($('#f_sanoAno')||{}).va
     try{SOL.st=await solApi('status');}catch(e){}
     const er=res.filter(r=>r.ok===false).length;toast(er?er+' mês(es) com erro: veja a lista.':'Ano '+ano+' buscado: '+res.reduce((s,r)=>s+(r.n||0),0)+' marcação(ões).',er?'neg':'pos');}
   finally{SOL.busy='';if(btn){btn.disabled=false;btn.textContent='Buscar de novo';}render();pint();}};
+/* ===== v96: todos os campos de mês viram lista (sem digitar) =====
+   Os campos do tipo mês (filtros e formulários) são trocados por uma lista de meses: 12 meses à frente até
+   5 anos atrás, do mais recente para o mais antigo. Mantém id, data-filter e data-f, então tudo continua igual. */
+const MES_AB=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+function mesesLista(v){const h=todayStr(),y0=+h.slice(0,4),m0=+h.slice(5,7),out=[];
+  for(let i=12;i>=-60;i--){const d=new Date(y0,m0-1+i,15),k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');out.push(k);}
+  if(v&&/^\d{4}-\d{2}$/.test(v)&&out.indexOf(v)<0){out.push(v);out.sort().reverse();}return out;}
+function mesesParaLista(root){(root||document).querySelectorAll('input[type=month]').forEach(inp=>{if(inp.dataset.semLista)return;
+  const s=document.createElement('select'),v=inp.value||'';['id','className','title','disabled','required'].forEach(k=>{if(inp[k])s[k]=inp[k];});
+  Object.keys(inp.dataset).forEach(k=>{s.dataset[k]=inp.dataset[k];});if(inp.getAttribute('aria-label'))s.setAttribute('aria-label',inp.getAttribute('aria-label'));
+  s.innerHTML=(v?'':'<option value="">—</option>')+mesesLista(v).map(k=>'<option value="'+k+'"'+(k===v?' selected':'')+'>'+MES_AB[+k.slice(5,7)-1]+'/'+k.slice(0,4)+'</option>').join('');
+  if(inp.style.cssText)s.style.cssText=inp.style.cssText;inp.replaceWith(s);});}
+{const r0=render;render=function(){const x=r0.apply(this,arguments);try{mesesParaLista();}catch(e){}return x;};}
+{const m0=modal;modal=function(o){const x=m0.apply(this,arguments);try{mesesParaLista($('#ov'));}catch(e){}return x;};}
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='95',APP_DATA='2026-10-26';
+const APP_VER='96',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['96','2026-10-26',['Todos os campos de mês do sistema (espelho de ponto, financeiro, DRE, relatórios, obras e outros) passam a ser escolhidos numa lista, sem digitar.']],
   ['95','2026-10-26',['Ponto (Sólides): a sincronização usa o local de trabalho do cadastro do funcionário na Sólides quando ele tem um só local, e as horas já vão para a obra ligada a esse local. O local vindo do relatório importado continua valendo.']],
   ['94','2026-10-26',['Ponto (Sólides): o relatório importado por arquivo substitui só os dias que traz (marcações, local de trabalho/obra e totais) e mantém o resumo mensal vindo da sincronização.']],
   ['93','2026-10-26',['Ponto (Sólides): Buscar o mês e Buscar o ano inteiro voltam a trazer os funcionários ativos (a Sólides devolvia só os demitidos). O andamento mostra também as marcações de quem está sem vínculo.']],
