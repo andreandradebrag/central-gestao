@@ -12,3 +12,6 @@ backup-banco-*
 __pycache__/
 *.pyc
 data/
+*.cg
+segredos.env
+backups/

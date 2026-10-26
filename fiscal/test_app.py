@@ -219,7 +219,29 @@ class T(unittest.TestCase):
         c, j = req('/tool/obter_xml', {'chave': j['documentos'][0]['chave']})
         self.assertIn('NFSe', j['xml'])
         self.assertEqual(req('/tool/apagar_tudo', {})[0], 404)
+        # erro interno: mensagem genérica com código, sem tipo nem texto da exceção
+        r = urllib.request.Request(base + '/manifestar', data=b'{isto nao e json', headers={'x-fiscal-token': 'tok', 'content-type': 'application/json'})
+        try:
+            urllib.request.urlopen(r)
+            self.fail('esperava 500')
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 500)
+            j = json.loads(e.read())
+            self.assertRegex(j['erro'], r'^Erro interno do conector fiscal \(ref\. [0-9a-f]{8}\)\.$')
+            self.assertNotIn('JSONDecodeError', j['erro'])
         srv.shutdown()
+
+    def test_falha_sefaz_generica(self):
+        class Quebra(HttpFalso):
+            def post(self, *a, **k):
+                raise RuntimeError('detalhe interno 10.0.0.5 senha=xyz')
+        con = app.Conector(self.cfg, self.db, http=Quebra())
+        out = con.sincronizar(forcar=True)
+        self.assertFalse(out['nfe']['ok'])
+        self.assertNotIn('10.0.0.5', out['nfe']['msg'])
+        self.assertNotIn('RuntimeError', out['nfe']['msg'])
+        self.assertIn('ref.', out['nfe']['msg'])
+        self.assertNotIn('10.0.0.5', json.dumps(con.status()))
 
 
 if __name__ == '__main__':

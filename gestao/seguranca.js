@@ -16,9 +16,10 @@ const precisaRefazer = hash => !!hash && !hash.startsWith('s2$' + N_NOVO + '$');
 
 /* senhas fracas demais: recusadas mesmo com 8 caracteres */
 const COMUNS = new Set(['12345678', '123456789', '1234567890', '87654321', '11111111', '00000000', '12341234', '11223344', 'senha123', 'senha1234', 'senha@123', 'password', 'password1', 'qwerty123', 'qwertyui', 'abcd1234', 'abc12345', 'mudar123', 'trocar123', 'admin123', 'admin1234', 'inaservicos', 'ina12345', 'central123', 'gestao123', 'brasil123', 'iloveyou', 'asdfghjk', '1q2w3e4r', '1q2w3e4r5t', 'q1w2e3r4', 'aaaaaaaa', 'deus1234', 'jesus123']);
-function senhaFraca(senha, email, nome) {
-  const s = String(senha || '');
-  if (s.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
+/* min: tamanho mínimo (8 para colaboradores; 12 para o dono e para perfis de Equipe que gravam, ver endurece.js) */
+function senhaFraca(senha, email, nome, min) {
+  const s = String(senha || ''), mn = Math.max(8, +min || 8);
+  if (s.length < mn) return 'A senha precisa ter pelo menos ' + mn + ' caracteres.';
   if (s.length > 200) return 'Senha longa demais.';
   const b = s.toLowerCase();
   if (COMUNS.has(b) || /^(.)\1+$/.test(b) || /^(0123456789|1234567890|abcdefgh)/.test(b)) return 'Essa senha é muito comum. Escolha outra (dica: junte 3 ou 4 palavras).';
@@ -45,11 +46,38 @@ function totp(segredo, passo) {
    Devolve o passo usado (para não aceitar o mesmo código duas vezes) ou -1. */
 function confereCodigo(segredo, codigo, ultimoPasso, agora) {
   const c = String(codigo || '').replace(/\D/g, ''); if (c.length !== 6) return -1;
+  if (typeof segredo === 'string' && segredo.startsWith(PREF_CIF)) { segredo = decifrarSegredo(segredo); if (!segredo) return -1; }
   const p0 = Math.floor((agora || Date.now()) / 30000);
   for (const d of [0, -1, 1]) { const p = p0 + d; if (p <= (ultimoPasso || 0)) continue; const esp = totp(segredo, p); if (crypto.timingSafeEqual(Buffer.from(esp), Buffer.from(c))) return p; }
   return -1;
 }
 const novoSegredo = () => b32enc(crypto.randomBytes(20));
+
+/* segredo TOTP cifrado no banco (AES-256-GCM) com a chave mestra CHAVE_MESTRA do Ambiente.
+   Formato: "c1:" + base64(iv 12 | tag 16 | texto cifrado). Sem a chave, o segredo fica como antes (em claro)
+   e a tela de Contas avisa. A chave pode ser 64 caracteres hexadecimais ou uma frase longa. */
+const PREF_CIF = 'c1:';
+let chaveMestraCache = null;
+function chaveMestra() {
+  const k = String(process.env.CHAVE_MESTRA || '');
+  if (!k) return null;
+  if (chaveMestraCache && chaveMestraCache.k === k) return chaveMestraCache.b;
+  const b = /^[0-9a-fA-F]{64}$/.test(k) ? Buffer.from(k, 'hex') : crypto.scryptSync(k, 'central-gestao/chave-mestra/v1', 32, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  chaveMestraCache = { k, b }; return b;
+}
+function cifrarSegredo(s) {
+  const ch = chaveMestra(); if (!ch || s == null || String(s).startsWith(PREF_CIF)) return s;
+  const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', ch, iv);
+  const ct = Buffer.concat([c.update(String(s), 'utf8'), c.final()]);
+  return PREF_CIF + Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64');
+}
+function decifrarSegredo(s) {
+  if (s == null) return s; s = String(s); if (!s.startsWith(PREF_CIF)) return s;
+  const ch = chaveMestra(); if (!ch) return null;
+  try { const b = Buffer.from(s.slice(PREF_CIF.length), 'base64'), d = crypto.createDecipheriv('aes-256-gcm', ch, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8'); }
+  catch (e) { return null; }
+}
+const segredoCifrado = s => typeof s === 'string' && s.startsWith(PREF_CIF);
 const uriAutenticador = (segredo, conta, emissor) => 'otpauth://totp/' + encodeURIComponent(emissor) + ':' + encodeURIComponent(conta) + '?secret=' + segredo + '&issuer=' + encodeURIComponent(emissor) + '&algorithm=SHA1&digits=6&period=30';
 
 /* códigos de recuperação: 10 de uso único, guardados só como hash */
@@ -75,4 +103,4 @@ function aparelho(ua) {
   return nav + ' · ' + so;
 }
 
-module.exports = { hashSenha, confere, precisaRefazer, senhaFraca, totp, confereCodigo, novoSegredo, uriAutenticador, novosCodigosRec, usarCodigoRec, b32enc, b32dec, aparelho, sha };
+module.exports = { hashSenha, confere, precisaRefazer, senhaFraca, totp, confereCodigo, novoSegredo, uriAutenticador, novosCodigosRec, usarCodigoRec, b32enc, b32dec, aparelho, sha, cifrarSegredo, decifrarSegredo, segredoCifrado, chaveMestra };

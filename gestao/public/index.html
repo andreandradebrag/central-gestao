@@ -15144,8 +15144,8 @@ const FR_COLS_VEIC=['vsai','vabas','vman','mult','vrota','ventr'];
 A.frLocais=()=>{if(!mayW('frota')){toast('Seu perfil não pode alterar os locais da frota.','neg');return;}
   const ls=frLocais(),us=S.usr.filter(u=>u.ativo!==false&&u.perfil!=='pendente').slice().sort((a,b)=>String(a.apelido||'').localeCompare(String(b.apelido||'')));
   const nomeU=u=>u.apelido||u.uid||'Usuário';
-  const podeU=mayW('usr'),tab=podeU&&ls.length&&us.length?'<div class="tw" style="margin-top:12px;max-height:360px;overflow:auto"><table><thead><tr><th>Usuário do sistema</th>'+ls.map(l=>'<th class="num">'+esc(l)+'</th>').join('')+'</tr></thead><tbody>'+
-    us.map(u=>'<tr><td>'+esc(nomeU(u))+'<div class="sub">'+esc((PERFIS[u.perfil]||{}).nome||u.perfil||'')+'</div></td>'+ls.map((l,i)=>'<td class="num"><input type="checkbox" data-frl-u="'+esc(u.id)+'" data-frl-i="'+i+'"'+((u.locaisVeic||[]).includes(l)?' checked':'')+'></td>').join('')+'</tr>').join('')+'</tbody></table></div>':'';
+  const podeU=mayW('usr'),tab=podeU&&ls.length&&us.length?'<div class="tw" style="margin-top:12px;max-height:360px;overflow:auto"><table><thead><tr><th>Usuário do sistema</th>'+ls.map(l=>'<th style="text-align:center;width:'+Math.floor(60/ls.length)+'%">'+esc(l)+'</th>').join('')+'</tr></thead><tbody>'+
+    us.map(u=>'<tr><td>'+esc(nomeU(u))+'<div class="sub">'+esc((PERFIS[u.perfil]||{}).nome||u.perfil||'')+((PERFIS[u.perfil]||{}).w==='*'?' · vê todos os veículos':'')+'</div></td>'+ls.map((l,i)=>'<td style="text-align:center"><input type="checkbox" style="width:auto;margin:0;vertical-align:middle;cursor:pointer" data-frl-u="'+esc(u.id)+'" data-frl-i="'+i+'"'+((u.locaisVeic||[]).includes(l)?' checked':'')+'></td>').join('')+'</tr>').join('')+'</tbody></table></div>':'';
   modal({title:'Locais da frota',wide:true,body:'<p class="sub" style="margin:0 0 8px">Um local por linha (ex.: Sede Tuiuti, Garagem Bragança, Obra Hospital). Depois de salvar os locais, marque quais usuários usam cada um. Quem não tiver nenhum local marcado (aqui ou no cadastro do colaborador) não vê nenhum veículo; veículo sem local definido só aparece para administradores, que sempre veem todos.</p>'+
     field('Locais','frlista','textarea',ls.join('\n'),{full:true})+tab,saveLabel:'Salvar',save:root=>{
       const novos=[...new Set(String(($('#f_frlista',root)||{}).value||'').split('\n').map(s=>s.trim()).filter(Boolean))].slice(0,60);
@@ -16137,7 +16137,7 @@ V.remessa=()=>{const f=ui.remessa,rc=remCfg(),ls=remLista(f.ate),ok=ls.filter(x=
   (ok.length?ok.map(x=>{const l=x.l,p=get('parc',l.parcId)||{},fm=remForma(p);return '<tr><td><input type="checkbox" data-rm="'+l.id+'" checked aria-label="Incluir na remessa"></td><td class="mono">'+fmtDate(l.venc)+'</td><td>'+esc(p.nome||'')+'<div class="sub">'+esc(finBkTxt(p))+'</div></td><td>'+esc(l.desc)+'</td><td>'+esc(fm?fm.nome:'')+'</td><td class="num">'+money(l.valor)+'</td><td>'+(l.aprov&&l.aprov.ok?pill('Aprovado','pos')+'<div class="sub">'+esc(nameOf(l.aprov.por))+'</div>':pill('Dispensada','')+'<div class="sub">abaixo do limite</div>')+'</td></tr>';}).join(''):emptyRow(7,'Nenhum título apto.'))+'</tbody></table></div>'+
   (w&&ok.length?'<div class="acts" style="margin-top:8px"><button class="btn pri" data-act="remGerarArq">Gerar remessa CNAB 240</button><button class="btn" data-act="remCsvArq">Baixar lote em CSV</button></div>':'')+'</div>'+
   (bl.length?'<div class="card"><h2>Fora da remessa</h2><div class="tw" style="border:0"><table style="min-width:760px"><tbody>'+bl.slice(0,60).map(x=>'<tr><td class="mono">'+fmtDate(x.l.venc)+'</td><td>'+esc(x.l.parcId?parcNome(x.l.parcId):'—')+'</td><td>'+esc(x.l.desc)+'</td><td class="num">'+money(x.l.valor)+'</td><td>'+pill(x.motivo,/aprova|banc/.test(x.motivo)?'neg':'warn')+'</td></tr>').join('')+'</tbody></table></div></div>':'')+
-  (hist.length?'<div class="card"><h2>Remessas geradas</h2><div class="tw" style="border:0"><table style="min-width:760px"><tbody>'+hist.map(r=>'<tr><td class="mono">nº '+esc(r.nsa)+'</td><td>'+fmtDT(r.em)+'<div class="sub">'+esc(nameOf(r.por))+'</div></td><td class="num">'+(r.ids||[]).length+' título(s)</td><td class="num">'+money(r.total)+'</td><td>'+(r.status==='cancelada'?pill('Cancelada',''):r.teste?pill('Teste','warn'):pill('Gerada','acc'))+'</td><td class="act">'+(r.status!=='cancelada'&&w?'<button class="btn sm" data-act="remBaixarDeNovo" data-id="'+r.id+'">Baixar de novo</button><button class="btn sm dng" data-act="remCancelar" data-id="'+r.id+'">Cancelar</button>':'')+'</td></tr>').join('')+'</tbody></table></div></div>':'')+
+  (hist.length?'<div class="card"><h2>Remessas geradas</h2><div class="tw" style="border:0"><table style="min-width:760px"><tbody>'+hist.map(r=>'<tr><td class="mono">nº '+esc(r.nsa)+'</td><td>'+fmtDT(r.em)+'<div class="sub">'+esc(nameOf(r.por))+'</div></td><td class="num">'+(r.srvQtd!=null?r.srvQtd:(r.ids||[]).length)+' título(s)</td><td class="num">'+money(r.srvTotal!=null?r.srvTotal:r.total)+(r.hash?'<div class="sub mono" title="Impressão digital (SHA-256) calculada pelo servidor ao gravar e conferida a cada download">SHA-256 '+esc(String(r.hash).slice(0,12))+'…</div>':'')+'</td><td>'+(r.status==='cancelada'?pill('Cancelada',''):r.teste?pill('Teste','warn'):pill('Gerada','acc'))+'</td><td class="act">'+(r.status!=='cancelada'&&w?'<button class="btn sm" data-act="remBaixarDeNovo" data-id="'+r.id+'">Baixar de novo</button><button class="btn sm dng" data-act="remCancelar" data-id="'+r.id+'">Cancelar</button>':'')+'</td></tr>').join('')+'</tbody></table></div></div>':'')+
   (w?'<div class="card"><h2>Conta pagadora e convênio</h2><div class="fg">'+field('Conta no sistema','remContaId','select',rc.contaId,{opts:adtoContasBanco(),blank:'—'})+field('Convênio de pagamentos BB (9 dígitos)','remConvenio','text',rc.convenio)+field('Agência (sem dígito)','remAgencia','text',rc.agencia)+field('Dígito da agência','remAgDv','text',rc.agDv)+field('Conta (sem dígito)','remConta','text',rc.conta)+field('Dígito da conta','remContaDv','text',rc.contaDv)+field('Versão do leiaute do arquivo','remVerArq','text',rc.verArq)+field('Versão do leiaute do lote','remVerLote','text',rc.verLote)+field('Arquivo de teste (TS) até homologar','remTeste','checkbox',rc.teste,{full:true})+'</div><div class="acts" style="margin-top:8px"><button class="btn pri" data-act="remCfgSalvar">Salvar</button></div><p class="sub" style="margin:8px 0 0">Pegue o número do convênio e as versões do leiaute com o gerente do BB (pagamento a fornecedores, CNAB 240).</p></div>':'')+'</div>';};
 const remSel=()=>{const els=$$('#view [data-rm]');const sel=els.filter(e=>e.checked).map(e=>e.dataset.rm);return els.length?sel:remLista(ui.remessa.ate).filter(x=>!x.motivo).map(x=>x.l.id);};
 function remRegistrar(g){const rc=remCfg(),id=uid(),nome='remessa-bb-'+String(g.nsa).padStart(6,'0')+'.txt';
@@ -17149,7 +17149,7 @@ rhTab('tercd','Documentos dos empreiteiros','Obras','proj','obras','medemp','Emp
 
 /* ---------- regras configuráveis (Sistema › Configurações e botão Regras de cada tela) ---------- */
 const TD_DOCS=[['cnd','CND federal (Receita/PGFN)','cert'],['cndt','CNDT (débitos trabalhistas)','cert'],['crf','CRF do FGTS','cert'],['folha','Folha de pagamento do mês','mes'],['gfgts','Guia do FGTS do mês paga (FGTS Digital)','mes'],['gdctf','DCTFWeb e guia do INSS do mês pagas','mes']];
-const RHX_DEF={foLiq:'colab',foVenc:{liq:5,liqUtil:true,fgts:20,dctf:20,irrf:20,adiant:20,d131:30,d132:20},foTol:1,
+const RHX_DEF={foLiq:'total',foVenc:{liq:5,liqUtil:true,fgts:20,dctf:20,irrf:20,adiant:20,d131:30,d132:20},foTol:1,
   heIni:'',heTol:10,heMax:2,heCoord:[],qdSemQuadro:'livre',diretores:[],tdDefas:1,tdExig:{cnd:true,cndt:true,crf:true,folha:true,gfgts:true,gdctf:true},tdExigeTrab:true,alocInteg:false,epiAssinarAoSalvar:true};
 const RHX=()=>{const c=cfg().rhx||{};return Object.assign({},RHX_DEF,c,{foVenc:Object.assign({},RHX_DEF.foVenc,c.foVenc||{}),tdExig:Object.assign({},RHX_DEF.tdExig,c.tdExig||{}),heCoord:Array.isArray(c.heCoord)?c.heCoord:[],diretores:Array.isArray(c.diretores)?c.diretores:[]});};
 function rhxSalvar(o){put('cfg',Object.assign({},cfg(),{id:'empresa',rhx:Object.assign({},cfg().rhx||{},o)}));}
@@ -17299,7 +17299,7 @@ function foSincLanc(comp,tipo,over){const its=foContas(comp,tipo,over),pre='fo|'
   its.forEach(i=>{const ex=S.lanc.find(l=>l.foKey===i.key&&l.status!=='cancelado');
     if(ex){if(ex.pago){if(Math.abs((+ex.valor||0)-i.valor)>0.009)res.pagosDif.push(i.desc+': pago '+money(ex.valor)+', folha '+money(i.valor));else res.iguais++;return;}
       if(Math.abs((+ex.valor||0)-i.valor)>0.009||ex.venc!==i.venc||ex.desc!==i.desc){put('lanc',Object.assign(cl(ex),{valor:i.valor,venc:i.venc,desc:i.desc}));res.atualizados++;}else res.iguais++;return;}
-    put('lanc',{id:uid(),tipo:'pagar',desc:i.desc,valor:i.valor,venc:i.venc,comp,parcId:'',projId:'',categoria:cat,comum:false,status:'aberto',pago:'',estoqueValor:0,foKey:i.key,foComp:comp,foTipo:tipo,foKind:i.kind,foFunc:i.funcId||'',obs:FO_OBS});res.criados++;});
+    put('lanc',{id:uid(),tipo:'pagar',desc:i.desc,valor:i.valor,venc:i.venc,comp,parcId:'',projId:'',categoria:cat,comum:false,status:'aberto',pago:'',estoqueValor:0,foKey:i.key,foComp:comp,foTipo:tipo,foKind:i.kind,foFunc:i.funcId||'',sens:i.funcId?'rh':'',obs:FO_OBS});res.criados++;});
   S.lanc.filter(l=>l.foKey&&l.foKey.indexOf(pre)===0&&!keys.has(l.foKey)&&l.status!=='cancelado'&&!l.pago).forEach(l=>{put('lanc',Object.assign(cl(l),{status:'cancelado',obs:[l.obs,'Cancelado: não consta mais na folha oficial importada.'].filter(Boolean).join(' ')}));res.cancelados++;});
   return res;}
 A.foGerar=()=>{const m=foM(),tipo=foT();if(!S.fofi.some(x=>x.comp===m&&x.tipo===tipo&&!x.semResumo)){toast('Importe a folha oficial desta competência antes.','neg');return;}if(!mayW('fin')&&!mayW('folha')){toast('Seu perfil não cria contas a pagar.','neg');return;}
@@ -17388,6 +17388,8 @@ RH_POST.push(()=>{if(typeof ptAdminOk!=='function'||!ptAdminOk())return;ptLinked
 A.meuEpiOk=d=>{const e=((meuDoc()||{}).epiConf||[]).find(x=>x.id===d.id);if(!e)return;
   confirmBox('Confirmo que recebi '+fmtQ(e.qtd)+' × '+esc(e.item)+(e.ca?' (CA '+esc(e.ca)+')':'')+' em '+fmtDate(e.entrega)+', gratuitamente, e que fui orientado sobre o uso, a guarda e a conservação (NR-6).',()=>{put('dpsol',{id:uid(),tipo:'epiok',epiId:e.id,em:Date.now()});toast('Recebimento confirmado.','pos');},'Confirmar');};
 ACT_GROUP.meuEpiOk=null;
+/* imagem da assinatura: no servidor próprio fica como anexo restrito (assin.anx); na página publicada, dentro do registro (assin.img) */
+const epiAssinImg=a=>!a?'':a.img&&safeImg(a.img)?a.img:(a.anx&&window.__SELFHOST&&/^[A-Za-z0-9_-]{6,64}$/.test(a.anx)?'/_blob/'+a.anx:'');
 const epiAssinTxt=e=>!e.assin?(e.assinado?'Ficha assinada no papel':''):e.assin.modo==='tela'?'Assinada na tela em '+fmtDT(e.assin.em)+(e.assin.nome?' por '+e.assin.nome:''):'Confirmada na Minha área em '+fmtDT(e.assin.em);
 function epiAssinarReg(id,sig,nome){const e=get('epi',id);if(!e)return null;const img=safeImg(sig);if(!img)return null;return put('epi',Object.assign(cl(e),{assinado:true,assin:{modo:'tela',img,nome:nome||funcNome(e.funcId),em:Date.now(),por:actorId()}}));}
 A.epiAssinar=d=>{const e=get('epi',d.id);if(!e)return;
@@ -17395,7 +17397,7 @@ A.epiAssinar=d=>{const e=get('epi',d.id);if(!e)return;
     '<canvas id="sigPad" width="560" height="180" style="width:100%;max-width:560px;height:180px;border:1px dashed var(--line);border-radius:8px;touch-action:none;background:#fff"></canvas><div class="acts" style="margin:6px 0 10px"><button class="btn sm" data-act="sigLimpar">Limpar assinatura</button></div><div class="fg">'+field('Nome de quem assinou','assinNome','text',funcNome(e.funcId),{full:true})+'</div><p class="sub" style="margin:8px 0 0">O colaborador assina com o dedo no celular ou com o mouse. Data e hora ficam guardadas na entrega. Ele também pode confirmar pela Minha área.</p>',
     saveLabel:'Registrar assinatura',save:root=>{const v=readForm(root),cv=$('#sigPad');const sig=cv&&cv.dataset&&cv.dataset.dirty==='1'&&cv.toDataURL?cv.toDataURL('image/png'):'';if(!sig){toast('Peça ao colaborador para assinar no quadro.','neg');return false;}if(!epiAssinarReg(e.id,sig,v.assinNome)){toast('Não foi possível guardar a assinatura.','neg');return false;}toast('Assinatura registrada.','pos');}});
   sigInit();};
-A.epiAssinVer=d=>{const e=get('epi',d.id);if(!e||!e.assin)return;modal({title:'Assinatura da entrega',body:'<p style="margin:0 0 8px">'+esc(funcNome(e.funcId))+' · '+esc(e.item)+' · entrega '+fmtDate(e.entrega)+'</p><p><b>'+esc(epiAssinTxt(e))+'</b></p>'+(e.assin.img&&safeImg(e.assin.img)?'<img src="'+e.assin.img+'" alt="Assinatura" style="max-width:100%;border:1px solid var(--line);border-radius:6px;background:#fff">':''),foot:'<button class="btn pri" data-act="closeModal">Fechar</button>'});};
+A.epiAssinVer=d=>{const e=get('epi',d.id);if(!e||!e.assin)return;modal({title:'Assinatura da entrega',body:'<p style="margin:0 0 8px">'+esc(funcNome(e.funcId))+' · '+esc(e.item)+' · entrega '+fmtDate(e.entrega)+'</p><p><b>'+esc(epiAssinTxt(e))+'</b></p>'+(epiAssinImg(e.assin)?'<img src="'+epiAssinImg(e.assin)+'" alt="Assinatura" style="max-width:100%;border:1px solid var(--line);border-radius:6px;background:#fff">':''),foot:'<button class="btn pri" data-act="closeModal">Fechar</button>'});};
 Object.assign(ACT_GROUP,{epiAssinar:'sst',epiAssinVer:null});
 {const d=MODS2.epi;const b0=d.blank;d.blank=()=>Object.assign(b0(),{assinado:false});
   d.cols=d.cols.map(c=>c[0]==='Ficha'?['Ficha',r=>r.assin?pill(r.assin.modo==='tela'?'Assinada na tela':'Confirmada na Minha área','pos')+'<div class="sub">'+fmtDT(r.assin.em)+'</div>':r.assinado?pill('Assinada no papel','pos'):pill('Sem assinatura','warn')]:c);
@@ -17404,7 +17406,7 @@ Object.assign(ACT_GROUP,{epiAssinar:'sst',epiAssinVer:null});
   const a0=d.after;d.after=(r,isNew)=>{if(a0)a0(r,isNew);if(isNew&&!r.assin&&!r.devolucao&&!r.assinado&&RHX().epiAssinarAoSalvar)setTimeout(()=>{if(get('epi',r.id))A.epiAssinar({id:r.id});},120);};}
 {const fd0=epiFichaDoc;epiFichaDoc=function(fid,de,ate){const o=fd0.apply(this,arguments);const es=S.epi.filter(e=>e.funcId===fid&&(!de||e.entrega>=de)&&(!ate||e.entrega<=ate)).sort((a,b)=>String(a.entrega).localeCompare(String(b.entrega)));
   if(o.tables&&o.tables[0])o.tables[0].rows=o.tables[0].rows.map((r,i)=>{const e=es[i];if(e){r=r.slice();r[r.length-1]=epiAssinTxt(e);}return r;});
-  const im=es.filter(e=>e.assin&&e.assin.img&&safeImg(e.assin.img));if(im.length)o.raw=(o.raw||'')+'<h3 style="margin:14px 0 6px">Assinaturas digitais</h3><div style="display:flex;flex-wrap:wrap;gap:10px">'+im.map(e=>'<div style="border:1px solid #ddd;padding:6px;border-radius:6px;width:220px"><img src="'+e.assin.img+'" alt="" style="width:100%;height:70px;object-fit:contain"><div style="font-size:11px">'+esc(e.item)+' · '+fmtDate(e.entrega)+'<br>'+esc(fmtDT(e.assin.em))+'</div></div>').join('')+'</div>';
+  const im=es.filter(e=>epiAssinImg(e.assin));if(im.length)o.raw=(o.raw||'')+'<h3 style="margin:14px 0 6px">Assinaturas digitais</h3><div style="display:flex;flex-wrap:wrap;gap:10px">'+im.map(e=>'<div style="border:1px solid #ddd;padding:6px;border-radius:6px;width:220px"><img src="'+epiAssinImg(e.assin)+'" alt="" style="width:100%;height:70px;object-fit:contain"><div style="font-size:11px">'+esc(e.item)+' · '+fmtDate(e.entrega)+'<br>'+esc(fmtDT(e.assin.em))+'</div></div>').join('')+'</div>';
   return o;};}
 
 /* =====================================================================
@@ -18039,9 +18041,228 @@ V.segf=()=>{const R=segAnalise(),pes=segPessoas(),a=alc(),pn=k=>(PERFIS[k]||{}).
 /* alertas do painel */
 if(typeof alertasQual==='function'){const q0=alertasQual;alertasQual=function(){const it=q0.apply(this,arguments)||[];try{it.push(...alertasPesq());if(mayR('fin')||mayW('qual')){const n=cnqItens().filter(x=>cnqSit(x.col,x.r).k==='pend').length;if(n)it.push(['cnq',n+' custo(s) de retrabalho ainda não lançado(s) na obra',String(n)]);}}catch(e){}return it;};}
 
+/* ===== sega: no servidor próprio, as decisões sensíveis passam pelas rotas do servidor =====
+   O servidor (deploy/gestao/regras.js) passou a recusar gravações que mudem aprovações, competência fechada,
+   assinatura de EPI e ciência de holerite por fora, e a guardar a troca de dados bancários como pendência.
+   Este módulo faz o navegador usar as rotas certas quando window.__SELFHOST é verdadeiro:
+   - aprovar/recusar (contas, pedidos, atos financeiros, comprovantes, horas extras, ajustes de inventário) → POST /api/aprovar;
+   - confirmar/recusar dados bancários → POST /api/fin/banco/confirmar | recusar;
+   - fechar/reabrir competência → POST /api/competencia/fechar | reabrir;
+   - assinatura de EPI na tela → POST /api/epi/assinar (a imagem vira anexo restrito);
+   - confirmações da Minha área (EPI e ciência do holerite) → POST /api/minha-area/confirmar (hora do servidor);
+   - "Baixar de novo" a remessa → GET /api/remessa/<id>/arquivo (confere o SHA-256).
+   Na página publicada (sem servidor próprio) nada muda: as funções originais continuam valendo. */
+const SEGA_SRV=()=>!!window.__SELFHOST&&store.mode==='db';
+function segaPost(url,body,metodo){return fetch(url,{method:metodo||'POST',credentials:'same-origin',headers:metodo==='GET'?{}:{'content-type':'application/json'},body:metodo==='GET'?undefined:JSON.stringify(body||{})}).then(r=>r.json().catch(()=>({})).then(j=>{if(!r.ok){const e=new Error(j.erro||('Erro '+r.status));e.st=r.status;throw e;}return j;}),e=>{const x=new Error('Sem conexão com o servidor.');x.st=0;throw x;});}
+/* atualiza a cópia local sem gravar de novo no servidor */
+function segaLocal(col,rec){if(!rec||!rec.id||!S[col])return;const i=S[col].findIndex(r=>r.id===rec.id),n=Object.assign({},rec);if(i>=0)S[col][i]=n;else S[col].push(n);reindex();schedule();}
+function segaTira(col,id){if(!S[col])return;const i=S[col].findIndex(r=>r.id===id);if(i>=0){S[col].splice(i,1);reindex();schedule();}}
+const SEGA_PROT={lanc:1,ped:1,aprovsol:1,adtoit:1,heaut:1,invaj:1};
+const segaEq=(a,b)=>JSON.stringify(a==null?null:a)===JSON.stringify(b==null?null:b);
+/* a gravação é uma decisão de aprovação? devolve {dec,obs,extra} */
+function segaDecisao(col,old,rec){if(!old)return null;
+  if(col==='lanc'||col==='ped'){const a=rec.aprov,p=rec.aprovParc;
+    if(a&&!segaEq(a,old.aprov))return {dec:a.ok===false?'nao':'sim',obs:a.obs||''};
+    if(p&&!segaEq(p,old.aprovParc))return {dec:'sim',obs:p.obs||''};return null;}
+  const de=(st,a,b)=>st===a||st===b;
+  if(col==='aprovsol'&&old.status==='pendente'){if(de(rec.status,'aprovado','recusado'))return {dec:rec.status==='recusado'?'nao':'sim',obs:(rec.aprov||{}).obs||''};if(rec.aprovParc&&!segaEq(rec.aprovParc,old.aprovParc))return {dec:'sim',obs:rec.aprovParc.obs||''};return null;}
+  if(col==='adtoit'&&(old.status||'pendente')==='pendente'&&de(rec.status,'aprovado','recusado'))return {dec:rec.status==='recusado'?'nao':'sim',obs:rec.motivo||'',extra:rec.lancId&&rec.lancId!==old.lancId?{lancId:rec.lancId}:{}};
+  if(col==='heaut'&&old.status==='pendente'&&de(rec.status,'aprovada','recusada'))return {dec:rec.status==='recusada'?'nao':'sim',obs:rec.aprovObs||''};
+  if(col==='invaj'&&old.status==='pendente'&&de(rec.status,'aprovado','recusado'))return {dec:rec.status==='recusado'?'nao':'sim',obs:rec.obs||'',extra:rec.movId&&rec.movId!==old.movId?{movId:rec.movId}:{}};
+  return null;}
+function segaAprovar(col,old,rec,d){
+  return segaPost('/api/aprovar',{col,id:rec.id,dec:d.dec,obs:d.obs,extra:d.extra||{}}).then(j=>{if(j.data)segaLocal(col,Object.assign({},j.data,{id:rec.id}));return j;},e=>{
+    segaLocal(col,old);toast('A decisão não foi gravada: '+e.message,'neg');
+    /* desfaz o que a tela já tinha criado para esta aprovação */
+    const x=d.extra||{};
+    if(col==='adtoit'&&x.lancId){const l=get('lanc',x.lancId);if(l&&l.adtoItId===rec.id)del('lanc',l.id,{semLixo:true});}
+    if(col==='invaj'&&x.movId&&get('mov',x.movId))del('mov',x.movId,{semLixo:true});
+    return null;});}
+function segaCompetencia(rec){const old=get('ctbfech',rec.id),mes=rec.mes||String(rec.id||'').replace(/^f/,'');
+  const volta=e=>{if(old)segaLocal('ctbfech',old);else segaTira('ctbfech',rec.id);toast('Não foi gravado: '+e.message,'neg');};
+  if(rec.st==='fechado'&&!(old&&old.st==='fechado')){segaLocal('ctbfech',rec);segaPost('/api/competencia/fechar',{mes,tot:rec.tot||null}).then(j=>segaLocal('ctbfech',j.data),volta);return rec;}
+  if(rec.st==='reaberto'&&old&&old.st==='fechado'){const r=(rec.reab||[]).slice(-1)[0]||{};segaLocal('ctbfech',rec);segaPost('/api/competencia/reabrir',{mes,motivo:r.motivo||''}).then(j=>segaLocal('ctbfech',j.data),volta);return rec;}
+  toast('O fechamento da competência só muda pelos botões Fechar e Reabrir.','neg');return old||rec;}
+/* gravações: a decisão vai para a rota do servidor; o resto segue normal */
+{const p0=put;put=function(col,rec){
+  if(!SEGA_SRV()||!rec)return p0.apply(this,arguments);
+  if(col==='ctbfech')return segaCompetencia(rec);
+  const old=rec.id?get(col,rec.id):null;
+  if(SEGA_PROT[col]&&old&&old!==rec){const d=segaDecisao(col,old,rec);if(d){segaLocal(col,rec);segaAprovar(col,old,rec,d);return rec;}}
+  if(col==='epi'&&rec.assin&&rec.assin.modo==='tela'&&rec.assin.img&&!(old&&old.assin)){segaLocal(col,rec);
+    segaPost('/api/epi/assinar',{id:rec.id,img:rec.assin.img,nome:rec.assin.nome||''}).then(j=>segaLocal('epi',j.data),e=>{if(old)segaLocal('epi',old);toast('A assinatura não foi gravada: '+e.message,'neg');});return rec;}
+  return p0.apply(this,arguments);};}
+/* dados bancários: confirmação e recusa pelo servidor (ele também reabre as aprovações das contas do fornecedor) */
+{const c0=finBancoConfirmar;finBancoConfirmar=function(pid,o){if(!SEGA_SRV())return c0.apply(this,arguments);
+  const p=get('parc',pid);if(!p||!p.bancoPend)return {ok:false,msg:'Não há alteração pendente.'};
+  if(p.bancoPend.por===actorId())return {ok:false,msg:'Quem pediu a alteração não pode confirmar. Outra pessoa precisa ligar para o fornecedor.'};
+  if(!o||!String(o.tel||'').trim()||!String(o.com||'').trim())return {ok:false,msg:'Informe o telefone usado e com quem falou.'};
+  segaPost('/api/fin/banco/confirmar',{id:pid,tel:o.tel,com:o.com,quando:o.quando||''}).then(j=>{segaLocal('parc',j.data);toast(j.msg||'Dados bancários confirmados.','pos');},e=>toast('Não confirmado: '+e.message,'neg'));
+  return {ok:true,msg:'Confirmação enviada ao servidor.'};};}
+{const r0=finBancoRecusar;finBancoRecusar=function(pid,motivo){if(!SEGA_SRV())return r0.apply(this,arguments);
+  const p=get('parc',pid);if(!p||!p.bancoPend)return false;
+  segaPost('/api/fin/banco/recusar',{id:pid,motivo:motivo||''}).then(j=>segaLocal('parc',j.data),e=>toast('Não recusado: '+e.message,'neg'));return true;};}
+/* Minha área: o servidor confere o pedido do colaborador e carimba a hora em que ele confirmou */
+const SEGA_SL=new Set();
+{const r0=rhSlProc;rhSlProc=function(f,u,x){if(!SEGA_SRV()||!x||!RH_SL_T.has(x.tipo))return r0.apply(this,arguments);
+  const k=u+'/'+x.id;if(SEGA_SL.has(k))return false;SEGA_SL.add(k);
+  segaPost('/api/minha-area/confirmar',{uid:u,slId:x.id}).then(j=>{if(j.data)segaLocal(x.tipo==='epiok'?'epi':'fofi',j.data);},e=>{if(!e.st)SEGA_SL.delete(k);});
+  return false;/* o servidor apaga o pedido depois de registrar */};}
+/* remessa: baixar de novo só com o arquivo conferido pelo servidor */
+{const b0=A.remBaixarDeNovo;A.remBaixarDeNovo=d=>{if(!SEGA_SRV())return b0(d);const r=get('remessa',d.id);if(!r)return;
+  fetch('/api/remessa/'+encodeURIComponent(r.id)+'/arquivo',{credentials:'same-origin'}).then(async x=>{if(!x.ok){let j={};try{j=await x.json();}catch(e){}msgModal('Remessa não conferida',[j.erro||('Erro '+x.status)]);return;}
+    const t=await x.text();saveFile(r.arquivo||'remessa.txt',t);toast('Arquivo conferido pelo servidor (SHA-256): '+(x.headers.get('x-quantidade')||'')+' título(s), '+money(+x.headers.get('x-total')||0)+'.','pos');},()=>toast('Sem conexão com o servidor.','neg'));};}
+
+/* ===== segurança B: bibliotecas do próprio servidor, reautenticação e verificação em duas etapas obrigatória =====
+   Só age no servidor próprio (window.__SELFHOST). Na página publicada no Claude nada muda.
+   - loadScript/loadJSZip: usam a cópia em /vendor (lista em /vendor/lista.json, com hash SRI calculado pelo servidor);
+     sem cópia local, a CDN (com SRI quando o hash é conhecido). O pdf.js local é a versão 6 (módulo), embrulhada
+     para continuar respondendo como window.pdfjsLib.
+   - fetch: quando o servidor pede reautenticação (403 reauth_required), abre uma janela pedindo a senha ou o código
+     do aplicativo, confirma em /api/reautenticar e repete o pedido; 403 2fa_required leva à página de segurança.
+   - aviso do prazo para ligar a verificação em duas etapas (DOIS_FATORES_CARENCIA_DIAS). */
+const SEGB={vend:null,pend:null};
+function segbVendor(){
+  if(!window.__SELFHOST)return Promise.resolve({mapa:{},cdnSri:{}});
+  return SEGB.vend||(SEGB.vend=fetch('/vendor/lista.json',{credentials:'same-origin'}).then(r=>r.ok?r.json():{mapa:{},cdnSri:{}}).catch(()=>({mapa:{},cdnSri:{}})));
+}
+function segbTag(src,sri){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;if(sri){s.integrity=sri;s.crossOrigin='anonymous';}
+  s.onload=()=>res();s.onerror=()=>{s.remove();rej(new Error('Não foi possível carregar a biblioteca.'));};document.head.appendChild(s);});}
+async function segbPdfjs(x){
+  const mod=await import(x.local);mod.GlobalWorkerOptions.workerSrc=x.worker;
+  /* o sistema escreve GlobalWorkerOptions.workerSrc com o endereço da CDN: aqui isso é ignorado */
+  const gwo={};Object.defineProperty(gwo,'workerSrc',{get:()=>mod.GlobalWorkerOptions.workerSrc,set:()=>{},enumerable:true});
+  const extra={cMapUrl:x.base+'cmaps/',cMapPacked:true,standardFontDataUrl:x.base+'standard_fonts/',wasmUrl:x.base+'wasm/',iccUrl:x.base+'iccs/'};
+  window.pdfjsLib=Object.assign({},mod,{GlobalWorkerOptions:gwo,getDocument:src=>{
+    const o=src&&typeof src==='object'&&!(src instanceof ArrayBuffer)&&!ArrayBuffer.isView(src)?Object.assign({},src):{data:src};
+    if(o.data instanceof ArrayBuffer)o.data=new Uint8Array(o.data);delete o.isEvalSupported;
+    return mod.getDocument(Object.assign({},extra,o));}});
+}
+{const segbLoad0=loadScript;
+  loadScript=function(src,test){
+    if(test())return Promise.resolve();
+    return segbVendor().then(v=>{const x=(v.mapa||{})[src],sri=(v.cdnSri||{})[src];
+      const cdn=()=>sri?segbTag(src,sri).then(()=>{if(!test())throw new Error('A biblioteca não iniciou.');}):segbLoad0(src,test);
+      if(!x)return cdn();
+      return (x.tipo==='pdfjs'?segbPdfjs(x):segbTag(x.local,x.sri)).then(()=>{if(!test())throw new Error('A biblioteca local não iniciou.');})
+        .catch(e=>{console.warn('[bibliotecas] cópia local falhou, usando a CDN:',e&&e.message);return cdn();});});
+  };
+  try{if(typeof loadJSZip==='function')loadJSZip=function(){return loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',()=>!!window.JSZip).then(()=>{if(!window.JSZip)throw new Error('Leitor de ZIP indisponível.');return window.JSZip;});};}catch(e){}
+}
+/* janela de reautenticação (sem HTML de terceiros; só texto fixo) */
+function segbReauth(msg){
+  if(SEGB.pend)return SEGB.pend;
+  SEGB.pend=new Promise(res=>{
+    const d=document.createElement('dialog');d.setAttribute('aria-label','Confirmar identidade');
+    d.style.cssText='max-width:380px;width:calc(100% - 32px);border:1px solid var(--line,#d8dde7);border-radius:12px;padding:20px;background:var(--surface,#fff);color:var(--fg,#111a27)';
+    d.innerHTML='<form method="dialog"><h3 style="margin:0 0 6px;font-size:18px">Confirme que é você</h3><p class="segb-t" style="margin:0 0 12px;font-size:14px"></p>'+
+      '<label style="display:block;font-size:13px">Senha ou código do aplicativo<input class="segb-s" type="password" autocomplete="current-password" required style="display:block;width:100%;margin-top:4px;padding:9px 10px;border:1px solid var(--line,#d8dde7);border-radius:8px;font:inherit;background:inherit;color:inherit"></label>'+
+      '<p class="segb-e" role="alert" style="color:var(--neg,#b3261e);min-height:1.2em;margin:6px 0;font-size:13px"></p>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn segb-c">Cancelar</button><button type="submit" class="btn pri segb-o">Confirmar</button></div></form>';
+    d.querySelector('.segb-t').textContent=msg||'Esta ação é sensível. Digite sua senha ou o código de 6 dígitos do aplicativo autenticador.';
+    const fim=ok=>{try{d.close();}catch(e){}d.remove();SEGB.pend=null;res(ok);};
+    d.querySelector('.segb-c').addEventListener('click',()=>fim(false));
+    d.addEventListener('cancel',e=>{e.preventDefault();fim(false);});
+    d.querySelector('form').addEventListener('submit',async e=>{e.preventDefault();const s=d.querySelector('.segb-s').value,er=d.querySelector('.segb-e'),b=d.querySelector('.segb-o');
+      if(!s)return;b.disabled=true;er.textContent='';
+      try{const r=await SEGB.f0('/api/reautenticar',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({segredo:s})});
+        const j=await r.json().catch(()=>({}));
+        if(r.ok)return fim(true);
+        if(r.status===401){location.href='/login';return fim(false);}
+        er.textContent=j.erro||'Senha ou código incorreto.';d.querySelector('.segb-s').value='';d.querySelector('.segb-s').focus();
+      }catch(x){er.textContent='Sem conexão com o servidor.';}
+      b.disabled=false;});
+    document.body.appendChild(d);try{d.showModal();}catch(e){d.setAttribute('open','');}
+    setTimeout(()=>{const i=d.querySelector('.segb-s');if(i)i.focus();},30);
+  });
+  return SEGB.pend;
+}
+if(window.__SELFHOST&&typeof window.fetch==='function'){
+  SEGB.f0=window.fetch.bind(window);
+  window.fetch=async function(input,init){
+    const r=await SEGB.f0(input,init);
+    if(r.status!==403)return r;
+    let j=null;try{j=await r.clone().json();}catch(e){return r;}
+    if(j&&j.code==='2fa_required'){location.href='/conta/seguranca?c=2f';return r;}
+    if(!j||j.code!=='reauth_required')return r;
+    if(!(await segbReauth()))return r;
+    return SEGB.f0(input,init);
+  };
+  window.segReautenticar=segbReauth;
+  /* prazo para ligar a verificação em duas etapas */
+  setTimeout(()=>{SEGB.f0('/api/seguranca/estado',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(j=>{
+    const d=j&&j.doisFatores;if(!d||!d.obrigatorio||d.ligado||!d.prazo)return;
+    const b=document.createElement('div');b.setAttribute('role','status');
+    b.style.cssText='position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;max-width:640px;margin:0 auto;padding:12px 14px;border-radius:10px;background:var(--warn-soft,#fcefd2);color:var(--warn,#8f5600);border:1px solid currentColor;font-size:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+    const t=document.createElement('span');t.style.flex='1';t.textContent='A verificação em duas etapas é obrigatória para o seu perfil. Ligue até '+new Date(d.prazo).toLocaleDateString('pt-BR')+'; depois disso o sistema só abre a página de segurança.';
+    const a=document.createElement('a');a.href='/conta/seguranca';a.className='btn pri';a.textContent='Ligar agora';
+    const x=document.createElement('button');x.type='button';x.className='btn';x.textContent='Depois';x.addEventListener('click',()=>b.remove());
+    b.append(t,a,x);document.body.appendChild(b);}).catch(()=>{});},2500);
+}
+
+/* ===== v110: composição do saldo no sistema (conciliação bancária) =====
+   Mostra de onde vem o "Saldo no sistema": saldo inicial da conta + recebimentos pagos − pagamentos pagos nessa conta
+   até a data do extrato. Separa por ano, aponta os lançamentos pagos que não aparecem em nenhuma linha do extrato,
+   possíveis duplicados e os maiores valores, e exporta tudo em CSV. */
+function czDados(contaId,ate){
+  const c=get('conta',contaId),ext=S.extrato.filter(e=>e.contaId===contaId);
+  const lig=new Set();ext.forEach(e=>{if(e.lancId)lig.add(e.lancId);(e.lancIds||[]).forEach(i=>lig.add(i));});
+  const dExt=ext.map(e=>e.data).filter(Boolean).sort(),ini=dExt[0]||'',fim=dExt[dExt.length-1]||'';
+  const ls=S.lanc.filter(l=>l.status!=='cancelado'&&l.pago&&l.contaId===contaId&&(!ate||l.pago<=ate)).map(l=>({l,v:(l.tipo==='receber'?1:-1)*lancVal(l),noExt:lig.has(l.id)}));
+  const si=c?+c.saldoInicial||0:0,ent=sum(ls.filter(x=>x.v>0),x=>x.v),sai=-sum(ls.filter(x=>x.v<0),x=>x.v);
+  const anos={};ls.forEach(x=>{const a=String(x.l.pago).slice(0,4),o=anos[a]||(anos[a]={ent:0,sai:0,n:0,semExt:0,vSemExt:0});if(x.v>0)o.ent+=x.v;else o.sai-=x.v;o.n++;
+    if(!x.noExt&&ini&&x.l.pago>=ini){o.semExt++;o.vSemExt+=x.v;}});
+  const antes=ls.filter(x=>ini&&x.l.pago<ini),semExt=ls.filter(x=>!x.noExt&&ini&&x.l.pago>=ini);
+  const grp=new Map();ls.forEach(x=>{const k=[x.l.tipo,r2(Math.abs(x.v)),x.l.pago,x.l.parcId||'',gsNorm(x.l.desc||'').slice(0,40)].join('|');if(!grp.has(k))grp.set(k,[]);grp.get(k).push(x);});
+  const dup=[...grp.values()].filter(g=>g.length>1);
+  return {c,ls,si,ent,sai,saldo:r2(si+ent-sai),anos,antes,semExt,dup,ini,fim};
+}
+function czLinhas(arr,lim){
+  return '<div class="tw" style="max-height:300px;overflow:auto"><table><thead><tr><th>Pago em</th><th>Descrição</th><th>Parceiro</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+
+    arr.slice(0,lim||50).map(x=>'<tr><td>'+fmtDate(x.l.pago)+'</td><td>'+esc(x.l.desc||'—')+'</td><td>'+esc(x.l.parcId?parcNome(x.l.parcId):'')+'</td><td class="num mono '+(x.v<0?'neg':'pos')+'">'+money(x.v)+'</td><td><button class="btn sm" data-act="editLanc" data-id="'+esc(x.l.id)+'">Abrir</button></td></tr>').join('')+
+    '</tbody></table></div>'+(arr.length>(lim||50)?'<p class="sub">Mostrando '+(lim||50)+' de '+arr.length+'. Use "Baixar CSV" para ver todos.</p>':'');
+}
+A.concComp=d=>{
+  const id=(d&&d.id)||(ui.conc&&ui.conc.conta),c=get('conta',id);if(!c){toast('Escolha a conta.','neg');return;}
+  const ate=c.ofxData||todayStr(),D=czDados(id,ate),porV=a=>a.slice().sort((x,y)=>Math.abs(y.v)-Math.abs(x.v));
+  const anos=Object.keys(D.anos).sort();
+  const banco=c.ofxSaldo!=null?+c.ofxSaldo:null,dif=banco!=null?r2(banco-D.saldo):null;
+  const vAntes=sum(D.antes,x=>x.v),vSem=sum(D.semExt,x=>x.v);
+  let b='<p class="sub" style="margin:0 0 10px">O saldo no sistema é calculado só com os dados do sistema: <b>saldo inicial da conta + recebimentos pagos − pagamentos pagos</b> nesta conta até '+fmtDate(ate)+'. Lançamentos cancelados ou em aberto não entram.</p>';
+  b+='<div class="tw"><table><tbody>'+
+    '<tr><td>Saldo inicial (cadastro da conta)</td><td class="num mono">'+money(D.si)+'</td></tr>'+
+    '<tr><td>+ Recebimentos pagos ('+D.ls.filter(x=>x.v>0).length+')</td><td class="num mono pos">'+money(D.ent)+'</td></tr>'+
+    '<tr><td>− Pagamentos pagos ('+D.ls.filter(x=>x.v<0).length+')</td><td class="num mono neg">'+money(-D.sai)+'</td></tr>'+
+    '<tr><td><b>= Saldo no sistema em '+fmtDate(ate)+'</b></td><td class="num mono"><b>'+money(D.saldo)+'</b></td></tr>'+
+    (banco!=null?'<tr><td>Saldo no banco (último extrato)</td><td class="num mono">'+money(banco)+'</td></tr><tr><td>Diferença (banco − sistema)</td><td class="num mono '+(Math.abs(dif)<0.005?'pos':'neg')+'">'+money(dif)+'</td></tr>':'')+
+    '</tbody></table></div>';
+  b+='<h3 style="margin:14px 0 6px">Por ano (data do pagamento)</h3><div class="tw"><table><thead><tr><th>Ano</th><th class="num">Entradas</th><th class="num">Saídas</th><th class="num">Líquido</th><th class="num">Lançamentos</th><th class="num">Sem linha no extrato</th></tr></thead><tbody>'+
+    anos.map(a=>{const o=D.anos[a];return '<tr><td>'+a+'</td><td class="num mono">'+money(o.ent)+'</td><td class="num mono">'+money(-o.sai)+'</td><td class="num mono">'+money(o.ent-o.sai)+'</td><td class="num">'+o.n+'</td><td class="num">'+(o.semExt?o.semExt+' ('+money(o.vSemExt)+')':'—')+'</td></tr>';}).join('')+'</tbody></table></div>';
+  b+='<h3 style="margin:14px 0 6px">Onde costuma estar a diferença</h3><ul style="margin:0 0 8px 18px;padding:0">'+
+    (D.ini?'<li><b>Antes do início do extrato</b> ('+fmtDate(D.ini)+'): '+D.antes.length+' lançamento(s) somando '+money(vAntes)+'. O banco não confere estes; junto com o saldo inicial, eles devem bater com o saldo do banco no dia '+fmtDate(addDays(D.ini,-1))+'.</li>':'<li>Nenhum extrato importado nesta conta: não dá para comparar linha a linha.</li>')+
+    (D.ini?'<li><b>Pagos no período do extrato sem linha no extrato</b>: '+D.semExt.length+' lançamento(s) somando '+money(vSem)+'. Costumam ser lançamentos marcados como pagos na conta errada, importados já como pagos ou pagos por outro meio.</li>':'')+
+    '<li><b>Possíveis duplicados</b> (mesmo tipo, valor, data, parceiro e descrição): '+D.dup.length+' grupo(s) somando '+money(sum(D.dup,g=>sum(g.slice(1),x=>x.v)))+' a mais.</li></ul>';
+  if(D.semExt.length)b+='<h3 style="margin:14px 0 6px">Pagos no período do extrato sem linha no extrato (maiores primeiro)</h3>'+czLinhas(porV(D.semExt));
+  if(D.dup.length)b+='<h3 style="margin:14px 0 6px">Possíveis duplicados</h3>'+czLinhas(D.dup.flat(),60);
+  if(D.antes.length)b+='<h3 style="margin:14px 0 6px">Antes do início do extrato (maiores primeiro)</h3>'+czLinhas(porV(D.antes),30);
+  b+='<h3 style="margin:14px 0 6px">Maiores lançamentos da conta</h3>'+czLinhas(porV(D.ls),20);
+  b+='<p style="margin:12px 0 0"><button class="btn" data-act="concCompCsv" data-id="'+esc(id)+'">Baixar CSV com todos os lançamentos do saldo</button></p>';
+  modal({title:'Composição do saldo · '+c.nome,wide:true,body:b,foot:'<button class="btn" data-act="closeModal">Fechar</button>'});
+};
+A.concCompCsv=d=>{const c=get('conta',d.id);if(!c)return;const D=czDados(c.id,c.ofxData||todayStr());
+  const rows=[['Pago em','Tipo','Descrição','Parceiro','Valor com sinal','Tem linha no extrato','Antes do extrato','ID']];
+  D.ls.slice().sort((a,b)=>String(a.l.pago).localeCompare(String(b.l.pago))).forEach(x=>rows.push([fmtDate(x.l.pago),x.l.tipo==='receber'?'Recebimento':'Pagamento',x.l.desc||'',x.l.parcId?parcNome(x.l.parcId):'',x.v,x.noExt?'sim':'não',D.ini&&x.l.pago<D.ini?'sim':'não',x.l.id]));
+  rows.push([]);rows.push(['Saldo inicial','','','',D.si]);rows.push(['Saldo no sistema','','','',D.saldo]);
+  saveFile('composicao-saldo-'+String(c.nome||'conta').replace(/[^\w-]+/g,'-')+'.csv',csv(rows));};
+{const v0=V.conc;V.conc=()=>{let h=v0();if((ui.conc.vis||'extrato')!=='extrato'||!ui.conc.conta)return h;
+  const a='<div class="sub">Saldo no sistema</div>';
+  if(h.includes(a))h=h.replace(a,'<div class="sub">Saldo no sistema <button class="btn sm" style="padding:1px 8px;margin-left:4px" data-act="concComp" data-id="'+esc(ui.conc.conta)+'" title="Ver de onde vem este saldo">Composição</button></div>');
+  return h;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='109',APP_DATA='2026-10-26';
+const APP_VER='110',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['110','2026-10-26',['Segurança digital: verificação em duas etapas obrigatória para a equipe que grava, senha mínima de 12 caracteres para ela, saída automática após 10 horas sem uso e nova confirmação de senha nas ações sensíveis (contas, cópia de segurança, exportação).','Financeiro: troca de dados bancários, aprovações, remessa e fechamento de competência agora são conferidos também no servidor; alteração de conta bancária fica pendente até outra pessoa confirmar.','Cópia de segurança cifrada e cópia dos anexos (completa semanal e diária incremental); trilha de auditoria em Contas › Auditoria (só o dono).','Bibliotecas de leitura de PDF e ZIP servidas pelo próprio sistema, em versão corrigida.','Conciliação bancária: botão "Composição" ao lado do saldo no sistema mostra de onde vem o saldo (saldo inicial, entradas e saídas por ano), os lançamentos pagos sem linha no extrato, possíveis duplicados e os maiores valores, com CSV.','Locais da frota: nomes dos locais e caixas de seleção alinhados; administradores aparecem com a indicação "vê todos os veículos".']],
   ['109','2026-10-26',['Locais da frota: quem não tem nenhum local marcado (no usuário ou no colaborador) não vê nenhum veículo, e veículo sem local só aparece para o administrador. A regra começa a valer quando houver locais cadastrados.']],
   ['108','2026-10-26',['Frota: local onde cada veículo fica (botão Locais da frota) e acesso por local no usuário e no colaborador.','Financeiro: alçadas de aprovação em níveis (inclusive descontos, renegociações, baixas sem pagamento, cancelamentos e estornos), dupla checagem na troca de dados bancários do fornecedor, adiantamentos, caixinha de obra e prestação de contas, orçamento anual x DRE, limite de crédito de clientes e remessa de pagamentos ao BB (CNAB 240, a homologar com o banco).','Fiscal e comercial: competência fechada travada (reabertura só pelo administrador, com motivo), conferência medições x NFS-e x contas a receber, retenções sofridas, cancelamento de NFS-e com aprovação, empenho obrigatório em contrato público, reequilíbrio, acervo técnico e aprovação da proposta abaixo da margem mínima.','Suprimentos: recebimento parcial e conferência pedido x nota x recebimento com tolerâncias, política de cotação, acordos de preço, aprovação de ajuste de inventário e devolução de sobras da obra.','Obras: custo único da obra (contas, material do estoque, mão de obra pelo ponto, equipamentos e frota), previsão do custo final, item da EAP obrigatório, linha de base, checklists de mobilização e encerramento, aluguel interno e calibração de equipamentos, extravios, checklist de saída de veículos e custo por km.','Pessoal e SST: folha oficial importada (resumo e PDF do holerite oficial, prévia marcada como não é recibo), contas a pagar da folha, autorização de hora extra, quadro de pessoal por obra, fontes oficiais do ponto por período, documentos de empreiteiros e terceiros, alerta de alocação irregular no diário e assinatura da entrega de EPI.','Qualidade e controles: custo da não qualidade, inspeção antes de medir, pesquisa de satisfação (NPS), controles internos (relatório de exceções), indicadores por área e mapa de segregação de funções.']],
   ['107','2026-10-26',['Frota › Veículos: botão Importar CRLV (PDF). Lê o CRLV digital e preenche placa, RENAVAM, chassi, marca, modelo, ano, combustível, tipo, cor e motor. Com um arquivo abre o cadastro para conferir e salvar; com vários, cadastra todos de uma vez. Placa já cadastrada só tem os campos vazios completados.']],
@@ -18153,7 +18374,7 @@ GROUP_OF_TAB.tut='ajuda';
 const TUT=[
   {id:'painel',t:'Painel e diretoria',g:'painel',ver:'15',p:['Painel da diretoria: margem, carteira, prazo médio de recebimento, inadimplência, horas extras, faltas, acidentes e frota, com metas.','O painel resume saldo, contas a vencer e vencidas, fluxo do mês e alertas de todos os módulos.','Clique num alerta para ir direto à tela que precisa de atenção.','A versão do sistema e a data da atualização aparecem no topo do painel.']},
   {id:'cad',t:'Cadastros',g:'cad',ver:'69',p:['Produtos: em Cadastros › Produtos, busque e clique em Abrir. A ficha tem abas: Estoque (mínimo por local direto na tabela), Custo do estoque, Fornecedores, Histórico de compras, Informações adicionais, Características, Recomendações fiscais, Unidade tributável, Observações e Anexos. Marque Kit ou Produzido para informar os componentes e Com variações para cadastrar cor, tamanho ou voltagem.','Transportadoras: CNPJ, RNTRC, modal, regiões, prazo, frete mínimo e contato.','Clientes e fornecedores: digite o CNPJ e o sistema preenche razão social, fantasia, endereço, telefone, e-mail e situação na Receita. O CEP também preenche o endereço.','Atualizar pelo CNPJ completa os cadastros antigos e marca CNPJ irregular.','Use Histórico para ver quem criou e alterou cada cadastro.']},
-  {id:'fin',t:'Financeiro',g:'fin',ver:'81',p:['Conciliação bancária: clique em Importar extrato OFX, escolha a conta e o arquivo. Na lista, clique numa linha: à direita aparecem a sugestão e as ações (conciliar, nova conta já preenchida, lançamento simples, transferência, buscar e associar, ignorar). Use as abas Encontrados, Aproximados e Não encontrados e o botão Conciliar todos os encontrados.','Cobrança e renegociação: em Financeiro › Mais › Cobrança e renegociação, veja os clientes em atraso e a etapa da régua. Cobrar abre a mensagem pronta; Registrar contato guarda ligações e promessas; Renegociar troca os títulos marcados por novas parcelas.','Regra automática de transferência: em Regras automáticas, escolha O que fazer = Transferência entre contas e a outra conta. Ex.: "aplicação" ou "resgate" para a conta de investimento.','Sugestões incluem as contas já baixadas no mesmo mês da linha do extrato; se a baixa foi em outra conta, ao conciliar ela passa para a conta do extrato.','Regras automáticas: em Conciliação bancária › Regras automáticas, diga o texto da descrição do extrato e o lançamento que ele vira (categoria, parceiro e projeto). Já vem a regra da tarifa PIX enviado.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Sugestões incluem as contas já baixadas no mesmo mês da linha do extrato; se a baixa foi em outra conta, ao conciliar ela passa para a conta do extrato.','Regras automáticas: em Conciliação bancária › Regras automáticas, diga o texto da descrição do extrato e o lançamento que ele vira (categoria, parceiro e projeto). Já vem a regra da tarifa PIX enviado.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Regras automáticas: em Conciliação bancária › Regras automáticas, diga o texto da descrição do extrato e o lançamento que ele vira (categoria, parceiro e projeto). Já vem a regra da tarifa PIX enviado.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Conciliação bancária: use Buscar título para achar a conta a pagar ou a receber de cada linha do extrato (pode marcar várias). Se o valor for diferente, o sistema separa juros, multa ou desconto.','Conciliação bancária: em Período, escolha Data específica ou Mês para ver só as linhas daquele dia ou mês; as setas ‹ › avançam e voltam.','Transferência entre contas: na conciliação ou em Contas bancárias. Ela concilia as duas linhas do extrato e não entra no DRE.','Índices financeiros: margem por obra, EBITDA e margem líquida, curva de caixa da obra com o maior furo de caixa, ponto de equilíbrio, liquidez (registre os dados do balanço) e ROE/ROI.','Fluxo de 90 dias: veja a semana em que o caixa aperta, com atraso médio dos clientes e medições previstas.','Aprovações: pedidos e pagamentos acima do limite só seguem depois de aprovados por outra pessoa.','Contas a receber e a pagar: lance, anexe a nota ou boleto, rateie por projeto e baixe quando pagar.','Recorrências geram contas mensais automaticamente.','Plano de contas (agora no Financeiro): grupos e categorias usados nos lançamentos e na DRE.','Conciliação: importe o extrato OFX do banco e confirme os pares sugeridos.','Fluxo de caixa e DRE mostram previsto e realizado por mês.']},
+  {id:'fin',t:'Financeiro',g:'fin',ver:'110',p:['Conciliação bancária: clique em Composição, ao lado de Saldo no sistema, para ver de onde vem o saldo: saldo inicial da conta + recebimentos pagos − pagamentos pagos nessa conta. A janela aponta os lançamentos pagos que não aparecem no extrato, possíveis duplicados e os maiores valores, e baixa tudo em CSV.','Conciliação bancária: clique em Importar extrato OFX, escolha a conta e o arquivo. Na lista, clique numa linha: à direita aparecem a sugestão e as ações (conciliar, nova conta já preenchida, lançamento simples, transferência, buscar e associar, ignorar). Use as abas Encontrados, Aproximados e Não encontrados e o botão Conciliar todos os encontrados.','Cobrança e renegociação: em Financeiro › Mais › Cobrança e renegociação, veja os clientes em atraso e a etapa da régua. Cobrar abre a mensagem pronta; Registrar contato guarda ligações e promessas; Renegociar troca os títulos marcados por novas parcelas.','Regra automática de transferência: em Regras automáticas, escolha O que fazer = Transferência entre contas e a outra conta. Ex.: "aplicação" ou "resgate" para a conta de investimento.','Sugestões incluem as contas já baixadas no mesmo mês da linha do extrato; se a baixa foi em outra conta, ao conciliar ela passa para a conta do extrato.','Regras automáticas: em Conciliação bancária › Regras automáticas, diga o texto da descrição do extrato e o lançamento que ele vira (categoria, parceiro e projeto). Já vem a regra da tarifa PIX enviado.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Sugestões incluem as contas já baixadas no mesmo mês da linha do extrato; se a baixa foi em outra conta, ao conciliar ela passa para a conta do extrato.','Regras automáticas: em Conciliação bancária › Regras automáticas, diga o texto da descrição do extrato e o lançamento que ele vira (categoria, parceiro e projeto). Já vem a regra da tarifa PIX enviado.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Regras automáticas: em Conciliação bancária › Regras automáticas, diga o texto da descrição do extrato e o lançamento que ele vira (categoria, parceiro e projeto). Já vem a regra da tarifa PIX enviado.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Conciliação com valor diferente: escolha se a diferença é desconto, multa, juros ou saldo a pagar. O saldo vira um novo título em aberto com o vencimento que você informar.','Conciliação bancária: use Buscar título para achar a conta a pagar ou a receber de cada linha do extrato (pode marcar várias). Se o valor for diferente, o sistema separa juros, multa ou desconto.','Conciliação bancária: em Período, escolha Data específica ou Mês para ver só as linhas daquele dia ou mês; as setas ‹ › avançam e voltam.','Transferência entre contas: na conciliação ou em Contas bancárias. Ela concilia as duas linhas do extrato e não entra no DRE.','Índices financeiros: margem por obra, EBITDA e margem líquida, curva de caixa da obra com o maior furo de caixa, ponto de equilíbrio, liquidez (registre os dados do balanço) e ROE/ROI.','Fluxo de 90 dias: veja a semana em que o caixa aperta, com atraso médio dos clientes e medições previstas.','Aprovações: pedidos e pagamentos acima do limite só seguem depois de aprovados por outra pessoa.','Contas a receber e a pagar: lance, anexe a nota ou boleto, rateie por projeto e baixe quando pagar.','Recorrências geram contas mensais automaticamente.','Plano de contas (agora no Financeiro): grupos e categorias usados nos lançamentos e na DRE.','Conciliação: importe o extrato OFX do banco e confirme os pares sugeridos.','Fluxo de caixa e DRE mostram previsto e realizado por mês.']},
   {id:'ven',t:'Vendas',g:'nf',ver:'67',p:['NFs recebidas no servidor próprio: o cartão SEFAZ e Ambiente Nacional mostra as notas emitidas contra a empresa. Buscar agora consulta na hora; NF-e com XML completo vão para a lista com Importar; as que vieram só como resumo recebem ciência e depois Baixar XML. Use Manifestar para confirmar, desconhecer ou informar operação não realizada. NFS-e: Lançar em contas a pagar cria o título com o prestador.','NFS-e com IBS e CBS: informe o código NBS e a classificação tributária (cClassTrib). O espelho e os Dados p/ portal mostram a base e os valores de CBS e IBS.','Pedido de venda com itens, condições e nota de venda (documento não fiscal).','NFS-e: prepare a nota de serviço com ISS e retenções e registre o número emitido na prefeitura; a conta a receber é criada sozinha.','Notas de saída registram as NF-e emitidas.']},
   {id:'com',t:'Compras',g:'comp',ver:'86',p:['Orçamento em PDF: no mapa de cotação clique em Importar resposta, escolha o fornecedor e Ler PDF ou foto com IA. Confira na tela seguinte o item do mapa e o preço unitário de cada linha (amarelo = conferir; vermelho = não vai para o mapa), ajuste frete, prazo e pagamento e clique em Lançar no mapa.','Avaliação de fornecedores: em Suprimentos › Mais › Avaliação de fornecedores, avalie cada pedido recebido (prazo, qualidade, preço e atendimento). Bloqueie quem não atende: ele não recebe pedido de compra. Nas cotações, use Cobrar para lembrar quem não respondeu.','Cotação com fornecedores: em Cotações, use Nova cotação (ou Cotar numa solicitação), confira itens, prazo e fornecedores e clique em Salvar e enviar. Envie o link, o e-mail, o WhatsApp ou o arquivo para cada fornecedor. As respostas entram no mapa; escolha o vencedor de cada item (ou Escolher menor preço) e clique em Gerar pedidos de compra.','Solicitação de compra confere o estoque e separa o que já existe.','Mapa de cotação compara fornecedores item a item.','Pedido de compra com código, NCM, desconto, IPI e ICMS-ST por item, transportadora, modalidade do frete e endereço completo de entrega (use os botões para copiar o endereço da obra ou da empresa).','NFs recebidas: valide, indique o almoxarifado e gere a conta a pagar.']},
   {id:'est',t:'Estoque',g:'est',ver:'53',p:['Ao entregar uma separação, o sistema já abre o romaneio de envio. Em Almoxarifados, defina o prazo do inventário e quem recebe o aviso no chat.','Almoxarifados › Ver itens: relação por almoxarifado e prateleira, exportação, lista de contagem às cegas e registro do balanço.','Romaneios: gere das separações prontas, acrescente itens, despache (baixa no estoque) e confirme o recebimento.','Saldo por produto com custo médio e alerta de mínimo.','Separação de itens para obras.','Almoxarifados e prateleiras indicam onde cada produto fica.']},
@@ -18165,7 +18386,7 @@ const TUT=[
   {id:'vei',t:'Veículos',g:'frota',ver:'56',p:['Rota diária: planeje as viagens de cada dia com veículo, motorista, obra, quem pediu e o material. Na saída, clique em Gerar saída: o km atual já vem preenchido.','Entregas com frete: registre os pedidos da Lalamove e de outras plataformas com o custo, que vai para contas a pagar no projeto.','Na saída do veículo, informe a hora do retorno, marque se houve abastecimento (o sistema abre o lançamento) e anexe as fotos do painel e do veículo.','Adicional de condutor: até 15 dias no mês paga R$ 32 por dia; acima disso, adicional mensal de dupla função (salário × 20%). Veja o resumo por condutor, projeto ou total.','Multas: use Importar multas para trazer as infrações do e-Frotas ou do portal da Senatran; o sistema identifica veículo, condutor e prazos e gera a conta a pagar com o desconto do SNE.','Veículos com documentos, saídas (bloqueia CNH vencida), abastecimentos e manutenção.','Multas com o condutor identificado pela saída do veículo e prazo de indicação.','Análise da frota: consumo, custo por km, custo por obra e abastecimentos fora do padrão.']},
   {id:'eqp',t:'Equipamentos',g:'ferr',ver:'28',p:['Envio e retorno: use Envio para mandar itens à obra ou à oficina e Retorno para trazer de volta, informando o estado de cada item.','Fotos: no cadastro do item use Tirar foto ou Escolher arquivo; a miniatura aparece na lista e abre ampliada ao clicar.','Ferramentas e equipamentos com código, número de série e responsável.','Envios para obras com responsável, previsão de retorno e devolução.','Manutenção de equipamentos com histórico e custo.']},
   {id:'ctb',t:'Contabilidade, tributos e assessorias',g:'ctb',ver:'50',p:['Reforma tributária (IBS/CBS): veja o que o sistema já atende e o que fazer, o cronograma até 2033, a apuração estimada do mês e o simulador de contratos. Em Parâmetros cadastre o NBS, a cClassTrib e a redução da atividade.','Tributos: retenções do mês, CNO das obras e calendário de obrigações.','Assessorias: checklist de fechamento e pacote de dados para contabilidade, medicina do trabalho e jurídico.','Confira as pendências do mês antes de fechar.','Gere o pacote ZIP com os arquivos para a assessoria contábil.','O relatório de fechamento registra quem fechou e quando.']},
-  {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'85',p:['Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
+  {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'110',p:['Segurança (versão 110): quem é da equipe e grava precisa ligar a verificação em duas etapas no primeiro acesso (aplicativo autenticador no celular). Guarde os códigos de recuperação.','Ações sensíveis, como mexer em contas de acesso, baixar cópia de segurança ou exportar dados, pedem a senha de novo se a última confirmação tiver mais de 15 minutos.','Troca de dados bancários de fornecedor ou colaborador fica pendente até outra pessoa com permissão confirmar.','Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
   {id:'ctr2',t:'Comercial e contratos',g:'ctr',ver:'49',p:['EAP e cronograma: monte as etapas com materiais, mão de obra e ferramentas, ou importe do MS Project (Salvar como XML); envie as etapas para o projeto.','Indicadores: conversão por etapa do funil, POC, prazo médio de recebimento e inadimplência.','Oportunidade ganha: marque Resultado = Ganhamos e use Gerar contrato; no contrato, Gerar projeto cria a obra. Habilitação: anexe o PDF de cada certidão e baixe o pacote ZIP.','Oportunidades e licitações: funil com etapa, valor, chance, sessão e motivo de perda.','Habilitação: certidões com alerta de vencimento.','Contratos: planilha orçamentária, BDI, aditivos com limite legal, reajuste, garantia e retenção.','Medições: boletim por item com acumulado; ao faturar, a NFS-e é criada em rascunho.']},
   {id:'srv',t:'Serviços (PMOC e OS)',g:'serv',ver:'15',p:['Cadastre os equipamentos de cada cliente.','Contrato PMOC com responsável técnico, periodicidade e cobrança mensal; gere as preventivas do mês.','Ordem de serviço com checklist, materiais, fotos e assinatura do cliente no celular; ao concluir, baixa o estoque e cria a conta a receber.']},
   {id:'qld',t:'Qualidade',g:'qual',ver:'15',p:['Fichas de verificação de serviço com modelos prontos.','Reprovação vira não conformidade com causa, ação e eficácia.','Termos de recebimento provisório e definitivo e chamados de garantia.']},

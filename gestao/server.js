@@ -70,6 +70,7 @@ const q = {
   arqDel: db.prepare('DELETE FROM arquivos WHERE id=?'),
   blobRefs: db.prepare("SELECT path, data FROM docs WHERE data LIKE ? ESCAPE '\\' LIMIT 200")
 };
+const END = require('./endurece.js')({ db, q, SEG, DATA, PUB, fn: () => ({ perfilDe, cookies, ipDe, esc, pag, json, CONEX, gestorContas, MAX_BLOB }) }); /* 2FA obrigatória, sessão, reautenticação, CSP, bibliotecas locais */
 const uid = (n = 20) => crypto.randomBytes(n).toString('base64url').replace(/[^A-Za-z0-9]/g, '').slice(0, n);
 const CORES = ['#2457d6', '#0e7c66', '#b54708', '#7a2eb8', '#c11574', '#2e7d32', '#00838f', '#6d4c41'];
 
@@ -95,7 +96,7 @@ const pode = (conta, p, modo) => !!conta && conta.ativo && NIV[conta.nivel] >= N
 /* ---- perfis do sistema (Usuários) aplicados também no servidor ----
    O nível do login (Equipe/Colaborador) diz o que a conta pode gravar; o perfil escolhido em Usuários restringe
    no servidor os dados de RH/DP, as integrações e a gestão de contas. */
-const SENS_RH = new Set(['rhdoc', 'fpag', 'ferias', 'afast', 'adm', 'dpmov', 'desl', 'esoc', 'dpsol', 'emprest', 'rel', 'psicamp', 'psr', 'cand', 'ppp', 'lgpdreq', 'lgpdinc', 'lgpdc', 'pmmes', 'bhlanc', 'fofi', 'foimp', 'tterc']);
+const SENS_RH = new Set(['rhdoc', 'fpag', 'ferias', 'afast', 'adm', 'dpmov', 'desl', 'esoc', 'dpsol', 'emprest', 'rel', 'psicamp', 'psr', 'cand', 'ppp', 'lgpdreq', 'lgpdinc', 'lgpdc', 'pmmes', 'bhlanc', 'fofi', 'foimp', 'tterc', 'acid', 'proc', 'procp', 'riscoia']);
 const PERF_RH = new Set(['admin', 'rh', 'leituratotal']);
 let perfilMapa = null;
 function perfilDe(conta) {
@@ -132,6 +133,7 @@ const FUNC_SENS = /^(cpf|rg|pis|ctps|nasc|salario|ben[A-Z]|tr(Valor|Modo|Linhas|
 const ehDocFunc = p => /^func\/[^/]+$/.test(p);
 const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin || PERF_RH.has(perfilDe(conta));
 function redigir(conta, p, data) {
+  data = REG.redigir(conta, p, data);
   if (!data || !ehDocFunc(p) || veFuncCompleto(conta)) return data;
   const o = {}; for (const k of Object.keys(data)) if (!FUNC_SENS.test(k)) o[k] = data[k]; o._restrito = true; return o;
 }
@@ -143,11 +145,11 @@ function preservarFunc(conta, p, novo) {
   return o;
 }
 /* gravação por módulo: cada coleção pertence a um módulo (perfis.json, gerado a partir do sistema); o perfil
-   só grava nos módulos dele. PERFIL_GRAVACAO=avisar (padrão) só registra o que seria bloqueado, para conferir
-   antes; PERFIL_GRAVACAO=bloquear passa a recusar. */
+   só grava nos módulos dele. PERFIL_GRAVACAO=bloquear (padrão) recusa; PERFIL_GRAVACAO=avisar só registra o que
+   seria bloqueado, para conferir antes. */
 let PERM = { perfis: {}, colecoes: {} };
 try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'utf8')); } catch (e) { console.log('perfis.json não encontrado: gravação por módulo desligada'); }
-const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'avisar').toLowerCase() === 'bloquear' ? 'bloquear' : 'avisar';
+const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'bloquear').toLowerCase() === 'avisar' ? 'avisar' : 'bloquear';
 const LIVRES = new Set(['cfg', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'usr']);
 function gravacaoPermitida(conta, p) {
   if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
@@ -169,7 +171,7 @@ function chatVisivel(conta, p, data, memo) {
   if (kind === 'm' || kind === 'v') { const cv = String(d.conv || ''); if (cv === 'geral') return true; const i = cv.indexOf('/'); if (i <= 0) return false; return membro(cv.slice(0, i), cv.slice(i + 1)); }
   return false;
 }
-const podeVer = (conta, p, data, memo) => pode(conta, p, 'r') && perfilPermite(conta, p, 'r') && chatVisivel(conta, p, data, memo);
+const podeVer = (conta, p, data, memo) => pode(conta, p, 'r') && perfilPermite(conta, p, 'r') && chatVisivel(conta, p, data, memo) && REG.podeLer(conta, p, data, memo) && END.leituraPropria(conta, p, data);
 const validPath = (p, doc) => { const s = String(p || '').split('/').filter(Boolean); return s.length > 0 && s.length <= 12 && s.every(x => /^[\w\-.|~@+=]{1,200}$/.test(x)) && (doc ? s.length % 2 === 0 : s.length % 2 === 1); };
 
 /* ---------------- tempo real (SSE) ---------------- */
@@ -194,16 +196,16 @@ setInterval(() => { for (const c of CONEX.values()) { try { c.res.write(': ping\
 
 /* ---------------- utilidades HTTP ---------------- */
 function lerCorpo(req, max) {
-  return new Promise((ok, err) => { const ch = []; let n = 0; req.on('data', d => { n += d.length; if (n > max) { err({ st: 413, msg: 'Conteúdo grande demais.' }); req.destroy(); } else ch.push(d); }); req.on('end', () => ok(Buffer.concat(ch))); req.on('error', err); });
+  return new Promise((ok, err) => { const ch = []; let n = 0; req.on('data', d => { n += d.length; if (n > max) { err({ st: 413, msg: 'Conteúdo grande demais.' }); req.destroy(); } else ch.push(d); }); req.on('end', () => { const b = Buffer.concat(ch); if (n <= 20000) req._corpo = b; ok(b); }); req.on('error', err); });
 }
 async function lerJson(req) { const b = await lerCorpo(req, MAX_JSON); if (!b.length) return {}; try { return JSON.parse(b.toString('utf8')); } catch (e) { throw { st: 400, msg: 'JSON inválido.' }; } }
 function json(res, st, obj, extra) { const b = Buffer.from(JSON.stringify(obj)); res.writeHead(st, Object.assign({ 'content-type': 'application/json; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store' }, extra || {})); res.end(b); }
-function html(res, st, body, extra) { const b = Buffer.from(body); res.writeHead(st, Object.assign({ 'content-type': 'text/html; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store' }, extra || {})); res.end(b); }
+function html(res, st, body, extra) { const pg = END.pagina(body, extra), b = Buffer.from(pg.body); res.writeHead(st, Object.assign({ 'content-type': 'text/html; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store' }, pg.cab, extra || {})); res.end(b); }
 function cookies(req) { const o = {}; String(req.headers.cookie || '').split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) o[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); }); return o; }
 const seguro = req => String(req.headers['x-forwarded-proto'] || '').includes('https') || !!req.socket.encrypted;
 function contaDa(req) {
   const t = cookies(req).sid; if (!t) return null; const s = q.sessGet.get(SEG.sha(t)); if (!s || s.expira < Date.now()) return null;
-  const c = q.contaPorId.get(s.conta); if (!c || !c.ativo) return null;
+  const c = q.contaPorId.get(s.conta); if (!c || !c.ativo || END.sessaoInativa(s, c)) return null;
   if (!s.visto || Date.now() - s.visto > 300000) try { db.prepare('UPDATE sessoes SET visto=?, ip=? WHERE token=?').run(Date.now(), ipDe(req), s.token); } catch (e) { }
   return c;
 }
@@ -284,13 +286,7 @@ function pagLogin(msg, setup) {
 const NIV_NOME = { owner: 'Dono', admin: 'Equipe (usa os módulos do perfil em Usuários)', interact: 'Só ponto, Minha área e chat', view: 'Somente leitura (sem acesso aos dados)' };
 function pagBackup(eu) {
   if (eu.nivel !== 'owner') return '';
-  const e = BACKUP.estado(), ls = BACKUP.lista().slice(0, 10), mb = n => (n / 1048576).toFixed(n < 1048576 ? 2 : 1) + ' MB';
-  const quando = t => new Date(t).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  return '<div class="card"><h2>Cópia de segurança</h2><p class="sub" style="margin:0 0 10px">Todo dia, a partir das 3h, o sistema grava uma cópia do banco de dados no servidor e guarda as dos últimos ' + e.dias + ' dias. ' +
-    (e.s3Configurado ? 'Cada cópia também vai para o armazenamento externo configurado.' : 'Para guardar também fora do servidor, preencha BACKUP_S3_* no Easypanel (veja o LEIA-ME).') + ' Os anexos não entram nesta cópia: ligue o backup da VPS na Hostinger.</p>' +
-    (e.erro ? '<div class="msg err">A última tentativa falhou: ' + esc(e.erro) + '</div>' : '') + (e.s3 ? '<p class="sub" style="margin:0 0 10px">' + esc(e.s3) + '</p>' : '') +
-    (ls.length ? '<table><thead><tr><th>Arquivo</th><th>Tamanho</th><th>Gravada em</th><th></th></tr></thead><tbody>' + ls.map(b => '<tr><td>' + esc(b.nome) + '</td><td>' + mb(b.tam) + '</td><td>' + quando(b.em) + '</td><td><a class="btn" href="/contas/backups/' + encodeURIComponent(b.nome) + '">Baixar</a></td></tr>').join('') + '</tbody></table>' : '<p class="sub">Nenhuma cópia ainda.</p>') +
-    '<form method="post" action="/contas/backup-agora" style="margin-top:10px"><button type="submit">Fazer uma cópia agora</button></form></div>';
+  return BACKUP.cartao(esc) + END.cartaoServidor(eu);
 }
 function pagPermLog(eu) {
   if (eu.nivel !== 'owner' && perfilDe(eu) !== 'admin') return '';
@@ -307,7 +303,7 @@ function pagContas(eu, msg, erro) {
     (c.id !== eu.id && (eu.nivel === 'owner' || c.nivel !== 'owner') ? '<form method="post" action="/contas/editar" style="display:inline"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="' + (c.ativo ? 'desativar' : 'ativar') + '">' + (c.ativo ? 'Desativar' : 'Ativar') + '</button></form> ' +
       '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Excluir a conta de acesso de ' + esc(String(c.nome || c.email || '').replace(/['"\\]/g, '')) + '? A pessoa não consegue mais entrar. O cadastro dela no sistema (colaborador, perfil, histórico) continua.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="excluir" style="color:var(--neg)">Excluir</button></form> ' : '') +
     (eu.nivel === 'owner' && c.importado && c.id !== eu.id ? '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Usar esta conta importada como a sua? Você passa a ver as conversas e registros dela.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="soueu">Sou eu</button></form>' : '') + '</td></tr>').join('');
-  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a>' : '') + '<a class="btn" href="/conta/seguranca">Segurança da minha conta</a><a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. Para cadastrar uma pessoa nova, prefira <b>Sistema › Usuários › Novo usuário</b>, dentro do sistema: lá você cria o login e o perfil de uma vez.</p>' +
+  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a><a class="btn" href="/contas/auditoria">Auditoria</a>' : '') + '<a class="btn" href="/conta/seguranca">Segurança da minha conta</a><a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. Para cadastrar uma pessoa nova, prefira <b>Sistema › Usuários › Novo usuário</b>, dentro do sistema: lá você cria o login e o perfil de uma vez.</p>' +
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
     (eu.nivel === 'owner' && !q.contaPorId.get(eu.id).totp ? '<div class="msg err"><b>Recomendado:</b> ligue a verificação em duas etapas na sua conta de dono em <a href="/conta/seguranca">Segurança da minha conta</a>.</div>' : '') +
     '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th>2 etapas</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
@@ -370,24 +366,24 @@ function cspApp(arq, st) {
   if (cspCache.mt === st.mtimeMs) return cspCache.v;
   const html = fs.readFileSync(arq, 'utf8'), hs = [];
   html.replace(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi, (m0, js) => { hs.push("'sha256-" + crypto.createHash('sha256').update(js, 'utf8').digest('base64') + "'"); return m0; });
-  const v = ["default-src 'self'", "script-src 'self' " + hs.join(' ') + " 'unsafe-eval' https://cdnjs.cloudflare.com", "worker-src 'self' blob: https://cdnjs.cloudflare.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src 'self' data: https://fonts.gstatic.com", "img-src 'self' data: blob: https:", "media-src 'self' data: blob:",
-    "connect-src 'self' https:", "frame-src 'self' https:", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'self'"].join('; ');
+  const v = END.cspApp(hs);
   cspCache = { mt: st.mtimeMs, v }; return v;
 }
 function form(b) { const o = {}; new URLSearchParams(b.toString('utf8')).forEach((v, k) => { o[k] = v; }); return o; }
-const redir = (res, to) => { res.writeHead(303, { location: to }); res.end(); };
+const redir = (res, to) => END.redir(res, to); /* ?m= vira código (texto livre na URL não aparece mais) */
 
 async function rotear(req, res) {
   /* proteção contra envio de formulário vindo de outro site (CSRF) */
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin) { let ok = false; try { ok = new URL(req.headers.origin).host === req.headers.host; } catch (e) { } if (!ok) return json(res, 403, { erro: 'Origem não permitida.' }); }
   const u = new URL(req.url, 'http://x'), p = u.pathname, m = req.method;
+  res.on('finish', () => REG.auditarHttp(req, res, p, m)); /* auditoria de login, duas etapas, contas, backup e anexos */
   res.setHeader('x-content-type-options', 'nosniff'); res.setHeader('referrer-policy', 'same-origin'); res.setHeader('x-frame-options', 'SAMEORIGIN');
   res.setHeader('permissions-policy', 'camera=(self), microphone=(self), geolocation=(self), payment=(), usb=(), serial=()');
   if (seguro(req)) res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
   if (p === '/saude') return json(res, 200, { ok: true });
   const semContas = q.contaN.get().n === 0;
   /* primeiro acesso */
+  if (p === '/setup' && semContas && END.setupBarrado(req, res, u, m)) return;
   if (p === '/setup') {
     if (!semContas) return redir(res, '/login');
     if (m === 'GET') return html(res, 200, pagLogin('', true));
@@ -400,13 +396,14 @@ async function rotear(req, res) {
   if (p === '/login') {
     if (semContas) return redir(res, '/setup');
     if (m === 'GET') return html(res, 200, pagLogin(''));
-    const ip = ipDe(req), t = tentativas.get(ip) || { n: 0, ate: 0 };
-    const f = form(await lerCorpo(req, 10000)), em = 'e:' + String(f.email || '').trim().toLowerCase().slice(0, 254), te = tentativas.get(em) || { n: 0, ate: 0 };
-    if (t.ate > Date.now() || te.ate > Date.now()) return html(res, 429, pagLogin('Muitas tentativas. Aguarde alguns minutos.'));
+    const ip = ipDe(req);
+    const f = form(await lerCorpo(req, 10000)), em = 'e:' + String(f.email || '').trim().toLowerCase().slice(0, 254);
+    { const lim = END.loginAntes(ip); if (lim) return html(res, 429, pagLogin(lim)); }
+    if (!(await END.loginEspera(em))) return html(res, 429, pagLogin('Muitas tentativas para este e-mail. Tente de novo em 1 minuto.'));
     const c = q.contaPorEmail.get(String(f.email || '').trim().slice(0, 254));
     if (!c || !c.hash) confere(String(f.senha || ''), HASH_FALSO);
-    if (!c || !c.ativo || !confere(f.senha, c.hash)) { for (const [k, x, lim] of [[ip, t, 8], [em, te, 10]]) { x.n++; x.em = Date.now(); if (x.n >= lim) { x.ate = Date.now() + 10 * 60000; x.n = 0; } tentativas.set(k, x); } await new Promise(r => setTimeout(r, 600)); return html(res, 401, pagLogin('E-mail ou senha incorretos.')); }
-    tentativas.delete(ip); tentativas.delete(em);
+    if (!c || !c.ativo || !confere(f.senha, c.hash)) { await END.loginFalhou(ip, em); return html(res, 401, pagLogin('E-mail ou senha incorretos.')); }
+    END.loginOk(ip, em);
     if (SEG.precisaRefazer(c.hash)) try { db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.senha), c.id); } catch (e) { }
     if (c.totp) {
       const t2 = crypto.randomBytes(24).toString('base64url');
@@ -502,9 +499,10 @@ async function rotear(req, res) {
   }
   const conta = contaDa(req);
   if (!conta) { if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 401, { erro: 'Entre novamente.' }); return redir(res, semContas ? '/setup' : '/login'); }
+  if (await END.antes(req, res, conta, p, m, u)) return; /* 2FA obrigatória, reautenticação, bibliotecas locais, cota de anexos */
 
   /* ---- segurança da própria conta: duas etapas, aparelhos, senha ---- */
-  if (p === '/conta/seguranca' && m === 'GET') return html(res, 200, pagSeguranca(conta, req, u.searchParams.get('m'), u.searchParams.get('e')));
+  if (p === '/conta/seguranca' && m === 'GET') return html(res, 200, pagSeguranca(conta, req, ...END.msg(u)));
   if (p.startsWith('/conta/seguranca/') && m === 'POST') {
     const acao = p.slice(17), f = form(await lerCorpo(req, 10000)), c = q.contaPorId.get(conta.id), volta = (t, e) => redir(res, '/conta/seguranca?' + (e ? 'e=1&' : '') + 'm=' + encodeURIComponent(t));
     const ip = ipDe(req), ti = tentativas.get('s:' + c.id) || { n: 0, ate: 0 };
@@ -514,7 +512,7 @@ async function rotear(req, res) {
     if (acao === 'confirmar') {
       const nv = db.prepare('SELECT * FROM totp_novo WHERE conta=? AND expira>?').get(c.id, Date.now()); if (!nv) return volta('O tempo acabou. Comece de novo.', 1);
       const ps = SEG.confereCodigo(nv.segredo, f.codigo, 0); if (ps < 0) return errou('Código incorreto. Confira se o horário do celular está automático e digite o código que aparece agora.');
-      const r = SEG.novosCodigosRec(); db.prepare('UPDATE contas SET totp=?, totp_ult=?, rec=? WHERE id=?').run(nv.segredo, ps, JSON.stringify(r.hashes), c.id); db.prepare('DELETE FROM totp_novo WHERE conta=?').run(c.id);
+      const r = SEG.novosCodigosRec(); db.prepare('UPDATE contas SET totp=?, totp_ult=?, rec=? WHERE id=?').run(SEG.cifrarSegredo(nv.segredo), ps, JSON.stringify(r.hashes), c.id); db.prepare('DELETE FROM totp_novo WHERE conta=?').run(c.id);
       tentativas.delete('s:' + c.id); return html(res, 200, pagCodigosRec(conta, req, r.cods));
     }
     if (acao === 'rec') {
@@ -541,7 +539,7 @@ async function rotear(req, res) {
     res.writeHead(200, { 'content-type': 'application/gzip', 'content-length': fs.statSync(f).size, 'content-disposition': 'attachment; filename="' + path.basename(f) + '"', 'cache-control': 'no-store' });
     return fs.createReadStream(f).pipe(res);
   }
-  if (p === '/contas' && m === 'GET') { if (!gestorContas(conta)) return redir(res, '/'); return html(res, 200, pagContas(conta, u.searchParams.get('m'), u.searchParams.get('e'))); }
+  if (p === '/contas' && m === 'GET') { if (!gestorContas(conta)) return redir(res, '/'); return html(res, 200, pagContas(conta, ...END.msg(u))); }
   if (p === '/contas/salvar' && m === 'POST') {
     if (!gestorContas(conta)) return redir(res, '/');
     const f = form(await lerCorpo(req, 10000)), niv = ['admin', 'interact'].includes(f.nivel) ? f.nivel : 'interact';
@@ -553,7 +551,7 @@ async function rotear(req, res) {
         if (f.senha) db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || ''));
         db.prepare('UPDATE contas SET nome=coalesce(nullif(?,\'\'),nome), email=coalesce(nullif(?,\'\'),email), hash=coalesce(?,hash), nivel=? WHERE id=?').run(f.nome || '', (f.email || '').trim(), f.senha ? hashSenha(f.senha) : null, c.nivel === 'owner' ? 'owner' : niv, c.id);
       } else {
-        if (!f.email || !f.senha) throw 'Informe e-mail e senha.'; { const fr = SEG.senhaFraca(f.senha, f.email, f.nome); if (fr) throw fr; } if (q.contaPorEmail.get(f.email)) throw 'Este e-mail já está em uso.';
+        if (!f.email || !f.senha) throw 'Informe e-mail e senha.'; { const fr = SEG.senhaFraca(f.senha, f.email, f.nome, END.minNivel(niv)); if (fr) throw fr; } if (q.contaPorEmail.get(f.email)) throw 'Este e-mail já está em uso.';
         q.contaNova.run(uid(), f.nome || f.email, f.email.trim(), hashSenha(f.senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
       }
       return redir(res, '/contas?m=' + encodeURIComponent('Conta salva.'));
@@ -603,7 +601,7 @@ async function rotear(req, res) {
     if (q.contaPorEmail.get(email)) return json(res, 400, { erro: 'Este e-mail já está em uso.' });
     const convite = !!b.convite;
     if (convite && !EMAIL.configurado()) return json(res, 400, { erro: 'O envio de e-mail não está configurado no servidor. Use a senha provisória.' });
-    if (!convite) { const fr = SEG.senhaFraca(senha, email, nome); if (fr) return json(res, 400, { erro: fr }); }
+    if (!convite) { const fr = SEG.senhaFraca(senha, email, nome, END.minNivel(b.nivel)); if (fr) return json(res, 400, { erro: fr }); }
     const id = uid(), niv = ['admin', 'interact'].includes(b.nivel) ? b.nivel : 'interact';
     q.contaNova.run(id, nome, email, convite ? null : hashSenha(senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
     if (!convite) return json(res, 200, { ok: true, id });
@@ -648,19 +646,27 @@ async function rotear(req, res) {
     const dp = String(u.searchParams.get('path') || ''); if (!validPath(dp, true)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
     if (m === 'GET') { if (!pode(conta, dp, 'r')) return json(res, 403, { code: 'not_granted' }); const r = q.docGet.get(dp), dd = r ? JSON.parse(r.data) : null; return json(res, 200, r && podeVer(conta, dp, dd, new Map()) ? { exists: true, data: redigir(conta, dp, dd), ts: r.ts } : { exists: false }); }
     if (!pode(conta, dp, 'w') || !perfilPermite(conta, dp, 'w')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite alterar estes dados.' });
-    if (!gravacaoPermitida(conta, dp)) {
-      try { permLogPut.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), dp.split('/')[0], Date.now()); } catch (e) { }
-      if (MODO_GRAV === 'bloquear') return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não grava neste módulo. Peça a um administrador.' });
-    }
     const seg = dp.split('/'), parent = seg.slice(0, -1).join('/'), id = seg[seg.length - 1], ts = Date.now();
-    if (m === 'DELETE') { q.docDel.run(dp); avisarDoc('del', dp, null, ts); return json(res, 200, { ok: true }); }
-    const corpo = await lerJson(req); let data = corpo.data;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) return json(res, 400, { code: 'invalid_argument', erro: 'Dados inválidos.' });
-    if (m === 'PATCH') { const r = q.docGet.get(dp); if (!r) return json(res, 404, { code: 'invalid_argument', erro: 'Documento não existe.' }); data = Object.assign(JSON.parse(r.data), data); }
-    if (Object.prototype.hasOwnProperty.call(data, 'id') && data.id !== id) data.id = id;
-    data = preservarFunc(conta, dp, data);
+    const r0 = q.docGet.get(dp), velho = r0 ? JSON.parse(r0.data) : null;
+    let data = null;
+    if (m !== 'DELETE') {
+      const corpo = await lerJson(req); data = corpo.data;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return json(res, 400, { code: 'invalid_argument', erro: 'Dados inválidos.' });
+      if (m === 'PATCH') { if (!r0) return json(res, 404, { code: 'invalid_argument', erro: 'Documento não existe.' }); data = Object.assign(JSON.parse(r0.data), data); }
+      if (Object.prototype.hasOwnProperty.call(data, 'id') && data.id !== id) data.id = id;
+      data = preservarFunc(conta, dp, data);
+    }
+    if (!gravacaoPermitida(conta, dp) && !REG.excecaoGravacao(conta, dp, velho, data, m)) {
+      try { permLogPut.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), dp.split('/')[0], Date.now()); } catch (e) { }
+      if (MODO_GRAV === 'bloquear') { REG.auditar(conta, req, m + '_NEGADO', dp, null, null); return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não grava neste módulo. Peça a um administrador.' }); }
+    }
+    /* regras do servidor: aprovações, dados bancários, competência fechada, assinaturas, remessa (regras.js) */
+    const v = m === 'DELETE' ? REG.antesExcluir(conta, dp, velho, req) : REG.antesGravar(conta, dp, velho, data, req);
+    if (v && v.erro) { REG.auditar(conta, req, m + '_RECUSADO', dp, null, { erro: v.erro }); return json(res, v.st || 403, { code: v.st === 409 ? 'failed_precondition' : v.st === 400 ? 'invalid_argument' : 'not_granted', erro: v.erro }); }
+    if (m === 'DELETE') { q.docDel.run(dp); avisarDoc('del', dp, null, ts); REG.depois(conta, req, m, dp, velho, null, null); return json(res, 200, { ok: true }); }
+    data = v.data;
     const txt = JSON.stringify(data); if (txt.length > 4 * 1024 * 1024) return json(res, 413, { code: 'invalid_argument', erro: 'Documento grande demais.' });
-    q.docPut.run(dp, parent, id, txt, ts); avisarDoc('set', dp, data, ts); return json(res, 200, { ok: true, ts });
+    q.docPut.run(dp, parent, id, txt, ts); avisarDoc('set', dp, data, ts); REG.depois(conta, req, m, dp, velho, data, v); return json(res, 200, { ok: true, ts });
   }
   if (p === '/api/db/col' && m === 'GET') {
     const cp = String(u.searchParams.get('path') || ''); if (!validPath(cp, false)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
@@ -679,22 +685,10 @@ async function rotear(req, res) {
     fs.writeFileSync(path.join(DATA, 'blobs', id), b); q.arqNovo.run(id, ct, b.length, conta.id, Date.now());
     return json(res, 200, { id, url: '/_blob/' + id, sizeBytes: b.length, contentType: ct });
   }
-  if (p === '/api/assets' && m === 'GET') { if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { code: 'not_granted' }); const l = q.arqLista.all(); return json(res, 200, { assets: l.map(a => ({ id: a.id, url: '/_blob/' + a.id, contentType: a.ct, sizeBytes: a.tam, createdAt: new Date(a.criado).toISOString() })), usage: { files: l.length, bytes: l.reduce((s, a) => s + a.tam, 0), maxFiles: 100000, maxBytes: 50 * 1024 ** 3 } }); }
-  if (p.startsWith('/api/assets/') && m === 'DELETE') { if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { code: 'not_granted' }); const id = p.split('/').pop().replace(/[^a-z0-9]/gi, ''); try { fs.unlinkSync(path.join(DATA, 'blobs', id)); } catch (e) { } q.arqDel.run(id); return json(res, 200, { deleted: true }); }
-  if (p.startsWith('/_blob/')) {
-    const id = p.slice(7).replace(/[^A-Za-z0-9_-]/g, ''), a = q.arqGet.get(id), f = path.join(DATA, 'blobs', id);
-    if (!a || !fs.existsSync(f)) { res.writeHead(404); return res.end(); }
-    /* quem não é administrador vê só o que enviou, o que está na própria Minha área/ponto ou no chat */
-    /* o arquivo só abre para quem enviou ou para quem pode ver algum registro que o cita (perfil, chat e Minha área valem) */
-    if (conta.nivel !== 'owner' && a.por !== conta.id) {
-      const kk = conta.id + ':' + id, ca = blobMemo.get(kk); let ok;
-      if (ca && Date.now() - ca.em < 300000) ok = ca.ok;
-      else { const memo = new Map(); ok = q.blobRefs.all('%' + id.replace(/[\\%_]/g, '\\$&') + '%').some(r => { let d = null; try { d = JSON.parse(r.data); } catch (e) { } return podeVer(conta, r.path, d, memo); }); blobMemo.set(kk, { ok, em: Date.now() }); if (blobMemo.size > 20000) blobMemo.clear(); }
-      if (!ok) { res.writeHead(404); return res.end(); }
-    }
-    const ct = String(a.ct || 'application/octet-stream').toLowerCase(), seguro = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|video\/(mp4|webm)|audio\/[a-z0-9.+-]+)$/.test(ct);
-    res.writeHead(200, { 'content-type': seguro ? ct : 'application/octet-stream', 'content-length': a.tam, 'cache-control': 'private, no-store', 'content-disposition': seguro ? 'inline' : 'attachment', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox" }); return fs.createReadStream(f).pipe(res);
-  }
+  /* anexos: lista só para o dono; exclusão só por quem enviou ou pelo dono (vai para a lixeira); leitura conforme o registro de origem (regras.js) */
+  if (p === '/api/assets' && m === 'GET') return REG.listarAnexos(conta, res);
+  if (p.startsWith('/api/assets/') && m === 'DELETE') return REG.excluirAnexo(conta, req, res, p.split('/').pop().replace(/[^A-Za-z0-9_-]/g, ''));
+  if (p.startsWith('/_blob/')) return REG.servirBlob(conta, req, res, p.slice(7).replace(/[^A-Za-z0-9_-]/g, ''));
   /* consulta de CNPJ pelo servidor (dados públicos da Receita: BrasilAPI e CNPJ.ws), com cache de 24 h */
   const mCnpj = p.match(/^\/api\/cnpj\/(brasilapi|cnpjws)\/(\d{14})$/);
   if (mCnpj && m === 'GET') {
@@ -719,6 +713,8 @@ async function rotear(req, res) {
   if (p.startsWith('/api/solides/') && !perfilEm(conta, ['admin', 'rh'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar a integração de ponto.' });
   if (p.startsWith('/api/bancos/') && !perfilEm(conta, ['admin', 'financeiro'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar o extrato automático.' });
   if (p.startsWith('/api/fiscal/') && !perfilEm(conta, ['admin', 'financeiro', 'fiscal', 'projetos', 'leitura', 'leituratotal'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite acessar as notas fiscais.' });
+  /* conector fiscal: consultar (GET) para quem lê notas; emitir, cancelar e demais ações só Administrador, Financeiro e Fiscal */
+  if (p.startsWith('/api/fiscal/') && m !== 'GET' && m !== 'HEAD' && !perfilEm(conta, ['admin', 'financeiro', 'fiscal'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil só consulta as notas fiscais; emitir ou cancelar fica com Administrador, Financeiro ou Fiscal.' });
   if (p.startsWith('/api/fiscal/')) {
     if (!FISCAL_URL) return json(res, 503, { erro: 'Conector fiscal não configurado (FISCAL_URL).' });
     if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { erro: 'Apenas administradores.' });
@@ -756,6 +752,7 @@ async function rotear(req, res) {
     const b = zlib.gzipSync(Buffer.from(JSON.stringify({ versao: 1, em: Date.now(), docs })));
     res.writeHead(200, { 'content-type': 'application/gzip', 'content-disposition': 'attachment; filename="backup-banco-' + new Date().toISOString().slice(0, 10) + '.json.gz"', 'content-length': b.length }); return res.end(b);
   }
+  if (await REG.rota(p, m, req, res, conta, u)) return;
   if (await solidesRota(p, m, req, res, conta, u)) return;
   if (await bancosRota(p, m, req, res, conta, u)) return;
   /* ---- arquivos do sistema ---- */
@@ -766,6 +763,9 @@ async function rotear(req, res) {
   json(res, 404, { erro: 'Não encontrado.' });
 }
 
+/* regras de negócio aplicadas pelo servidor (aprovações, bancos, competência, anexos, auditoria...) */
+const REG = require('./regras.js')({ db, q, json, html, lerJson, lerCorpo, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH,
+  pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto });
 const solidesRota = require('./solides.js')({ q, db, avisarDoc, json, lerJson, NIV });
 const bancosRota = require('./bancos.js')({ q, db, avisarDoc, json, lerJson, NIV });
 const srv = http.createServer((req, res) => { rotear(req, res).catch(e => { if (!res.headersSent) json(res, e.st || 500, { erro: e.msg || 'Erro interno.' }); else try { res.end(); } catch (x) { } if (!e.st) console.error(e); }); });

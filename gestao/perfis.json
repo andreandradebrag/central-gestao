@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-26T21:29:27.620Z",
+ "gerado": "2026-10-26T22:50:53.107Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -194,6 +194,420 @@
   }
  },
  "colecoes": {
+  "lanc": [
+   "fin",
+   "ctb",
+   "dir"
+  ],
+  "recor": [
+   "fin"
+  ],
+  "extrato": [
+   "contas"
+  ],
+  "ped": [
+   "nf",
+   "comp",
+   "fin"
+  ],
+  "notas": [
+   "nf",
+   "comp",
+   "fin"
+  ],
+  "prod": [
+   "est",
+   "comp"
+  ],
+  "mov": [
+   "est",
+   "proj",
+   "comp"
+  ],
+  "proj": [
+   "proj",
+   "est",
+   "dir"
+  ],
+  "parc": [
+   "cad",
+   "comp"
+  ],
+  "plano": [
+   "plano"
+  ],
+  "cat": [
+   "plano"
+  ],
+  "conta": [
+   "contas"
+  ],
+  "usr": [
+   "usr",
+   "dir"
+  ],
+  "cfg": [
+   "cfg",
+   "ponto",
+   "dir"
+  ],
+  "func": [
+   "rh",
+   "frota",
+   "ponto"
+  ],
+  "rhdoc": [
+   "rh"
+  ],
+  "epi": [
+   "sst"
+  ],
+  "veic": [
+   "frota"
+  ],
+  "vsai": [
+   "frota"
+  ],
+  "vabas": [
+   "frota"
+  ],
+  "vman": [
+   "frota"
+  ],
+  "ferr": [
+   "ferr"
+  ],
+  "fmov": [
+   "ferr"
+  ],
+  "fman": [
+   "ferr"
+  ],
+  "psv": [
+   "nf"
+  ],
+  "sc": [
+   "comp"
+  ],
+  "cot": [
+   "comp"
+  ],
+  "sep": [
+   "comp"
+  ],
+  "etapa": [
+   "proj"
+  ],
+  "almox": [
+   "est",
+   "comp"
+  ],
+  "nfse": [
+   "nf",
+   "ctb"
+  ],
+  "ctbfech": [
+   "ctb",
+   "fin"
+  ],
+  "ponto": [
+   "ponto"
+  ],
+  "pajuste": [
+   "ponto"
+  ],
+  "jornada": [
+   "rh",
+   "ponto"
+  ],
+  "feriado": [
+   "rh",
+   "ponto"
+  ],
+  "cipa": [
+   "sst"
+  ],
+  "cipam": [
+   "sst"
+  ],
+  "cipar": [
+   "sst"
+  ],
+  "cipaa": [
+   "sst"
+  ],
+  "acid": [
+   "sst"
+  ],
+  "proc": [
+   "jur"
+  ],
+  "procp": [
+   "jur"
+  ],
+  "riscoia": [
+   "jur"
+  ],
+  "lgpdreq": [
+   "lgpd"
+  ],
+  "lgpdinc": [
+   "lgpd"
+  ],
+  "reun": [
+   "agenda"
+  ],
+  "rdo": [
+   "proj"
+  ],
+  "rmesf": [
+   "proj"
+  ],
+  "ctr": [
+   "ctr",
+   "dir"
+  ],
+  "med": [
+   "ctr",
+   "ctb",
+   "dir",
+   "fin"
+  ],
+  "opp": [
+   "ctr"
+  ],
+  "hab": [
+   "ctr"
+  ],
+  "aprovsol": [
+   "fin"
+  ],
+  "eqc": [
+   "serv"
+  ],
+  "pmoc": [
+   "serv"
+  ],
+  "os": [
+   "serv",
+   "qual"
+  ],
+  "multa": [
+   "frota"
+  ],
+  "fvs": [
+   "qual"
+  ],
+  "nc": [
+   "qual",
+   "dir"
+  ],
+  "trec": [
+   "qual"
+  ],
+  "gar": [
+   "qual",
+   "dir"
+  ],
+  "pgr": [
+   "sst"
+  ],
+  "pte": [
+   "sst"
+  ],
+  "ppp": [
+   "sst"
+  ],
+  "arq": [
+   "cfg"
+  ],
+  "transp": [
+   "cad"
+  ],
+  "ferias": [
+   "rh",
+   "ponto"
+  ],
+  "afast": [
+   "rh",
+   "ponto"
+  ],
+  "adm": [
+   "rh"
+  ],
+  "dpmov": [
+   "rh"
+  ],
+  "desl": [
+   "rh"
+  ],
+  "psicamp": [
+   "sst"
+  ],
+  "rel": [
+   "sst"
+  ],
+  "dpsol": [
+   "rh"
+  ],
+  "intra": [
+   "meu"
+  ],
+  "rsreq": [
+   "rh"
+  ],
+  "vaga": [
+   "rh"
+  ],
+  "cand": [
+   "rh"
+  ],
+  "eap": [
+   "ctr"
+  ],
+  "idxbal": [
+   "fluxo"
+  ],
+  "sstv": [
+   "sst"
+  ],
+  "bhlanc": [
+   "rh"
+  ],
+  "hht": [
+   "sst"
+  ],
+  "fapac": [
+   "rh"
+  ],
+  "trein": [
+   "sst"
+  ],
+  "treinc": [
+   "sst"
+  ],
+  "vrota": [
+   "frota"
+  ],
+  "vfrete": [
+   "frota"
+  ],
+  "rda": [
+   "sst"
+  ],
+  "integ": [
+   "sst"
+  ],
+  "pgrdoc": [
+   "sst"
+  ],
+  "sstdoc": [
+   "sst"
+  ],
+  "insp": [
+   "sst"
+  ],
+  "pa": [
+   "sst",
+   "qual"
+  ],
+  "ambdoc": [
+   "sst"
+  ],
+  "ambres": [
+   "sst"
+  ],
+  "ambforn": [
+   "sst"
+  ],
+  "ambind": [
+   "sst"
+  ],
+  "isochk": [
+   "sst"
+  ],
+  "procd": [
+   "qual"
+  ],
+  "procl": [
+   "qual"
+  ],
+  "servcat": [
+   "cad"
+  ],
+  "pmmes": [
+   "ponto"
+  ],
+  "pmimp": [
+   "ponto"
+  ],
+  "emprest": [
+   "rh"
+  ],
+  "fzret": [
+   "ctb"
+  ],
+  "acervo": [
+   "ctr"
+  ],
+  "reeq": [
+   "ctr"
+  ],
+  "adto": [
+   "fin"
+  ],
+  "adtoit": [
+   "fin"
+  ],
+  "remessa": [
+   "fin"
+  ],
+  "orcfin": [
+   "fin"
+  ],
+  "acordo": [
+   "comp"
+  ],
+  "invaj": [
+   "comp",
+   "est"
+  ],
+  "devobra": [
+   "est"
+  ],
+  "obrchk": [
+   "proj"
+  ],
+  "obrextr": [
+   "ferr"
+  ],
+  "fofi": [
+   "folha"
+  ],
+  "foimp": [
+   "folha"
+  ],
+  "heaut": [
+   "ponto"
+  ],
+  "quadro": [
+   "rh"
+  ],
+  "tdoc": [
+   "proj"
+  ],
+  "tterc": [
+   "sst"
+  ],
+  "pesq": [
+   "qual",
+   "dir"
+  ],
+  "medemp": [
+   "fin"
+  ]
+ },
+ "leitura": {
   "lanc": [
    "fin",
    "ctb",

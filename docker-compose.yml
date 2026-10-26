@@ -1,5 +1,10 @@
 # Central de Gestão + conector fiscal
 # No Easypanel: crie um serviço "App" para cada pasta (gestao e fiscal) OU use um serviço "Compose" com este arquivo.
+# Pastas do servidor (as mesmas do instalar.sh e do LEIA-ME):
+#   /opt/central/certs -> só o conector fiscal (certificado A1 da empresa, certificado.pfx)
+#   /opt/central/bb    -> só o sistema (gestao), e só quando o extrato do BB for ligado (bb.pfx)
+# Endurecimento: sistema de arquivos só leitura (grava só em /data e /tmp), sem capacidades do Linux,
+# sem escalar privilégio, limites de memória e CPU.
 services:
   gestao:
     build: ./gestao
@@ -7,8 +12,20 @@ services:
     environment:
       PORT: "3000"
       DATA_DIR: /data
+      NODE_ENV: production
       FISCAL_URL: http://fiscal:8000
       FISCAL_TOKEN: ${FISCAL_TOKEN}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      CHAVE_MESTRA: ${CHAVE_MESTRA:-}
+      BACKUP_CHAVE: ${BACKUP_CHAVE:-}
+      DOIS_FATORES_OBRIGATORIO: ${DOIS_FATORES_OBRIGATORIO:-equipe}
+      DOIS_FATORES_CARENCIA_DIAS: ${DOIS_FATORES_CARENCIA_DIAS:-0}
+      SESSAO_INATIVIDADE_HORAS: ${SESSAO_INATIVIDADE_HORAS:-10}
+      SESSAO_COLABORADOR_DIAS: ${SESSAO_COLABORADOR_DIAS:-30}
+      REAUTENTICAR_MINUTOS: ${REAUTENTICAR_MINUTOS:-15}
+      ANEXOS_COTA_MB: ${ANEXOS_COTA_MB:-2048}
+      ANEXOS_COTA_COLABORADOR_MB: ${ANEXOS_COTA_COLABORADOR_MB:-300}
+      PERFIL_GRAVACAO: ${PERFIL_GRAVACAO:-avisar}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SOLIDES_TOKEN: ${SOLIDES_TOKEN:-}
       SOLIDES_INTERVALO_MIN: ${SOLIDES_INTERVALO_MIN:-15}
@@ -16,7 +33,7 @@ services:
       BB_CLIENT_ID: ${BB_CLIENT_ID:-}
       BB_CLIENT_SECRET: ${BB_CLIENT_SECRET:-}
       BB_APP_KEY: ${BB_APP_KEY:-}
-      BB_CERT_PATH: ${BB_CERT_PATH:-}
+      BB_CERT_PATH: ${BB_CERT_PATH:-/certs/bb.pfx}
       BB_CERT_SENHA: ${BB_CERT_SENHA:-}
       PLUGGY_CLIENT_ID: ${PLUGGY_CLIENT_ID:-}
       PLUGGY_CLIENT_SECRET: ${PLUGGY_CLIENT_SECRET:-}
@@ -27,9 +44,25 @@ services:
       SMTP_USUARIO: ${SMTP_USUARIO:-}
       SMTP_SENHA: ${SMTP_SENHA:-}
       SMTP_REMETENTE: ${SMTP_REMETENTE:-}
+      BACKUP_DIAS: ${BACKUP_DIAS:-30}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_REGIAO: ${BACKUP_S3_REGIAO:-auto}
+      BACKUP_S3_CHAVE: ${BACKUP_S3_CHAVE:-}
+      BACKUP_S3_SEGREDO: ${BACKUP_S3_SEGREDO:-}
+      BACKUP_S3_PASTA: ${BACKUP_S3_PASTA:-central}
     volumes:
       - gestao-dados:/data
-      - /opt/central/certs:/certs:ro
+      # só a pasta do BB (vazia até ligar o extrato); NUNCA /opt/central/certs aqui
+      - /opt/central/bb:/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    cpus: 1.5
+    pids_limit: 200
     # sem "ports": o Easypanel publica o serviço pelo domínio (HTTPS). Para testar fora do Easypanel use "127.0.0.1:3001:3000".
     expose:
       - "3000"
@@ -51,7 +84,16 @@ services:
       NFSE_ADN: ${NFSE_ADN:-1}
     volumes:
       - fiscal-dados:/data
-      - /opt/central/bb:/certs:ro
+      # certificado A1 da empresa: só o conector fiscal enxerga
+      - /opt/central/certs:/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 100
     # sem "ports": o conector fica só na rede interna, acessível apenas pelo serviço gestao
 
 volumes:

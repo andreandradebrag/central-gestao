@@ -501,7 +501,7 @@ class Conector:
                 self.db.set('nfse_espera_ate', time.time() + UMA_HORA)
                 break
             if r.status_code >= 400:
-                self.db.log(f'ADN NFS-e respondeu HTTP {r.status_code}: {r.text[:200]}', 'erro')
+                self.db.log(f'ADN NFS-e respondeu HTTP {r.status_code} (ref. {falha_ref("ADN HTTP " + str(r.status_code) + ": " + r.text[:300])}).', 'erro')
                 self.db.set('nfse_espera_ate', time.time() + UMA_HORA)
                 break
             j = r.json()
@@ -553,13 +553,13 @@ class Conector:
             try:
                 out['nfe'] = self.sync_nfe(forcar)
             except Exception as e:
-                out['nfe'] = {'ok': False, 'msg': 'Falha ao consultar a SEFAZ: ' + type(e).__name__ + ' ' + str(e)[:160]}
+                out['nfe'] = {'ok': False, 'msg': 'Falha ao consultar a SEFAZ. Tente mais tarde; se continuar, veja o log do serviço fiscal (ref. ' + falha_ref('SEFAZ', e) + ').'}
                 self.db.log(out['nfe']['msg'], 'erro')
             if self.cfg.nfse:
                 try:
                     out['nfse'] = self.sync_nfse()
                 except Exception as e:
-                    out['nfse'] = {'ok': False, 'msg': 'Falha ao consultar o Ambiente Nacional da NFS-e: ' + type(e).__name__ + ' ' + str(e)[:160]}
+                    out['nfse'] = {'ok': False, 'msg': 'Falha ao consultar o Ambiente Nacional da NFS-e. Tente mais tarde; se continuar, veja o log do serviço fiscal (ref. ' + falha_ref('ADN', e) + ').'}
                     self.db.log(out['nfse']['msg'], 'erro')
             self.db.set('ultima_sync', out)
             return out
@@ -695,8 +695,8 @@ def servidor(con: Conector, cfg: Config):
                         return self.resp(404, {'erro': 'Ferramenta desconhecida.'})
                 return self.resp(404, {'erro': 'Rota não encontrada.'})
             except Exception as e:
-                traceback.print_exc()
-                return self.resp(500, {'erro': type(e).__name__ + ': ' + str(e)[:200]})
+                # detalhe só no log do contêiner; quem chamou recebe uma mensagem genérica com um código para procurar no log
+                return self.resp(500, {'erro': 'Erro interno do conector fiscal (ref. ' + falha_ref(metodo + ' ' + p, e) + ').'})
 
         def do_GET(self):
             self.tratar('GET')
@@ -705,6 +705,15 @@ def servidor(con: Conector, cfg: Config):
             self.tratar('POST')
 
     return ThreadingHTTPServer(('0.0.0.0', cfg.port), H)
+
+
+def falha_ref(contexto, e=None):
+    """Registra o detalhe do erro só no log do contêiner (stdout) e devolve um código curto para a mensagem genérica."""
+    ref = hashlib.sha1(os.urandom(8)).hexdigest()[:8]
+    print(f'[erro {ref}] {contexto}: {type(e).__name__ if e else ""} {e if e else ""}', flush=True)
+    if e is not None:
+        traceback.print_exc()
+    return ref
 
 
 def agendador(con: Conector, cfg: Config):

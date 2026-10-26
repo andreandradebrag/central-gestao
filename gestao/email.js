@@ -14,9 +14,11 @@ const CFG = () => ({
   usuario: (process.env.SMTP_USUARIO || '').trim(),
   senha: process.env.SMTP_SENHA || '',
   remetente: (process.env.SMTP_REMETENTE || process.env.SMTP_USUARIO || '').trim(),
-  tlsDireto: process.env.SMTP_TLS ? process.env.SMTP_TLS === 'ssl' : (+process.env.SMTP_PORT || 465) === 465,
-  semTls: process.env.SMTP_TLS === 'nao' /* só para testes locais */
+  tlsDireto: process.env.SMTP_TLS === 'ssl' ? true : process.env.SMTP_TLS === 'starttls' ? false : (+process.env.SMTP_PORT || 465) === 465,
+  /* sem TLS só nos testes automáticos (NODE_ENV=test); em produção a senha do e-mail nunca trafega aberta */
+  semTls: process.env.SMTP_TLS === 'nao' && process.env.NODE_ENV === 'test'
 });
+if (process.env.SMTP_TLS === 'nao' && process.env.NODE_ENV !== 'test') console.warn('[email] SMTP_TLS=nao ignorado: só vale com NODE_ENV=test. O envio usa TLS.');
 const configurado = () => { const c = CFG(); return !!(c.host && c.usuario && c.senha && c.remetente); };
 
 const b64 = s => Buffer.from(String(s), 'utf8').toString('base64');

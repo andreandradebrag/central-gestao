@@ -1,3 +1,6 @@
-requests==2.32.3
-lxml==5.3.0
-cryptography==43.0.3
+# versões fixas e testadas (python -m unittest test_app.py) — atualizadas em 26/10/2026:
+# cryptography 43.0.3 tinha a falha do OpenSSL embutido (CVE-2024-12797, corrigida na 44.0.1) e requests 2.32.3 a
+# CVE-2024-47081 (vazamento de credenciais .netrc, corrigida na 2.32.4). Depois de mudar, refaça a imagem (Deploy).
+requests==2.34.2
+lxml==6.1.3
+cryptography==50.0.1
