@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-26T20:36:33.987Z",
+ "gerado": "2026-10-26T21:16:12.737Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -195,7 +195,11 @@
  },
  "colecoes": {
   "lanc": [
-   "fin"
+   "fin",
+   "ctb",
+   "folha",
+   "qual",
+   "dir"
   ],
   "recor": [
    "fin"
@@ -204,24 +208,32 @@
    "contas"
   ],
   "ped": [
-   "nf"
+   "nf",
+   "comp",
+   "fin"
   ],
   "notas": [
    "nf",
-   "comp"
+   "comp",
+   "fin"
   ],
   "prod": [
-   "est"
+   "est",
+   "comp"
   ],
   "mov": [
    "est",
-   "proj"
+   "proj",
+   "comp"
   ],
   "proj": [
-   "proj"
+   "proj",
+   "est",
+   "dir"
   ],
   "parc": [
-   "cad"
+   "cad",
+   "comp"
   ],
   "plano": [
    "plano"
@@ -233,10 +245,13 @@
    "contas"
   ],
   "usr": [
-   "usr"
+   "usr",
+   "dir"
   ],
   "cfg": [
-   "cfg"
+   "cfg",
+   "ponto",
+   "dir"
   ],
   "func": [
    "rh",
@@ -286,13 +301,16 @@
    "proj"
   ],
   "almox": [
-   "est"
+   "est",
+   "comp"
   ],
   "nfse": [
-   "nf"
+   "nf",
+   "ctb"
   ],
   "ctbfech": [
-   "ctb"
+   "ctb",
+   "fin"
   ],
   "ponto": [
    "ponto"
@@ -348,16 +366,23 @@
    "proj"
   ],
   "ctr": [
-   "ctr"
+   "ctr",
+   "dir"
   ],
   "med": [
-   "ctr"
+   "ctr",
+   "ctb",
+   "dir",
+   "fin"
   ],
   "opp": [
    "ctr"
   ],
   "hab": [
    "ctr"
+  ],
+  "aprovsol": [
+   "fin"
   ],
   "eqc": [
    "serv"
@@ -366,7 +391,8 @@
    "serv"
   ],
   "os": [
-   "serv"
+   "serv",
+   "qual"
   ],
   "multa": [
    "frota"
@@ -375,13 +401,15 @@
    "qual"
   ],
   "nc": [
-   "qual"
+   "qual",
+   "dir"
   ],
   "trec": [
    "qual"
   ],
   "gar": [
-   "qual"
+   "qual",
+   "dir"
   ],
   "pgr": [
    "sst"
@@ -517,6 +545,68 @@
   ],
   "emprest": [
    "rh"
+  ],
+  "fzret": [
+   "ctb"
+  ],
+  "acervo": [
+   "ctr"
+  ],
+  "reeq": [
+   "ctr"
+  ],
+  "adto": [
+   "fin"
+  ],
+  "adtoit": [
+   "fin"
+  ],
+  "remessa": [
+   "fin"
+  ],
+  "orcfin": [
+   "fin"
+  ],
+  "acordo": [
+   "comp"
+  ],
+  "invaj": [
+   "comp",
+   "est"
+  ],
+  "devobra": [
+   "est"
+  ],
+  "obrchk": [
+   "proj"
+  ],
+  "obrextr": [
+   "ferr"
+  ],
+  "fofi": [
+   "folha"
+  ],
+  "foimp": [
+   "folha"
+  ],
+  "heaut": [
+   "ponto"
+  ],
+  "quadro": [
+   "rh"
+  ],
+  "tdoc": [
+   "proj"
+  ],
+  "tterc": [
+   "sst"
+  ],
+  "pesq": [
+   "qual",
+   "dir"
+  ],
+  "medemp": [
+   "fin"
   ]
  }
 }

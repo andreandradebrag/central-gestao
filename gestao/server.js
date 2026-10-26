@@ -95,7 +95,7 @@ const pode = (conta, p, modo) => !!conta && conta.ativo && NIV[conta.nivel] >= N
 /* ---- perfis do sistema (Usuários) aplicados também no servidor ----
    O nível do login (Equipe/Colaborador) diz o que a conta pode gravar; o perfil escolhido em Usuários restringe
    no servidor os dados de RH/DP, as integrações e a gestão de contas. */
-const SENS_RH = new Set(['rhdoc', 'fpag', 'ferias', 'afast', 'adm', 'dpmov', 'desl', 'esoc', 'dpsol', 'emprest', 'rel', 'psicamp', 'psr', 'cand', 'ppp', 'lgpdreq', 'lgpdinc', 'lgpdc', 'pmmes', 'bhlanc']);
+const SENS_RH = new Set(['rhdoc', 'fpag', 'ferias', 'afast', 'adm', 'dpmov', 'desl', 'esoc', 'dpsol', 'emprest', 'rel', 'psicamp', 'psr', 'cand', 'ppp', 'lgpdreq', 'lgpdinc', 'lgpdc', 'pmmes', 'bhlanc', 'fofi', 'foimp', 'tterc']);
 const PERF_RH = new Set(['admin', 'rh', 'leituratotal']);
 let perfilMapa = null;
 function perfilDe(conta) {
