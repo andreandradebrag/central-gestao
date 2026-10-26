@@ -126,10 +126,11 @@ module.exports = function (ctx) {
       catch (er) { if (!/ 404/.test(String(er.msg || ''))) throw er; brutos = await todas(await punchUrl(), '', query); }
       const funcs = col('func'), porExt = new Map(), porSol = new Map(), porCpf = new Map(), vinc = e.vinculos || {};
       funcs.forEach(f => { porExt.set(f.id, f.id); if (f.solidesId) porSol.set(String(f.solidesId), f.id); const c = dig(f.cpf); if (c.length === 11) porCpf.set(c, f.id); });
-      const docs = new Map(), sem = new Map(); let n = 0, ex = 0;
+      const docs = new Map(), sem = new Map(), empDe = new Map(); let n = 0, ex = 0;
       for (const o of brutos) {
         const p = normPunch(o); if (!p.tempos.length) continue;
         const fid = (p.ext && porExt.get(p.ext)) || (p.empId && (porSol.get(p.empId) || vinc[p.empId])) || (p.cpf && porCpf.get(p.cpf)) || '';
+        if (fid && p.empId) empDe.set(fid, p.empId);
         if (!fid) { const k = p.empId || p.cpf || p.nome; if (k && !sem.has(k)) sem.set(k, { solidesId: p.empId, nome: p.nome, cpf: p.cpf ? '***.' + p.cpf.slice(3, 6) + '.' + p.cpf.slice(6, 9) + '-**' : '' }); continue; }
         for (const [t, suf] of p.tempos) {
           const L = fmtLocal(t), id = 'pm_' + fid + '_' + L.data.slice(0, 7), key = (p.id || String(t)) + suf;
@@ -144,6 +145,12 @@ module.exports = function (ctx) {
           dia.m = [...new Set(outras.concat(Object.values(dia.p)))].sort();
         }
       }
+      /* totais fechados pela Sólides no mês (trabalhadas, extras, faltas, atrasos e banco), para a Conferência do mês */
+      const fila = [...docs.values()].filter(d => empDe.get(d.funcId)), minDe = v => typeof v === 'number' ? Math.round(v / 60000) : null;
+      await Promise.all([0, 1, 2, 3].map(async () => { while (fila.length) { const d = fila.shift(); const [y, mo] = d.ym.split('-').map(Number);
+        const i0 = Date.parse(d.ym + '-01T00:00:00-03:00'), f0 = Math.min(Date.now(), Date.parse(new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 10) + 'T00:00:00-03:00') - 1);
+        try { const r = await sol(PUNCHES, '/punch/v2/punches/employees/' + encodeURIComponent(empDe.get(d.funcId)) + '/summary', { query: { startDate: i0, endDate: f0 } });
+          if (r && typeof r === 'object') d.sum = { trab: minDe(r.totalWorked), prev: minDe(r.totalExpected), ext: minDe(r.overtime), atraso: minDe(r.delays), falta: typeof r.absences === 'number' ? r.absences : null, bh: minDe(r.hoursBank), em: Date.now() }; } catch (x) { } } }));
       docs.forEach((d, id) => { d.v = Date.now(); d.imp = 'solides'; docPut('pmmes/' + id, d); });
       const novo = Object.assign(e, { lastUpdate: ini, ultimo: Date.now(), ok: true, erro: '', recebidas: n, excluidas: ex, docs: docs.size, semVinculo: [...sem.values()].slice(0, 200) });
       salvaEst(novo);
