@@ -14035,7 +14035,8 @@ A.pmImportar=async()=>{
     r.marcs.forEach(h=>{if(o.m.indexOf(h)<0)o.m.push(h);});if(r.dep)o.dep=r.dep;if(r.oc)o.oc=o.oc?o.oc+' · '+r.oc:r.oc;Object.assign(o.t,r.t);});
   porDoc.forEach(x=>Object.values(x.dias).forEach(o=>{if(o._n>1)o.m.sort();delete o._n;}));
   porDoc.forEach((x,id)=>{const old=get('pmmes',id),dias=Object.assign({},old&&old.dias||{},x.dias);
-    put('pmmes',{id,funcId:x.funcId,ym:x.ym,dias,imp:imp.id,v:Date.now()});
+    /* o relatório substitui os dias que trouxer (marcações, local de trabalho e totais); o resto do mês e o resumo da Sólides ficam */
+    put('pmmes',Object.assign({},old||{},{id,funcId:x.funcId,ym:x.ym,dias,imp:imp.id,v:Date.now()}));
     imp.chaves[id]=Object.keys(x.dias);nd+=Object.keys(x.dias).length;Object.values(x.dias).forEach(o=>nm+=o.m.length);
     /* marcações do nosso app nos mesmos dias são desconsideradas (dá para desfazer) */
     if(u.anular!=='nao'){const set=new Set(Object.keys(x.dias));S.ponto.filter(q=>!q._pm&&!q.anulada&&q.funcId===x.funcId&&set.has(q.data)).forEach(q=>{put('ponto',Object.assign(cl(q),{anulada:true,anuladaPm:imp.id}));imp.anuladas.push(q.id);});}});
@@ -14763,8 +14764,9 @@ A.solSyncAnoOk=async()=>{if(SOL.busy)return;const ano=+(($('#f_sanoAno')||{}).va
   finally{SOL.busy='';if(btn){btn.disabled=false;btn.textContent='Buscar de novo';}render();pint();}};
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='93',APP_DATA='2026-10-26';
+const APP_VER='94',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['94','2026-10-26',['Ponto (Sólides): o relatório importado por arquivo substitui só os dias que traz (marcações, local de trabalho/obra e totais) e mantém o resumo mensal vindo da sincronização.']],
   ['93','2026-10-26',['Ponto (Sólides): Buscar o mês e Buscar o ano inteiro voltam a trazer os funcionários ativos (a Sólides devolvia só os demitidos). O andamento mostra também as marcações de quem está sem vínculo.']],
   ['92','2026-10-26',['Ponto (Sólides): novo botão Buscar o ano inteiro, que traz da Sólides, mês a mês, as marcações e os totais de janeiro até o mês atual, mostrando o andamento.']],
   ['91','2026-10-26',['Ponto (Sólides) › Conferência do mês: o mês é escolhido numa lista (sem digitar).','As colunas da Sólides (trabalhadas, extras e banco) passam a vir do resumo mensal da própria Sólides.','Quem não tem jornada cadastrada aparece como "sem jornada" em vez de mostrar todas as horas como extras; o botão Aplicar jornada a quem não tem resolve em lote.']],
