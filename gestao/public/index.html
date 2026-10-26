@@ -15112,15 +15112,15 @@ A.crlvImportar=()=>{if(!mayW('frota')){toast('Seu perfil não pode cadastrar ve�
    Cada veículo tem o local onde fica (base, garagem, obra). Em Frota › Veículos › "Locais da frota" o administrador
    cadastra os locais e diz quais usuários usam cada local; no cadastro do colaborador há os locais permitidos.
    Quem tem locais definidos (no usuário ou no colaborador ligado a ele) só vê os veículos desses locais na lista de
-   veículos, nas saídas, abastecimentos e manutenções e em toda escolha de veículo. Sem locais definidos, vê tudo.
-   Administrador vê sempre tudo. Veículo sem local aparece para todos. */
+   veículos, nas saídas, abastecimentos e manutenções e em toda escolha de veículo. Sem nenhum local marcado, não vê nenhum veículo.
+   Administrador vê sempre tudo. Veículo sem local só aparece para o administrador. Enquanto não houver locais cadastrados, nada muda. */
 const frLocais=()=>(cfg().frotaLocais||[]).filter(Boolean);
 function frLocaisPermitidos(){
   const p=PERFIS[me.perfil]||{};if(p.w==='*'||me.owner)return null;
   const u=typeof meuUsr==='function'?meuUsr():null,f=me.uid?S.func.find(x=>x.usrId===me.uid):null;
-  const ls=[].concat(u&&u.locaisVeic||[],f&&f.locaisVeic||[]).filter(l=>frLocais().includes(l));
-  return ls.length?new Set(ls):null;}
-const frVeicOk=(v,perm)=>!perm||!v||!v.local||perm.has(v.local);
+  if(!frLocais().length)return null;/* enquanto não houver locais cadastrados, nada muda */
+  return new Set([].concat(u&&u.locaisVeic||[],f&&f.locaisVeic||[]).filter(l=>frLocais().includes(l)));}
+const frVeicOk=(v,perm)=>!perm||!!(v&&v.local&&perm.has(v.local));
 /* troca S.veic pelos veículos permitidos só durante o desenho da tela ou do formulário */
 function frComVeicPermitidos(fn,ctx,args){const perm=frLocaisPermitidos();if(!perm)return fn.apply(ctx,args);const sv=S.veic;S.veic=sv.filter(v=>frVeicOk(v,perm));try{return fn.apply(ctx,args);}finally{S.veic=sv;}}
 const FR_COLS_VEIC=['vsai','vabas','vman','mult','vrota','ventr'];
@@ -15139,14 +15139,14 @@ const FR_COLS_VEIC=['vsai','vabas','vman','mult','vrota','ventr'];
 /* locais permitidos no cadastro do colaborador */
 {const d=MODS2.func,f0=d.fields,p0=d.pre;
   d.fields=r=>{const ls=frLocais();if(!ls.length)return f0(r);const tem=new Set(r.locaisVeic||[]);
-    return f0(r).concat([{t:'sect',l:'Veículos que pode usar (locais da frota). Nenhum marcado: vê todos.'}].concat(ls.map((l,i)=>F('frl_'+i,l,'checkbox')).map((f,i)=>{r['frl_'+i]=tem.has(ls[i]);return f;})));};
+    return f0(r).concat([{t:'sect',l:'Veículos que pode usar (locais da frota). Nenhum marcado: não vê nenhum veículo.'}].concat(ls.map((l,i)=>F('frl_'+i,l,'checkbox')).map((f,i)=>{r['frl_'+i]=tem.has(ls[i]);return f;})));};
   d.pre=(r,isNew)=>{const ls=frLocais();if(ls.length){r.locaisVeic=ls.filter((l,i)=>r['frl_'+i]);ls.forEach((l,i)=>delete r['frl_'+i]);}if(p0)p0(r,isNew);};}
 A.frLocais=()=>{if(!mayW('frota')){toast('Seu perfil não pode alterar os locais da frota.','neg');return;}
   const ls=frLocais(),us=S.usr.filter(u=>u.ativo!==false&&u.perfil!=='pendente').slice().sort((a,b)=>String(a.apelido||'').localeCompare(String(b.apelido||'')));
   const nomeU=u=>u.apelido||u.uid||'Usuário';
   const podeU=mayW('usr'),tab=podeU&&ls.length&&us.length?'<div class="tw" style="margin-top:12px;max-height:360px;overflow:auto"><table><thead><tr><th>Usuário do sistema</th>'+ls.map(l=>'<th class="num">'+esc(l)+'</th>').join('')+'</tr></thead><tbody>'+
     us.map(u=>'<tr><td>'+esc(nomeU(u))+'<div class="sub">'+esc((PERFIS[u.perfil]||{}).nome||u.perfil||'')+'</div></td>'+ls.map((l,i)=>'<td class="num"><input type="checkbox" data-frl-u="'+esc(u.id)+'" data-frl-i="'+i+'"'+((u.locaisVeic||[]).includes(l)?' checked':'')+'></td>').join('')+'</tr>').join('')+'</tbody></table></div>':'';
-  modal({title:'Locais da frota',wide:true,body:'<p class="sub" style="margin:0 0 8px">Um local por linha (ex.: Sede Tuiuti, Garagem Bragança, Obra Hospital). Depois de salvar os locais, marque quais usuários usam cada um. Quem não tiver nenhum local marcado (aqui ou no cadastro do colaborador) vê todos os veículos; administradores sempre veem todos.</p>'+
+  modal({title:'Locais da frota',wide:true,body:'<p class="sub" style="margin:0 0 8px">Um local por linha (ex.: Sede Tuiuti, Garagem Bragança, Obra Hospital). Depois de salvar os locais, marque quais usuários usam cada um. Quem não tiver nenhum local marcado (aqui ou no cadastro do colaborador) não vê nenhum veículo; veículo sem local definido só aparece para administradores, que sempre veem todos.</p>'+
     field('Locais','frlista','textarea',ls.join('\n'),{full:true})+tab,saveLabel:'Salvar',save:root=>{
       const novos=[...new Set(String(($('#f_frlista',root)||{}).value||'').split('\n').map(s=>s.trim()).filter(Boolean))].slice(0,60);
       put('cfg',Object.assign(cl(cfg()),{frotaLocais:novos}));
@@ -18040,8 +18040,9 @@ V.segf=()=>{const R=segAnalise(),pes=segPessoas(),a=alc(),pn=k=>(PERFIS[k]||{}).
 if(typeof alertasQual==='function'){const q0=alertasQual;alertasQual=function(){const it=q0.apply(this,arguments)||[];try{it.push(...alertasPesq());if(mayR('fin')||mayW('qual')){const n=cnqItens().filter(x=>cnqSit(x.col,x.r).k==='pend').length;if(n)it.push(['cnq',n+' custo(s) de retrabalho ainda não lançado(s) na obra',String(n)]);}}catch(e){}return it;};}
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='108',APP_DATA='2026-10-26';
+const APP_VER='109',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['109','2026-10-26',['Locais da frota: quem não tem nenhum local marcado (no usuário ou no colaborador) não vê nenhum veículo, e veículo sem local só aparece para o administrador. A regra começa a valer quando houver locais cadastrados.']],
   ['108','2026-10-26',['Frota: local onde cada veículo fica (botão Locais da frota) e acesso por local no usuário e no colaborador.','Financeiro: alçadas de aprovação em níveis (inclusive descontos, renegociações, baixas sem pagamento, cancelamentos e estornos), dupla checagem na troca de dados bancários do fornecedor, adiantamentos, caixinha de obra e prestação de contas, orçamento anual x DRE, limite de crédito de clientes e remessa de pagamentos ao BB (CNAB 240, a homologar com o banco).','Fiscal e comercial: competência fechada travada (reabertura só pelo administrador, com motivo), conferência medições x NFS-e x contas a receber, retenções sofridas, cancelamento de NFS-e com aprovação, empenho obrigatório em contrato público, reequilíbrio, acervo técnico e aprovação da proposta abaixo da margem mínima.','Suprimentos: recebimento parcial e conferência pedido x nota x recebimento com tolerâncias, política de cotação, acordos de preço, aprovação de ajuste de inventário e devolução de sobras da obra.','Obras: custo único da obra (contas, material do estoque, mão de obra pelo ponto, equipamentos e frota), previsão do custo final, item da EAP obrigatório, linha de base, checklists de mobilização e encerramento, aluguel interno e calibração de equipamentos, extravios, checklist de saída de veículos e custo por km.','Pessoal e SST: folha oficial importada (resumo e PDF do holerite oficial, prévia marcada como não é recibo), contas a pagar da folha, autorização de hora extra, quadro de pessoal por obra, fontes oficiais do ponto por período, documentos de empreiteiros e terceiros, alerta de alocação irregular no diário e assinatura da entrega de EPI.','Qualidade e controles: custo da não qualidade, inspeção antes de medir, pesquisa de satisfação (NPS), controles internos (relatório de exceções), indicadores por área e mapa de segregação de funções.']],
   ['107','2026-10-26',['Frota › Veículos: botão Importar CRLV (PDF). Lê o CRLV digital e preenche placa, RENAVAM, chassi, marca, modelo, ano, combustível, tipo, cor e motor. Com um arquivo abre o cadastro para conferir e salvar; com vários, cadastra todos de uma vez. Placa já cadastrada só tem os campos vazios completados.']],
   ['106','2026-10-26',['Folha e holerites: holerite de colaborador excluído do cadastro aparecia só como "—". Agora a linha avisa e tem o botão Excluir holerite; se o colaborador está sem nome, aparece Abrir cadastro.']],
