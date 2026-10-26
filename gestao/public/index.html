@@ -14857,12 +14857,35 @@ A.jorFuncsOk=d=>{const j=get('jornada',d.id);if(!j)return;let ent=0,sai=0;
     if(c.checked&&f.jornadaId!==j.id){put('func',Object.assign(cl(f),{jornadaId:j.id}));ent++;}
     else if(!c.checked&&f.jornadaId===j.id){put('func',Object.assign(cl(f),{jornadaId:''}));sai++;}});
   closeModal();toast(ent||sai?(ent?ent+' funcionário(s) incluído(s)':'')+(ent&&sai?' e ':'')+(sai?sai+' retirado(s)':'')+' da jornada '+(j.nome||'')+'.':'Nada mudou.','pos');render();};
+/* ===== v100: Empréstimos › Editar =====
+   Sem parcela paga: edita tudo (funcionário, data, valor, parcelas, juros, primeira parcela, forma, testemunhas)
+   e as parcelas são recalculadas; a liberação no financeiro acompanha. Com parcela paga: só forma, finalidade,
+   testemunhas e observações (valores ficam travados; use Quitar antecipado ou um novo empréstimo). */
+ACT_GROUP.emEditar='rh';
+{const v0=V.emprest;V.emprest=()=>{const h=v0();if(!mayW('rh'))return h;
+  return h.replace(/<button class="btn sm" data-act="emAbrir" data-xid="([^"]+)">Abrir<\/button>/g,(m,id)=>{const e=get('emprest',id);return m+(e&&e.status==='ativo'?'<button class="btn sm" data-act="emEditar" data-xid="'+id+'">Editar</button>':'');});};}
+{const a0=A.emAbrir;A.emAbrir=d=>{a0(d);const e=get('emprest',d.xid||d.id),f=$('#mf');if(e&&f&&mayW('rh')&&e.status==='ativo'&&!f.querySelector('[data-act=emEditar]'))f.insertAdjacentHTML('afterbegin','<button class="btn" data-act="emEditar" data-xid="'+esc(e.id)+'" style="margin-right:auto">Editar</button>');};}
+A.emEditar=d=>{const e=get('emprest',d.xid);if(!e)return;if(e.status!=='ativo'){toast('Só empréstimos ativos podem ser editados.','neg');return;}
+  const pagas=(e.parcelas||[]).filter(p=>emPaga(e,p)).length,livre=!pagas;
+  const fs=S.func.filter(x=>x.status!=='desligado'||x.id===e.funcId).slice().sort(byNome).map(x=>[x.id,x.nome]);
+  const formas=[['folha','Desconto em folha (com autorização)'],['pix','PIX ou transferência'],['dinheiro','Dinheiro']];
+  const body='<div class="fg">'+(livre?field('Funcionário *','funcId','select',e.funcId,{opts:fs,full:true})+field('Data do contrato *','data','date',e.data)+field('Valor emprestado (R$) *','valor','number',e.valor)+field('Número de parcelas *','n','number',(e.parcelas||[]).length||e.n)+field('Juros ao mês (%)','juros','number',e.juros||0)+field('Primeira parcela (mês) *','inicio','month',e.inicio||((e.parcelas||[])[0]||{}).comp||''):'')+
+    field('Forma de pagamento','forma','select',e.forma,{opts:formas})+field('Finalidade (opcional)','finalidade','text',e.finalidade||'',{full:true})+field('Testemunha 1 (nome)','test1','text',e.test1||'')+field('Testemunha 2 (nome)','test2','text',e.test2||'')+field('Observações','obs','textarea',e.obs||'',{full:true,rows:2})+'</div>'+
+    (livre?'<p class="sub" id="emPrev" style="margin:10px 0 0">Ao salvar, as parcelas são recalculadas. Se o contrato já foi assinado, imprima e assine de novo.</p>':'<div class="note" style="margin-top:10px">'+pagas+' parcela(s) já paga(s): valor, parcelas e juros ficam travados. Para mudar o saldo, use <b>Quitar antecipado</b> ou crie um novo empréstimo.</div>');
+  modal({title:'Editar empréstimo nº '+e.numero,wide:true,body,saveLabel:'Salvar',save:root=>{const v=readForm(root),n=cl(e);
+    Object.assign(n,{forma:v.forma,finalidade:v.finalidade||'',test1:v.test1||'',test2:v.test2||'',obs:v.obs||'',editadoEm:Date.now(),editadoPor:actorId()});
+    if(livre){if(!v.funcId){toast('Escolha o funcionário.','neg');return false;}if(!(+v.valor>0)){toast('Informe o valor.','neg');return false;}if(!(+v.n>=1&&+v.n<=60)){toast('Parcelas entre 1 e 60.','neg');return false;}if(!v.inicio){toast('Informe o mês da primeira parcela.','neg');return false;}if(+v.juros<0||+v.juros>10){toast('Juros entre 0% e 10% ao mês.','neg');return false;}
+      Object.assign(n,{funcId:v.funcId,data:v.data||e.data,valor:r2(+v.valor),n:+v.n,juros:+v.juros||0,inicio:v.inicio,parcelas:emGerar(v.valor,v.n,v.juros,v.inicio)});
+      const l=e.liberadoLancId&&get('lanc',e.liberadoLancId),fn=get('func',v.funcId)||{};
+      if(l)put('lanc',Object.assign(cl(l),{desc:'Empréstimo nº '+e.numero+' a '+(fn.nome||''),valor:n.valor,valorPago:n.valor,venc:n.data,pago:n.data,comp:ym(n.data)}));}
+    put('emprest',n);closeModal();toast('Empréstimo nº '+e.numero+' atualizado.'+(livre?' Parcelas recalculadas.':''),'pos');render();}});};
 /* ===== v98: abrir o cadastro do funcionário a partir dos quadros ===== */
 ACT_GROUP.funcAbrir='rh';
 A.funcAbrir=d=>{const f=get('func',d.id);if(!f){toast('Funcionário não encontrado.','neg');return;}openMod('func',cl(f));};
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='99',APP_DATA='2026-10-26';
+const APP_VER='100',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['100','2026-10-26',['Empréstimos a funcionários: botão Editar. Sem parcela paga, dá para mudar tudo e as parcelas são recalculadas; com parcela paga, só forma, finalidade, testemunhas e observações.']],
   ['99','2026-10-26',['Pessoas › Mais › Jornadas: novo botão Funcionários em cada jornada, para marcar quem faz aquele horário (com busca e marcar/desmarcar todos).']],
   ['98','2026-10-26',['Painel do DP › Contratos de experiência: clique no nome do funcionário para abrir o cadastro e editar.']],
   ['97','2026-10-26',['Nova tela Pessoas › Ponto do dia: todos os funcionários num dia, com Entrada, Saída almoço, Volta e Saída, e a situação de cada um (completo, em andamento, batida faltando, sem marcação, folga, férias/afastamento). Atrasos aparecem na entrada.','Indicadores no topo e alerta no Painel do DP com quem ficou com batida faltando no último dia útil.']],
