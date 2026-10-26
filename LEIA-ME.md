@@ -181,3 +181,15 @@ No serviço **gestao › Ambiente** do Easypanel, preencha e clique em **Implant
 
 Para conferir: **Contas de acesso › E-mail do sistema › Enviar e-mail de teste**.
 
+
+## Cópia de segurança
+
+Todo dia, a partir das 3h (horário de Brasília), o sistema grava `/data/backups/gestao-AAAA-MM-DD.db.gz` com o banco de dados inteiro e guarda os últimos 30 dias (`BACKUP_DIAS`). O dono vê a lista, baixa e faz uma cópia na hora em **Contas de acesso › Cópia de segurança**.
+
+- Os anexos (pasta `/data/blobs`) não entram nessa cópia: ative também o **backup da VPS no painel da Hostinger**.
+- Para guardar uma cópia fora do servidor, crie um bucket num serviço compatível com S3 (Cloudflare R2, Backblaze B2, Wasabi, AWS) e preencha no serviço gestao › Ambiente: `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_REGIAO` (R2: `auto`), `BACKUP_S3_CHAVE`, `BACKUP_S3_SEGREDO` e, se quiser, `BACKUP_S3_PASTA`. Clique em Implantar.
+- Para restaurar: descompacte o arquivo (`gunzip`), pare o serviço gestao, troque `/data/gestao.db` pelo arquivo descompactado e implante de novo.
+
+## Permissão de gravação por módulo
+
+O servidor confere se o perfil de cada pessoa pode gravar no módulo. Começa em `PERFIL_GRAVACAO=avisar`: nada é bloqueado e **Contas de acesso › Gravação por módulo** mostra o que seria recusado. Depois de conferir, mude para `PERFIL_GRAVACAO=bloquear` e implante.

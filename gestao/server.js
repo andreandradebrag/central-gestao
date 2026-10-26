@@ -31,6 +31,7 @@ fs.mkdirSync(path.join(DATA, 'tmp'), { recursive: true });
 /* ---------------- banco ---------------- */
 process.removeAllListeners('warning');
 const db = new DatabaseSync(path.join(DATA, 'gestao.db'));
+const BACKUP = require('./backup.js').criar(db, DATA);
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
 CREATE TABLE IF NOT EXISTS docs(path TEXT PRIMARY KEY, parent TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS docs_parent ON docs(parent);
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS contas(id TEXT PRIMARY KEY, nome TEXT, email TEXT UNI
 CREATE TABLE IF NOT EXISTS sessoes(token TEXT PRIMARY KEY, conta TEXT NOT NULL, criado INTEGER, expira INTEGER);
 CREATE TABLE IF NOT EXISTS arquivos(id TEXT PRIMARY KEY, ct TEXT, tam INTEGER, por TEXT, criado INTEGER);
 CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS perm_log(dia TEXT, conta TEXT, perfil TEXT, col TEXT, n INTEGER, ult INTEGER, PRIMARY KEY(dia, conta, col));
 CREATE TABLE IF NOT EXISTS tokens_senha(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, tipo TEXT, expira INTEGER);`);
 const q = {
   docGet: db.prepare('SELECT data, ts FROM docs WHERE path=?'),
@@ -113,6 +115,37 @@ function perfilPermite(conta, p, modo) {
 /* gestão de contas: só o perfil Administrador; contas de nível Equipe só o dono altera (evita que um administrador tome a conta de outro) */
 const gestorContas = conta => !!conta && NIV[conta.nivel] >= NIV.admin && perfilEm(conta, ['admin']);
 const protegida = (conta, c) => c.id !== conta.id && conta.nivel !== 'owner' && (c.nivel === 'admin' || c.nivel === 'owner');
+/* cadastro de colaboradores: salário, CPF, documentos, endereço, dados bancários, benefícios e dependentes
+   só para RH, Administrador e Leitura completa; os outros perfis veem nome, função, obra, contato e CNH.
+   Ao gravar, o servidor mantém os campos ocultos como estavam. */
+const FUNC_SENS = /^(cpf|rg|pis|ctps|nasc|salario|ben[A-Z]|tr(Valor|Modo|Linhas|Dist|Tempo|Dias)|banco|agencia|conta[A-Z]?|pix|dep[A-Z]|insal|pericul|end$|numero$|compl$|bairro$|cep$|rec[A-Z]|mae$|pai$|raca|sexo|estadoCivil|escolaridade|defic|sangue|alerg|tituloEleitor|reservista)/;
+const ehDocFunc = p => /^func\/[^/]+$/.test(p);
+const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin || PERF_RH.has(perfilDe(conta));
+function redigir(conta, p, data) {
+  if (!data || !ehDocFunc(p) || veFuncCompleto(conta)) return data;
+  const o = {}; for (const k of Object.keys(data)) if (!FUNC_SENS.test(k)) o[k] = data[k]; o._restrito = true; return o;
+}
+function preservarFunc(conta, p, novo) {
+  if (!ehDocFunc(p) || veFuncCompleto(conta)) return novo;
+  const r = q.docGet.get(p), velho = r ? JSON.parse(r.data) : {}, o = {};
+  for (const k of Object.keys(novo)) if (!FUNC_SENS.test(k) && k !== '_restrito') o[k] = novo[k];
+  for (const k of Object.keys(velho)) if (FUNC_SENS.test(k)) o[k] = velho[k];
+  return o;
+}
+/* gravação por módulo: cada coleção pertence a um módulo (perfis.json, gerado a partir do sistema); o perfil
+   só grava nos módulos dele. PERFIL_GRAVACAO=avisar (padrão) só registra o que seria bloqueado, para conferir
+   antes; PERFIL_GRAVACAO=bloquear passa a recusar. */
+let PERM = { perfis: {}, colecoes: {} };
+try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'utf8')); } catch (e) { console.log('perfis.json não encontrado: gravação por módulo desligada'); }
+const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'avisar').toLowerCase() === 'bloquear' ? 'bloquear' : 'avisar';
+const LIVRES = new Set(['cfg', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'usr']);
+function gravacaoPermitida(conta, p) {
+  if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
+  const pf = perfilDe(conta), pr = PERM.perfis[pf]; if (!pr || pr.w === '*') return true;
+  const c0 = p.split('/')[0], gs = PERM.colecoes[c0]; if (LIVRES.has(c0) || !gs || !gs.length) return true;
+  return gs.some(g => pr.w.includes(g));
+}
+const permLogPut = db.prepare('INSERT INTO perm_log(dia,conta,perfil,col,n,ult) VALUES(?,?,?,?,1,?) ON CONFLICT(dia,conta,col) DO UPDATE SET n=n+1, ult=excluded.ult, perfil=excluded.perfil');
 const perfilEm = (conta, lista) => conta && (conta.nivel === 'owner' || lista.includes(perfilDe(conta)));
 /* chat: mensagens, áudios e conversas só para quem participa da conversa (o canal Geral é de todos) */
 function chatVisivel(conta, p, data, memo) {
@@ -137,7 +170,7 @@ function avisarDoc(op, p, data, ts) {
   const parent = p.split('/').slice(0, -1).join('/'), id = p.split('/').pop();
   for (const [cid, c] of CONEX) {
     const ca = q.contaPorId.get(c.conta.id); if (!ca || !ca.ativo) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } continue; }
-    c.conta = ca; if (podeVer(ca, p, data || (op === 'del' ? null : {}), null) || (op === 'del' && pode(ca, p, 'r') && perfilPermite(ca, p, 'r'))) sse(c.res, 'doc', { op, path: p, parent, id, data, ts });
+    c.conta = ca; if (podeVer(ca, p, data || (op === 'del' ? null : {}), null) || (op === 'del' && pode(ca, p, 'r') && perfilPermite(ca, p, 'r'))) sse(c.res, 'doc', { op, path: p, parent, id, data: redigir(ca, p, data), ts });
   }
 }
 function pares() {
@@ -206,6 +239,24 @@ function pagLogin(msg, setup) {
     '<form method="post" action="' + (setup ? '/setup' : '/login') + '">' + (setup ? '<label>Seu nome<input name="nome" required autocomplete="name"></label>' : '') + '<label>E-mail<input name="email" type="email" required autocomplete="username"></label><label>Senha<input name="senha" type="password" required minlength="' + (setup ? 8 : 1) + '" autocomplete="' + (setup ? 'new-password' : 'current-password') + '"></label><button class="pri" type="submit" style="width:100%">' + (setup ? 'Criar e entrar' : 'Entrar') + '</button></form>' + (setup ? '' : '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/esqueci">Esqueci minha senha</a></p>') + '</div>');
 }
 const NIV_NOME = { owner: 'Dono', admin: 'Equipe (usa os módulos do perfil em Usuários)', interact: 'Só ponto, Minha área e chat', view: 'Somente leitura (sem acesso aos dados)' };
+function pagBackup(eu) {
+  if (eu.nivel !== 'owner') return '';
+  const e = BACKUP.estado(), ls = BACKUP.lista().slice(0, 10), mb = n => (n / 1048576).toFixed(n < 1048576 ? 2 : 1) + ' MB';
+  const quando = t => new Date(t).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  return '<div class="card"><h2>Cópia de segurança</h2><p class="sub" style="margin:0 0 10px">Todo dia, a partir das 3h, o sistema grava uma cópia do banco de dados no servidor e guarda as dos últimos ' + e.dias + ' dias. ' +
+    (e.s3Configurado ? 'Cada cópia também vai para o armazenamento externo configurado.' : 'Para guardar também fora do servidor, preencha BACKUP_S3_* no Easypanel (veja o LEIA-ME).') + ' Os anexos não entram nesta cópia: ligue o backup da VPS na Hostinger.</p>' +
+    (e.erro ? '<div class="msg err">A última tentativa falhou: ' + esc(e.erro) + '</div>' : '') + (e.s3 ? '<p class="sub" style="margin:0 0 10px">' + esc(e.s3) + '</p>' : '') +
+    (ls.length ? '<table><thead><tr><th>Arquivo</th><th>Tamanho</th><th>Gravada em</th><th></th></tr></thead><tbody>' + ls.map(b => '<tr><td>' + esc(b.nome) + '</td><td>' + mb(b.tam) + '</td><td>' + quando(b.em) + '</td><td><a class="btn" href="/contas/backups/' + encodeURIComponent(b.nome) + '">Baixar</a></td></tr>').join('') + '</tbody></table>' : '<p class="sub">Nenhuma cópia ainda.</p>') +
+    '<form method="post" action="/contas/backup-agora" style="margin-top:10px"><button type="submit">Fazer uma cópia agora</button></form></div>';
+}
+function pagPermLog(eu) {
+  if (eu.nivel !== 'owner' && perfilDe(eu) !== 'admin') return '';
+  const desde = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+  const ls = db.prepare('SELECT conta, perfil, col, SUM(n) AS n, MAX(ult) AS ult FROM perm_log WHERE dia>=? GROUP BY conta, col ORDER BY n DESC LIMIT 50').all(desde);
+  const nome = id => { const c = q.contaPorId.get(id); return c ? (c.nome || c.email) : id; };
+  return '<div class="card"><h2>Gravação por módulo</h2><p class="sub" style="margin:0 0 10px">Modo atual: <b>' + (MODO_GRAV === 'bloquear' ? 'bloquear' : 'só avisar') + '</b>. ' + (MODO_GRAV === 'bloquear' ? 'Gravações fora dos módulos do perfil são recusadas.' : 'Nada é bloqueado ainda: a lista abaixo mostra o que seria recusado nos últimos 14 dias. Se estiver vazia ou só com casos que devem mesmo ser barrados, coloque PERFIL_GRAVACAO=bloquear no serviço gestao (Ambiente) e clique em Implantar.') + '</p>' +
+    (ls.length ? '<table><thead><tr><th>Pessoa</th><th>Perfil</th><th>Dados</th><th>Vezes</th><th>Última</th></tr></thead><tbody>' + ls.map(r => '<tr><td>' + esc(nome(r.conta)) + '</td><td>' + esc(r.perfil) + '</td><td>' + esc(r.col) + ' <span style="color:var(--mut)">(' + esc((PERM.colecoes[r.col] || []).join(', ')) + ')</span></td><td>' + r.n + '</td><td>' + new Date(r.ult).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</td></tr>').join('') + '</tbody></table>' : '<p class="sub" style="margin:0">Nenhuma gravação fora do perfil nos últimos 14 dias.</p>') + '</div>';
+}
 function pagContas(eu, msg, erro) {
   const cs = q.contas.all();
   const linhas = cs.map(c => '<tr><td><b>' + esc(c.nome || '—') + '</b><div style="color:var(--mut);font-size:12px">' + esc(c.email || 'sem e-mail') + (c.importado ? ' · importado' : '') + '</div></td><td>' + esc(NIV_NOME[c.nivel] || c.nivel) + '</td><td>' + (c.ativo ? (c.temSenha ? 'Ativa' : 'Sem senha') : 'Desativada') + '</td><td style="white-space:nowrap">' +
@@ -216,6 +267,7 @@ function pagContas(eu, msg, erro) {
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
     '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
     '<div class="card"><h2>Criar conta ou definir senha</h2><form method="post" action="/contas/salvar"><div class="row"><label>Conta<select name="id"><option value="">Nova conta</option>' + cs.filter(c => c.nivel !== 'owner' || c.id === eu.id).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Nome<input name="nome"></label></div><div class="row"><label>E-mail<input name="email" type="email"></label><label>Senha (mínimo 8)<input name="senha" type="password" minlength="8" autocomplete="new-password"></label><label>Nível<select name="nivel">' + ['admin', 'interact'].map(n => '<option value="' + n + '">' + NIV_NOME[n] + '</option>').join('') + '</select></label></div><button class="pri" type="submit">Salvar</button><p class="sub" style="margin:10px 0 0">Para uma conta existente, deixe em branco o que não quer mudar. Passe a senha à pessoa por um canal seguro; ela pode trocá-la depois em Minha senha.</p></form></div>' +
+    pagPermLog(eu) + pagBackup(eu) +
     '<div class="card"><h2>E-mail do sistema</h2><p class="sub" style="margin:0 0 10px">' + (EMAIL.configurado() ? 'Configurado. O sistema envia o convite de novo usuário e o link de "Esqueci minha senha".' : 'Ainda não configurado: preencha SMTP_HOST, SMTP_PORT, SMTP_USUARIO, SMTP_SENHA e SMTP_REMETENTE no serviço gestao do Easypanel e clique em Implantar.') + '</p>' + (EMAIL.configurado() ? '<form method="post" action="/contas/teste-email"><button type="submit">Enviar e-mail de teste para ' + esc(eu.email || '') + '</button></form>' : '') + '</div>' +
     '<div class="card"><h2>Minha senha</h2><form method="post" action="/contas/senha"><div class="row"><label>Senha atual<input name="atual" type="password" required autocomplete="current-password"></label><label>Nova senha<input name="nova" type="password" minlength="8" required autocomplete="new-password"></label></div><button type="submit">Trocar senha</button></form></div>');
 }
@@ -377,6 +429,16 @@ async function rotear(req, res) {
   if (!conta) { if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 401, { erro: 'Entre novamente.' }); return redir(res, semContas ? '/setup' : '/login'); }
 
   /* ---- contas ---- */
+  if (p === '/contas/backup-agora' && m === 'POST') {
+    if (conta.nivel !== 'owner') return redir(res, '/contas');
+    try { const b = await BACKUP.fazer('manual'); return redir(res, '/contas?m=' + encodeURIComponent('Cópia gravada: ' + b.nome)); } catch (e) { return redir(res, '/contas?e=1&m=' + encodeURIComponent('A cópia falhou: ' + e.message)); }
+  }
+  if (p.startsWith('/contas/backups/') && m === 'GET') {
+    if (conta.nivel !== 'owner') { res.writeHead(404); return res.end(); }
+    const f = BACKUP.arquivo(decodeURIComponent(p.slice(16))); if (!f) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': 'application/gzip', 'content-length': fs.statSync(f).size, 'content-disposition': 'attachment; filename="' + path.basename(f) + '"', 'cache-control': 'no-store' });
+    return fs.createReadStream(f).pipe(res);
+  }
   if (p === '/contas' && m === 'GET') { if (!gestorContas(conta)) return redir(res, '/'); return html(res, 200, pagContas(conta, u.searchParams.get('m'), u.searchParams.get('e'))); }
   if (p === '/contas/salvar' && m === 'POST') {
     if (!gestorContas(conta)) return redir(res, '/');
@@ -479,20 +541,25 @@ async function rotear(req, res) {
   if (p === '/api/busca-pessoas') { const t = String(u.searchParams.get('q') || '').toLowerCase(); return json(res, 200, q.contas.all().filter(c => c.ativo && (!t || (c.nome + ' ' + c.email).toLowerCase().includes(t))).slice(0, 30).map(c => Object.assign(perfilPub(c), { isMe: c.id === conta.id }))); }
   if (p === '/api/db/doc') {
     const dp = String(u.searchParams.get('path') || ''); if (!validPath(dp, true)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
-    if (m === 'GET') { if (!pode(conta, dp, 'r')) return json(res, 403, { code: 'not_granted' }); const r = q.docGet.get(dp), dd = r ? JSON.parse(r.data) : null; return json(res, 200, r && podeVer(conta, dp, dd, new Map()) ? { exists: true, data: dd, ts: r.ts } : { exists: false }); }
+    if (m === 'GET') { if (!pode(conta, dp, 'r')) return json(res, 403, { code: 'not_granted' }); const r = q.docGet.get(dp), dd = r ? JSON.parse(r.data) : null; return json(res, 200, r && podeVer(conta, dp, dd, new Map()) ? { exists: true, data: redigir(conta, dp, dd), ts: r.ts } : { exists: false }); }
     if (!pode(conta, dp, 'w') || !perfilPermite(conta, dp, 'w')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite alterar estes dados.' });
+    if (!gravacaoPermitida(conta, dp)) {
+      try { permLogPut.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), dp.split('/')[0], Date.now()); } catch (e) { }
+      if (MODO_GRAV === 'bloquear') return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não grava neste módulo. Peça a um administrador.' });
+    }
     const seg = dp.split('/'), parent = seg.slice(0, -1).join('/'), id = seg[seg.length - 1], ts = Date.now();
     if (m === 'DELETE') { q.docDel.run(dp); avisarDoc('del', dp, null, ts); return json(res, 200, { ok: true }); }
     const corpo = await lerJson(req); let data = corpo.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)) return json(res, 400, { code: 'invalid_argument', erro: 'Dados inválidos.' });
     if (m === 'PATCH') { const r = q.docGet.get(dp); if (!r) return json(res, 404, { code: 'invalid_argument', erro: 'Documento não existe.' }); data = Object.assign(JSON.parse(r.data), data); }
     if (Object.prototype.hasOwnProperty.call(data, 'id') && data.id !== id) data.id = id;
+    data = preservarFunc(conta, dp, data);
     const txt = JSON.stringify(data); if (txt.length > 4 * 1024 * 1024) return json(res, 413, { code: 'invalid_argument', erro: 'Documento grande demais.' });
     q.docPut.run(dp, parent, id, txt, ts); avisarDoc('set', dp, data, ts); return json(res, 200, { ok: true, ts });
   }
   if (p === '/api/db/col' && m === 'GET') {
     const cp = String(u.searchParams.get('path') || ''); if (!validPath(cp, false)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
-    const memo = new Map(), rows = q.colGet.all(cp).map(r => ({ id: r.id, data: JSON.parse(r.data), ts: r.ts })).filter(r => podeVer(conta, cp + '/' + r.id, r.data, memo));
+    const memo = new Map(), rows = q.colGet.all(cp).map(r => ({ id: r.id, data: JSON.parse(r.data), ts: r.ts })).filter(r => podeVer(conta, cp + '/' + r.id, r.data, memo)).map(r => Object.assign(r, { data: redigir(conta, cp + '/' + r.id, r.data) }));
     return json(res, 200, { docs: rows });
   }
   if (p === '/api/stream' && m === 'GET') {
