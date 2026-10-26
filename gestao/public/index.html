@@ -14778,9 +14778,73 @@ function mesesParaLista(root){(root||document).querySelectorAll('input[type=mont
 {const r0=render;render=function(){const x=r0.apply(this,arguments);try{mesesParaLista();}catch(e){}return x;};}
 {const m0=modal;modal=function(o){const x=m0.apply(this,arguments);try{mesesParaLista($('#ov'));}catch(e){}return x;};}
 
+/* ===== v97: Ponto do dia — painel de batidas por período =====
+   Um dia, todos os funcionários: Entrada, Saída almoço, Volta e Saída, com a situação de cada um
+   (completo, em andamento, batida faltando, sem marcação, folga, férias/afastamento) e indicadores no topo.
+   A situação usa a jornada de cada um; sem jornada, o sistema mostra as batidas mas não cobra períodos. */
+GROUP_OF_TAB.pdia='ponto';TAB_COLS.pdia=['ponto','pmmes','func','jornada','feriado','ferias','afast'];
+if(!NAV.some(n=>n[0]==='pdia'))NAV.push(['pdia','Ponto do dia','Ponto']);
+{const pe=MENU.find(m=>m[0]==='pess');if(pe&&!pe[2].some(i=>i[0]==='pdia')){const k=pe[2].findIndex(i=>i[0]==='pmimp');pe[2].splice(k>=0?k+1:pe[2].length,0,['pdia','Ponto do dia']);}}
+ui.pdia=ui.pdia||{data:'',obra:'',sit:'',q:''};
+ACT_GROUP.pdiaEspelho=null;ACT_GROUP.pdiaDia=null;
+const PD_SIT={ok:['Completo','pos'],and:['Em andamento',''],falta:['Batida faltando','warn'],sem:['Sem marcação','neg'],folga:['Folga',''],ausente:['Férias / afastamento',''],extra:['Batidas a mais','warn'],livre:['Sem jornada','']};
+const pdHm=r=>r.hora?String(r.hora).slice(0,5):new Date(r.ts).toTimeString().slice(0,5);
+const pdMin=h=>{const m=String(h||'').match(/^(\d{1,2}):(\d{2})/);return m?+m[1]*60+ +m[2]:null;};
+function pdAusente(f,d){
+  const fe=(S.ferias||[]).find(x=>x.funcId===f.id&&x.ini&&!/cancel|programad/i.test(x.status||'')&&d>=x.ini&&d<=(x.fim||addDays(x.ini,(+x.dias||30)-1)));if(fe)return 'Férias';
+  const af=(S.afast||[]).find(x=>x.funcId===f.id&&x.ini&&d>=x.ini&&d<=(x.fim||addDays(x.ini,(+x.dias||1)-1)));if(af)return (af.tipo==='atestado'?'Atestado':'Afastamento');
+  return '';}
+function pdLinha(f,d,agora){
+  const j=funcJor(f),dw=dowOf(d),fer=S.feriado.some(x=>x.data===d);
+  const ms=S.ponto.filter(p=>p.funcId===f.id&&p.data===d&&!p.anulada).sort((a,b)=>a.ts-b.ts),hs=ms.map(pdHm);
+  const obra=(ms.find(p=>p.projId)||{}).projId||f.projId||'';
+  const out={f,hs,obra,j,sit:'',falta:'',atraso:'',aus:pdAusente(f,d)};
+  if(!j){out.sit=hs.length?'livre':'livre';return out;}
+  const prog=!!j['d'+dw]&&!fer&&(!f.admissao||d>=f.admissao);
+  const temInt=!!(j.intIni&&j.intFim),slots=temInt?[['Entrada',j.entrada],['Saída almoço',j.intIni],['Volta almoço',j.intFim],['Saída',j.saida]]:[['Entrada',j.entrada],['Saída',j.saida]];
+  const tol=j.tolerancia!=null&&j.tolerancia!==''?+j.tolerancia:10;
+  if(out.aus&&!hs.length){out.sit='ausente';return out;}
+  if(!prog){out.sit=hs.length?(hs.length%2?'falta':'ok'):'folga';if(hs.length%2)out.falta='Saída (dia de folga)';return out;}
+  if(hs.length&&j.entrada){const e=pdMin(hs[0]),pe=pdMin(j.entrada);if(e!=null&&pe!=null&&e>pe+tol)out.atraso=minHm(e-pe);}
+  /* cada batida vai para o período de horário mais próximo, na ordem do dia */
+  const col=slots.map(()=>''),extra=[];let k=0;
+  hs.forEach((h,i)=>{const t=pdMin(h),rest=hs.length-i-1;let best=-1,bd=1e9;for(let s=k;s<=slots.length-1-Math.max(0,Math.min(rest,slots.length-1-k));s++){const e=pdMin(slots[s][1]);const dd=e==null||t==null?0:Math.abs(t-e);if(dd<bd){bd=dd;best=s;}}
+    if(best<0||k>=slots.length)extra.push(h);else{col[best]=h;k=best+1;}});
+  out.cols=temInt?col:[col[0],'','',col[1]];out.extra=extra;
+  const faltam=slots.map((s,i)=>col[i]?null:s).filter(Boolean),hoje=d===todayStr();
+  if(!faltam.length){out.sit=extra.length?'extra':'ok';return out;}
+  const vencidas=faltam.filter(s=>!hoje||pdMin(s[1])==null||agora>=pdMin(s[1])+30);
+  if(!hs.length){out.sit=vencidas.length?'sem':'and';return out;}
+  if(!vencidas.length){out.sit='and';return out;}
+  out.sit='falta';out.falta=vencidas.map(s=>s[0]).join(', ');return out;}
+function pdDados(d){const agora=d===todayStr()?(new Date().getHours()*60+new Date().getMinutes()):24*60;
+  return S.func.filter(f=>f.status!=='desligado'&&(!f.admissao||f.admissao<=d)).sort(byNome).map(f=>pdLinha(f,d,agora));}
+V.pdia=()=>{const u=ui.pdia,d=u.data||todayStr(),todas=pdDados(d);
+  const q=gsNorm(u.q||''),L=todas.filter(x=>(!u.obra||x.obra===u.obra)&&(!q||gsNorm(x.f.nome).includes(q))&&(!u.sit||(u.sit==='prob'?['falta','sem'].includes(x.sit):x.sit===u.sit)));
+  const n=k=>todas.filter(x=>(!u.obra||x.obra===u.obra)&&x.sit===k).length,semJ=todas.filter(x=>!x.j).length;
+  const obras=[...new Set(todas.map(x=>x.obra).filter(Boolean))].map(id=>[id,projNome(id)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  const cols=x=>x.cols?x.cols.concat(x.extra||[]):x.hs;const maxH=Math.max(4,...L.map(x=>cols(x).length));const cab=['Entrada','Saída almoço','Volta almoço','Saída'].concat(Array.from({length:maxH-4},(_,i)=>'Batida extra '+(i+1)));
+  let h=pageHead('Ponto do dia','Quem bateu cada período: entrada, saída e volta do almoço e saída. Os indicadores usam a jornada de cada funcionário.','<button class="btn" data-act="pdiaDia" data-k="-1">← Dia anterior</button><button class="btn" data-act="pdiaDia" data-k="0">Hoje</button><button class="btn" data-act="pdiaDia" data-k="1">Próximo dia →</button>')+'<div class="stack">';
+  h+='<div class="bar"><label class="f"><span>Data</span><input type="date" data-filter="pdia.data" value="'+esc(d)+'"></label><label class="f"><span>Obra</span><select data-filter="pdia.obra">'+opt(obras,u.obra,'Todas')+'</select></label><label class="f"><span>Situação</span><select data-filter="pdia.sit">'+opt([['prob','Só com problema'],['ok','Completo'],['and','Em andamento'],['falta','Batida faltando'],['sem','Sem marcação'],['folga','Folga'],['ausente','Férias / afastamento'],['livre','Sem jornada']],u.sit,'Todas')+'</select></label><label class="f grow"><span>Buscar</span><input data-filter="pdia.q" value="'+esc(u.q||'')+'" placeholder="Nome do funcionário"></label></div>';
+  h+='<div class="kpis">'+kpi('Completos',String(n('ok')+n('extra')),fmtDate(d))+kpi('Em andamento',String(n('and')),d===todayStr()?'dentro do horário':'—')+kpi('Batida faltando',String(n('falta')),'entrada, almoço ou saída',n('falta')?'neg':'')+kpi('Sem marcação',String(n('sem')),'dia de trabalho sem batida',n('sem')?'neg':'')+kpi('Folga / ausentes',String(n('folga')+n('ausente')),'folga, feriado, férias, atestado')+'</div>';
+  if(semJ)h+='<div class="note">'+semJ+' funcionário(s) sem jornada: as batidas aparecem, mas o sistema não sabe quais períodos cobrar.'+(mayW('rh')?' <button class="btn sm" data-act="jorLote">Aplicar jornada a quem não tem</button>':'')+'</div>';
+  h+='<div class="tw"><table style="min-width:'+(760+90*(maxH-4))+'px"><thead><tr><th>Funcionário</th><th>Obra</th>'+cab.map(c=>'<th class="num">'+c+'</th>').join('')+'<th>Situação</th></tr></thead><tbody>'+
+    (L.map(x=>{const s=PD_SIT[x.sit]||['—',''];return '<tr><td><a href="#" data-act="pdiaEspelho" data-id="'+esc(x.f.id)+'">'+esc(x.f.nome)+'</a>'+(x.j?'<div class="sub">'+esc(x.j.nome||'')+'</div>':'')+'</td><td class="sub">'+esc(x.obra?projNome(x.obra):'—')+'</td>'+
+      cab.map((c,i)=>{const v=cols(x)[i];const faltou=!v&&x.sit==='falta'&&x.falta.split(', ').includes(c);return '<td class="num mono">'+(v?esc(v)+(i===0&&x.atraso?'<div class="sub neg">atraso '+esc(x.atraso)+'</div>':''):(faltou?'<span class="neg" title="Batida não registrada">✕</span>':'<span class="sub">—</span>'))+'</td>';}).join('')+
+      '<td>'+pill(x.sit==='ausente'&&x.aus?x.aus:s[0],s[1])+(x.falta&&x.sit==='falta'?'<div class="sub">falta: '+esc(x.falta)+'</div>':'')+(x.aus&&x.sit!=='ausente'?'<div class="sub">'+esc(x.aus)+' neste dia</div>':'')+'</td></tr>';}).join('')||emptyRow(cab.length+3,'Nenhum funcionário neste filtro.'))+'</tbody></table></div>';
+  h+='<p class="sub" style="margin:0">As batidas vêm da Sólides (sincronização a cada 15 min) e dos ajustes. "Em andamento" é quem ainda está dentro do horário do próximo período (30 min de folga). Para corrigir uma batida, faça o ajuste na Sólides e sincronize.</p>';
+  return h+'</div>';};
+A.pdiaDia=d=>{const k=+d.k;ui.pdia.data=k===0?todayStr():addDays(ui.pdia.data||todayStr(),k);render();};
+A.pdiaEspelho=d=>{const f=get('func',d.id);if(!f)return;ui.pespelho=ui.pespelho||{};ui.pespelho.func=f.id;ui.pespelho.m=(ui.pdia.data||todayStr()).slice(0,7);
+  const b=document.createElement('button');b.dataset.act='nav';b.dataset.tab='pespelho';document.body.appendChild(b);b.click();b.remove();};
+/* alerta no Painel do DP: batidas faltando ontem (dia útil) */
+{const a0=typeof alertasPonto==='function'?alertasPonto:null;if(a0)alertasPonto=function(){const it=a0.apply(this,arguments)||[];try{if(mayR('ponto')){let d=addDays(todayStr(),-1);for(let i=0;i<4&&[0,6].includes(dowOf(d));i++)d=addDays(d,-1);
+  const L=pdDados(d),p=L.filter(x=>x.sit==='falta').length,s=L.filter(x=>x.sit==='sem').length;if(p+s)it.push(['pdia',(p?p+' funcionário(s) com batida faltando':'')+(p&&s?' e ':'')+(s?s+' sem marcação':'')+' em '+fmtDate(d),String(p+s)]);}}catch(e){}return it;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='96',APP_DATA='2026-10-26';
+const APP_VER='97',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['97','2026-10-26',['Nova tela Pessoas › Ponto do dia: todos os funcionários num dia, com Entrada, Saída almoço, Volta e Saída, e a situação de cada um (completo, em andamento, batida faltando, sem marcação, folga, férias/afastamento). Atrasos aparecem na entrada.','Indicadores no topo e alerta no Painel do DP com quem ficou com batida faltando no último dia útil.']],
   ['96','2026-10-26',['Todos os campos de mês do sistema (espelho de ponto, financeiro, DRE, relatórios, obras e outros) passam a ser escolhidos numa lista, sem digitar.']],
   ['95','2026-10-26',['Ponto (Sólides): a sincronização usa o local de trabalho do cadastro do funcionário na Sólides quando ele tem um só local, e as horas já vão para a obra ligada a esse local. O local vindo do relatório importado continua valendo.']],
   ['94','2026-10-26',['Ponto (Sólides): o relatório importado por arquivo substitui só os dias que traz (marcações, local de trabalho/obra e totais) e mantém o resumo mensal vindo da sincronização.']],
