@@ -1,8 +1,8 @@
 'use strict';
 /* Integração com o Sólides DP (antigo Tangerino) — ponto oficial
    Recebe: marcações de ponto (consulta incremental por lastUpdate), gravadas na coleção pmmes
-           (um documento por funcionário e mês), que o sistema já usa no espelho, banco de horas e obras.
-   Envia:  obras como locais de trabalho, funcionários e ajustes (férias e afastamentos).
+           (um documento por colaborador e mês), que o sistema já usa no espelho, banco de horas e obras.
+   Envia:  obras como locais de trabalho, colaboradores e ajustes (férias e afastamentos).
    O token fica só no ambiente da VPS (SOLIDES_TOKEN) e nunca é enviado ao navegador.
    Os nomes de campos da Sólides seguem a documentação pública; a leitura é tolerante a variações
    e o modo de teste (/api/solides/testar) mostra a resposta bruta para conferir na primeira ligação. */
@@ -63,11 +63,11 @@ module.exports = function (ctx) {
       catch (er) { ult = er; if (!/ 404|405/.test(String(er.msg || ''))) throw er; } }
     throw { st: 502, msg: 'Não encontrei o endereço de marcações da Sólides (todos responderam 404). Peça à Sólides o endereço da API de marcações (punch) liberado para o seu token.' };
   }
-  /* marcações por funcionário (API atual da Sólides): lista os funcionários no cadastro do empregador e busca as
+  /* marcações por colaborador (API atual da Sólides): lista os colaboradores no cadastro do empregador e busca as
      marcações de cada um em apis.tangerino.com.br/punch/v2/punches/employees/{id}. Cada marcação é um período
      com entrada (startDate) e saída (endDate) em horário local. */
   const localMs = v => { const t = String(v || ''); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return NaN; return Date.parse(t.slice(0, 19) + '-03:00'); };
-  /* lista de funcionários: os ativos sempre; com comDemitidos, junta também a lista com demitidos (a Sólides pode
+  /* lista de colaboradores: os ativos sempre; com comDemitidos, junta também a lista com demitidos (a Sólides pode
      devolver só os demitidos quando showFired=1), sem repetir ninguém */
   async function funcionariosSolides(comDemitidos) {
     const at = await todas(EMPLOYER, '/employee/find-all', {}, 30); if (!comDemitidos) return at;
@@ -78,7 +78,7 @@ module.exports = function (ctx) {
   let stLocal = { um: 0, varios: 0, nenhum: 0 };
   async function buscarPorFuncionario(ini, fim, comDemitidos) {
     const emps = (await funcionariosSolides(comDemitidos)).filter(x => x && x.id != null && x.recordsPunch !== false);
-    /* local de trabalho: a marcação não traz, mas o cadastro do funcionário na Sólides tem os locais dele;
+    /* local de trabalho: a marcação não traz, mas o cadastro do colaborador na Sólides tem os locais dele;
        com um local só, todas as horas vão para ele (com mais de um, fica a obra do cadastro ou o relatório) */
     let nomesWp = null; const nomeWp = async id => { if (!nomesWp) { nomesWp = new Map(); try { (await todas(EMPLOYER, '/workplace/find-all', {}, 20)).forEach(w => nomesWp.set(String(w.id), w.name || w.description || '')); } catch (e) { } } return nomesWp.get(String(id)) || ''; };
     const out = [], fila = emps.slice(); let erro404 = 0, ok = 0; stLocal = { um: 0, varios: 0, nenhum: 0 };
@@ -90,7 +90,7 @@ module.exports = function (ctx) {
       for (const pz of ps) { const a = localMs(pz.startDate), b = localMs(pz.endDate);
         out.push({ id: pz.id, dateIn: isNaN(a) ? undefined : a, dateOut: isNaN(b) ? undefined : b, employee: emp, workplace: local ? { name: local } : undefined, deleted: !!pz.canceled }); } } };
     await Promise.all([trab(), trab(), trab(), trab()]);
-    if (!ok && erro404) throw { st: 502, msg: 'Sólides respondeu 404 nas marcações por funcionário.' };
+    if (!ok && erro404) throw { st: 502, msg: 'Sólides respondeu 404 nas marcações por colaborador.' };
     return out;
   }
   const lista = r => Array.isArray(r) ? r : (r && (r.content || r.data || r.items || r.list || r.punches || r.result || r.records)) || [];
@@ -195,11 +195,11 @@ module.exports = function (ctx) {
   async function enviarFuncionarios(ids, padrao) {
     const out = [], e = est();
     for (const id of ids || []) {
-      const f = docGet('func/' + id); if (!f) { out.push({ id, ok: false, erro: 'Funcionário não encontrado.' }); continue; }
+      const f = docGet('func/' + id); if (!f) { out.push({ id, ok: false, erro: 'Colaborador não encontrado.' }); continue; }
       if (dig(f.cpf).length !== 11) { out.push({ id, nome: f.nome, ok: false, erro: 'CPF ausente ou inválido no cadastro.' }); continue; }
       const proj = f.projId ? docGet('proj/' + f.projId) : null, wp = (proj && proj.solidesWp) || (padrao && padrao.local) || '';
       const esc = f.solidesEscala || (padrao && padrao.escala) || '';
-      if (!wp || !esc) { out.push({ id, nome: f.nome, ok: false, erro: !wp ? 'Sem local de trabalho: envie a obra do funcionário ou escolha um local padrão.' : 'Escolha a escala padrão.' }); continue; }
+      if (!wp || !esc) { out.push({ id, nome: f.nome, ok: false, erro: !wp ? 'Sem local de trabalho: envie a obra do colaborador ou escolha um local padrão.' : 'Escolha a escala padrão.' }); continue; }
       const corpo = {
         id: f.solidesId ? +f.solidesId || f.solidesId : undefined, externalId: f.id, name: f.nome, email: f.email || undefined, phone: f.telefone || undefined,
         cpf: dig(f.cpf), pis: dig(f.pis) || undefined, ctps: f.ctpsNum || undefined, series: f.ctpsSerie || undefined,
@@ -215,7 +215,7 @@ module.exports = function (ctx) {
   async function enviarAjustes(itens) {
     const out = [], e = est(); e.ajEnviados = e.ajEnviados || {};
     for (const it of itens || []) {
-      const f = docGet('func/' + it.funcId); if (!f) { out.push({ k: it.k, ok: false, erro: 'Funcionário não encontrado.' }); continue; }
+      const f = docGet('func/' + it.funcId); if (!f) { out.push({ k: it.k, ok: false, erro: 'Colaborador não encontrado.' }); continue; }
       if (!it.motivo) { out.push({ k: it.k, ok: false, erro: 'Sem motivo da Sólides para este tipo.' }); continue; }
       const corpo = { employee: f.solidesId ? { id: +f.solidesId || f.solidesId } : { externalId: f.id }, employeeId: f.solidesId ? +f.solidesId || f.solidesId : undefined, externalId: f.solidesId ? undefined : f.id, adjustmentReason: { id: +it.motivo || it.motivo }, startDate: ms(it.ini), endDate: ms(it.fim) + 12 * 3600e3 - 60e3, status: 'APROVADO', observation: String(it.obs || '').slice(0, 250) || undefined };
       try { const r = await sol(EMPLOYER, '/adjustment/register', { method: 'POST', body: corpo }); e.ajEnviados[it.k] = { em: Date.now(), id: idDe(r) }; out.push({ k: it.k, ok: true }); }
