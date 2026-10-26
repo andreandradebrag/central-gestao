@@ -32,6 +32,7 @@ fs.mkdirSync(path.join(DATA, 'tmp'), { recursive: true });
 process.removeAllListeners('warning');
 const db = new DatabaseSync(path.join(DATA, 'gestao.db'));
 const BACKUP = require('./backup.js').criar(db, DATA);
+const SEG = require('./seguranca.js'), QR = require('./qr.js');
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
 CREATE TABLE IF NOT EXISTS docs(path TEXT PRIMARY KEY, parent TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS docs_parent ON docs(parent);
@@ -40,7 +41,16 @@ CREATE TABLE IF NOT EXISTS sessoes(token TEXT PRIMARY KEY, conta TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS arquivos(id TEXT PRIMARY KEY, ct TEXT, tam INTEGER, por TEXT, criado INTEGER);
 CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS perm_log(dia TEXT, conta TEXT, perfil TEXT, col TEXT, n INTEGER, ult INTEGER, PRIMARY KEY(dia, conta, col));
-CREATE TABLE IF NOT EXISTS tokens_senha(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, tipo TEXT, expira INTEGER);`);
+CREATE TABLE IF NOT EXISTS tokens_senha(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, tipo TEXT, expira INTEGER);
+CREATE TABLE IF NOT EXISTS login2f(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, expira INTEGER, n INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS totp_novo(conta TEXT PRIMARY KEY, segredo TEXT, expira INTEGER);`);
+for (const s of ['ALTER TABLE contas ADD COLUMN totp TEXT', 'ALTER TABLE contas ADD COLUMN totp_ult INTEGER', 'ALTER TABLE contas ADD COLUMN rec TEXT', 'ALTER TABLE sessoes ADD COLUMN ua TEXT', 'ALTER TABLE sessoes ADD COLUMN ip TEXT', 'ALTER TABLE sessoes ADD COLUMN visto INTEGER']) { try { db.exec(s); } catch (e) { } }
+/* sessões: o banco passa a guardar só o hash do token (o cookie continua o mesmo; ninguém precisa entrar de novo) */
+if (!db.prepare("SELECT v FROM cfg WHERE k='sess_hash'").get()) {
+  db.exec('BEGIN'); try { for (const r of db.prepare('SELECT token FROM sessoes').all()) db.prepare('UPDATE sessoes SET token=? WHERE token=?').run(SEG.sha(r.token), r.token); db.prepare("INSERT INTO cfg(k,v) VALUES('sess_hash','1')").run(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+/* emergência: DOIS_FATORES_RESET=email@... no Ambiente desliga a verificação em duas etapas dessa conta ao iniciar */
+if (process.env.DOIS_FATORES_RESET) { const r = db.prepare('UPDATE contas SET totp=NULL, totp_ult=NULL, rec=NULL WHERE lower(email)=lower(?)').run(String(process.env.DOIS_FATORES_RESET).trim()); console.log('[seguranca] verificação em duas etapas desligada para', process.env.DOIS_FATORES_RESET, '(' + r.changes + ' conta). Tire DOIS_FATORES_RESET do Ambiente.'); }
 const q = {
   docGet: db.prepare('SELECT data, ts FROM docs WHERE path=?'),
   docPut: db.prepare('INSERT INTO docs(path,parent,id,data,ts) VALUES(?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET data=excluded.data, ts=excluded.ts'),
@@ -48,10 +58,10 @@ const q = {
   colGet: db.prepare('SELECT id, data, ts FROM docs WHERE parent=?'),
   contaPorEmail: db.prepare('SELECT * FROM contas WHERE lower(email)=lower(?)'),
   contaPorId: db.prepare('SELECT * FROM contas WHERE id=?'),
-  contas: db.prepare('SELECT id,nome,email,nivel,ativo,criado,importado,cor,(hash IS NOT NULL) AS temSenha FROM contas ORDER BY nome'),
+  contas: db.prepare('SELECT id,nome,email,nivel,ativo,criado,importado,cor,(hash IS NOT NULL) AS temSenha,(totp IS NOT NULL) AS dois FROM contas ORDER BY nome'),
   contaNova: db.prepare('INSERT INTO contas(id,nome,email,hash,nivel,ativo,criado,importado,cor) VALUES(?,?,?,?,?,?,?,?,?)'),
   contaN: db.prepare('SELECT count(*) AS n FROM contas'),
-  sessNova: db.prepare('INSERT INTO sessoes(token,conta,criado,expira) VALUES(?,?,?,?)'),
+  sessNova: db.prepare('INSERT INTO sessoes(token,conta,criado,expira,ua,ip,visto) VALUES(?,?,?,?,?,?,?)'),
   sessGet: db.prepare('SELECT * FROM sessoes WHERE token=?'),
   sessDel: db.prepare('DELETE FROM sessoes WHERE token=?'),
   arqNovo: db.prepare('INSERT OR REPLACE INTO arquivos(id,ct,tam,por,criado) VALUES(?,?,?,?,?)'),
@@ -192,13 +202,14 @@ function html(res, st, body, extra) { const b = Buffer.from(body); res.writeHead
 function cookies(req) { const o = {}; String(req.headers.cookie || '').split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) o[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); }); return o; }
 const seguro = req => String(req.headers['x-forwarded-proto'] || '').includes('https') || !!req.socket.encrypted;
 function contaDa(req) {
-  const t = cookies(req).sid; if (!t) return null; const s = q.sessGet.get(t); if (!s || s.expira < Date.now()) return null;
-  const c = q.contaPorId.get(s.conta); if (!c || !c.ativo) return null; return c;
+  const t = cookies(req).sid; if (!t) return null; const s = q.sessGet.get(SEG.sha(t)); if (!s || s.expira < Date.now()) return null;
+  const c = q.contaPorId.get(s.conta); if (!c || !c.ativo) return null;
+  if (!s.visto || Date.now() - s.visto > 300000) try { db.prepare('UPDATE sessoes SET visto=?, ip=? WHERE token=?').run(Date.now(), ipDe(req), s.token); } catch (e) { }
+  return c;
 }
-function hashSenha(s) { const salt = crypto.randomBytes(16); const h = crypto.scryptSync(String(s), salt, 64, { N: 16384 }); return salt.toString('hex') + ':' + h.toString('hex'); }
+const hashSenha = SEG.hashSenha, confere = SEG.confere;
 const HASH_FALSO = hashSenha(crypto.randomBytes(12).toString('hex'));
-function confere(s, hash) { if (!hash) return false; const [salt, h] = hash.split(':'); const x = crypto.scryptSync(String(s), Buffer.from(salt, 'hex'), 64, { N: 16384 }); return crypto.timingSafeEqual(x, Buffer.from(h, 'hex')); }
-function abrirSessao(res, req, conta) { const t = uid(40), dias = 30; q.sessNova.run(t, conta.id, Date.now(), Date.now() + dias * 864e5); res.setHeader('set-cookie', 'sid=' + t + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + dias * 86400 + (seguro(req) ? '; Secure' : '')); }
+function abrirSessao(res, req, conta, extra) { const t = uid(40), dias = 30, ag = Date.now(); q.sessNova.run(SEG.sha(t), conta.id, ag, ag + dias * 864e5, String(req.headers['user-agent'] || '').slice(0, 300), ipDe(req), ag); res.setHeader('set-cookie', ['sid=' + t + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + dias * 86400 + (seguro(req) ? '; Secure' : '')].concat(extra || [])); }
 const perfilPub = c => ({ id: c.id, name: c.nome || c.email || 'Usuário', avatarUrl: '', color: c.cor || CORES[0], email: c.email || null, guest: false });
 const tentativas = new Map(), limitePub = new Map(), usoIa = new Map();
 /* IP real: o último endereço acrescentado pelo proxy (Traefik/Easypanel); o cliente não consegue forjar */
@@ -222,6 +233,8 @@ async function enviarLink(c, tipo) {
   await EMAIL.enviar({ para: c.email, assunto: convite ? 'Seu acesso à Central de Gestão' : 'Redefinir sua senha · Central de Gestão', texto: m.texto, html: m.html });
 }
 const limiteEsqueci = new Map(), cacheCnpj = new Map(), blobMemo = new Map();
+/* fecha as conexões ao vivo da conta, menos as deste aparelho */
+function derrubarOutras(contaId, req) { const meu = SEG.sha(cookies(req).sid || ''); for (const [cid, c] of CONEX) if (c.conta.id === contaId && c.sess !== meu) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } } }
 function derrubarConexoes(contaId) { for (const [cid, c] of CONEX) if (c.conta.id === contaId) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } } }
 
 /* ---------------- páginas simples (login, contas, migração) ---------------- */
@@ -234,6 +247,36 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px so
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:160px}nav{display:flex;gap:10px;margin:0 0 16px;flex-wrap:wrap}`;
 const pag = (t, corpo) => '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + t + ' · Central de Gestão</title><style>' + CSS + '</style></head><body><main>' + corpo + '</main></body></html>';
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function pagCodigo(msg) {
+  return pag('Código de verificação', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Verificação em duas etapas</h1><p class="sub">Abra o aplicativo autenticador no celular (Google Authenticator, Microsoft Authenticator...) e digite o código de 6 dígitos da Central de Gestão.</p>' + (msg ? '<div class="msg err">' + esc(msg) + '</div>' : '') +
+    '<form method="post" action="/login/codigo"><label>Código<input name="codigo" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code" required autofocus></label><button class="pri" type="submit" style="width:100%">Confirmar</button></form>' +
+    '<details style="margin-top:16px"><summary class="sub" style="cursor:pointer">Perdi o celular: usar um código de recuperação</summary><form method="post" action="/login/codigo" style="margin-top:10px"><label>Código de recuperação<input name="rec" placeholder="XXXXX-XXXXX" autocomplete="off" required></label><button type="submit" style="width:100%">Entrar com código de recuperação</button></form></details>' +
+    '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/login">Voltar</a></p></div>');
+}
+function pagSeguranca(eu, req, msg, erro, extra) {
+  const c = q.contaPorId.get(eu.id), meu = SEG.sha(cookies(req).sid || ''), quando = t => t ? new Date(t).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
+  let rec = []; try { rec = JSON.parse(c.rec || '[]'); } catch (e) { }
+  const novo = db.prepare('SELECT * FROM totp_novo WHERE conta=? AND expira>?').get(c.id, Date.now());
+  let dois;
+  if (c.totp) dois = '<p><b style="color:#0e7c66">Ligada.</b> Ao entrar, além da senha, o sistema pede o código do aplicativo. Códigos de recuperação restantes: <b>' + rec.length + '</b>.</p>' +
+    '<div class="row"><form method="post" action="/conta/seguranca/rec"><label>Código do aplicativo<input name="codigo" inputmode="numeric" maxlength="7" required autocomplete="one-time-code"></label><button type="submit">Gerar novos códigos de recuperação</button></form>' +
+    '<form method="post" action="/conta/seguranca/desligar"><label>Senha<input name="senha" type="password" required autocomplete="current-password"></label><label>Código do aplicativo<input name="codigo" inputmode="numeric" maxlength="7" required autocomplete="one-time-code"></label><button type="submit" class="dng">Desligar</button></form></div>';
+  else if (novo) { const uri = SEG.uriAutenticador(novo.segredo, c.email || c.nome || 'conta', 'Central de Gestão');
+    dois = '<ol style="padding-left:18px;margin:0 0 12px"><li>Instale no celular um aplicativo autenticador (Google Authenticator, Microsoft Authenticator ou outro).</li><li>No aplicativo, toque em adicionar e leia este QR Code:</li></ol>' +
+      '<div style="text-align:center;margin:8px 0">' + QR.svg(uri, 220) + '</div><p class="sub" style="text-align:center">Sem câmera? Digite a chave: <b style="font-family:monospace;letter-spacing:1px">' + esc(novo.segredo.replace(/(.{4})/g, '$1 ').trim()) + '</b></p>' +
+      '<form method="post" action="/conta/seguranca/confirmar"><label>3. Digite o código de 6 dígitos que apareceu no aplicativo<input name="codigo" inputmode="numeric" maxlength="7" required autocomplete="one-time-code" autofocus></label><button class="pri" type="submit">Confirmar e ligar</button></form>'; }
+  else dois = '<p><b>Desligada.</b> Com ela ligada, quem descobrir a sua senha ainda precisa do seu celular para entrar. ' + (eu.nivel === 'owner' || NIV[eu.nivel] >= NIV.admin ? '<b>Recomendado para a sua conta.</b>' : '') + '</p><form method="post" action="/conta/seguranca/iniciar"><button class="pri" type="submit">Ligar verificação em duas etapas</button></form>';
+  const ss = db.prepare('SELECT token, ua, ip, criado, visto FROM sessoes WHERE conta=? AND expira>? ORDER BY coalesce(visto, criado) DESC').all(c.id, Date.now());
+  return pag('Segurança', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (gestorContas(eu) ? '<a class="btn" href="/contas">Contas de acesso</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Segurança da minha conta</h1><p class="sub">' + esc(c.nome || '') + ' · ' + esc(c.email || '') + '</p>' +
+    (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') + (extra || '') +
+    '<div class="card"><h2>Verificação em duas etapas</h2>' + dois + '</div>' +
+    '<div class="card"><h2>Aparelhos conectados</h2><table><thead><tr><th>Aparelho</th><th>Endereço</th><th>Entrou em</th><th>Último uso</th></tr></thead><tbody>' + ss.map(s => '<tr><td>' + esc(SEG.aparelho(s.ua)) + (s.token === meu ? ' <b>(este)</b>' : '') + '</td><td>' + esc(s.ip || '—') + '</td><td>' + quando(s.criado) + '</td><td>' + quando(s.visto) + '</td></tr>').join('') + '</tbody></table>' +
+    (ss.length > 1 ? '<form method="post" action="/conta/seguranca/sair-outros" style="margin-top:10px"><button type="submit">Sair de todos os outros aparelhos</button></form>' : '') + '</div>' +
+    '<div class="card"><h2>Trocar senha</h2><form method="post" action="/contas/senha"><input type="hidden" name="volta" value="seg"><div class="row"><label>Senha atual<input name="atual" type="password" required autocomplete="current-password"></label><label>Nova senha<input name="nova" type="password" minlength="8" required autocomplete="new-password"></label></div><p class="sub" style="margin:0 0 10px">Use pelo menos 8 caracteres. Uma frase com 3 ou 4 palavras é fácil de lembrar e difícil de adivinhar.</p><button type="submit">Trocar senha</button></form></div>');
+}
+function pagCodigosRec(eu, req, cods) {
+  return pagSeguranca(eu, req, '', false, '<div class="card" style="border-color:#b54708"><h2>Guarde seus códigos de recuperação</h2><p class="sub" style="margin:0 0 10px">Cada código entra uma vez, se você perder o celular. Anote ou imprima e guarde em lugar seguro: eles <b>não aparecem de novo</b>.</p><div style="font-family:monospace;font-size:16px;columns:2;max-width:360px;line-height:1.9">' + cods.map(esc).join('<br>') + '</div></div>');
+}
 function pagLogin(msg, setup) {
   return pag(setup ? 'Primeiro acesso' : 'Entrar', '<div class="card" style="max-width:420px;margin:40px auto"><h1>' + (setup ? 'Primeiro acesso' : 'Central de Gestão') + '</h1><p class="sub">' + (setup ? 'Crie a conta do dono do sistema. Ela pode criar as contas das outras pessoas depois.' : 'Entre com seu e-mail e senha.') + '</p>' + (msg ? '<div class="msg err">' + esc(msg) + '</div>' : '') +
     '<form method="post" action="' + (setup ? '/setup' : '/login') + '">' + (setup ? '<label>Seu nome<input name="nome" required autocomplete="name"></label>' : '') + '<label>E-mail<input name="email" type="email" required autocomplete="username"></label><label>Senha<input name="senha" type="password" required minlength="' + (setup ? 8 : 1) + '" autocomplete="' + (setup ? 'new-password' : 'current-password') + '"></label><button class="pri" type="submit" style="width:100%">' + (setup ? 'Criar e entrar' : 'Entrar') + '</button></form>' + (setup ? '' : '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/esqueci">Esqueci minha senha</a></p>') + '</div>');
@@ -259,13 +302,15 @@ function pagPermLog(eu) {
 }
 function pagContas(eu, msg, erro) {
   const cs = q.contas.all();
-  const linhas = cs.map(c => '<tr><td><b>' + esc(c.nome || '—') + '</b><div style="color:var(--mut);font-size:12px">' + esc(c.email || 'sem e-mail') + (c.importado ? ' · importado' : '') + '</div></td><td>' + esc(NIV_NOME[c.nivel] || c.nivel) + '</td><td>' + (c.ativo ? (c.temSenha ? 'Ativa' : 'Sem senha') : 'Desativada') + '</td><td style="white-space:nowrap">' +
+  const linhas = cs.map(c => '<tr><td><b>' + esc(c.nome || '—') + '</b><div style="color:var(--mut);font-size:12px">' + esc(c.email || 'sem e-mail') + (c.importado ? ' · importado' : '') + '</div></td><td>' + esc(NIV_NOME[c.nivel] || c.nivel) + '</td><td>' + (c.ativo ? (c.temSenha ? 'Ativa' : 'Sem senha') : 'Desativada') + '</td><td>' + (c.dois ? 'Ligada' : '—') + '</td><td style="white-space:nowrap">' +
+    (eu.nivel === 'owner' && c.dois && c.id !== eu.id ? '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Desligar a verificação em duas etapas desta conta? Use quando a pessoa perdeu o celular e os códigos de recuperação.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="tirar2f">Desligar 2 etapas</button></form> ' : '') +
     (c.id !== eu.id && (eu.nivel === 'owner' || c.nivel !== 'owner') ? '<form method="post" action="/contas/editar" style="display:inline"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="' + (c.ativo ? 'desativar' : 'ativar') + '">' + (c.ativo ? 'Desativar' : 'Ativar') + '</button></form> ' +
       '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Excluir a conta de acesso de ' + esc(String(c.nome || c.email || '').replace(/['"\\]/g, '')) + '? A pessoa não consegue mais entrar. O cadastro dela no sistema (colaborador, perfil, histórico) continua.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="excluir" style="color:var(--neg)">Excluir</button></form> ' : '') +
     (eu.nivel === 'owner' && c.importado && c.id !== eu.id ? '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Usar esta conta importada como a sua? Você passa a ver as conversas e registros dela.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="soueu">Sou eu</button></form>' : '') + '</td></tr>').join('');
-  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. Para cadastrar uma pessoa nova, prefira <b>Sistema › Usuários › Novo usuário</b>, dentro do sistema: lá você cria o login e o perfil de uma vez.</p>' +
+  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a>' : '') + '<a class="btn" href="/conta/seguranca">Segurança da minha conta</a><a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. Para cadastrar uma pessoa nova, prefira <b>Sistema › Usuários › Novo usuário</b>, dentro do sistema: lá você cria o login e o perfil de uma vez.</p>' +
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
-    '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
+    (eu.nivel === 'owner' && !q.contaPorId.get(eu.id).totp ? '<div class="msg err"><b>Recomendado:</b> ligue a verificação em duas etapas na sua conta de dono em <a href="/conta/seguranca">Segurança da minha conta</a>.</div>' : '') +
+    '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th>2 etapas</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
     '<div class="card"><h2>Criar conta ou definir senha</h2><form method="post" action="/contas/salvar"><div class="row"><label>Conta<select name="id"><option value="">Nova conta</option>' + cs.filter(c => c.nivel !== 'owner' || c.id === eu.id).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Nome<input name="nome"></label></div><div class="row"><label>E-mail<input name="email" type="email"></label><label>Senha (mínimo 8)<input name="senha" type="password" minlength="8" autocomplete="new-password"></label><label>Nível<select name="nivel">' + ['admin', 'interact'].map(n => '<option value="' + n + '">' + NIV_NOME[n] + '</option>').join('') + '</select></label></div><button class="pri" type="submit">Salvar</button><p class="sub" style="margin:10px 0 0">Para uma conta existente, deixe em branco o que não quer mudar. Passe a senha à pessoa por um canal seguro; ela pode trocá-la depois em Minha senha.</p></form></div>' +
     pagPermLog(eu) + pagBackup(eu) +
     '<div class="card"><h2>E-mail do sistema</h2><p class="sub" style="margin:0 0 10px">' + (EMAIL.configurado() ? 'Configurado. O sistema envia o convite de novo usuário e o link de "Esqueci minha senha".' : 'Ainda não configurado: preencha SMTP_HOST, SMTP_PORT, SMTP_USUARIO, SMTP_SENHA e SMTP_REMETENTE no serviço gestao do Easypanel e clique em Implantar.') + '</p>' + (EMAIL.configurado() ? '<form method="post" action="/contas/teste-email"><button type="submit">Enviar e-mail de teste para ' + esc(eu.email || '') + '</button></form>' : '') + '</div>' +
@@ -347,7 +392,7 @@ async function rotear(req, res) {
     if (!semContas) return redir(res, '/login');
     if (m === 'GET') return html(res, 200, pagLogin('', true));
     const f = form(await lerCorpo(req, 10000));
-    if (!f.email || String(f.senha || '').length < 8) return html(res, 400, pagLogin('Informe e-mail e uma senha com pelo menos 8 caracteres.', true));
+    if (!f.email) return html(res, 400, pagLogin('Informe o e-mail.', true)); { const fr = SEG.senhaFraca(f.senha, f.email, f.nome); if (fr) return html(res, 400, pagLogin(fr, true)); }
     const c = { id: uid(), nome: f.nome || f.email, email: f.email.trim(), nivel: 'owner' };
     if (q.contaN.get().n !== 0) return redir(res, '/login');
     q.contaNova.run(c.id, c.nome, c.email, hashSenha(f.senha), 'owner', 1, Date.now(), 0, CORES[0]); abrirSessao(res, req, c); return redir(res, '/');
@@ -361,9 +406,39 @@ async function rotear(req, res) {
     const c = q.contaPorEmail.get(String(f.email || '').trim().slice(0, 254));
     if (!c || !c.hash) confere(String(f.senha || ''), HASH_FALSO);
     if (!c || !c.ativo || !confere(f.senha, c.hash)) { for (const [k, x, lim] of [[ip, t, 8], [em, te, 10]]) { x.n++; x.em = Date.now(); if (x.n >= lim) { x.ate = Date.now() + 10 * 60000; x.n = 0; } tentativas.set(k, x); } await new Promise(r => setTimeout(r, 600)); return html(res, 401, pagLogin('E-mail ou senha incorretos.')); }
-    tentativas.delete(ip); tentativas.delete(em); abrirSessao(res, req, c); return redir(res, '/');
+    tentativas.delete(ip); tentativas.delete(em);
+    if (SEG.precisaRefazer(c.hash)) try { db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.senha), c.id); } catch (e) { }
+    if (c.totp) {
+      const t2 = crypto.randomBytes(24).toString('base64url');
+      db.prepare('DELETE FROM login2f WHERE conta=? OR expira<?').run(c.id, Date.now());
+      db.prepare('INSERT INTO login2f(hash,conta,expira,n) VALUES(?,?,?,0)').run(SEG.sha(t2), c.id, Date.now() + 5 * 60000);
+      res.setHeader('set-cookie', 'p2f=' + t2 + '; Path=/login; HttpOnly; SameSite=Lax; Max-Age=300' + (seguro(req) ? '; Secure' : ''));
+      return html(res, 200, pagCodigo(''));
+    }
+    abrirSessao(res, req, c); return redir(res, '/');
   }
-  if (p === '/sair') { const t = cookies(req).sid; if (t) q.sessDel.run(t); res.setHeader('set-cookie', 'sid=; Path=/; Max-Age=0'); return redir(res, '/login'); }
+  if (p === '/login/codigo') {
+    const t2 = cookies(req).p2f, reg = t2 ? db.prepare('SELECT * FROM login2f WHERE hash=?').get(SEG.sha(t2)) : null;
+    const c = reg && reg.expira > Date.now() ? q.contaPorId.get(reg.conta) : null;
+    if (!c || !c.ativo || !c.totp) return html(res, 401, pagLogin('O tempo para digitar o código acabou. Entre de novo.'));
+    if (m === 'GET') return html(res, 200, pagCodigo(''));
+    if (m !== 'POST') return json(res, 405, { erro: 'Método não permitido.' });
+    const ip = ipDe(req), ti = tentativas.get(ip) || { n: 0, ate: 0 };
+    if (ti.ate > Date.now()) return html(res, 429, pagLogin('Muitas tentativas. Aguarde alguns minutos.'));
+    const f = form(await lerCorpo(req, 10000)); let ok = false, restam = -1;
+    if (f.rec) { const hs = SEG.usarCodigoRec(c.rec, f.rec); if (hs) { db.prepare('UPDATE contas SET rec=? WHERE id=?').run(JSON.stringify(hs), c.id); ok = true; restam = hs.length; } }
+    else { const ps = SEG.confereCodigo(c.totp, f.codigo, c.totp_ult); if (ps > 0) { db.prepare('UPDATE contas SET totp_ult=? WHERE id=?').run(ps, c.id); ok = true; } }
+    if (!ok) {
+      ti.n++; ti.em = Date.now(); if (ti.n >= 8) { ti.ate = Date.now() + 10 * 60000; ti.n = 0; } tentativas.set(ip, ti);
+      const n = (reg.n || 0) + 1; await new Promise(r => setTimeout(r, 600));
+      if (n >= 5) { db.prepare('DELETE FROM login2f WHERE hash=?').run(reg.hash); return html(res, 401, pagLogin('Muitos códigos errados. Entre de novo com e-mail e senha.')); }
+      db.prepare('UPDATE login2f SET n=? WHERE hash=?').run(n, reg.hash); return html(res, 401, pagCodigo(f.rec ? 'Código de recuperação inválido ou já usado.' : 'Código incorreto. Confira o código que aparece agora no aplicativo.'));
+    }
+    db.prepare('DELETE FROM login2f WHERE hash=?').run(reg.hash); tentativas.delete(ip);
+    abrirSessao(res, req, c, ['p2f=; Path=/login; Max-Age=0']);
+    return redir(res, restam >= 0 ? '/conta/seguranca?' + (restam <= 3 ? 'e=1&' : '') + 'm=' + encodeURIComponent('Você entrou com um código de recuperação. Restam ' + restam + '.' + (restam <= 3 ? ' Gere códigos novos abaixo.' : '')) : '/');
+  }
+  if (p === '/sair') { const t = cookies(req).sid; if (t) q.sessDel.run(SEG.sha(t)); res.setHeader('set-cookie', 'sid=; Path=/; Max-Age=0'); return redir(res, '/login'); }
   /* ---- pedido de cotação: página pública em que o fornecedor responde, sem login ---- */
   const mPag = p.match(/^\/cotacao\/([A-Za-z0-9]{24,64})$/);
   if (mPag && m === 'GET') {
@@ -418,7 +493,7 @@ async function rotear(req, res) {
     if (m === 'GET') return formH('');
     if (m !== 'POST') return json(res, 405, { erro: 'Método não permitido.' });
     const f = form(await lerCorpo(req, 10000));
-    if (String(f.senha || '').length < 8) return formH('A senha precisa ter pelo menos 8 caracteres.');
+    { const fr = SEG.senhaFraca(f.senha, c.email, c.nome); if (fr) return formH(fr); }
     if (f.senha !== f.senha2) return formH('As duas senhas não são iguais.');
     db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.senha), c.id);
     db.prepare('DELETE FROM tokens_senha WHERE conta=?').run(c.id); db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id);
@@ -427,6 +502,33 @@ async function rotear(req, res) {
   }
   const conta = contaDa(req);
   if (!conta) { if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 401, { erro: 'Entre novamente.' }); return redir(res, semContas ? '/setup' : '/login'); }
+
+  /* ---- segurança da própria conta: duas etapas, aparelhos, senha ---- */
+  if (p === '/conta/seguranca' && m === 'GET') return html(res, 200, pagSeguranca(conta, req, u.searchParams.get('m'), u.searchParams.get('e')));
+  if (p.startsWith('/conta/seguranca/') && m === 'POST') {
+    const acao = p.slice(17), f = form(await lerCorpo(req, 10000)), c = q.contaPorId.get(conta.id), volta = (t, e) => redir(res, '/conta/seguranca?' + (e ? 'e=1&' : '') + 'm=' + encodeURIComponent(t));
+    const ip = ipDe(req), ti = tentativas.get('s:' + c.id) || { n: 0, ate: 0 };
+    if (ti.ate > Date.now()) return volta('Muitas tentativas. Aguarde alguns minutos.', 1);
+    const errou = t => { ti.n++; if (ti.n >= 6) { ti.ate = Date.now() + 10 * 60000; ti.n = 0; } ti.em = Date.now(); tentativas.set('s:' + c.id, ti); return volta(t, 1); };
+    if (acao === 'iniciar') { if (c.totp) return volta('Já está ligada.'); db.prepare('INSERT OR REPLACE INTO totp_novo(conta,segredo,expira) VALUES(?,?,?)').run(c.id, SEG.novoSegredo(), Date.now() + 15 * 60000); return redir(res, '/conta/seguranca'); }
+    if (acao === 'confirmar') {
+      const nv = db.prepare('SELECT * FROM totp_novo WHERE conta=? AND expira>?').get(c.id, Date.now()); if (!nv) return volta('O tempo acabou. Comece de novo.', 1);
+      const ps = SEG.confereCodigo(nv.segredo, f.codigo, 0); if (ps < 0) return errou('Código incorreto. Confira se o horário do celular está automático e digite o código que aparece agora.');
+      const r = SEG.novosCodigosRec(); db.prepare('UPDATE contas SET totp=?, totp_ult=?, rec=? WHERE id=?').run(nv.segredo, ps, JSON.stringify(r.hashes), c.id); db.prepare('DELETE FROM totp_novo WHERE conta=?').run(c.id);
+      tentativas.delete('s:' + c.id); return html(res, 200, pagCodigosRec(conta, req, r.cods));
+    }
+    if (acao === 'rec') {
+      if (!c.totp) return redir(res, '/conta/seguranca'); const ps = SEG.confereCodigo(c.totp, f.codigo, c.totp_ult); if (ps < 0) return errou('Código incorreto.');
+      const r = SEG.novosCodigosRec(); db.prepare('UPDATE contas SET totp_ult=?, rec=? WHERE id=?').run(ps, JSON.stringify(r.hashes), c.id); return html(res, 200, pagCodigosRec(conta, req, r.cods));
+    }
+    if (acao === 'desligar') {
+      if (!c.totp) return redir(res, '/conta/seguranca'); if (!confere(f.senha, c.hash)) return errou('Senha incorreta.');
+      const ps = SEG.confereCodigo(c.totp, f.codigo, c.totp_ult); if (ps < 0) return errou('Código incorreto.');
+      db.prepare('UPDATE contas SET totp=NULL, totp_ult=NULL, rec=NULL WHERE id=?').run(c.id); return volta('Verificação em duas etapas desligada.');
+    }
+    if (acao === 'sair-outros') { db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || '')); derrubarOutras(c.id, req); return volta('Os outros aparelhos foram desconectados.'); }
+    return redir(res, '/conta/seguranca');
+  }
 
   /* ---- contas ---- */
   if (p === '/contas/backup-agora' && m === 'POST') {
@@ -447,11 +549,11 @@ async function rotear(req, res) {
       if (f.id) {
         const c = q.contaPorId.get(f.id); if (!c) throw 'Conta não encontrada.'; if (c.nivel === 'owner' && c.id !== conta.id) throw 'Só o dono altera a própria conta.'; if (protegida(conta, c)) throw 'Só o dono altera contas de nível Equipe.';
         if (f.email && f.email !== c.email && q.contaPorEmail.get(f.email)) throw 'Este e-mail já está em uso.';
-        if (f.senha && f.senha.length < 8) throw 'A senha precisa ter pelo menos 8 caracteres.';
-        if (f.senha) db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, String(cookies(req).sid || ''));
+        if (f.senha) { const fr = SEG.senhaFraca(f.senha, f.email || c.email, f.nome || c.nome); if (fr) throw fr; }
+        if (f.senha) db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || ''));
         db.prepare('UPDATE contas SET nome=coalesce(nullif(?,\'\'),nome), email=coalesce(nullif(?,\'\'),email), hash=coalesce(?,hash), nivel=? WHERE id=?').run(f.nome || '', (f.email || '').trim(), f.senha ? hashSenha(f.senha) : null, c.nivel === 'owner' ? 'owner' : niv, c.id);
       } else {
-        if (!f.email || !f.senha || f.senha.length < 8) throw 'Informe e-mail e senha (mínimo 8).'; if (q.contaPorEmail.get(f.email)) throw 'Este e-mail já está em uso.';
+        if (!f.email || !f.senha) throw 'Informe e-mail e senha.'; { const fr = SEG.senhaFraca(f.senha, f.email, f.nome); if (fr) throw fr; } if (q.contaPorEmail.get(f.email)) throw 'Este e-mail já está em uso.';
         q.contaNova.run(uid(), f.nome || f.email, f.email.trim(), hashSenha(f.senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
       }
       return redir(res, '/contas?m=' + encodeURIComponent('Conta salva.'));
@@ -462,6 +564,7 @@ async function rotear(req, res) {
     const f = form(await lerCorpo(req, 10000)), c = q.contaPorId.get(f.id); if (!c || c.id === conta.id) return redir(res, '/contas'); if (protegida(conta, c) && f.acao !== 'soueu') return redir(res, '/contas?e=1&m=' + encodeURIComponent('Só o dono altera contas de nível Equipe.'));
     if (f.acao === 'desativar' && c.nivel !== 'owner') { db.prepare('UPDATE contas SET ativo=0 WHERE id=?').run(c.id); db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id); }
     if (f.acao === 'ativar') db.prepare('UPDATE contas SET ativo=1 WHERE id=?').run(c.id);
+    if (f.acao === 'tirar2f') { if (conta.nivel !== 'owner') return redir(res, '/contas?e=1&m=' + encodeURIComponent('Só o dono desliga a verificação em duas etapas de outra pessoa.')); db.prepare('UPDATE contas SET totp=NULL, totp_ult=NULL, rec=NULL WHERE id=?').run(c.id); db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id); return redir(res, '/contas?m=' + encodeURIComponent('Verificação em duas etapas desligada. A pessoa entra só com a senha e pode ligar de novo.')); }
     if (f.acao === 'excluir') {
       if (c.nivel === 'owner') return redir(res, '/contas?e=1&m=' + encodeURIComponent('A conta do dono não pode ser excluída.'));
       db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id); db.prepare('DELETE FROM contas WHERE id=?').run(c.id);
@@ -484,8 +587,10 @@ async function rotear(req, res) {
   }
   if (p === '/contas/senha' && m === 'POST') {
     const f = form(await lerCorpo(req, 10000)), c = q.contaPorId.get(conta.id);
-    if (!confere(f.atual, c.hash) || String(f.nova || '').length < 8) return redir(res, '/contas?e=1&m=' + encodeURIComponent('Senha atual incorreta ou nova senha curta.'));
-    db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.nova), c.id); db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, String(cookies(req).sid || '')); return redir(res, '/contas?m=' + encodeURIComponent('Senha trocada.'));
+    const volta = f.volta === 'seg' ? '/conta/seguranca' : '/contas';
+    if (!confere(f.atual, c.hash)) return redir(res, volta + '?e=1&m=' + encodeURIComponent('Senha atual incorreta.'));
+    { const fr = SEG.senhaFraca(f.nova, c.email, c.nome); if (fr) return redir(res, volta + '?e=1&m=' + encodeURIComponent(fr)); }
+    db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.nova), c.id); db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || '')); derrubarOutras(c.id, req); return redir(res, volta + '?m=' + encodeURIComponent('Senha trocada. Os outros aparelhos foram desconectados.'));
   }
   if (p === '/migrar' && m === 'GET') { if (conta.nivel !== 'owner') return redir(res, '/'); return html(res, 200, pagMigrar(conta)); }
 
@@ -498,7 +603,7 @@ async function rotear(req, res) {
     if (q.contaPorEmail.get(email)) return json(res, 400, { erro: 'Este e-mail já está em uso.' });
     const convite = !!b.convite;
     if (convite && !EMAIL.configurado()) return json(res, 400, { erro: 'O envio de e-mail não está configurado no servidor. Use a senha provisória.' });
-    if (!convite && senha.length < 8) return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
+    if (!convite) { const fr = SEG.senhaFraca(senha, email, nome); if (fr) return json(res, 400, { erro: fr }); }
     const id = uid(), niv = ['admin', 'interact'].includes(b.nivel) ? b.nivel : 'interact';
     q.contaNova.run(id, nome, email, convite ? null : hashSenha(senha), niv, 1, Date.now(), 0, CORES[Math.floor(Math.random() * CORES.length)]);
     if (!convite) return json(res, 200, { ok: true, id });
@@ -526,11 +631,11 @@ async function rotear(req, res) {
       if (protegida(conta, c)) return json(res, 403, { erro: 'Só o dono altera contas de nível Equipe.' });
       if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { erro: 'E-mail inválido.' });
       if (email && email !== String(c.email || '').toLowerCase()) { const o = q.contaPorEmail.get(email); if (o && o.id !== c.id) return json(res, 400, { erro: 'Este e-mail já está em uso.' }); }
-      if (senha && senha.length < 8) return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
+      if (senha) { const fr = SEG.senhaFraca(senha, email || c.email, nome || c.nome); if (fr) return json(res, 400, { erro: fr }); }
       const niv = c.nivel === 'owner' ? 'owner' : (['admin', 'interact'].includes(b.nivel) ? b.nivel : c.nivel);
       const ativo = c.nivel === 'owner' || c.id === conta.id ? 1 : (b.ativo === false ? 0 : 1);
       db.prepare('UPDATE contas SET nome=coalesce(nullif(?,\'\'),nome), email=coalesce(nullif(?,\'\'),email), hash=coalesce(?,hash), nivel=?, ativo=? WHERE id=?').run(nome, email, senha ? hashSenha(senha) : null, niv, ativo, c.id);
-      if (!ativo || senha) db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, String(cookies(req).sid || ''));
+      if (!ativo || senha) db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || ''));
       if (!ativo) derrubarConexoes(c.id);
       return json(res, 200, { ok: true });
     }
@@ -564,7 +669,7 @@ async function rotear(req, res) {
   }
   if (p === '/api/stream' && m === 'GET') {
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-    const cid = uid(12); CONEX.set(cid, { res, conta, presence: {}, updatedAt: Date.now() }); sse(res, 'hello', { cid }); avisarPares();
+    const cid = uid(12); CONEX.set(cid, { res, conta, sess: SEG.sha(cookies(req).sid || ''), presence: {}, updatedAt: Date.now() }); sse(res, 'hello', { cid }); avisarPares();
     req.on('close', () => { CONEX.delete(cid); avisarPares(); }); return;
   }
   if (p === '/api/room/presence' && m === 'POST') { const b = await lerJson(req), c = CONEX.get(b.cid); if (JSON.stringify(b.patch || {}).length > 4096) return json(res, 413, { erro: 'Presença grande demais.' }); if (c && c.conta.id === conta.id) { const pr = Object.assign({}, c.presence); Object.keys(b.patch || {}).forEach(k => { if (b.patch[k] === null) delete pr[k]; else pr[k] = b.patch[k]; }); c.presence = pr; c.updatedAt = Date.now(); avisarPares(); } return json(res, 200, { ok: true }); }

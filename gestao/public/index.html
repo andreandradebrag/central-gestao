@@ -14916,9 +14916,14 @@ const funcRestrito=()=>window.__SELFHOST&&S.func.some(f=>f&&f._restrito);
 const NOTA_RESTR='<div class="note"><b>Dados protegidos.</b> CPF, documentos, endereço, dados bancários, salário e benefícios aparecem só para os perfis RH e Administrador. Por isso o custo de mão de obra das obras fica zerado neste perfil.</div>';
 {const vf=V.func;if(vf)V.func=function(){const h=vf.apply(this,arguments);if(!funcRestrito())return h;const i=h.indexOf('<div class="stack">');return i<0?NOTA_RESTR+h:h.slice(0,i+19)+NOTA_RESTR+h.slice(i+19);};}
 
+/* ===== v104: botão Segurança no topo (sistema na VPS): senha, verificação em duas etapas e aparelhos conectados ===== */
+{const w2=whoHtml;whoHtml=function(){const h=w2();if(!window.__SELFHOST)return h;
+  return h.replace('<button class="btn sm" data-act="sairConta"','<a class="btn sm" href="/conta/seguranca" title="Senha, verificação em duas etapas e aparelhos conectados" style="margin-left:8px;align-self:center;text-decoration:none">Segurança</a><button class="btn sm" data-act="sairConta"');};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='103',APP_DATA='2026-10-26';
+const APP_VER='104',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['104','2026-10-26',['Novo botão Segurança no topo: verificação em duas etapas com aplicativo autenticador (QR Code e 10 códigos de recuperação), lista de aparelhos conectados com "Sair de todos os outros aparelhos" e troca de senha.','Senhas guardadas com cálculo mais forte (as antigas são atualizadas sozinhas no próximo login) e senhas muito comuns recusadas.','As sessões passam a ser guardadas cifradas no banco: uma cópia do banco não permite entrar no sistema.']],
   ['103','2026-10-26',['O módulo Pessoas passou a se chamar Pessoal.','Renegociação: a multa e os juros cobrados ficam marcados em cada parcela nova e, quando ela é paga, entram no DRE como Juros recebidos (receita financeira), e não como receita da obra.','Dados pessoais e salário dos colaboradores (CPF, documentos, endereço, banco, salário, benefícios) só chegam aos perfis RH e Administrador; os demais veem um aviso.','Permissão de gravação por módulo conferida também no servidor (primeiro só registrando, com relatório em Contas de acesso).','Cópia de segurança diária do banco de dados às 3h, com 30 dias guardados e download em Contas de acesso (só o dono).']],
   ['102','2026-10-26',['Os submenus usam todo o espaço da barra: as telas só vão para "Mais" quando não cabem na largura da tela.']],
   ['101','2026-10-26',['Em todo o sistema, o termo "colaborador" passa a ser "colaborador" (menus, telas, relatórios, documentos e mensagens).']],
