@@ -9,6 +9,7 @@
 const TOKEN = (process.env.SOLIDES_TOKEN || '').trim();
 const PUNCH = (process.env.SOLIDES_PUNCH_URL || 'https://api.tangerino.com.br/api/punch').replace(/\/$/, '');
 const EMPLOYER = (process.env.SOLIDES_EMPLOYER_URL || 'https://employer.tangerino.com.br').replace(/\/$/, '');
+const PUNCHES = (process.env.SOLIDES_PUNCHES_URL || 'https://apis.tangerino.com.br').replace(/\/$/, '');
 const INTERVALO = Math.max(5, +process.env.SOLIDES_INTERVALO_MIN || 15);
 const DIAS_INI = Math.min(120, Math.max(1, +process.env.SOLIDES_DIAS_INICIAIS || 35));
 const TZ = process.env.SOLIDES_TZ || 'America/Sao_Paulo';
@@ -62,6 +63,24 @@ module.exports = function (ctx) {
       catch (er) { ult = er; if (!/ 404|405/.test(String(er.msg || ''))) throw er; } }
     throw { st: 502, msg: 'Não encontrei o endereço de marcações da Sólides (todos responderam 404). Peça à Sólides o endereço da API de marcações (punch) liberado para o seu token.' };
   }
+  /* marcações por funcionário (API atual da Sólides): lista os funcionários no cadastro do empregador e busca as
+     marcações de cada um em apis.tangerino.com.br/punch/v2/punches/employees/{id}. Cada marcação é um período
+     com entrada (startDate) e saída (endDate) em horário local. */
+  const localMs = v => { const t = String(v || ''); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return NaN; return Date.parse(t.slice(0, 19) + '-03:00'); };
+  async function funcionariosSolides(comDemitidos) { return await todas(EMPLOYER, '/employee/find-all', comDemitidos ? { showFired: 1 } : {}, 30); }
+  async function marcacoesDe(empId, ini, fim) { const r = await sol(PUNCHES, '/punch/v2/punches/employees/' + encodeURIComponent(empId), { query: { startDate: Math.round(ini), endDate: Math.round(fim) } }); return Array.isArray(r) ? r : lista(r); }
+  async function buscarPorFuncionario(ini, fim, comDemitidos) {
+    const emps = (await funcionariosSolides(comDemitidos)).filter(x => x && x.id != null && x.recordsPunch !== false);
+    const out = [], fila = emps.slice(); let erro404 = 0, ok = 0;
+    const trab = async () => { while (fila.length) { const x = fila.shift(); let ps;
+      try { ps = await marcacoesDe(x.id, ini, fim); ok++; } catch (er) { if (/ 404/.test(String(er.msg || ''))) { erro404++; continue; } throw er; }
+      const emp = { id: x.id, name: x.name || x.socialName || '', cpf: x.cpf || '', externalId: x.externalId || '' };
+      for (const pz of ps) { const a = localMs(pz.startDate), b = localMs(pz.endDate);
+        out.push({ id: pz.id, dateIn: isNaN(a) ? undefined : a, dateOut: isNaN(b) ? undefined : b, employee: emp, deleted: !!pz.canceled }); } } };
+    await Promise.all([trab(), trab(), trab(), trab()]);
+    if (!ok && erro404) throw { st: 502, msg: 'Sólides respondeu 404 nas marcações por funcionário.' };
+    return out;
+  }
   const lista = r => Array.isArray(r) ? r : (r && (r.content || r.data || r.items || r.list || r.punches || r.result || r.records)) || [];
   async function todas(base, caminho, query, max) {
     const out = []; let page = 0, tot = 1;
@@ -101,7 +120,10 @@ module.exports = function (ctx) {
       if (op && op.ini && op.fim) query = { startDate: ms(op.ini) - 12 * 3600e3, endDate: ms(op.fim) + 12 * 3600e3 };
       else if (e.lastUpdate) query = { lastUpdate: e.lastUpdate - 5 * 60e3 };
       else query = { startDate: Date.now() - DIAS_INI * 864e5, endDate: Date.now() };
-      const brutos = await todas(await punchUrl(), '', query);
+      let brutos;
+      const jan = query.lastUpdate ? { ini: Date.now() - 3 * 864e5, fim: Date.now() } : { ini: query.startDate, fim: query.endDate };
+      try { brutos = await buscarPorFuncionario(jan.ini, jan.fim, !!(op && op.ini)); }
+      catch (er) { if (!/ 404/.test(String(er.msg || ''))) throw er; brutos = await todas(await punchUrl(), '', query); }
       const funcs = col('func'), porExt = new Map(), porSol = new Map(), porCpf = new Map(), vinc = e.vinculos || {};
       funcs.forEach(f => { porExt.set(f.id, f.id); if (f.solidesId) porSol.set(String(f.solidesId), f.id); const c = dig(f.cpf); if (c.length === 11) porCpf.set(c, f.id); });
       const docs = new Map(), sem = new Map(); let n = 0, ex = 0;
@@ -189,8 +211,8 @@ module.exports = function (ctx) {
     const r = p.slice('/api/solides/'.length);
     try {
       if (r === 'status') { const e = est(); json(res, 200, { configurado: !!TOKEN, intervaloMin: INTERVALO, ultimo: e.ultimo || 0, ok: e.ok !== false, erro: e.erro || '', ultimaFalha: e.ultimaFalha || 0, recebidas: e.recebidas || 0, semVinculo: e.semVinculo || [], vinculos: e.vinculos || {}, ajEnviados: e.ajEnviados || {}, rodando }); return true; }
-      if (r === 'testar') { const x = await sol(EMPLOYER, '/workplace/find-all', { query: { page: 0, size: 3 } }); let pu = '', puErro = ''; try { pu = await punchUrl(); } catch (er) { puErro = er.msg || String(er); } json(res, 200, { ok: true, amostra: x, marcacoes: pu ? 'ok' : 'falhou', marcacoesErro: puErro }); return true; }
-      if (r === 'amostra-pontos') { const x = await sol(await punchUrl(), '', { query: { startDate: Date.now() - 2 * 864e5, endDate: Date.now(), page: 0, size: 5 } }); json(res, 200, { ok: true, amostra: x, lidas: lista(x).map(normPunch) }); return true; }
+      if (r === 'testar') { const x = await sol(EMPLOYER, '/workplace/find-all', { query: { page: 0, size: 3 } }); let pu = '', puErro = ''; try { const em = (await funcionariosSolides(false))[0]; if (em) { await marcacoesDe(em.id, Date.now() - 864e5, Date.now()); pu = 'ok'; } else pu = 'ok'; } catch (er) { puErro = er.msg || String(er); } json(res, 200, { ok: true, amostra: x, marcacoes: pu ? 'ok' : 'falhou', marcacoesErro: puErro }); return true; }
+      if (r === 'amostra-pontos') { const em = (await funcionariosSolides(false)).slice(0, 3); let lst = []; for (const x of em) { const ps = await marcacoesDe(x.id, Date.now() - 3 * 864e5, Date.now()); lst = lst.concat(ps.slice(0, 3).map(pz => ({ id: pz.id, dateIn: localMs(pz.startDate), dateOut: localMs(pz.endDate), employee: { id: x.id, name: x.name, cpf: x.cpf || '' }, deleted: !!pz.canceled }))); } const x = { content: lst }; json(res, 200, { ok: true, amostra: x, lidas: lista(x).map(normPunch) }); return true; }
       if (r === 'sincronizar' && m === 'POST') { const b = await lerJson(req); json(res, 200, await sincronizar(b && b.ini && b.fim ? { ini: b.ini, fim: b.fim } : null)); return true; }
       if (r === 'locais') { const l = await todas(EMPLOYER, '/workplace/find-all', {}, 20); json(res, 200, l.map(x => ({ id: String(x.id), nome: x.name || x.description || '', externalId: x.externalId || '' }))); return true; }
       if (r === 'escalas') { const l = await todas(EMPLOYER, '/work-schedule', {}, 20); json(res, 200, l.map(x => ({ id: String(x.id), nome: x.name || x.description || ('Escala ' + x.id) }))); return true; }
