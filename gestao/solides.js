@@ -39,6 +39,29 @@ module.exports = function (ctx) {
     if (!r.ok) throw { st: r.status === 401 || r.status === 403 ? 401 : 502, msg: 'Sólides respondeu ' + r.status + (r.status === 401 || r.status === 403 ? ' (token inválido ou sem permissão)' : '') + ': ' + String((j && (j.message || j.error || j.texto)) || '').slice(0, 300), bruto: j };
     return j;
   }
+  /* endereço da lista de marcações: a Sólides publica o módulo de ponto em /api/punch; o caminho exato varia
+     (com ou sem barra, versão). Testa os candidatos, lê a especificação (Swagger) do próprio módulo se preciso
+     e guarda o que funcionou. */
+  async function punchUrl() {
+    const e = est(); if (e.punchUrl) return e.punchUrl;
+    const cand = [PUNCH + '/', PUNCH, PUNCH + '/punch', PUNCH + '/v1/', PUNCH + '/punches'];
+    try {
+      const origem = new URL(PUNCH).origin;
+      for (const docs of ['/v2/api-docs', '/v3/api-docs']) {
+        const r = await fetch(PUNCH + docs, { headers: { Accept: 'application/json', Authorization: /^(basic|bearer)\s/i.test(TOKEN) ? TOKEN : 'Basic ' + TOKEN }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+        if (!r || !r.ok) continue; const j = await r.json().catch(() => null); if (!j || !j.paths) continue;
+        const base = (j.basePath || (j.servers && j.servers[0] && new URL(j.servers[0].url, origem).pathname) || '').replace(/\/$/, '');
+        for (const [cam, ops] of Object.entries(j.paths)) { const g = ops && ops.get; if (!g) continue; const ps = (g.parameters || []).map(x => x && x.name);
+          if (ps.includes('lastUpdate') || (ps.includes('startDate') && ps.includes('endDate') && !/observation|historical|report/i.test(cam))) cand.unshift(origem + base + cam); }
+        break;
+      }
+    } catch (x) { }
+    const desde = Date.now() - 864e5, vistos = new Set(); let ult = null;
+    for (const c of cand) { if (vistos.has(c)) continue; vistos.add(c);
+      try { await sol(c, '', { query: { startDate: desde, endDate: Date.now(), page: 0, size: 1 } }); const e2 = est(); e2.punchUrl = c; salvaEst(e2); return c; }
+      catch (er) { ult = er; if (!/ 404|405/.test(String(er.msg || ''))) throw er; } }
+    throw { st: 502, msg: 'Não encontrei o endereço de marcações da Sólides (todos responderam 404). Peça à Sólides o endereço da API de marcações (punch) liberado para o seu token.' };
+  }
   const lista = r => Array.isArray(r) ? r : (r && (r.content || r.data || r.items || r.list || r.punches || r.result || r.records)) || [];
   async function todas(base, caminho, query, max) {
     const out = []; let page = 0, tot = 1;
@@ -78,7 +101,7 @@ module.exports = function (ctx) {
       if (op && op.ini && op.fim) query = { startDate: ms(op.ini) - 12 * 3600e3, endDate: ms(op.fim) + 12 * 3600e3 };
       else if (e.lastUpdate) query = { lastUpdate: e.lastUpdate - 5 * 60e3 };
       else query = { startDate: Date.now() - DIAS_INI * 864e5, endDate: Date.now() };
-      const brutos = await todas(PUNCH, '/', query);
+      const brutos = await todas(await punchUrl(), '', query);
       const funcs = col('func'), porExt = new Map(), porSol = new Map(), porCpf = new Map(), vinc = e.vinculos || {};
       funcs.forEach(f => { porExt.set(f.id, f.id); if (f.solidesId) porSol.set(String(f.solidesId), f.id); const c = dig(f.cpf); if (c.length === 11) porCpf.set(c, f.id); });
       const docs = new Map(), sem = new Map(); let n = 0, ex = 0;
@@ -104,7 +127,7 @@ module.exports = function (ctx) {
       salvaEst(novo);
       return { ok: true, recebidas: n, excluidas: ex, dias: docs.size, semVinculo: novo.semVinculo.length };
     } catch (err) {
-      const e2 = est(); e2.ultimaFalha = Date.now(); e2.ok = false; e2.erro = err.msg || String(err.message || err); salvaEst(e2);
+      const e2 = est(); e2.ultimaFalha = Date.now(); e2.ok = false; e2.erro = err.msg || String(err.message || err); if (/ 404/.test(e2.erro)) delete e2.punchUrl; salvaEst(e2);
       throw err;
     } finally { rodando = false; }
   }
@@ -166,8 +189,8 @@ module.exports = function (ctx) {
     const r = p.slice('/api/solides/'.length);
     try {
       if (r === 'status') { const e = est(); json(res, 200, { configurado: !!TOKEN, intervaloMin: INTERVALO, ultimo: e.ultimo || 0, ok: e.ok !== false, erro: e.erro || '', ultimaFalha: e.ultimaFalha || 0, recebidas: e.recebidas || 0, semVinculo: e.semVinculo || [], vinculos: e.vinculos || {}, ajEnviados: e.ajEnviados || {}, rodando }); return true; }
-      if (r === 'testar') { const x = await sol(EMPLOYER, '/workplace/find-all', { query: { page: 0, size: 3 } }); json(res, 200, { ok: true, amostra: x }); return true; }
-      if (r === 'amostra-pontos') { const x = await sol(PUNCH, '/', { query: { startDate: Date.now() - 2 * 864e5, endDate: Date.now(), page: 0, size: 5 } }); json(res, 200, { ok: true, amostra: x, lidas: lista(x).map(normPunch) }); return true; }
+      if (r === 'testar') { const x = await sol(EMPLOYER, '/workplace/find-all', { query: { page: 0, size: 3 } }); let pu = '', puErro = ''; try { pu = await punchUrl(); } catch (er) { puErro = er.msg || String(er); } json(res, 200, { ok: true, amostra: x, marcacoes: pu ? 'ok' : 'falhou', marcacoesErro: puErro }); return true; }
+      if (r === 'amostra-pontos') { const x = await sol(await punchUrl(), '', { query: { startDate: Date.now() - 2 * 864e5, endDate: Date.now(), page: 0, size: 5 } }); json(res, 200, { ok: true, amostra: x, lidas: lista(x).map(normPunch) }); return true; }
       if (r === 'sincronizar' && m === 'POST') { const b = await lerJson(req); json(res, 200, await sincronizar(b && b.ini && b.fim ? { ini: b.ini, fim: b.fim } : null)); return true; }
       if (r === 'locais') { const l = await todas(EMPLOYER, '/workplace/find-all', {}, 20); json(res, 200, l.map(x => ({ id: String(x.id), nome: x.name || x.description || '', externalId: x.externalId || '' }))); return true; }
       if (r === 'escalas') { const l = await todas(EMPLOYER, '/work-schedule', {}, 20); json(res, 200, l.map(x => ({ id: String(x.id), nome: x.name || x.description || ('Escala ' + x.id) }))); return true; }

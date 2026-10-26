@@ -14121,7 +14121,7 @@ async function solApi(rota,op){
   op=op||{};let r;
   try{r=await fetch('/api/solides/'+rota,{method:op.method||'GET',credentials:'same-origin',headers:{'content-type':'application/json'},body:op.body?JSON.stringify(op.body):undefined});}
   catch(e){throw new Error('Sem conexão com o servidor.');}
-  let j=null;try{j=await r.json();}catch(e){throw new Error('A conexão automática só funciona no sistema instalado na VPS.');}
+  let j=null;try{j=await r.json();}catch(e){throw new Error(window.__SELFHOST?'O servidor não respondeu a tempo (erro '+r.status+'). Tente de novo em alguns minutos.':'A conexão automática só funciona no sistema instalado na VPS.');}
   if(!r.ok)throw new Error((j&&j.erro)||('Erro '+r.status));return j;}
 function solSondar(){
   if(SOL.busy==='sonda'||Date.now()-SOL.sonda<60000)return;SOL.sonda=Date.now();
@@ -14133,7 +14133,7 @@ const solRun=async(nome,fn)=>{if(SOL.busy)return;SOL.busy=nome;render();try{awai
 A.solAba=d=>{SOL.aba=d.k;render();};
 A.solSync=()=>solRun('sync',async()=>{const r=await solApi('sincronizar',{method:'POST',body:{}});toast(r.ok?('Sincronizado: '+r.recebidas+' marcação(ões) recebida(s)'+(r.semVinculo?', '+r.semVinculo+' funcionário(s) sem vínculo':'')+'.'):(r.msg||'Não sincronizou.'),r.ok?'pos':'neg');SOL.st=await solApi('status');});
 A.solSyncMes=()=>solRun('sync',async()=>{const m=ui.pmimp.mes||todayStr().slice(0,7),[a,b]=monthRange(m);const r=await solApi('sincronizar',{method:'POST',body:{ini:a,fim:b<todayStr()?b:todayStr()}});toast(r.ok?('Mês '+fmtYm(m)+' buscado de novo: '+r.recebidas+' marcação(ões).'):(r.msg||'Não sincronizou.'),r.ok?'pos':'neg');SOL.st=await solApi('status');});
-A.solTestar=()=>solRun('teste',async()=>{const r=await solApi('testar');const n=(Array.isArray(r.amostra)?r.amostra:((r.amostra&&(r.amostra.content||r.amostra.data))||[])).length;toast('Conexão com a Sólides ok'+(n?' ('+n+' local(is) de trabalho na amostra).':'.'),'pos');});
+A.solTestar=()=>solRun('teste',async()=>{const r=await solApi('testar');const n=(Array.isArray(r.amostra)?r.amostra:((r.amostra&&(r.amostra.content||r.amostra.data))||[])).length;if(r.marcacoes==='falhou')toast('Cadastro da Sólides ok, mas as marcações não responderam: '+(r.marcacoesErro||'erro'),'neg');else toast('Conexão com a Sólides ok: cadastro e marcações'+(n?' ('+n+' local(is) de trabalho na amostra).':'.'),'pos');});
 A.solAmostra=()=>solRun('teste',async()=>{const r=await solApi('amostra-pontos');const lidas=r.lidas||[];
   modal({title:'Amostra de marcações da Sólides (últimos 2 dias)',wide:true,body:'<p class="sub" style="margin:0 0 10px">Use na primeira ligação para conferir se os campos foram entendidos. O CPF aparece mascarado.</p><div class="tw"><table style="min-width:620px"><thead><tr><th>Funcionário</th><th>Horários lidos</th><th>Local</th><th>Excluída</th></tr></thead><tbody>'+(lidas.map(p=>'<tr><td>'+esc(p.nome||p.empId||'—')+(p.cpf?'<div class="sub mono">'+pmCpfMask(p.cpf)+'</div>':'')+'</td><td class="mono">'+esc((p.tempos||[]).map(t=>new Date(t[0]).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'})).join(' · ')||'nenhum')+'</td><td>'+esc(p.local||'—')+'</td><td>'+(p.excluida?'sim':'')+'</td></tr>').join('')||emptyRow(4,'Nenhuma marcação nos últimos 2 dias.'))+'</tbody></table></div><details style="margin-top:10px"><summary class="sub">Resposta bruta (para o suporte técnico)</summary><pre style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap">'+esc(JSON.stringify(r.amostra,null,1).replace(/(\d{3})\.?(\d{3})\.?(\d{3})-?(\d{2})/g,'***.$2.$3-**').slice(0,8000))+'</pre></details>',foot:'<button class="btn" data-act="closeModal">Fechar</button>'});});
 A.solVincSalvar=()=>solRun('vinc',async()=>{const v={};(SOL.st&&SOL.st.semVinculo||[]).forEach((x,i)=>{const f=ui.sol['v'+i];if(f&&x.solidesId)v[x.solidesId]=f;});if(!Object.keys(v).length){toast('Escolha ao menos um cadastro.','neg');return;}
@@ -14730,8 +14730,9 @@ ACT_GROUP.sairConta=null;
 A.sairConta=()=>confirmBox('Sair do sistema neste aparelho?',()=>{location.href='/sair';},'Sair');
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='88',APP_DATA='2026-10-23';
+const APP_VER='89',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['89','2026-10-26',['Ponto (Sólides): o sistema descobre sozinho o endereço das marcações na API da Sólides (a chamada antiga respondia 404). Testar conexão agora confere o cadastro e as marcações.']],
   ['88','2026-10-23',['Segurança: o perfil escolhido em Usuários passa a valer também no servidor (dados de RH e Departamento Pessoal, integrações e gestão de contas).','Conversas privadas e de grupo do chat só chegam a quem participa; anexos só abrem para quem pode ver o registro que os cita.','Contas de nível Equipe só podem ser alteradas pelo dono; leitura de PDF e páginas do sistema com proteções extras contra arquivos maliciosos.']],
   ['87','2026-10-23',['Clientes e fornecedores: no sistema da VPS a busca de dados pelo CNPJ passa pelo servidor, sem depender da rede ou do navegador de cada pessoa.','Ao digitar um CPF, o sistema confere os dígitos e formata; ao digitar CPF ou CNPJ já cadastrado, avisa para não duplicar. (Dados de pessoa física não têm consulta pública.)']],
   ['86','2026-10-23',['Cotações: o orçamento do fornecedor em PDF (no formato dele) ou foto agora é lido pela IA. No mapa, clique em Importar resposta, escolha o fornecedor e Ler PDF ou foto com IA.','A tela de conferência mostra cada linha do orçamento ligada ao item do mapa, com preço unitário, frete, prazo, pagamento e validade; o que tiver dúvida aparece em amarelo e nada é gravado antes de você clicar em Lançar no mapa.','O orçamento original fica anexado ao mapa (link Orçamento original).']],
