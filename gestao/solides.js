@@ -75,14 +75,20 @@ module.exports = function (ctx) {
     const vistos = new Set(at.map(x => String(x.id))); return at.concat(dem.filter(x => x && !vistos.has(String(x.id))));
   }
   async function marcacoesDe(empId, ini, fim) { const r = await sol(PUNCHES, '/punch/v2/punches/employees/' + encodeURIComponent(empId), { query: { startDate: Math.round(ini), endDate: Math.round(fim) } }); return Array.isArray(r) ? r : lista(r); }
+  let stLocal = { um: 0, varios: 0, nenhum: 0 };
   async function buscarPorFuncionario(ini, fim, comDemitidos) {
     const emps = (await funcionariosSolides(comDemitidos)).filter(x => x && x.id != null && x.recordsPunch !== false);
-    const out = [], fila = emps.slice(); let erro404 = 0, ok = 0;
+    /* local de trabalho: a marcação não traz, mas o cadastro do funcionário na Sólides tem os locais dele;
+       com um local só, todas as horas vão para ele (com mais de um, fica a obra do cadastro ou o relatório) */
+    let nomesWp = null; const nomeWp = async id => { if (!nomesWp) { nomesWp = new Map(); try { (await todas(EMPLOYER, '/workplace/find-all', {}, 20)).forEach(w => nomesWp.set(String(w.id), w.name || w.description || '')); } catch (e) { } } return nomesWp.get(String(id)) || ''; };
+    const out = [], fila = emps.slice(); let erro404 = 0, ok = 0; stLocal = { um: 0, varios: 0, nenhum: 0 };
     const trab = async () => { while (fila.length) { const x = fila.shift(); let ps;
       try { ps = await marcacoesDe(x.id, ini, fim); ok++; } catch (er) { if (/ 404/.test(String(er.msg || ''))) { erro404++; continue; } throw er; }
+      const wps = (Array.isArray(x.workplaceList) ? x.workplaceList : []).filter(w => w && w.active !== false && w.inactive !== true);
+      let local = ''; if (wps.length === 1) { local = wps[0].name || wps[0].description || await nomeWp(wps[0].id); stLocal.um++; } else if (wps.length > 1) stLocal.varios++; else stLocal.nenhum++;
       const emp = { id: x.id, name: x.name || x.socialName || '', cpf: x.cpf || '', externalId: x.externalId || '' };
       for (const pz of ps) { const a = localMs(pz.startDate), b = localMs(pz.endDate);
-        out.push({ id: pz.id, dateIn: isNaN(a) ? undefined : a, dateOut: isNaN(b) ? undefined : b, employee: emp, deleted: !!pz.canceled }); } } };
+        out.push({ id: pz.id, dateIn: isNaN(a) ? undefined : a, dateOut: isNaN(b) ? undefined : b, employee: emp, workplace: local ? { name: local } : undefined, deleted: !!pz.canceled }); } } };
     await Promise.all([trab(), trab(), trab(), trab()]);
     if (!ok && erro404) throw { st: 502, msg: 'Sólides respondeu 404 nas marcações por funcionário.' };
     return out;
@@ -147,7 +153,7 @@ module.exports = function (ctx) {
           const antes = new Set(Object.values(dia.p)), outras = (dia.m || []).filter(h => !antes.has(h)); /* horários vindos de arquivo ficam */
           Object.keys(dia.p).forEach(k => { if (k.split('#')[0] === key) delete dia.p[k]; });
           if (p.excluida) ex++; else { dia.p[key + '#' + L.hora] = L.hora; n++; }
-          if (p.local) dia.dep = p.local;
+          if (p.local && (!dia.dep || dia.depSrc === 'solides')) { dia.dep = p.local; dia.depSrc = 'solides'; }
           dia.src = 'solides';
           dia.m = [...new Set(outras.concat(Object.values(dia.p)))].sort();
         }
@@ -159,9 +165,9 @@ module.exports = function (ctx) {
         try { const r = await sol(PUNCHES, '/punch/v2/punches/employees/' + encodeURIComponent(empDe.get(d.funcId)) + '/summary', { query: { startDate: i0, endDate: f0 } });
           if (r && typeof r === 'object') d.sum = { trab: minDe(r.totalWorked), prev: minDe(r.totalExpected), ext: minDe(r.overtime), atraso: minDe(r.delays), falta: typeof r.absences === 'number' ? r.absences : null, bh: minDe(r.hoursBank), em: Date.now() }; } catch (x) { } } }));
       docs.forEach((d, id) => { d.v = Date.now(); d.imp = 'solides'; docPut('pmmes/' + id, d); });
-      const novo = Object.assign(e, { lastUpdate: ini, ultimo: Date.now(), ok: true, erro: '', recebidas: n, excluidas: ex, docs: docs.size, semVinculo: [...sem.values()].slice(0, 200) });
+      const novo = Object.assign(e, { locais: stLocal, lastUpdate: ini, ultimo: Date.now(), ok: true, erro: '', recebidas: n, excluidas: ex, docs: docs.size, semVinculo: [...sem.values()].slice(0, 200) });
       salvaEst(novo);
-      return { ok: true, recebidas: n, excluidas: ex, dias: docs.size, semVinculo: novo.semVinculo.length, foraVinculo: semN };
+      return { ok: true, recebidas: n, excluidas: ex, dias: docs.size, semVinculo: novo.semVinculo.length, foraVinculo: semN, locais: stLocal };
     } catch (err) {
       const e2 = est(); e2.ultimaFalha = Date.now(); e2.ok = false; e2.erro = err.msg || String(err.message || err); if (/ 404/.test(e2.erro)) delete e2.punchUrl; salvaEst(e2);
       throw err;
@@ -224,7 +230,7 @@ module.exports = function (ctx) {
     if (NIV[conta.nivel] < NIV.admin) { json(res, 403, { erro: 'Apenas administradores.' }); return true; }
     const r = p.slice('/api/solides/'.length);
     try {
-      if (r === 'status') { const e = est(); json(res, 200, { configurado: !!TOKEN, intervaloMin: INTERVALO, ultimo: e.ultimo || 0, ok: e.ok !== false, erro: e.erro || '', ultimaFalha: e.ultimaFalha || 0, recebidas: e.recebidas || 0, semVinculo: e.semVinculo || [], vinculos: e.vinculos || {}, ajEnviados: e.ajEnviados || {}, rodando }); return true; }
+      if (r === 'status') { const e = est(); json(res, 200, { locais: e.locais || null, configurado: !!TOKEN, intervaloMin: INTERVALO, ultimo: e.ultimo || 0, ok: e.ok !== false, erro: e.erro || '', ultimaFalha: e.ultimaFalha || 0, recebidas: e.recebidas || 0, semVinculo: e.semVinculo || [], vinculos: e.vinculos || {}, ajEnviados: e.ajEnviados || {}, rodando }); return true; }
       if (r === 'testar') { const x = await sol(EMPLOYER, '/workplace/find-all', { query: { page: 0, size: 3 } }); let pu = '', puErro = ''; try { const em = (await funcionariosSolides(false))[0]; if (em) { await marcacoesDe(em.id, Date.now() - 864e5, Date.now()); pu = 'ok'; } else pu = 'ok'; } catch (er) { puErro = er.msg || String(er); } json(res, 200, { ok: true, amostra: x, marcacoes: pu ? 'ok' : 'falhou', marcacoesErro: puErro }); return true; }
       if (r === 'amostra-pontos') { const em = (await funcionariosSolides(false)).slice(0, 3); let lst = []; for (const x of em) { const ps = await marcacoesDe(x.id, Date.now() - 3 * 864e5, Date.now()); lst = lst.concat(ps.slice(0, 3).map(pz => ({ id: pz.id, dateIn: localMs(pz.startDate), dateOut: localMs(pz.endDate), employee: { id: x.id, name: x.name, cpf: x.cpf || '' }, deleted: !!pz.canceled }))); } const x = { content: lst }; json(res, 200, { ok: true, amostra: x, lidas: lista(x).map(normPunch) }); return true; }
       if (r === 'sincronizar' && m === 'POST') { const b = await lerJson(req); json(res, 200, await sincronizar(b && b.ini && b.fim ? { ini: b.ini, fim: b.fim } : null)); return true; }

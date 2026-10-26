@@ -14180,6 +14180,7 @@ function solCard(){
   let h='<div class="card"><h2>Conexão automática com a Sólides<small>a cada '+st.intervaloMin+' min</small></h2>';
   h+='<div class="kpis">'+kpi('Última sincronização',solDt(st.ultimo),st.ok?(st.recebidas+' marcação(ões) na última'):'com erro',st.ok?'':'neg')+kpi('Sem vínculo',String((st.semVinculo||[]).length),'funcionários da Sólides',(st.semVinculo||[]).length?'neg':'')+'</div>';
   if(!st.ok&&st.erro)h+='<div class="note neg" style="margin-top:10px">'+esc(st.erro)+'</div>';
+  if(st.locais&&(st.locais.um||st.locais.varios))h+='<p class="sub" style="margin:10px 0 0">Obra das horas: <b>'+st.locais.um+'</b> funcionário(s) com um só local de trabalho na Sólides (as horas vão para a obra ligada a esse local)'+(st.locais.varios?'; <b>'+st.locais.varios+'</b> com mais de um local (vale a obra do cadastro, ou importe o relatório do mês para separar)':'')+(st.locais.nenhum?'; '+st.locais.nenhum+' sem local na Sólides (obra do cadastro)':'')+'.</p>';
   h+='<div class="acts" style="margin-top:10px">'+bt('solSync',b==='sync'?'Sincronizando…':'Sincronizar agora','pri')+bt('solSyncMes','Buscar o mês escolhido de novo')+bt('solSyncAno',SOL.busy==='ano'?'Buscando o ano…':'Buscar o ano inteiro')+bt('solTestar','Testar conexão')+bt('solAmostra','Ver amostra de marcações')+'</div>';
   h+='<div class="tabs" style="margin-top:14px">'+[['receber','Receber'],['enviar','Enviar obras e funcionários'],['ajustes','Enviar férias e afastamentos']].map(([k,l])=>'<button class="btn sm'+(SOL.aba===k?' pri':'')+'" data-act="solAba" data-k="'+k+'">'+l+'</button>').join(' ')+'</div>';
   if(SOL.aba==='receber'){
@@ -14764,8 +14765,9 @@ A.solSyncAnoOk=async()=>{if(SOL.busy)return;const ano=+(($('#f_sanoAno')||{}).va
   finally{SOL.busy='';if(btn){btn.disabled=false;btn.textContent='Buscar de novo';}render();pint();}};
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='94',APP_DATA='2026-10-26';
+const APP_VER='95',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['95','2026-10-26',['Ponto (Sólides): a sincronização usa o local de trabalho do cadastro do funcionário na Sólides quando ele tem um só local, e as horas já vão para a obra ligada a esse local. O local vindo do relatório importado continua valendo.']],
   ['94','2026-10-26',['Ponto (Sólides): o relatório importado por arquivo substitui só os dias que traz (marcações, local de trabalho/obra e totais) e mantém o resumo mensal vindo da sincronização.']],
   ['93','2026-10-26',['Ponto (Sólides): Buscar o mês e Buscar o ano inteiro voltam a trazer os funcionários ativos (a Sólides devolvia só os demitidos). O andamento mostra também as marcações de quem está sem vínculo.']],
   ['92','2026-10-26',['Ponto (Sólides): novo botão Buscar o ano inteiro, que traz da Sólides, mês a mês, as marcações e os totais de janeiro até o mês atual, mostrando o andamento.']],
