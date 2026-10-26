@@ -67,7 +67,13 @@ module.exports = function (ctx) {
      marcações de cada um em apis.tangerino.com.br/punch/v2/punches/employees/{id}. Cada marcação é um período
      com entrada (startDate) e saída (endDate) em horário local. */
   const localMs = v => { const t = String(v || ''); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return NaN; return Date.parse(t.slice(0, 19) + '-03:00'); };
-  async function funcionariosSolides(comDemitidos) { return await todas(EMPLOYER, '/employee/find-all', comDemitidos ? { showFired: 1 } : {}, 30); }
+  /* lista de funcionários: os ativos sempre; com comDemitidos, junta também a lista com demitidos (a Sólides pode
+     devolver só os demitidos quando showFired=1), sem repetir ninguém */
+  async function funcionariosSolides(comDemitidos) {
+    const at = await todas(EMPLOYER, '/employee/find-all', {}, 30); if (!comDemitidos) return at;
+    let dem = []; try { dem = await todas(EMPLOYER, '/employee/find-all', { showFired: 1 }, 30); } catch (e) { }
+    const vistos = new Set(at.map(x => String(x.id))); return at.concat(dem.filter(x => x && !vistos.has(String(x.id))));
+  }
   async function marcacoesDe(empId, ini, fim) { const r = await sol(PUNCHES, '/punch/v2/punches/employees/' + encodeURIComponent(empId), { query: { startDate: Math.round(ini), endDate: Math.round(fim) } }); return Array.isArray(r) ? r : lista(r); }
   async function buscarPorFuncionario(ini, fim, comDemitidos) {
     const emps = (await funcionariosSolides(comDemitidos)).filter(x => x && x.id != null && x.recordsPunch !== false);
@@ -126,11 +132,12 @@ module.exports = function (ctx) {
       catch (er) { if (!/ 404/.test(String(er.msg || ''))) throw er; brutos = await todas(await punchUrl(), '', query); }
       const funcs = col('func'), porExt = new Map(), porSol = new Map(), porCpf = new Map(), vinc = e.vinculos || {};
       funcs.forEach(f => { porExt.set(f.id, f.id); if (f.solidesId) porSol.set(String(f.solidesId), f.id); const c = dig(f.cpf); if (c.length === 11) porCpf.set(c, f.id); });
-      const docs = new Map(), sem = new Map(), empDe = new Map(); let n = 0, ex = 0;
+      const docs = new Map(), sem = new Map(), empDe = new Map(); let n = 0, ex = 0, semN = 0;
       for (const o of brutos) {
         const p = normPunch(o); if (!p.tempos.length) continue;
         const fid = (p.ext && porExt.get(p.ext)) || (p.empId && (porSol.get(p.empId) || vinc[p.empId])) || (p.cpf && porCpf.get(p.cpf)) || '';
         if (fid && p.empId) empDe.set(fid, p.empId);
+        if (!fid) semN += p.tempos.length;
         if (!fid) { const k = p.empId || p.cpf || p.nome; if (k && !sem.has(k)) sem.set(k, { solidesId: p.empId, nome: p.nome, cpf: p.cpf ? '***.' + p.cpf.slice(3, 6) + '.' + p.cpf.slice(6, 9) + '-**' : '' }); continue; }
         for (const [t, suf] of p.tempos) {
           const L = fmtLocal(t), id = 'pm_' + fid + '_' + L.data.slice(0, 7), key = (p.id || String(t)) + suf;
@@ -154,7 +161,7 @@ module.exports = function (ctx) {
       docs.forEach((d, id) => { d.v = Date.now(); d.imp = 'solides'; docPut('pmmes/' + id, d); });
       const novo = Object.assign(e, { lastUpdate: ini, ultimo: Date.now(), ok: true, erro: '', recebidas: n, excluidas: ex, docs: docs.size, semVinculo: [...sem.values()].slice(0, 200) });
       salvaEst(novo);
-      return { ok: true, recebidas: n, excluidas: ex, dias: docs.size, semVinculo: novo.semVinculo.length };
+      return { ok: true, recebidas: n, excluidas: ex, dias: docs.size, semVinculo: novo.semVinculo.length, foraVinculo: semN };
     } catch (err) {
       const e2 = est(); e2.ultimaFalha = Date.now(); e2.ok = false; e2.erro = err.msg || String(err.message || err); if (/ 404/.test(e2.erro)) delete e2.punchUrl; salvaEst(e2);
       throw err;

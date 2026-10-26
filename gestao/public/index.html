@@ -14749,12 +14749,12 @@ A.solSyncAnoOk=async()=>{if(SOL.busy)return;const ano=+(($('#f_sanoAno')||{}).va
   const meses=Array.from({length:ult},(_,i)=>ano+'-'+String(i+1).padStart(2,'0')),res=meses.map(m=>({m,st:'na fila',n:null,ok:null}));
   const btn=$('#mf [data-act=solSyncAnoOk]');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
   const pint=()=>{const el=$('#sanoProg');if(!el)return;const feitos=res.filter(r=>r.ok!==null).length;
-    el.innerHTML='<p style="margin:0 0 6px"><b>'+feitos+' de '+res.length+' mês(es)</b></p><div class="tw"><table><tbody>'+res.map(r=>'<tr><td>'+esc(fmtYm(r.m))+'</td><td>'+(r.ok===true?pill(r.n+' marcação(ões)','pos'):r.ok===false?pill(r.st,'neg'):esc(r.st))+'</td></tr>').join('')+'</tbody></table></div>';};
+    el.innerHTML='<p style="margin:0 0 6px"><b>'+feitos+' de '+res.length+' mês(es)</b></p><div class="tw"><table><tbody>'+res.map(r=>'<tr><td>'+esc(fmtYm(r.m))+'</td><td>'+(r.ok===true?pill(r.n+' marcação(ões)','pos')+(r.fora?' '+pill(r.fora+' de quem está sem vínculo','warn'):''):r.ok===false?pill(r.st,'neg'):esc(r.st))+'</td></tr>').join('')+'</tbody></table></div>';};
   SOL.busy='ano';render();pint();
   try{for(const r of res){r.st='buscando…';pint();const [a,b]=monthRange(r.m);let tent=0;
     while(true){try{const x=await solApi('sincronizar',{method:'POST',body:{ini:a,fim:b<hoje?b:hoje}});
         if(!x.ok&&/andamento/i.test(x.msg||'')&&tent++<20){r.st='aguardando a sincronização automática…';pint();await new Promise(z=>setTimeout(z,6000));continue;}
-        r.ok=!!x.ok;r.n=x.recebidas||0;r.st=x.ok?'ok':(x.msg||'não sincronizou');}
+        r.ok=!!x.ok;r.n=x.recebidas||0;r.fora=x.foraVinculo||0;r.st=x.ok?'ok':(x.msg||'não sincronizou');}
       catch(e){r.ok=false;r.st=e.message||'erro';}
       break;}
     pint();}
@@ -14763,8 +14763,9 @@ A.solSyncAnoOk=async()=>{if(SOL.busy)return;const ano=+(($('#f_sanoAno')||{}).va
   finally{SOL.busy='';if(btn){btn.disabled=false;btn.textContent='Buscar de novo';}render();pint();}};
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='92',APP_DATA='2026-10-26';
+const APP_VER='93',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['93','2026-10-26',['Ponto (Sólides): Buscar o mês e Buscar o ano inteiro voltam a trazer os funcionários ativos (a Sólides devolvia só os demitidos). O andamento mostra também as marcações de quem está sem vínculo.']],
   ['92','2026-10-26',['Ponto (Sólides): novo botão Buscar o ano inteiro, que traz da Sólides, mês a mês, as marcações e os totais de janeiro até o mês atual, mostrando o andamento.']],
   ['91','2026-10-26',['Ponto (Sólides) › Conferência do mês: o mês é escolhido numa lista (sem digitar).','As colunas da Sólides (trabalhadas, extras e banco) passam a vir do resumo mensal da própria Sólides.','Quem não tem jornada cadastrada aparece como "sem jornada" em vez de mostrar todas as horas como extras; o botão Aplicar jornada a quem não tem resolve em lote.']],
   ['90','2026-10-26',['Ponto (Sólides): as marcações passam a vir pela API atual da Sólides, funcionário por funcionário (entrada e saída de cada período). Os funcionários são ligados ao cadastro pelo CPF.']],
