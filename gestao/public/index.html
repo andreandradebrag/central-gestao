@@ -14841,12 +14841,29 @@ A.pdiaEspelho=d=>{const f=get('func',d.id);if(!f)return;ui.pespelho=ui.pespelho|
 {const a0=typeof alertasPonto==='function'?alertasPonto:null;if(a0)alertasPonto=function(){const it=a0.apply(this,arguments)||[];try{if(mayR('ponto')){let d=addDays(todayStr(),-1);for(let i=0;i<4&&[0,6].includes(dowOf(d));i++)d=addDays(d,-1);
   const L=pdDados(d),p=L.filter(x=>x.sit==='falta').length,s=L.filter(x=>x.sit==='sem').length;if(p+s)it.push(['pdia',(p?p+' funcionário(s) com batida faltando':'')+(p&&s?' e ':'')+(s?s+' sem marcação':'')+' em '+fmtDate(d),String(p+s)]);}}catch(e){}return it;};}
 
+/* ===== v99: Jornadas › botão Funcionários ===== */
+ACT_GROUP.jorFuncs='rh';ACT_GROUP.jorFuncsOk='rh';ACT_GROUP.jorFuncsTodos=null;
+{const d=MODS2.jornada;if(d){const ra=d.rowActs;d.rowActs=r=>{const n=S.func.filter(f=>f.status!=='desligado'&&f.jornadaId===r.id).length;return '<button class="btn sm" data-act="jorFuncs" data-id="'+esc(r.id)+'">Funcionários ('+n+')</button>'+(ra?ra(r):'');};}}
+A.jorFuncs=d=>{const j=get('jornada',d.id);if(!j)return;const fs=S.func.filter(f=>f.status!=='desligado').sort(byNome);
+  const nomeJ=id=>{const x=id&&get('jornada',id);return x?x.nome:'';};
+  modal({title:'Funcionários na jornada '+(j.nome||''),wide:true,body:'<p class="sub" style="margin:0 0 8px">Marque os funcionários ativos que fazem esta jornada. Quem já está em outra jornada aparece bloqueado: para mudar, retire-o primeiro da jornada atual.</p>'+
+    '<div class="bar" style="margin-bottom:8px"><label class="f grow"><span>Buscar</span><input id="jfQ" placeholder="Nome do funcionário" autocomplete="off"></label><button class="btn sm" data-act="jorFuncsTodos" data-v="1">Marcar visíveis</button><button class="btn sm" data-act="jorFuncsTodos" data-v="0">Desmarcar visíveis</button></div>'+
+    '<div id="jfL" style="max-height:420px;overflow:auto">'+fs.map(f=>'<label class="f chk" data-nome="'+esc(gsNorm(f.nome))+'"><input type="checkbox" data-jf="'+esc(f.id)+'"'+(f.jornadaId===j.id?' checked':'')+(f.jornadaId&&f.jornadaId!==j.id&&get('jornada',f.jornadaId)?' disabled':'')+'><span>'+esc(f.nome)+(f.funcao?' <span class="sub">· '+esc(f.funcao)+'</span>':'')+(f.jornadaId&&f.jornadaId!==j.id&&get('jornada',f.jornadaId)?' '+pill('já está em: '+nomeJ(f.jornadaId),'warn'):'')+(!f.jornadaId?' '+pill('sem jornada'):'')+'</span></label>').join('')+'</div>',
+    onOpen:mb=>{const q=$('#jfQ',mb);if(q)q.addEventListener('input',()=>{const t=gsNorm(q.value);$$('#jfL [data-nome]',mb).forEach(l=>{l.hidden=!!t&&!l.dataset.nome.includes(t);});});},
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button><button class="btn pri" data-act="jorFuncsOk" data-id="'+esc(j.id)+'">Salvar</button>'});};
+A.jorFuncsTodos=d=>{$$('#jfL [data-nome]').forEach(l=>{if(!l.hidden){const c=l.querySelector('input');if(c&&!c.disabled)c.checked=d.v==='1';}});};
+A.jorFuncsOk=d=>{const j=get('jornada',d.id);if(!j)return;let ent=0,sai=0;
+  $$('#jfL input[data-jf]').forEach(c=>{const f=get('func',c.dataset.jf);if(!f||c.disabled)return;
+    if(c.checked&&f.jornadaId!==j.id){put('func',Object.assign(cl(f),{jornadaId:j.id}));ent++;}
+    else if(!c.checked&&f.jornadaId===j.id){put('func',Object.assign(cl(f),{jornadaId:''}));sai++;}});
+  closeModal();toast(ent||sai?(ent?ent+' funcionário(s) incluído(s)':'')+(ent&&sai?' e ':'')+(sai?sai+' retirado(s)':'')+' da jornada '+(j.nome||'')+'.':'Nada mudou.','pos');render();};
 /* ===== v98: abrir o cadastro do funcionário a partir dos quadros ===== */
 ACT_GROUP.funcAbrir='rh';
 A.funcAbrir=d=>{const f=get('func',d.id);if(!f){toast('Funcionário não encontrado.','neg');return;}openMod('func',cl(f));};
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='98',APP_DATA='2026-10-26';
+const APP_VER='99',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['99','2026-10-26',['Pessoas › Mais › Jornadas: novo botão Funcionários em cada jornada, para marcar quem faz aquele horário (com busca e marcar/desmarcar todos).']],
   ['98','2026-10-26',['Painel do DP › Contratos de experiência: clique no nome do funcionário para abrir o cadastro e editar.']],
   ['97','2026-10-26',['Nova tela Pessoas › Ponto do dia: todos os funcionários num dia, com Entrada, Saída almoço, Volta e Saída, e a situação de cada um (completo, em andamento, batida faltando, sem marcação, folga, férias/afastamento). Atrasos aparecem na entrada.','Indicadores no topo e alerta no Painel do DP com quem ficou com batida faltando no último dia útil.']],
   ['96','2026-10-26',['Todos os campos de mês do sistema (espelho de ponto, financeiro, DRE, relatórios, obras e outros) passam a ser escolhidos numa lista, sem digitar.']],
