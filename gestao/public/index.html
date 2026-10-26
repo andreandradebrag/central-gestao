@@ -15049,9 +15049,69 @@ A.fpagExcluir=d=>{const x=get('fpag',d.id);if(!x)return;if(x.status==='fechada')
   confirmBox('Excluir este holerite de '+money(x.liquido)+'? O colaborador dele não existe mais no cadastro.',()=>{del('fpag',x.id);toast('Holerite excluído.','pos');},'Excluir',true);};
 ACT_GROUP.fpagExcluir='folha';
 
+/* ===== v107: importar CRLV digital (PDF) para cadastrar o veículo =====
+   Lê o CRLV-e emitido pela Carteira Digital de Trânsito / Portal de Serviços (Senatran): cada campo é o texto
+   logo abaixo do rótulo, na mesma coluna. Com um arquivo abre o cadastro já preenchido para conferir e salvar;
+   com vários, cadastra todos de uma vez. Placa já cadastrada: completa o cadastro existente. */
+const CRLV_ROT={renavam:'CÓDIGO RENAVAM',placa:'PLACA',exercicio:'EXERCÍCIO',anoFab:'ANO FABRICAÇÃO',anoMod:'ANO MODELO',crv:'NÚMERO DO CRV',cla:'CÓDIGO DE SEGURANÇA DO CLA',
+  marcaModelo:'MARCA / MODELO / VERSÃO',especie:'ESPÉCIE / TIPO',chassi:'CHASSI',placaAnt:'PLACA ANTERIOR / UF',cor:'COR PREDOMINANTE',combustivel:'COMBUSTÍVEL',categoria:'CATEGORIA',
+  capacidade:'CAPACIDADE',potencia:'POTÊNCIA/CILINDRADA',pbt:'PESO BRUTO TOTAL',motor:'MOTOR',cmt:'CMT',eixos:'EIXOS',lotacao:'LOTAÇÃO',carroceria:'CARROCERIA',proprietario:'NOME',doc:'CPF / CNPJ',local:'LOCAL',data:'DATA'};
+const crlvNorm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+/* itens: [{s,x,y,h}] de uma página (pdf.js: x/y do canto inferior esquerdo) */
+function crlvLer(itens){
+  const it=itens.filter(t=>String(t.s||'').trim()).map(t=>Object.assign({},t,{n:crlvNorm(t.s)}));
+  const rots=it.filter(t=>t.h<8.5),vals=it.filter(t=>t.h>=8.5);
+  const r={};
+  Object.keys(CRLV_ROT).forEach(k=>{const alvo=crlvNorm(CRLV_ROT[k]);const L=rots.find(t=>t.n===alvo);if(!L)return;
+    let best=null,bd=1e9;vals.forEach(v=>{const dy=L.y-v.y,dx=Math.abs(v.x-L.x);if(dy<3||dy>40||dx>14)return;const d=dy+dx*2;if(d<bd){bd=d;best=v;}});
+    if(best){const s=String(best.s).trim();if(!/^[*.\/ ]+$/.test(s))r[k]=s;}});
+  /* reserva: padrões conhecidos no texto todo (outros leiautes do CRLV) */
+  const tudo=it.map(t=>t.s).join(' ');
+  if(!r.placa){const m=tudo.match(/\b([A-Z]{3}-?\d[A-Z0-9]\d{2})\b/);if(m)r.placa=m[1];}
+  if(!r.chassi){const m=tudo.match(/\b([A-HJ-NPR-Z0-9]{17})\b/);if(m)r.chassi=m[1];}
+  if(!r.renavam){const m=tudo.match(/\b(\d{11})\b/);if(m)r.renavam=m[1];}
+  if(r.placa)r.placa=r.placa.toUpperCase().replace(/[^A-Z0-9]/g,'');
+  return r;}
+const CRLV_COMB=c=>{c=crlvNorm(c);return /ELETRIC/.test(c)&&!/GASOL|ALCOOL|ETANOL|DIESEL/.test(c)?'Elétrico':/(ALCOOL|ETANOL).*(GASOL)|(GASOL).*(ALCOOL|ETANOL)|FLEX/.test(c)?'Flex':/DIESEL/.test(c)?'Diesel':/GNV|GAS NATURAL/.test(c)?'GNV':/ALCOOL|ETANOL/.test(c)?'Etanol':/GASOL/.test(c)?'Gasolina':'';};
+const CRLV_TIPO=e=>{e=crlvNorm(e);return /MOTOCICL|MOTONETA|CICLOMOTOR|TRICICLO|QUADRICICLO/.test(e)?'Moto':/CAMINHAO|TRATOR|REBOQUE|SEMI-?REBOQUE|ONIBUS/.test(e)?'Caminhão':/AUTOMOVEL/.test(e)?'Carro':/CAMINHONETE|CAMIONETA|UTILITARIO|MISTO|FURGAO/.test(e)?'Utilitário':/ESPECIAL|MAQUINA/.test(e)?'Máquina':'';};
+const crlvTit=s=>String(s||'').toLowerCase().replace(/(^|[\s\/-])(\S)/g,(m,a,b)=>a+b.toUpperCase());
+/* registro do veículo a partir do que foi lido */
+function crlvVeic(c){const mm=String(c.marcaModelo||'').split('/'),marca=mm.length>1?mm[0].trim():'',modelo=(mm.length>1?mm.slice(1).join('/'):mm[0]).trim();
+  const dt=String(c.data||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return {placa:c.placa||'',renavam:c.renavam||'',chassi:c.chassi||'',marca:crlvTit(marca),modelo:modelo,ano:[c.anoFab,c.anoMod].filter(Boolean).join('/'),
+    combustivel:CRLV_COMB(c.combustivel)||'',tipo:CRLV_TIPO(c.especie)||'',cor:crlvTit(c.cor||''),motor:c.motor||'',potencia:c.potencia||'',lotacao:c.lotacao||'',
+    categoriaDoc:crlvTit(c.categoria||''),especie:crlvTit(c.especie||''),proprietarioDoc:c.proprietario||'',docProprietario:c.doc||'',
+    crlvExercicio:c.exercicio||'',crlvEmissao:dt?dt[3]+'-'+dt[2]+'-'+dt[1]:''};}
+/* ---- FIM DO LEITOR ---- */
+
+{const d=MODS2.veic,f0=d.fields;d.fields=r=>f0(r).concat([{t:'sect',l:'Dados do CRLV'},F('chassi','Chassi','text'),F('cor','Cor','text'),F('motor','Motor','text'),F('crlvExercicio','Exercício do último CRLV','text')]);
+  const h0=d.headActs||'';d.headActs=h0+'<button class="btn" data-act="crlvImportar" title="Ler o CRLV digital (PDF) e cadastrar o veículo">Importar CRLV (PDF)</button>';}
+ACT_GROUP.crlvImportar='frota';
+async function crlvItensPdf(file){const buf=await file.arrayBuffer();await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
+  const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:buf}).promise,pg=await doc.getPage(1),tc=await pg.getTextContent();
+  return tc.items.map(t=>({s:t.str,x:t.transform[4],y:t.transform[5],h:Math.abs(t.height||t.transform[3]||0)}));}
+const crlvMescla=(ex,v)=>{const n=cl(ex);Object.keys(v).forEach(k=>{if(v[k]!==''&&v[k]!=null&&(n[k]==null||n[k]===''))n[k]=v[k];});if(v.crlvExercicio)n.crlvExercicio=v.crlvExercicio;if(v.crlvEmissao)n.crlvEmissao=v.crlvEmissao;return n;};
+A.crlvImportar=()=>{if(!mayW('frota')){toast('Seu perfil não pode cadastrar veículos.','neg');return;}
+  let i=document.getElementById('crlvFile__b');if(!i){document.body.insertAdjacentHTML('beforeend','<input type="file" id="crlvFile__b" accept=".pdf,application/pdf" multiple hidden>');i=document.getElementById('crlvFile__b');
+    i.addEventListener('change',async()=>{const fs=[...(i.files||[])];i.value='';if(!fs.length)return;toast('Lendo '+fs.length+' CRLV…');
+      const lidos=[],erros=[];
+      for(const f of fs){try{const c=crlvLer(await crlvItensPdf(f));if(!c.placa||!(c.renavam||c.chassi))throw new Error('não parece um CRLV digital');lidos.push({arq:f.name,v:crlvVeic(c)});}catch(e){erros.push(f.name+': '+(e&&e.message||'erro ao ler'));}}
+      if(erros.length)toast('Não li '+erros.length+' arquivo(s): '+erros.join(' · '),'neg');
+      if(!lidos.length)return;
+      const acha=v=>S.veic.find(x=>String(x.placa||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===v.placa);
+      if(lidos.length===1){const v=lidos[0].v,ex=acha(v);
+        if(ex){openMod('veic',crlvMescla(ex,v));toast('Placa '+v.placa+' já cadastrada: completei os campos vazios. Confira e salve.');return;}
+        const r=Object.assign(MODS2.veic.blank(),v);if(!r.tipo)r.tipo='Utilitário';if(!r.combustivel)r.combustivel='Flex';openMod('veic',r);toast('CRLV lido. Confira os dados e salve.','pos');return;}
+      const novos=lidos.filter(l=>!acha(l.v)),exist=lidos.filter(l=>acha(l.v));
+      confirmBox('Li '+lidos.length+' CRLV: '+novos.length+' veículo(s) novo(s)'+(novos.length?' ('+novos.map(l=>l.v.placa).join(', ')+')':'')+(exist.length?' e '+exist.length+' já cadastrado(s), que só terão os campos vazios completados':'')+'. Cadastrar agora?',()=>{
+        const regs=novos.map(l=>{const r=Object.assign(MODS2.veic.blank(),l.v,{id:uid()});if(!r.tipo)r.tipo='Utilitário';if(!r.combustivel)r.combustivel='Flex';return r;}).concat(exist.map(l=>crlvMescla(acha(l.v),l.v)));
+        bulkPut('veic',regs);toast(novos.length+' veículo(s) cadastrado(s)'+(exist.length?', '+exist.length+' atualizado(s)':'')+'.','pos');},'Cadastrar');});}
+  i.click();};
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='106',APP_DATA='2026-10-26';
+const APP_VER='107',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['107','2026-10-26',['Frota › Veículos: botão Importar CRLV (PDF). Lê o CRLV digital e preenche placa, RENAVAM, chassi, marca, modelo, ano, combustível, tipo, cor e motor. Com um arquivo abre o cadastro para conferir e salvar; com vários, cadastra todos de uma vez. Placa já cadastrada só tem os campos vazios completados.']],
   ['106','2026-10-26',['Folha e holerites: holerite de colaborador excluído do cadastro aparecia só como "—". Agora a linha avisa e tem o botão Excluir holerite; se o colaborador está sem nome, aparece Abrir cadastro.']],
   ['105','2026-10-26',['Importar cadastros › Escala de férias: lê o PDF da escala de férias da contabilidade e atualiza cada colaborador com os períodos aquisitivos em aberto, dias pagos, saldo e faltas. Os períodos que não aparecem na escala ficam como quitados.','Os afastamentos informados na escala (licença-maternidade, benefícios) podem ser cadastrados junto, sem repetir os que já existem.','Conferência antes de gravar, com o saldo vencido antes e depois de cada colaborador, e opção de desfazer.']],
   ['104','2026-10-26',['Novo botão Segurança no topo: verificação em duas etapas com aplicativo autenticador (QR Code e 10 códigos de recuperação), lista de aparelhos conectados com "Sair de todos os outros aparelhos" e troca de senha.','Senhas guardadas com cálculo mais forte (as antigas são atualizadas sozinhas no próximo login) e senhas muito comuns recusadas.','As sessões passam a ser guardadas cifradas no banco: uma cópia do banco não permite entrar no sistema.']],
