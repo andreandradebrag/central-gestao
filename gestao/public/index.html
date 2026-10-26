@@ -14179,7 +14179,7 @@ function solCard(){
   let h='<div class="card"><h2>Conexão automática com a Sólides<small>a cada '+st.intervaloMin+' min</small></h2>';
   h+='<div class="kpis">'+kpi('Última sincronização',solDt(st.ultimo),st.ok?(st.recebidas+' marcação(ões) na última'):'com erro',st.ok?'':'neg')+kpi('Sem vínculo',String((st.semVinculo||[]).length),'funcionários da Sólides',(st.semVinculo||[]).length?'neg':'')+'</div>';
   if(!st.ok&&st.erro)h+='<div class="note neg" style="margin-top:10px">'+esc(st.erro)+'</div>';
-  h+='<div class="acts" style="margin-top:10px">'+bt('solSync',b==='sync'?'Sincronizando…':'Sincronizar agora','pri')+bt('solSyncMes','Buscar o mês escolhido de novo')+bt('solTestar','Testar conexão')+bt('solAmostra','Ver amostra de marcações')+'</div>';
+  h+='<div class="acts" style="margin-top:10px">'+bt('solSync',b==='sync'?'Sincronizando…':'Sincronizar agora','pri')+bt('solSyncMes','Buscar o mês escolhido de novo')+bt('solSyncAno',SOL.busy==='ano'?'Buscando o ano…':'Buscar o ano inteiro')+bt('solTestar','Testar conexão')+bt('solAmostra','Ver amostra de marcações')+'</div>';
   h+='<div class="tabs" style="margin-top:14px">'+[['receber','Receber'],['enviar','Enviar obras e funcionários'],['ajustes','Enviar férias e afastamentos']].map(([k,l])=>'<button class="btn sm'+(SOL.aba===k?' pri':'')+'" data-act="solAba" data-k="'+k+'">'+l+'</button>').join(' ')+'</div>';
   if(SOL.aba==='receber'){
     const sv=st.semVinculo||[];
@@ -14739,10 +14739,33 @@ A.jorLote=()=>{const js=S.jornada.slice().sort(byNome),fs=S.func.filter(f=>f.sta
     '<p class="sub" style="margin:10px 0 6px">'+fs.length+' funcionário(s) ativo(s) sem jornada. Desmarque quem tem outro horário.</p><div class="ch-pick" style="max-height:340px;overflow:auto">'+fs.map(f=>'<label class="f chk"><input type="checkbox" data-jl="'+esc(f.id)+'" checked><span>'+esc(f.nome)+(f.funcao?' <span class="sub">· '+esc(f.funcao)+'</span>':'')+'</span></label>').join('')+'</div>',
     saveLabel:'Aplicar',save:root=>{const jid=($('#f_jor',root)||{}).value;const ids=$$('[data-jl]',root).filter(x=>x.checked).map(x=>x.dataset.jl);if(!jid||!ids.length){toast('Escolha a jornada e ao menos um funcionário.','neg');return false;}
       ids.forEach(id=>{const f=get('func',id);if(f)put('func',Object.assign(cl(f),{jornadaId:jid}));});toast('Jornada aplicada a '+ids.length+' funcionário(s). Extras, faltas e banco passam a ser calculados.','pos');}});};
+/* Buscar o ano inteiro na Sólides: mês a mês, de janeiro até o mês atual, mostrando o andamento */
+ACT_GROUP.solSyncAno='ponto';ACT_GROUP.solSyncAnoOk='ponto';
+const SANO={parar:false};
+A.solSyncAno=()=>{if(SOL.busy){toast('Espere terminar a busca em andamento.','neg');return;}const ano=+todayStr().slice(0,4);
+  modal({title:'Buscar o ano inteiro na Sólides',body:'<div class="fg">'+field('Ano','sanoAno','select',String(ano),{opts:[[String(ano),String(ano)],[String(ano-1),String(ano-1)]]})+'</div><p class="sub" style="margin:10px 0 0">O sistema busca mês a mês as marcações e os totais da Sólides de todos os funcionários. Pode levar alguns minutos; deixe esta tela aberta até terminar. Buscar de novo não duplica nada.</p><div id="sanoProg" style="margin-top:10px"></div>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn pri" data-act="solSyncAnoOk">Começar</button>'});};
+A.solSyncAnoOk=async()=>{if(SOL.busy)return;const ano=+(($('#f_sanoAno')||{}).value||todayStr().slice(0,4)),hoje=todayStr(),ult=ano<+hoje.slice(0,4)?12:+hoje.slice(5,7);
+  const meses=Array.from({length:ult},(_,i)=>ano+'-'+String(i+1).padStart(2,'0')),res=meses.map(m=>({m,st:'na fila',n:null,ok:null}));
+  const btn=$('#mf [data-act=solSyncAnoOk]');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
+  const pint=()=>{const el=$('#sanoProg');if(!el)return;const feitos=res.filter(r=>r.ok!==null).length;
+    el.innerHTML='<p style="margin:0 0 6px"><b>'+feitos+' de '+res.length+' mês(es)</b></p><div class="tw"><table><tbody>'+res.map(r=>'<tr><td>'+esc(fmtYm(r.m))+'</td><td>'+(r.ok===true?pill(r.n+' marcação(ões)','pos'):r.ok===false?pill(r.st,'neg'):esc(r.st))+'</td></tr>').join('')+'</tbody></table></div>';};
+  SOL.busy='ano';render();pint();
+  try{for(const r of res){r.st='buscando…';pint();const [a,b]=monthRange(r.m);let tent=0;
+    while(true){try{const x=await solApi('sincronizar',{method:'POST',body:{ini:a,fim:b<hoje?b:hoje}});
+        if(!x.ok&&/andamento/i.test(x.msg||'')&&tent++<20){r.st='aguardando a sincronização automática…';pint();await new Promise(z=>setTimeout(z,6000));continue;}
+        r.ok=!!x.ok;r.n=x.recebidas||0;r.st=x.ok?'ok':(x.msg||'não sincronizou');}
+      catch(e){r.ok=false;r.st=e.message||'erro';}
+      break;}
+    pint();}
+    try{SOL.st=await solApi('status');}catch(e){}
+    const er=res.filter(r=>r.ok===false).length;toast(er?er+' mês(es) com erro: veja a lista.':'Ano '+ano+' buscado: '+res.reduce((s,r)=>s+(r.n||0),0)+' marcação(ões).',er?'neg':'pos');}
+  finally{SOL.busy='';if(btn){btn.disabled=false;btn.textContent='Buscar de novo';}render();pint();}};
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='91',APP_DATA='2026-10-26';
+const APP_VER='92',APP_DATA='2026-10-26';
 const CHANGELOG=[
+  ['92','2026-10-26',['Ponto (Sólides): novo botão Buscar o ano inteiro, que traz da Sólides, mês a mês, as marcações e os totais de janeiro até o mês atual, mostrando o andamento.']],
   ['91','2026-10-26',['Ponto (Sólides) › Conferência do mês: o mês é escolhido numa lista (sem digitar).','As colunas da Sólides (trabalhadas, extras e banco) passam a vir do resumo mensal da própria Sólides.','Quem não tem jornada cadastrada aparece como "sem jornada" em vez de mostrar todas as horas como extras; o botão Aplicar jornada a quem não tem resolve em lote.']],
   ['90','2026-10-26',['Ponto (Sólides): as marcações passam a vir pela API atual da Sólides, funcionário por funcionário (entrada e saída de cada período). Os funcionários são ligados ao cadastro pelo CPF.']],
   ['89','2026-10-26',['Ponto (Sólides): o sistema descobre sozinho o endereço das marcações na API da Sólides (a chamada antiga respondia 404). Testar conexão agora confere o cadastro e as marcações.']],
