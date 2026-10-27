@@ -21961,9 +21961,19 @@ function p3Plural1(h){return String(h).split(/(<[^>]*>)/).map(seg=>{if(!seg||seg
     return pre+num+ws.map(w=>{if(parar||/^\s*$/.test(w))return w;if(/\((?:s|es|is|ns|ões)\)$/.test(w)){viu=true;return p3Pal(w,n);}if(/^\d/.test(w)){parar=true;return w;}if(viu&&!/^(de|do|da|dos|das|em|com|e|ou|sem|a|o)$/i.test(w))parar=true;return w;}).join('');});}).join('');}
 P3_PAINEIS.forEach(id=>{const v0=V[id];if(typeof v0!=='function')return;V[id]=function(){const h=v0.apply(this,arguments);return '<div class="pnSetor">'+p3Plural(h)+'</div>';};});
 
+/* ===== v118: versão e data no menu superior, para todos (antes só no Painel do Início) ===== */
+{const t0=toolsHtml;toolsHtml=function(){
+  const h=t0();if(!h||typeof APP_VER==='undefined')return h;
+  const d=fmtDate(APP_DATA),dc=d.length===10?d.slice(0,6)+d.slice(8):d;
+  const b='<button class="tbtn verchip" data-act="nav" data-tab="tut" title="Versão '+APP_VER+', atualizada em '+d+'. Clique para ver novidades e tutoriais." aria-label="Versão '+APP_VER+', atualizada em '+d+'">v'+APP_VER+'<span class="vs">·</span><span class="vd">'+dc+'</span></button>';
+  return h.replace('<div class="tools">','<div class="tools">'+b);
+};}
+try{const st=document.createElement('style');st.textContent='.tools .verchip{display:inline-flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:center;gap:5px;font:600 11.5px var(--font-ui,inherit);white-space:nowrap;opacity:.85;letter-spacing:.2px}.tools .verchip:hover{opacity:1}.tools .verchip .vd,.tools .verchip .vs{display:inline!important;font-weight:500}@media (max-width:1100px){.tools .verchip{flex-direction:column!important;gap:0;line-height:1.05;padding:3px 6px}.tools .verchip .vd{display:block!important;font-size:9.5px}.tools .verchip .vs{display:none!important}}';document.head.appendChild(st);}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='117',APP_DATA='2026-10-27';
+const APP_VER='118',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['118','2026-10-27',['Número da versão e data da atualização agora aparecem no menu superior, abaixo do nome do sistema, para todos os usuários (antes só no Painel do Início). Clique nele para ver as novidades e os tutoriais.']],
   ['117','2026-10-27',['Contratos de experiência (Pessoal › Painel): botões Prorrogar (só no 1º período, uma vez e até 90 dias), Efetivar (prazo indeterminado no dia seguinte ao fim da experiência) e Encerrar (abre o desligamento com o motivo certo).', 'Painéis de setor revisados no computador e no celular: botões dentro das caixas, indicadores com número curto e texto na legenda, plurais corretos e sem rolagem lateral.']],
   ['116','2026-10-27',['Chat: chamada de vídeo individual volta a funcionar (o servidor escondia da outra pessoa os dados que combinam a chamada); se a ligação direta não conectar, aparece a opção de chamada por link.', 'Chat: mensagens e anexos chegam ao vivo para quem recebe (antes esperavam a consulta periódica).', 'Chat: anexos baixam com o nome original, sem abrir aba; fotos ganharam o botão Baixar. Anexo continua visível só para quem participa da conversa.']],
   ['115.2','2026-10-27',['Notas fiscais de saída e NFS-e (faturamento) só para Financeiro, Fiscal, Comercial, Administrador e Diretoria, também no servidor. Comprador, Almoxarife, Gestor de projetos e os perfis de leitura continuam vendo só as notas de entrada.']],
