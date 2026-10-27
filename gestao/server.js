@@ -223,6 +223,7 @@ function chatVisivel(conta, p, data, memo) {
   const s = p.split('/'); if (s[0] !== 'cm' || s.length < 4 || s[1] === conta.id) return true;
   const kind = s[2], d = data || {};
   if (kind === 's') return true;
+  if (kind === 'rtc') return !!d.to && d.to === conta.id; /* v116: sinalização da chamada direta: só a outra pessoa da chamada */
   const membro = (criador, cid) => { if (criador === conta.id) return true; const k = criador + '/' + cid; if (memo && memo.has(k)) return memo.get(k); let ok = false;
     const r = q.docGet.get('cm/' + criador + '/c/' + cid); if (r) { try { const cv = JSON.parse(r.data); ok = cv.tipo === 'canal' || (Array.isArray(cv.membros) && cv.membros.includes(conta.id)); } catch (e) { } }
     if (memo) memo.set(k, ok); return ok; };
@@ -231,6 +232,31 @@ function chatVisivel(conta, p, data, memo) {
   return false;
 }
 const podeVer = (conta, p, data, memo) => pode(conta, p, 'r') && perfilPermite(conta, p, 'r') && chatVisivel(conta, p, data, memo) && REG.podeLer(conta, p, data, memo) && END.leituraPropria(conta, p, data);
+/* v116: sinalização das chamadas diretas (cm/<eu>/rtc/<id>): o documento leva "to" (a outra pessoa); a resposta, a recusa e o
+   encerramento herdam o "to" do documento anterior ou de quem ligou, para que só as duas pessoas da chamada leiam */
+const rtcPar = db.prepare("SELECT path, data FROM docs WHERE id=? AND parent LIKE 'cm/%/rtc' LIMIT 5");
+function rtcPreparar(conta, dp, velho, data) {
+  const s = dp.split('/'); if (s[0] !== 'cm' || s[2] !== 'rtc' || s.length !== 4) return { data };
+  if (JSON.stringify(data).length > 65536) return { st: 413, erro: 'Dados da chamada grandes demais.' };
+  let to = typeof data.to === 'string' && data.to ? data.to : '';
+  if (!to && velho && typeof velho.to === 'string') to = velho.to;
+  if (!to) for (const r of rtcPar.all(s[3])) { const a = r.path.split('/')[1]; if (a === conta.id) continue; try { if (JSON.parse(r.data).to === conta.id) { to = a; break; } } catch (e) { } }
+  if (!to) { const o = Object.assign({}, data); delete o.to; return { data: o }; }
+  const c = q.contaPorId.get(to); if (to === conta.id || !c || !c.ativo) return { st: 400, erro: 'Chamada para uma conta inválida.' };
+  return { data: Object.assign({}, data, { to }) };
+}
+/* v116: servidores de conexão das chamadas diretas (STUN e, se configurado, TURN para redes que bloqueiam a ligação direta) */
+function iceServers(conta) {
+  const lista = v => String(v || '').split(',').map(x => x.trim()).filter(x => /^(stun|turns?):[^\s"'<>]{3,200}$/.test(x)).slice(0, 6);
+  const stun = lista(process.env.STUN_URLS != null ? process.env.STUN_URLS : 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302'), turn = lista(process.env.TURN_URLS), out = [];
+  if (stun.length) out.push({ urls: stun });
+  if (turn.length) {
+    if (process.env.TURN_SEGREDO) { const username = Math.floor(Date.now() / 1000 + 12 * 3600) + ':' + conta.id; out.push({ urls: turn, username, credential: crypto.createHmac('sha1', process.env.TURN_SEGREDO).update(username).digest('base64') }); }
+    else if (process.env.TURN_USUARIO) out.push({ urls: turn, username: process.env.TURN_USUARIO, credential: process.env.TURN_SENHA || '' });
+    else out.push({ urls: turn });
+  }
+  return { iceServers: out, turn: turn.length > 0 };
+}
 const validPath = (p, doc) => { const s = String(p || '').split('/').filter(Boolean); return s.length > 0 && s.length <= 12 && s.every(x => /^[\w\-.|~@+=]{1,200}$/.test(x)) && (doc ? s.length % 2 === 0 : s.length % 2 === 1); };
 
 /* ---------------- tempo real (SSE) ---------------- */
@@ -725,6 +751,7 @@ async function rotear(req, res) {
       if (m === 'PATCH') { if (!r0) return json(res, 404, { code: 'invalid_argument', erro: 'Documento não existe.' }); data = Object.assign(JSON.parse(r0.data), data); }
       if (Object.prototype.hasOwnProperty.call(data, 'id') && data.id !== id) data.id = id;
       data = preservarFunc(conta, dp, data);
+      { const rt = rtcPreparar(conta, dp, velho, data); if (rt.erro) return json(res, rt.st, { code: 'invalid_argument', erro: rt.erro }); data = rt.data; } /* v116 */
     }
     if (!gravacaoPermitida(conta, dp) && !REG.excecaoGravacao(conta, dp, velho, data, m)) {
       try { permLogPut.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), dp.split('/')[0], Date.now()); } catch (e) { }
@@ -751,6 +778,7 @@ async function rotear(req, res) {
     req.on('close', () => { CONEX.delete(cid); avisarPares(); }); return;
   }
   if (p === '/api/room/presence' && m === 'POST') { const b = await lerJson(req), c = CONEX.get(b.cid); if (JSON.stringify(b.patch || {}).length > 4096) return json(res, 413, { erro: 'Presença grande demais.' }); if (c && c.conta.id === conta.id) { const pr = Object.assign({}, c.presence); Object.keys(b.patch || {}).forEach(k => { if (b.patch[k] === null) delete pr[k]; else pr[k] = b.patch[k]; }); c.presence = pr; c.updatedAt = Date.now(); avisarPares(); } return json(res, 200, { ok: true }); }
+  if (p === '/api/rtc/ice' && m === 'GET') return json(res, 200, iceServers(conta)); /* v116 */
   if (p === '/api/assets' && m === 'POST') {
     if (NIV[conta.nivel] < NIV.interact) return json(res, 403, { code: 'not_granted' });
     const b = await lerCorpo(req, MAX_BLOB).catch(e => { throw Object.assign(e, { code: 'too_large' }); }), id = uid(32).toLowerCase().replace(/[^a-z0-9]/g, '').padEnd(32, '0').slice(0, 32), ct = String(req.headers['content-type'] || 'application/octet-stream').split(';')[0];

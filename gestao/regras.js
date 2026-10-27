@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS auditoria_ts ON auditoria(ts);
 CREATE INDEX IF NOT EXISTS auditoria_conta ON auditoria(conta, ts);
 CREATE TABLE IF NOT EXISTS blobcit(blob TEXT NOT NULL, path TEXT NOT NULL, por TEXT, ts INTEGER, PRIMARY KEY(blob, path));
 CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
-  for (const s of ['ALTER TABLE arquivos ADD COLUMN origem TEXT', 'ALTER TABLE arquivos ADD COLUMN lixo INTEGER', 'ALTER TABLE arquivos ADD COLUMN lixoPor TEXT', 'ALTER TABLE arquivos ADD COLUMN restrito INTEGER']) { try { db.exec(s); } catch (e) { } }
+  for (const s of ['ALTER TABLE blobcit ADD COLUMN fwd INTEGER', 'ALTER TABLE arquivos ADD COLUMN origem TEXT', 'ALTER TABLE arquivos ADD COLUMN lixo INTEGER', 'ALTER TABLE arquivos ADD COLUMN lixoPor TEXT', 'ALTER TABLE arquivos ADD COLUMN restrito INTEGER']) { try { db.exec(s); } catch (e) { } }
   fs.mkdirSync(path.join(DATA, 'blobs', 'lixo'), { recursive: true });
   /* v112: privacidade (auditoria só com campos alterados e dados protegidos, leitura de saúde, relatório do titular, IA) */
   const PRIV = require('./privacidade.js')({ db, q, perfilDe, NIV, ipDe });
@@ -60,7 +60,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     citIns: db.prepare('INSERT INTO blobcit(blob,path,por,ts) VALUES(?,?,?,?) ON CONFLICT(blob,path) DO NOTHING'),
     citDoPath: db.prepare('SELECT blob FROM blobcit WHERE path=?'),
     citDel: db.prepare('DELETE FROM blobcit WHERE blob=? AND path=?'),
-    citDoBlob: db.prepare('SELECT path, por FROM blobcit WHERE blob=? LIMIT 500'),
+    citDoBlob: db.prepare('SELECT path, por, fwd FROM blobcit WHERE blob=? LIMIT 500'),
+    citFwd: db.prepare('UPDATE blobcit SET fwd=1 WHERE blob=? AND path=?'), /* v116: anexo do chat encaminhado */
     sessao: db.prepare('SELECT conta FROM sessoes WHERE token=? AND expira>?')
   };
   const doc = p => { const r = q.docGet.get(p); if (!r) return null; try { return JSON.parse(r.data); } catch (e) { return null; } };
@@ -755,7 +756,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     try {
       const ids = data ? idsCitados(data).filter(id => st.arq.get(id)) : [], tem = new Set(ids), agora = Date.now();
       for (const r of st.citDoPath.all(p)) if (!tem.has(r.blob)) st.citDel.run(r.blob, p);
-      for (const id of ids) { const a = st.arq.get(id); if (!a.origem && conta && a.por === conta.id) st.arqOrigem.run(p, id); st.citIns.run(id, p, conta ? conta.id : null, agora); }
+      const velhas = new Set(st.citDoPath.all(p).map(r => r.blob));
+      for (const id of ids) { const a = st.arq.get(id); if (!a.origem && conta && a.por === conta.id) st.arqOrigem.run(p, id);
+        /* v116: encaminhar no chat um anexo do chat vale para a nova conversa só se quem encaminha já podia abrir o arquivo (anexo restrito, de outro módulo ou na lixeira, não) */
+        const fwd = !velhas.has(id) && conta && a.por !== conta.id && /^cm\/[^/]+\/m\/[^/]+$/.test(p) && p.split('/')[1] === conta.id && /^cm\/[^/]+\/m\//.test(String(a.origem || '')) && !a.restrito && !a.lixo && blobPermitido(conta, a);
+        st.citIns.run(id, p, conta ? conta.id : null, agora); if (fwd) st.citFwd.run(id, p); }
     } catch (e) { console.error('[anexos]', e.message); }
   }
   const AREAS = new Set(['cm', 'pt', 'usrreq']);
@@ -772,6 +777,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c.path === a.origem) continue; const c0 = c.path.split('/')[0];
       let valida = c.por === a.por;
       if (!valida && (c0 === 'pt' || c0 === 'usrreq') && ehRhOuAdmin(c.por)) valida = true; /* RH publicou na Minha área do colaborador */
+      if (!valida && c.fwd && c0 === 'cm') valida = true; /* v116: encaminhado no chat por quem participava da conversa de origem */
       if (!valida) continue;
       const r = citaAinda(c.path, a.id); if (!r) continue; let d = null; try { d = JSON.parse(r.data); } catch (e) { }
       if (podeVer(conta, c.path, d, memo)) return true;
@@ -785,8 +791,18 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (a.por !== conta.id && a.origem && SENS_ANX(a.origem.split('/')[0])) auditar(conta, req, 'ANEXO_DOWNLOAD', '/_blob/' + id, null, { origem: a.origem, tipo: a.ct });
     if (a.origem && PRIV.ehSaude(a.origem.split('/')[0])) PRIV.registrarLeitura(conta, req, 'anexo:' + a.origem.split('/')[0], [a.origem.split('/').slice(1).join('/') + '#' + id], 'anexo'); /* v112 */
     const ct = String(a.ct || 'application/octet-stream').toLowerCase(), ok = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|video\/(mp4|webm)|audio\/[a-z0-9.+-]+)$/.test(ct);
-    res.writeHead(200, { 'content-type': ok ? ct : 'application/octet-stream', 'content-length': a.tam, 'cache-control': 'private, no-store', 'content-disposition': ok ? 'inline' : 'attachment', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox" });
+    /* v116: ?baixar=1&nome=<arquivo> entrega como download com o nome original (o id do anexo continua sendo a única chave de acesso) */
+    let qs = null; try { qs = new URL(req.url, 'http://x').searchParams; } catch (e) { }
+    const baixar = !!qs && qs.get('baixar') === '1', nome = baixar ? nomeArquivo(qs.get('nome'), ct) : '';
+    const disp = baixar ? 'attachment; filename="' + nome.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') + '"; filename*=UTF-8\'\'' + encodeURIComponent(nome).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase()) : ok ? 'inline' : 'attachment';
+    res.writeHead(200, { 'content-type': ok ? ct : 'application/octet-stream', 'content-length': a.tam, 'cache-control': 'private, no-store', 'content-disposition': disp, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox" });
     fs.createReadStream(f).pipe(res);
+  }
+  function nomeArquivo(n, ct) {
+    let s = String(n || '').normalize('NFC').replace(/[\u0000-\u001f\u007f\\/:*?"<>|]+/g, '_').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 120);
+    if (!s) s = 'arquivo';
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(s)) { const ext = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' }[ct]; if (ext) s += '.' + ext; }
+    return s;
   }
   function listarAnexos(conta, res) {
     if (conta.nivel !== 'owner') return json(res, 403, { code: 'not_granted', erro: 'Só o dono lista todos os anexos.' });

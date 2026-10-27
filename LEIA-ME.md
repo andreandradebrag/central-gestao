@@ -145,6 +145,14 @@ O ponto oficial é registrado no app da Sólides (Sólides DP, antigo Tangerino)
 Opcionais: `SOLIDES_INTERVALO_MIN` (padrão 15) e `SOLIDES_DIAS_INICIAIS` (quantos dias buscar na primeira vez, padrão 35).
 Sem token, a tela continua aceitando o relatório exportado da Sólides (Excel ou CSV).
 
+## 7.1.1. Chamada de vídeo do chat (STUN e TURN)
+
+A chamada individual do chat é direta entre os navegadores e não precisa de nenhum endereço externo liberado. Na mesma rede e na maioria das conexões de casa ela funciona só com o STUN público (padrão). Em 4G e em redes de empresa ou de obra a ligação direta costuma ser bloqueada; nesse caso o app oferece "Iniciar chamada por link" (Jitsi, em nova aba). Para a chamada direta funcionar também nessas redes, instale um servidor TURN (ex.: coturn) e configure no serviço gestao:
+
+- `TURN_URLS=turn:turn.seudominio.com.br:3478,turns:turn.seudominio.com.br:5349`
+- `TURN_SEGREDO=<mesmo valor de static-auth-secret do coturn>` (credencial temporária de 12 h, recomendado), ou `TURN_USUARIO` e `TURN_SENHA` (credencial fixa)
+- Opcional: `STUN_URLS` para trocar o STUN padrão (vazio desliga o STUN).
+
 ## 7.2. Extrato automático do Banco do Brasil (Financeiro › Conciliação bancária › Extrato automático)
 
 1. No portal **BB Developers** (developers.bb.com.br), entre com o usuário da empresa, crie um aplicativo e peça acesso à **API Extratos** (produção). Se travar, o gerente do BB libera.
