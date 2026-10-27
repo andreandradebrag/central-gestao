@@ -22362,9 +22362,30 @@ A.obr3Atu=d=>{const c=eapCur(),e=c&&eapDe(c.id);if(!e)return;const i=d&&d.i!=nul
       if(!sel.length){toast('Nenhuma linha marcada.','neg');return false;}
       const n=obr3Aplicar(c,sel);toast(n+' valor(es) atualizado(s).','pos');}});};
 
+/* ===== v121: cor por setor (aba sólida + fundo claro do setor aberto) ===== */
+const SETOR_COR={inicio:'#475569',comer:'#1d4ed8',obras:'#c2410c',sup:'#a16207',finan:'#15803d',fisc:'#7e22ce',pess:'#be185d',sstq:'#b91c1c',qsgi:'#0f766e',frota:'#0e7490',equip:'#4d7c0f',cad:'#57534e',sis:'#334155'};
+const coresLigadas=()=>{try{return localStorage.getItem('cg.coresSetor')!=='0';}catch(e){return true;}};
+try{const st=document.createElement('style');let css='';
+  for(const[k,v]of Object.entries(SETOR_COR))css+='html.cores-setor .nav-b[data-mod="'+k+'"]{background:'+v+';color:#fff}';
+  css+='html.cores-setor .nav-b{margin:1px 2px;opacity:.8}html.cores-setor .nav-b:hover{opacity:1;filter:brightness(1.08)}'+
+    'html.cores-setor .nav-b[aria-current="page"]{opacity:1;box-shadow:inset 0 0 0 2px #fff}'+
+    'html.cores-setor body{background:color-mix(in srgb,var(--setor-cor,transparent) 7%,var(--bg))}'+
+    '@media (prefers-color-scheme:dark){html.cores-setor:not([data-theme="light"]) body{background:color-mix(in srgb,var(--setor-cor,transparent) 10%,var(--bg))}}'+
+    'html.cores-setor[data-theme="dark"] body{background:color-mix(in srgb,var(--setor-cor,transparent) 10%,var(--bg))}';
+  st.textContent=css;document.head.appendChild(st);}catch(e){}
+function coresAplicar(){try{const r=document.documentElement,on=coresLigadas();r.classList.toggle('cores-setor',on);
+  const b=document.querySelector('#nav .nav-b[aria-current="page"]'),m=b&&b.dataset.mod;
+  if(on&&m&&SETOR_COR[m])r.style.setProperty('--setor-cor',SETOR_COR[m]);else r.style.removeProperty('--setor-cor');}catch(e){}}
+{const r0=render;render=function(){const x=r0.apply(this,arguments);coresAplicar();return x;};}
+try{setTimeout(coresAplicar,0);}catch(e){}
+A.coresSetor=()=>{try{localStorage.setItem('cg.coresSetor',coresLigadas()?'0':'1');}catch(e){}coresAplicar();render();};
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);
+  return h+'<div class="card" style="margin-top:14px"><h2>Cores por setor</h2><p class="sub" style="margin:0 0 8px">Cada aba do menu tem a cor do seu setor e o fundo da página fica com a cor do setor aberto, bem clara. Vale só para este navegador.</p><button class="btn" data-act="coresSetor">'+(coresLigadas()?'Desligar as cores':'Ligar as cores')+'</button></div>';};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='120',APP_DATA='2026-10-27';
+const APP_VER='121',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['121','2026-10-27',['Cores por setor: cada aba do menu superior tem a cor do seu setor e o fundo da página fica com a cor do setor aberto, bem clara. Para desligar neste navegador: Sistema › Configurações › Cores por setor.']],
   ['120','2026-10-27',['Comercial › Oportunidades: Nº da proposta na 1ª coluna (próximo número sugerido, editável, sem repetição; botão para separar o número que hoje está no título), coluna Projeto com link, colunas mais largas e títulos em até 3 linhas.', 'Botões Participar e Desistir no lugar do Go/no-go: Participar segue para a proposta e, com margem abaixo do mínimo, continua pedindo a aprovação do diretor; Desistir pede o motivo.', 'Valores em dinheiro em todo o sistema: digite só os números e o campo mostra R$ 2.000.000,00.', 'Habilitação: tipos de documento em ordem alfabética e filtro por documento.', 'EAP e Curva S: obras listadas pelo projeto (P490 · contrato · objeto).', 'Pessoal › Custo-hora por função: o RH calcula a média por função (com encargos e benefícios, só funções com 3 ou mais pessoas, sem expor salários) ou informa um valor de referência. Na EAP, a mão de obra recebe o valor da hora e o material o custo médio; valores gravados só mudam pelo botão Atualizar valores.']],
   ['119','2026-10-27',['Conector fiscal: fim do conflito com o Agente da NF-e do Omie. Só um sistema por CNPJ pode consultar a SEFAZ por NSU (regra da NT 2014.002); por padrão (NFE_DIST=0) quem consulta é o Omie e a Central continua buscando as NFS-e. O cartão de Fiscal › NFs recebidas mostra quem consulta, avisa se outro sistema estiver na fila e bloqueia Baixar XML durante a espera de 1 hora da SEFAZ.', 'Conector fiscal: chaves e CNPJ com letras (CNPJ alfanumérico) aceitos; ciência automática só até 10 dias da emissão e aviso dos prazos de manifestação (10 e 90 dias); NFS-e recebidas guardam os valores de IBS/CBS.']],
   ['118','2026-10-27',['Número da versão e data da atualização agora aparecem no menu superior, abaixo do nome do sistema, para todos os usuários (antes só no Painel do Início). Clique nele para ver as novidades e os tutoriais.']],
