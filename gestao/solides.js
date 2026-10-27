@@ -15,6 +15,26 @@ const DIAS_INI = Math.min(120, Math.max(1, +process.env.SOLIDES_DIAS_INICIAIS ||
 const TZ = process.env.SOLIDES_TZ || 'America/Sao_Paulo';
 const TZ_SOL = process.env.SOLIDES_TIMEZONE || 'SAO_PAULO';
 
+/* nunca deixar credencial em log nem em mensagem: alguns servidores devolvem o cabeçalho Authorization no corpo do erro */
+const ocultar = t => String(t == null ? '' : t)
+  .replace(/<ArgumentValue>[^<]*<\/ArgumentValue>/gi, '<ArgumentValue>[oculto]</ArgumentValue>')
+  .replace(/\b(Basic|Bearer)\s+[A-Za-z0-9+/=._~-]{6,}/gi, '$1 [oculto]')
+  .replace(TOKEN && TOKEN.length >= 6 ? new RegExp(TOKEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g') : /$^/, '[oculto]');
+const resumoXml = t => { const s = String(t || ''); if (!/^\s*<\?xml|^\s*<Error>/i.test(s)) return s; const c = (s.match(/<Code>([^<]*)</i) || [])[1], m = (s.match(/<Message>([^<]*)</i) || [])[1]; return [c, m].filter(Boolean).join(': ') || 'erro em XML'; };
+/* segue redirecionamentos sem levar a credencial para outro endereço (ex.: link de arquivo no S3, que recusa o Authorization) */
+async function solFetch(u, opts) {
+  let url = String(u), o = Object.assign({}, opts, { redirect: 'manual', headers: Object.assign({}, opts.headers) });
+  for (let i = 0; i < 5; i++) {
+    const r = await fetch(url, o);
+    if (r.status < 300 || r.status >= 400 || !r.headers.get('location')) return r;
+    const prox = new URL(r.headers.get('location'), url);
+    if (prox.origin !== new URL(url).origin) { delete o.headers.Authorization; delete o.headers.authorization; }
+    if (r.status === 303 || ((r.status === 301 || r.status === 302) && o.method && o.method !== 'GET')) { o.method = 'GET'; delete o.body; }
+    url = prox.href;
+  }
+  throw new Error('redirecionamentos demais');
+}
+
 module.exports = function (ctx) {
   const { q, db, avisarDoc, json, lerJson, NIV } = ctx;
   const cfgGet = db.prepare('SELECT v FROM cfg WHERE k=?'), cfgPut = db.prepare('INSERT INTO cfg(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v');
@@ -34,10 +54,10 @@ module.exports = function (ctx) {
     Object.entries(op.query || {}).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v)); });
     const auth = /^(basic|bearer)\s/i.test(TOKEN) ? TOKEN : 'Basic ' + TOKEN;
     let r;
-    try { r = await fetch(u, { method: op.method || 'GET', headers: { Authorization: auth, Accept: 'application/json', 'Content-Type': 'application/json' }, body: op.body ? JSON.stringify(op.body) : undefined, signal: AbortSignal.timeout(60000) }); }
-    catch (e) { throw { st: 502, msg: 'A Sólides não respondeu (' + (e.message || e) + ').' }; }
-    const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { texto: t.slice(0, 2000) }; }
-    if (!r.ok) throw { st: r.status === 401 || r.status === 403 ? 401 : 502, msg: 'Sólides respondeu ' + r.status + (r.status === 401 || r.status === 403 ? ' (token inválido ou sem permissão)' : '') + ': ' + String((j && (j.message || j.error || j.texto)) || '').slice(0, 300), bruto: j };
+    try { r = await solFetch(u, { method: op.method || 'GET', headers: { Authorization: auth, Accept: 'application/json', 'Content-Type': 'application/json' }, body: op.body ? JSON.stringify(op.body) : undefined, signal: AbortSignal.timeout(60000) }); }
+    catch (e) { throw { st: 502, msg: 'A Sólides não respondeu (' + ocultar(e.message || e) + ').' }; }
+    const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = { texto: ocultar(resumoXml(t)).slice(0, 2000) }; }
+    if (!r.ok) throw { st: r.status === 401 || r.status === 403 ? 401 : 502, msg: 'Sólides respondeu ' + r.status + (r.status === 401 || r.status === 403 ? ' (token inválido ou sem permissão)' : '') + ': ' + ocultar(resumoXml(String((j && (j.message || j.error || j.texto)) || ''))).slice(0, 300), bruto: JSON.parse(ocultar(JSON.stringify(j))) };
     return j;
   }
   /* endereço da lista de marcações: a Sólides publica o módulo de ponto em /api/punch; o caminho exato varia
@@ -49,7 +69,7 @@ module.exports = function (ctx) {
     try {
       const origem = new URL(PUNCH).origin;
       for (const docs of ['/v2/api-docs', '/v3/api-docs']) {
-        const r = await fetch(PUNCH + docs, { headers: { Accept: 'application/json', Authorization: /^(basic|bearer)\s/i.test(TOKEN) ? TOKEN : 'Basic ' + TOKEN }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+        const r = await solFetch(PUNCH + docs, { headers: { Accept: 'application/json', Authorization: /^(basic|bearer)\s/i.test(TOKEN) ? TOKEN : 'Basic ' + TOKEN }, signal: AbortSignal.timeout(20000) }).catch(() => null);
         if (!r || !r.ok) continue; const j = await r.json().catch(() => null); if (!j || !j.paths) continue;
         const base = (j.basePath || (j.servers && j.servers[0] && new URL(j.servers[0].url, origem).pathname) || '').replace(/\/$/, '');
         for (const [cam, ops] of Object.entries(j.paths)) { const g = ops && ops.get; if (!g) continue; const ps = (g.parameters || []).map(x => x && x.name);
@@ -174,8 +194,8 @@ module.exports = function (ctx) {
     } finally { rodando = false; }
   }
   if (TOKEN) {
-    setTimeout(() => sincronizar().catch(e => console.log('Sólides: ' + (e.msg || e))), 20000);
-    setInterval(() => sincronizar().catch(e => console.log('Sólides: ' + (e.msg || e))), INTERVALO * 60e3);
+    setTimeout(() => sincronizar().catch(e => console.log('Sólides: ' + ocultar(e.msg || e))), 20000);
+    setInterval(() => sincronizar().catch(e => console.log('Sólides: ' + ocultar(e.msg || e))), INTERVALO * 60e3);
   }
 
   /* ---------- envio para a Sólides ---------- */

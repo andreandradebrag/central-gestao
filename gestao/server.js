@@ -190,10 +190,13 @@ try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'ut
 const PERF_BASE = PERM.perfis || {}, PERF_BASE_N = Object.keys(PERF_BASE).length;
 const PERFC_PROIBIDOS = new Set(['usr', 'cfg', 'lixo']), PERFC_SO_LEITURA = new Set(['painel', 'dir', 'meu', 'ajuda']);
 const PERFC_ID = /^c_[a-z0-9]{4,24}$/;
+/* v115: Painel do Início e Painel da diretoria (com os indicadores) são só do Administrador, do dono e da Diretoria: o perfil
+   personalizado não os recebe, mesmo que estejam gravados nele (perfis criados antes da v115). */
+const PERFC_SO_ADMIN = new Set(['painel', 'dir']);
 const perfcGrupoValido = g => typeof g === 'string' && !PERFC_PROIBIDOS.has(g) && ((PERM.modulos || []).some(m => m[0] === g) || g === 'agenda' || g === 'chat');
 function perfcCompilar(d) {
   const w = [], r = [];
-  for (const [g, v] of Object.entries((d && d.mod) || {})) { if (!perfcGrupoValido(g)) continue; if (v === 'w' && !PERFC_SO_LEITURA.has(g)) w.push(g); else if (v === 'w' || v === 'r') r.push(g); }
+  for (const [g, v] of Object.entries((d && d.mod) || {})) { if (!perfcGrupoValido(g) || PERFC_SO_ADMIN.has(g)) continue; if (v === 'w' && !PERFC_SO_LEITURA.has(g)) w.push(g); else if (v === 'w' || v === 'r') r.push(g); }
   ['meu', 'ajuda'].forEach(g => { if (!r.includes(g)) r.push(g); });
   const o = (d && d.opc) || {};
   return { w, r, custom: true, nome: String((d && d.nome) || '').slice(0, 60), sensRh: o.rh === true, banco: o.banco === true, frotaTodos: o.frota === true, aprovDir: o.dir === true };

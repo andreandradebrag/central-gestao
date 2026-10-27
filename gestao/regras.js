@@ -887,6 +887,19 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const cuEmpdoc = (conta, modo) => { const d = defDe(conta); return !!(d && d.custom && ((d.w || []).includes('empdoc') || (modo === 'r' && (d.r || []).includes('empdoc')))); };
   const tdocLe = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin ? !!conta && conta.nivel === 'owner' : (TDOC_LE.has(papelConta(conta)) || cuEmpdoc(conta, 'r'));
   const tdocGrava = conta => !!conta && (conta.nivel === 'owner' || (NIV[conta.nivel] >= NIV.admin && (TDOC_GRAVA.has(papelConta(conta)) || cuEmpdoc(conta, 'w'))));
+  /* v115 (relatorios/feito_v115_P0.md): leitura parcial de uma coleção financeira (perfis.json › leituraParcial, gerado por
+     gen_perm.js). Quem não lê o módulo financeiro, mas tem o módulo indicado, lê só os registros que o predicado aceita:
+     folha = contas da folha oficial geradas pelo RH; cnq = contas do custo da não qualidade (Qualidade). Vale também para
+     os perfis personalizados, pelo módulo. */
+  const PARCIAL = { folha: d => ehLancFolha(d) || /^fo\|/.test(String((d && d.foKey) || '')), cnq: d => !!(d && d.cnqCol && d.cnqId) };
+  function leParcial(conta, c0, data) {
+    const par = PERM.leituraParcial && PERM.leituraParcial[c0]; if (!par || !data) return false;
+    const pr = PERM.perfis[perfilDe(conta)]; if (!pr) return false; const tem = g => (pr.w || []).includes(g) || (Array.isArray(pr.r) && pr.r.includes(g));
+    return Object.entries(par).some(([g, k]) => tem(g) && PARCIAL[k] && PARCIAL[k](data));
+  }
+  /* v115: lê o financeiro da empresa (contas a pagar e a receber inteiras): dono, Administrador, Diretoria, Financeiro, Fiscal e
+     o personalizado com um módulo financeiro. Usado para tirar valores dos avisos e o resultado do mês fechado. */
+  const leFin = conta => !!conta && (conta.nivel === 'owner' || leModulo(conta, 'lanc'));
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
@@ -895,6 +908,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
+    if (leParcial(conta, c0, data)) return true; /* v115: RH só as contas da folha; Qualidade só as do custo da não qualidade */
     const k = 'plog:' + c0; if (!memo || !memo.has(k)) { if (memo) memo.set(k, 1); try { permLog.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), 'leitura:' + c0, Date.now()); } catch (e) { } }
     return MODO_LEIT !== 'bloquear';
   }
@@ -913,6 +927,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (/^remessa\/[^/]+$/.test(p)) { const o = Object.assign({}, data); delete o.txt; o._restrito = true; return o; }
       if (/^lixo\/[^/]+$/.test(p) && data.col === 'parc' && data.rec) { const o = Object.assign({}, data, { rec: Object.assign({}, data.rec) }); FIN_BK.concat(['bancoPend', 'bancoHist']).forEach(k => delete o.rec[k]); return o; }
     }
+    if (data && /^ctbfech\/[^/]+$/.test(p) && data.tot && conta && !leFin(conta)) { /* v115: o mês fechado é de leitura livre (trava), mas o resultado (DRE) só para o Financeiro */
+      const o = Object.assign({}, data); delete o.tot; o._restrito = true; return o; }
     if (!data || !/^lanc\/[^/]+$/.test(p) || !ehLancFolha(data) || veFolha(conta)) return data;
     const o = {}; for (const k of Object.keys(data)) if (!LANC_SENS.includes(k)) o[k] = data[k];
     o.desc = 'Folha de pagamento (restrito ao RH e ao Financeiro)'; o._restrito = true; return o;
@@ -976,12 +992,12 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   function pendenciasAprovacao() {
     const lim = Date.now() - HORAS_PEND * 3600e3, A = alcadas(), itens = [];
     const desde = (r, p) => Math.max(+r.cr || 0, +(r.aprovReaberta && r.aprovReaberta.em) || 0, +r.enviadoEm || 0, +r.solEm || 0) || docTs(p);
-    const add = (quem, tipo, desc, valor, d, fora) => { if (!d || d > lim) return; const f = (fora || []).filter(Boolean); itens.push({ quem: [...new Set(quem)].filter(u => !f.includes(u)), tipo, desc: String(desc || '').slice(0, 160), valor, desde: d }); };
-    for (const l of col('lanc')) if (!l.pago && !l.aprov && precisaAprovPag(l) && !aprovacaoValida(l)) add(quemAprova(l.obrig ? Math.min(2, nivelDe(valorAlc('lanc', l))) : nivelDe(valorAlc('lanc', l))), 'Conta a pagar', l.desc, +l.valor, desde(l, 'lanc/' + l.id), [l.crBy, l.aprovParc && l.aprovParc.por]);
+    const add = (quem, tipo, desc, valor, d, fora, fin) => { if (!d || d > lim) return; const f = (fora || []).filter(Boolean); itens.push({ quem: [...new Set(quem)].filter(u => !f.includes(u)), tipo, desc: String(desc || '').slice(0, 160), valor, desde: d, fin: !!fin }); };
+    for (const l of col('lanc')) if (!l.pago && !l.aprov && precisaAprovPag(l) && !aprovacaoValida(l)) add(quemAprova(l.obrig ? Math.min(2, nivelDe(valorAlc('lanc', l))) : nivelDe(valorAlc('lanc', l))), 'Conta a pagar', l.desc, +l.valor, desde(l, 'lanc/' + l.id), [l.crBy, l.aprovParc && l.aprovParc.por], true);
     if (A.ped > 0) for (const p of col('ped')) if (!p.aprov && p.status !== 'cancelado' && pedTotal(p) > A.ped) add(quemAprova(nivelDe(pedTotal(p))), 'Pedido de compra', 'Pedido ' + (p.numero || p.id), pedTotal(p), desde(p, 'ped/' + p.id), [p.crBy]);
-    for (const x of col('aprovsol')) if (x.status === 'pendente') add(quemAprova(nivelDe(+x.valor || 0)), 'Pedido de aprovação', (x.tipo || '') + ' ' + (x.chave || ''), +x.valor || 0, +x.em || desde(x, 'aprovsol/' + x.id), [x.por]);
+    for (const x of col('aprovsol')) if (x.status === 'pendente') add(quemAprova(nivelDe(+x.valor || 0)), 'Pedido de aprovação', (x.tipo || '') + ' ' + (x.chave || ''), +x.valor || 0, +x.em || desde(x, 'aprovsol/' + x.id), [x.por], true);
     for (const x of col('heaut')) if (x.status === 'pendente') add(aprovadoresDe('rh').length ? aprovadoresDe('rh') : contasQueGravam('rh'), 'Hora extra', (x.data || '') + ' · ' + (x.horas || '') + ' h · ' + (x.motivo || ''), null, desde(x, 'heaut/' + x.id), [x.solPor]);
-    for (const x of col('adtoit')) if ((x.status || 'pendente') === 'pendente') add(contasQueGravam('fin'), 'Comprovante de adiantamento', x.desc || x.id, +x.valor || 0, desde(x, 'adtoit/' + x.id), [x.crBy]);
+    for (const x of col('adtoit')) if ((x.status || 'pendente') === 'pendente') add(contasQueGravam('fin'), 'Comprovante de adiantamento', x.desc || x.id, +x.valor || 0, desde(x, 'adtoit/' + x.id), [x.crBy], true);
     for (const x of col('invaj')) if (x.status === 'pendente') add(aprovadoresDe('compras').length ? aprovadoresDe('compras') : contasQueGravam('comp'), 'Ajuste de inventário', x.prodId || x.id, +x.valor || 0, +x.contEm || desde(x, 'invaj/' + x.id), [x.contPor]);
     for (const x of col('medemp')) if (x.status === 'aguardando') add(todosAprovadores().concat(aprovadoresDe('diretoria')), 'Medição de empreiteiro', 'Medição nº ' + (x.numero || ''), (x.fixo && x.fixo.bruto) || null, desde(x, 'medemp/' + x.id), [x.enviadoPor]);
     for (const x of col('nfse')) if (x.status === 'emitida' && x.canc && x.canc.st === 'pendente') add(contasQueGravam('fin'), 'Cancelamento de NFS-e', 'NFS-e ' + (x.numOficial || x.numero || ''), null, +x.canc.em || desde(x, 'nfse/' + x.id), [x.canc.por]);
@@ -992,9 +1008,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const itens = pendenciasAprovacao(), por = new Map();
     for (const it of itens) { const q2 = it.quem.length ? it.quem : donos(); for (const u of q2) { if (!por.has(u)) por.set(u, []); por.get(u).push(it); } }
     const conf = EMAIL.configurado(), out = [];
-    for (const [u, its] of por) {
+    for (let [u, its] of por) {
       const c = q.contaPorId.get(u); if (!c || !c.ativo) continue;
-      const linhas = ['Você tem ' + its.length + ' item(ns) aguardando a sua aprovação há mais de ' + HORAS_PEND + ' horas:'].concat(its.slice(0, 60).map(i => '• ' + i.tipo + ': ' + i.desc + (i.valor != null ? ' · ' + moeda(i.valor) : '') + ' · desde ' + quandoBR(i.desde)), its.length > 60 ? ['… e mais ' + (its.length - 60) + '.'] : [], ['Abra Início › Aprovações. Se você estiver ausente, peça ao administrador para indicar um substituto por período.']);
+      /* v115: quem não lê o financeiro (aprovador fora do Financeiro) recebe o tipo e a data, sem descrição nem valor */
+      const semFin = !leFin(c) && its.some(i => i.fin); if (semFin) its = its.map(i => i.fin ? Object.assign({}, i, { desc: 'detalhes no sistema', valor: null }) : i);
+      const linhas = ['Você tem ' + its.length + ' item(ns) aguardando a sua aprovação há mais de ' + HORAS_PEND + ' horas:'].concat(its.slice(0, 60).map(i => '• ' + i.tipo + ': ' + i.desc + (i.valor != null ? ' · ' + moeda(i.valor) : '') + ' · desde ' + quandoBR(i.desde)), its.length > 60 ? ['… e mais ' + (its.length - 60) + '.'] : [], ['Abra Início › Aprovações. Se você estiver ausente, peça ao administrador para indicar um substituto por período.'], semFin ? ['Seu perfil não abre contas a pagar: peça ao administrador um perfil com o Financeiro em consulta ou a saída da matriz de aprovação.'] : []);
       const enviado = conf && !!c.email;
       auditar(null, null, 'ALERTA_EMAIL_APROVADOR', 'aprovacoes', null, { para: c.email || '', conta: u, itens: its.length, enviado, motivo: !conf ? 'SMTP não configurado' : !c.email ? 'sem e-mail' : undefined });
       if (enviado) { const m = EMAIL.modelo('Aprovações pendentes', linhas, 'Abrir as aprovações', APP_URL, 'Aviso diário da Central de Gestão.'); EMAIL.enviar({ para: c.email, assunto: 'Aprovações pendentes (' + its.length + ') · Central de Gestão', texto: m.texto, html: m.html }).catch(e => auditar(null, null, 'ALERTA_EMAIL_FALHA', 'aprovacoes', null, { para: c.email, erro: e.message })); }
@@ -1388,7 +1406,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const id = s[1]; if (!PERFC_ID.test(id) || PERF_BASE[id]) return erro('Identificador de perfil inválido.', 400);
     const nome = String(novo.nome || '').replace(/\s+/g, ' ').trim(); if (nome.length < 3) return erro('Dê um nome ao perfil (ao menos 3 letras).', 400);
     const mod = {}, rec = [];
-    for (const [g, v] of Object.entries(novo.mod && typeof novo.mod === 'object' ? novo.mod : {})) { if (v !== 'w' && v !== 'r') continue; if (!X.perfcGrupoValido || !X.perfcGrupoValido(g)) { rec.push(g); continue; } mod[g] = v; }
+    for (const [g, v] of Object.entries(novo.mod && typeof novo.mod === 'object' ? novo.mod : {})) { if (v !== 'w' && v !== 'r') continue; if (g === 'painel' || g === 'dir') continue; /* v115: Painel do Início e da diretoria só do Administrador */ if (!X.perfcGrupoValido || !X.perfcGrupoValido(g)) { rec.push(g); continue; } mod[g] = v; }
     if (rec.length) return erro('Um perfil personalizado não pode ter: ' + rec.slice(0, 5).join(', ') + '. Usuários, configurações e lixeira ficam só com o Administrador.', 400);
     const o = novo.opc && typeof novo.opc === 'object' ? novo.opc : {}, opc = { rh: o.rh === true, banco: o.banco === true, frota: o.frota === true, dir: o.dir === true };
     const ativo = novo.ativo !== false;
@@ -1442,6 +1460,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin']))) { const v = velho || {}; const k = CFG_PROT.find(k => !igual(v[k], novo[k])); if (k) return erro('Alçadas e aprovadores só um administrador altera.'); }
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin', 'rh'])) && !igual((velho || {}).pfonte, novo.pfonte)) return erro('As fontes e a trava do ponto só o RH ou um administrador alteram.');
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual(((velho || {}).fz || {}).fech2, (novo.fz || {}).fech2)) return erro('O modo de fechamento (duas etapas) só um administrador altera.');
+    if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual((velho || {}).p0, novo.p0)) return erro('Quem vê o Painel do Início só um administrador altera.'); /* v115 */
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual((velho || {}).j4, novo.j4)) return erro('As regras de aptidão para obra e de retenção dos empreiteiros só um administrador altera.');
     if (c0 === 'aptlib' && s.length === 2) { const e = regraAptLib(conta, req, velho, novo); if (e) return e; }
     if (c0 === 'pesqlink') return erro('O link da pesquisa só é criado pelo botão "Enviar link ao cliente".');

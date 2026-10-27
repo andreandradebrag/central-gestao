@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-27T17:11:41.356Z",
+ "gerado": "2026-10-27T18:30:08.181Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -22,14 +22,12 @@
     "empdoc"
    ],
    "r": [
-    "painel",
     "nf",
     "est",
     "proj",
     "frota",
     "ferr",
     "comp",
-    "dir",
     "serv",
     "qual",
     "meu",
@@ -51,7 +49,6 @@
     "serv"
    ],
    "r": [
-    "painel",
     "fin",
     "fluxo",
     "proj",
@@ -77,14 +74,10 @@
     "qual"
    ],
    "r": [
-    "painel",
-    "fin",
-    "fluxo",
     "nf",
     "est",
     "cad",
     "plano",
-    "contas",
     "meu",
     "ajuda"
    ],
@@ -95,24 +88,18 @@
     "chat"
    ],
    "r": [
-    "painel",
-    "fin",
-    "fluxo",
     "nf",
     "est",
     "proj",
     "cad",
-    "contas",
     "plano",
     "frota",
     "ferr",
     "comp",
-    "ctb",
     "ponto",
     "sst",
     "agenda",
     "ctr",
-    "dir",
     "serv",
     "qual",
     "meu",
@@ -132,7 +119,6 @@
     "empdoc"
    ],
    "r": [
-    "painel",
     "proj",
     "frota",
     "ferr",
@@ -179,10 +165,6 @@
     "chat"
    ],
    "r": [
-    "painel",
-    "fin",
-    "contas",
-    "fluxo",
     "nf",
     "est",
     "proj",
@@ -192,14 +174,12 @@
     "frota",
     "ferr",
     "comp",
-    "ctb",
     "ponto",
     "sst",
     "jur",
     "chat",
     "agenda",
     "ctr",
-    "dir",
     "serv",
     "qual",
     "folha",
@@ -217,7 +197,6 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "est",
     "ferr",
     "frota",
@@ -244,11 +223,9 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "proj",
     "serv",
     "qual",
-    "dir",
     "meu",
     "ajuda"
    ],
@@ -272,7 +249,6 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "est",
     "proj",
     "meu",
@@ -307,7 +283,6 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "proj",
     "cad",
     "meu",
@@ -374,7 +349,6 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "proj",
     "rh",
     "ferr",
@@ -394,7 +368,6 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "proj",
     "rh",
     "meu",
@@ -445,7 +418,6 @@
     "agenda"
    ],
    "r": [
-    "painel",
     "proj",
     "nf",
     "ferr",
@@ -464,7 +436,6 @@
     "empdoc"
    ],
    "r": [
-    "painel",
     "proj",
     "rh",
     "ferr",
@@ -939,8 +910,6 @@
   "lanc": [
    "fin",
    "ctb",
-   "folha",
-   "qual",
    "dir"
   ],
   "recor": [
@@ -1390,6 +1359,25 @@
   "aptid": [],
   "tercsit": []
  },
+ "leituraParcial": {
+  "lanc": {
+   "folha": "folha",
+   "qual": "cnq"
+  }
+ },
+ "finCols": [
+  "lanc",
+  "recor",
+  "extrato",
+  "conta",
+  "remessa",
+  "orcfin",
+  "idxbal",
+  "adto",
+  "adtoit",
+  "aprovsol",
+  "fzret"
+ ],
  "modulos": [
   [
    "painel",

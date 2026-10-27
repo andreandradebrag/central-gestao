@@ -21062,9 +21062,720 @@ A.perfcAtivar=d=>{const pc=get('perfc',d.id);if(!pc)return;put('perfc',Object.as
 {const vu=V.usr;V.usr=function(){const h=vu.apply(this,arguments);if(!(me.owner||mayW('usr')))return h;
   return h+'<div class="acts" style="margin-top:10px"><button class="btn" data-act="nav" data-mod="sis" data-tab="perfc">Criar ou editar perfis de acesso</button></div>';};}
 
+/* v115: new_painel0 — acesso ao Painel do Início, painel do setor ao entrar e leitura financeira por perfil.
+   Pedido do dono: o Painel do Início (saldo, contas, fluxo e alertas de todos os módulos) e o Painel da diretoria passam a ser
+   SÓ do Administrador e do dono. O perfil Diretoria só vê os dois se a opção estiver ligada em Sistema › Configurações
+   (padrão: desligada). Cada pessoa entra no painel do próprio setor (window.PAINEIS_SETOR, preenchido por new_painel1/2).
+   Dado financeiro da empresa (contas a pagar e a receber, contas bancárias, extrato, remessa, orçamento financeiro, DRE,
+   fluxo e contabilidade) só para Financeiro, Fiscal, Administrador e Diretoria; o servidor aplica o mesmo mapa
+   (deploy/gestao/perfis.json, gerado por gen_perm.js, e regras.js). Perfis personalizados seguem o mesmo mapa pelo módulo. */
+window.PAINEIS_SETOR=window.PAINEIS_SETOR||[];
+const P0_INICIO=['painel','dir'];                 /* grupos do Painel do Início e do Painel da diretoria (e Indicadores por área) */
+const P0_FIN=['fin','fluxo','contas','ctb'];      /* módulos com dado financeiro da empresa */
+const P0_FIN_PERFIS=['admin','financeiro','fiscal','diretoria'];
+/* painel de cada perfil padrão (o setor dele); sem preferência, vale o primeiro painel que a pessoa grava e depois o primeiro que ela lê */
+const P0_PREF={financeiro:'pnFin',fiscal:'pnFis',rh:'pnPes',sstgestor:'pnSst',ssttec:'pnSst',sst:'pnSst',comercial:'pnCom',projetos:'pnObr',encarregado:'pnObr',
+  comprador:'pnSup',almoxarife:'pnSup',compras:'pnSup',diretoria:'pnFin'};
+const p0Cfg=()=>{const c=(cfg()||{}).p0||{};return {dirPainel:c.dirPainel===true};};
+
+/* ---------- perfis: tira o Painel do Início/diretoria e, de quem não é do Financeiro, os módulos financeiros ---------- */
+function p0AjustaPerfil(k,p){if(!p||k==='admin'||k==='diretoria'||p.w==='*')return;
+  const tira=g=>P0_INICIO.includes(g)||(!p.custom&&!P0_FIN_PERFIS.includes(k)&&P0_FIN.includes(g));
+  if(Array.isArray(p.r))p.r=p.r.filter(g=>!tira(g));if(Array.isArray(p.w))p.w=p.w.filter(g=>!tira(g));}
+Object.keys(PERFIS).forEach(k=>p0AjustaPerfil(k,PERFIS[k]));
+if(PERFIS.projetos)PERFIS.projetos.desc='Edita obras e rateio, frota, ferramentas e compras. Consulta notas, estoque e cadastros. Não vê o financeiro da empresa.';
+if(PERFIS.leitura)PERFIS.leitura.desc='Consulta, sem alterar, as áreas operacionais (compras, estoque, obras, frota, equipamentos…). Não vê o financeiro da empresa, RH, Departamento Pessoal, Trabalhista, usuários nem configurações. No Compartilhar da página precisa ser Editor.';
+if(PERFIS.leituratotal)PERFIS.leituratotal.desc=String(PERFIS.leituratotal.desc||'Consulta todos os módulos.').replace(/\.?\s*$/,'')+'. Não vê o financeiro da empresa (contas, bancos, fluxo, DRE e contabilidade): para isso, crie um perfil personalizado com o Financeiro em Consulta.';
+/* perfil personalizado: Painel e Painel da diretoria saem das opções (o servidor também os ignora) */
+if(typeof P2_MODS!=='undefined')for(let i=P2_MODS.length-1;i>=0;i--)if(P0_INICIO.includes(P2_MODS[i][0]))P2_MODS.splice(i,1);
+/* lista de todos os grupos (para o perfil Diretoria, que lê tudo, sem o Painel quando a opção está desligada) */
+function p0TodosGrupos(){const s=new Set(['meu','ajuda','chat','agenda']);Object.values(GROUP_OF_TAB).forEach(g=>{if(g)s.add(g);});MODS.forEach(m=>s.add(m[0]));
+  Object.values(PERFIS).forEach(p=>{[p.r,p.w].forEach(l=>{if(Array.isArray(l))l.forEach(g=>s.add(g));});});P0_INICIO.forEach(g=>s.delete(g));return [...s];}
+function p0Sync(){Object.keys(PERFIS).forEach(k=>{const p=PERFIS[k];if(p&&p.custom)p0AjustaPerfil(k,p);});
+  const d=PERFIS.diretoria;if(!d)return;
+  /* só com o servidor (modo db): no modo local todos são Administrador, e o perfis.json (gen_perm.js) guarda a Diretoria com leitura total */
+  if(store.mode!=='db'||p0Cfg().dirPainel){if(d.r!=='*'&&d.__p0)d.r='*';}
+  else if(d.r==='*'||d.__p0){d.r=p0TodosGrupos();d.__p0=true;}}
+{const r0=resolvePerfil;resolvePerfil=function(){const r=r0.apply(this,arguments);try{p0Sync();}catch(e){}return r;};}
+
+/* ---------- quem vê o Painel do Início ---------- */
+function p0VeInicio(){if(me.owner||store.mode!=='db')return true;const pf=me.perfil;return pf==='admin'||(pf==='diretoria'&&p0Cfg().dirPainel);}
+/* lê os módulos financeiros (alertas e avisos com valores) */
+function p0LeFin(){return me.owner||store.mode!=='db'||mayR('fin');}
+const p0TabsInicio=()=>Object.keys(GROUP_OF_TAB).filter(t=>P0_INICIO.includes(GROUP_OF_TAB[t]));
+/* painéis de setor que a pessoa pode abrir, na ordem registrada */
+function p0Paineis(){return (window.PAINEIS_SETOR||[]).filter(p=>p&&p.id&&typeof V[p.id]==='function'&&mayR(GROUP_OF_TAB[p.id]||p.group));}
+function p0PainelInicial(){const ls=p0Paineis();if(!ls.length)return '';
+  const pf=me.perfil,pr=PERFIS[pf]||{},pref=P0_PREF[pf];
+  if(pref&&ls.some(p=>p.id===pref))return pref;
+  const w=Array.isArray(pr.w)?pr.w:[],g=p=>GROUP_OF_TAB[p.id]||p.group;
+  const gw=ls.find(p=>w.includes(g(p)));return (gw||ls[0]).id;}
+/* ao entrar (e em qualquer navegação para o Painel do Início sem permissão): vai para o painel do setor */
+RH_PRE.push(()=>{if(!store.ready)return;try{me.perfil=resolvePerfil();}catch(e){return;}
+  if(p0VeInicio()||!p0TabsInicio().includes(ui.tab))return;
+  const d=p0PainelInicial();if(d){ui.tab=d;ui.mod='';}});
+/* navegação direta (atalho, busca, endereço salvo): a tela não abre nem mostra os números */
+function p0SemInicio(){const ls=p0Paineis();
+  return pageHead('Painel','O painel geral da empresa é do Administrador.')+'<div class="card"><p style="margin:0 0 8px">Use o painel do seu setor: ele mostra só os indicadores e as pendências da sua área.</p>'+
+    (ls.length?'<div class="acts" style="justify-content:flex-start;flex-wrap:wrap">'+ls.map(p=>'<button class="btn" data-act="nav" data-tab="'+esc(p.id)+'">'+esc(p.nome||p.id)+'</button>').join('')+'</div>':'<p class="sub" style="margin:0">Nenhum painel de setor liberado para o seu perfil. Fale com o administrador.</p>')+'</div>';}
+['painel','dir','ind'].forEach(t=>{if(typeof V[t]!=='function')return;const v0=V[t];V[t]=function(){if(!p0VeInicio())return p0SemInicio();
+  let h=v0.apply(this,arguments);
+  if(t==='painel'){const ls=p0Paineis();if(ls.length)h=h.replace(/(<div class="ph">[\s\S]*?<\/div><\/div>)/,'$1<div class="card" id="p0Setores"><h2>Painéis dos setores</h2><div class="acts" style="justify-content:flex-start;flex-wrap:wrap">'+ls.map(p=>'<button class="btn sm" data-act="nav" data-tab="'+esc(p.id)+'">'+esc(p.nome||p.id)+'</button>').join('')+'</div></div>');}
+  return h;};});
+
+/* ---------- alertas e pendências: sem dado financeiro para quem não é do Financeiro ---------- */
+const P0_GRUPOS_FIN=P0_FIN.concat(P0_INICIO);
+const p0SemValor=t=>String(t==null?'':t).replace(/\s*[·(\-–]?\s*R\$\s?-?[\d.]+(,\d+)?\)?/g,'').replace(/\s{2,}/g,' ').trim();
+function p0FiltrarAlertas(it){if(!Array.isArray(it)||p0LeFin())return it;
+  return it.filter(x=>{if(!Array.isArray(x))return true;const g=GROUP_OF_TAB[x[0]];return !(g&&P0_GRUPOS_FIN.includes(g)&&!mayR(g));})
+    .map(x=>{if(!Array.isArray(x))return x;const y=x.slice();if(/R\$/.test(String(y[2]||'')))y[2]='';if(/R\$/.test(String(y[1]||'')))y[1]=p0SemValor(y[1]);return y;});}
+window.p0FiltrarAlertas=p0FiltrarAlertas;
+/* todas as funções alertas…() do sistema (inclusive as que os painéis de setor chamam) passam pelo filtro */
+const p0EmbAlerta=f=>function(){return p0FiltrarAlertas(f.apply(this,arguments));};
+if(typeof alertasAcesso==='function')alertasAcesso=p0EmbAlerta(alertasAcesso);if(typeof alertasAgenda==='function')alertasAgenda=p0EmbAlerta(alertasAgenda);if(typeof alertasAprov==='function')alertasAprov=p0EmbAlerta(alertasAprov);if(typeof alertasAv==='function')alertasAv=p0EmbAlerta(alertasAv);
+if(typeof alertasBh==='function')alertasBh=p0EmbAlerta(alertasBh);if(typeof alertasChat==='function')alertasChat=p0EmbAlerta(alertasChat);if(typeof alertasCipa==='function')alertasCipa=p0EmbAlerta(alertasCipa);if(typeof alertasCnpj==='function')alertasCnpj=p0EmbAlerta(alertasCnpj);
+if(typeof alertasCompras==='function')alertasCompras=p0EmbAlerta(alertasCompras);if(typeof alertasCot==='function')alertasCot=p0EmbAlerta(alertasCot);if(typeof alertasCtr==='function')alertasCtr=p0EmbAlerta(alertasCtr);if(typeof alertasDp==='function')alertasDp=p0EmbAlerta(alertasDp);
+if(typeof alertasFerias==='function')alertasFerias=p0EmbAlerta(alertasFerias);if(typeof alertasFin==='function')alertasFin=p0EmbAlerta(alertasFin);if(typeof alertasFiscal==='function')alertasFiscal=p0EmbAlerta(alertasFiscal);if(typeof alertasFrota2==='function')alertasFrota2=p0EmbAlerta(alertasFrota2);
+if(typeof alertasFunc==='function')alertasFunc=p0EmbAlerta(alertasFunc);if(typeof alertasHht==='function')alertasHht=p0EmbAlerta(alertasHht);if(typeof alertasIbs==='function')alertasIbs=p0EmbAlerta(alertasIbs);if(typeof alertasInv==='function')alertasInv=p0EmbAlerta(alertasInv);
+if(typeof alertasLgpd==='function')alertasLgpd=p0EmbAlerta(alertasLgpd);if(typeof alertasMat==='function')alertasMat=p0EmbAlerta(alertasMat);if(typeof alertasModulos==='function')alertasModulos=p0EmbAlerta(alertasModulos);if(typeof alertasMulta2==='function')alertasMulta2=p0EmbAlerta(alertasMulta2);
+if(typeof alertasNfrec==='function')alertasNfrec=p0EmbAlerta(alertasNfrec);if(typeof alertasObr==='function')alertasObr=p0EmbAlerta(alertasObr);if(typeof alertasObrEq==='function')alertasObrEq=p0EmbAlerta(alertasObrEq);if(typeof alertasP4==='function')alertasP4=p0EmbAlerta(alertasP4);
+if(typeof alertasPesq==='function')alertasPesq=p0EmbAlerta(alertasPesq);if(typeof alertasPonto==='function')alertasPonto=p0EmbAlerta(alertasPonto);if(typeof alertasPontoInt==='function')alertasPontoInt=p0EmbAlerta(alertasPontoInt);if(typeof alertasProc==='function')alertasProc=p0EmbAlerta(alertasProc);
+if(typeof alertasQual==='function')alertasQual=p0EmbAlerta(alertasQual);if(typeof alertasRdo==='function')alertasRdo=p0EmbAlerta(alertasRdo);if(typeof alertasRom==='function')alertasRom=p0EmbAlerta(alertasRom);if(typeof alertasRs==='function')alertasRs=p0EmbAlerta(alertasRs);
+if(typeof alertasServ==='function')alertasServ=p0EmbAlerta(alertasServ);if(typeof alertasSst2==='function')alertasSst2=p0EmbAlerta(alertasSst2);if(typeof alertasSup==='function')alertasSup=p0EmbAlerta(alertasSup);if(typeof alertasTrein==='function')alertasTrein=p0EmbAlerta(alertasTrein);
+
+/* as pendências do Painel do Início também (só o Administrador as vê, mas o filtro protege quem chegar por outro caminho) */
+if(typeof pendenciasHtml==='function'){const p0=pendenciasHtml;pendenciasHtml=function(){if(!p0VeInicio())return '';return p0.apply(this,arguments);};}
+
+/* ---------- Sistema › Configurações: Diretoria e o Painel do Início ---------- */
+A.p0CfgAbrir=()=>{const c=p0Cfg(),w=me.owner||me.perfil==='admin';
+  modal({title:'Painel do Início e Painel da diretoria',body:'<p class="sub" style="margin:0 0 8px">O painel geral da empresa (saldo, contas a pagar e a receber, fluxo de caixa e alertas de todos os módulos) e o Painel da diretoria ficam só com o Administrador e o dono. Os outros perfis entram no painel do próprio setor.</p>'+
+    '<div class="fg">'+field('O perfil Diretoria também vê o Painel do Início e o Painel da diretoria','dirPainel','select',c.dirPainel?'sim':'nao',{opts:[['nao','Não (padrão): só Administrador e dono'],['sim','Sim: Administrador, dono e Diretoria']],full:true,dis:!w})+'</div>'+
+    (w?'':'<p class="sub" style="margin:8px 0 0">Só o Administrador ou o dono altera esta opção.</p>'),
+    saveLabel:'Salvar',save:w?root=>{const v=readForm(root);put('cfg',Object.assign(cl(cfg()),{p0:{dirPainel:v.dirPainel==='sim'}}));toast('Opção salva.','pos');render();}:null});};
+ACT_GROUP.p0CfgAbrir=null;
+if(typeof V.cfg==='function'){const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!mayR('cfg'))return h;const c=p0Cfg();
+  const card='<div class="card" id="p0CfgBox"><h2>Painel do Início</h2><p style="margin:0 0 6px">Painel geral e Painel da diretoria: <b>'+(c.dirPainel?'Administrador, dono e Diretoria':'só Administrador e dono')+'</b>. Os outros perfis entram no painel do setor deles e não veem o financeiro da empresa.</p><div class="acts" style="justify-content:flex-start"><button class="btn" data-act="p0CfgAbrir">'+((me.owner||me.perfil==='admin')?'Alterar':'Ver')+'</button></div></div>';
+  const j=h.lastIndexOf('</div>');return j>0?h.slice(0,j)+card+h.slice(j):h+card;};}
+
+/* ---------- Matriz de aprovadores: aviso de quem aprova pagamentos sem ler o financeiro ---------- */
+function p0AprovSemFin(){const ids=new Set();['n1','n2','n3'].forEach(k=>{try{(aprovadoresDe(k)||[]).forEach(u=>{if(u)ids.add(u);});}catch(e){}});
+  return [...ids].map(u=>(S.usr||[]).find(x=>x.uid===u||x.id===u)).filter(u=>{if(!u||u.ativo===false)return false;const p=PERFIS[u.perfil];if(!p)return false;
+    const tem=l=>l==='*'||(Array.isArray(l)&&l.includes('fin'));return !(tem(p.r)||tem(p.w));});}
+if(typeof V.aprovcfg==='function'){const v0=V.aprovcfg;V.aprovcfg=function(){const h=v0.apply(this,arguments);let ls=[];try{ls=p0AprovSemFin();}catch(e){}if(!ls.length)return h;
+  const nota='<div class="note" id="p0AprovNota" style="margin:0 0 12px"><b>Aprovadores sem acesso ao financeiro.</b> '+ls.map(u=>esc(u.nome||u.email||u.uid)+' ('+esc((PERFIS[u.perfil]||{}).nome||u.perfil)+')').join(', ')+' está(ão) na matriz de pagamentos, mas o perfil não abre contas a pagar nem Início › Aprovações. Troque o perfil (Financeiro, Diretoria ou um personalizado com o Financeiro em consulta) ou tire da matriz.</div>';
+  const i=h.indexOf('</div></div>',h.indexOf('class="ph"'));return i>0?h.slice(0,i+12)+nota+h.slice(i+12):nota+h;};}
+
+/* ===== v115 · P1: painéis por setor — Pessoal, Segurança do Trabalho, Qualidade, Frota e Equipamentos =====
+   Cada setor ganha a própria tela "Painel" (primeiro item do submenu do módulo), visível só para quem lê o grupo do módulo
+   (GROUP_OF_TAB). Os painéis mostram indicadores e pendências do setor, com atalhos para as telas onde se resolve.
+   Regras:
+   - nenhum dado financeiro da empresa (saldo, fluxo, contas a pagar/receber, DRE, margem, faturamento);
+   - salário e folha só no painel de Pessoal e só para quem lê a folha (como no antigo Painel do DP);
+   - Frota respeita os locais da frota (frLocaisPermitidos) e o custo de combustível só aparece para o Financeiro;
+   - ASO, treinamentos, integração e terceiros: cálculo ao vivo para quem lê a origem; para os outros, o resumo aptid.
+   Os painéis ficam em window.PAINEIS_SETOR ({id,nome,modulo,group,perfis}); `perfis` é a sugestão de perfis cujo painel
+   de entrada é este (o P0 decide a ordem). */
+
+const P1_PAINEIS=[
+  {id:'pnPes',nome:'Painel de Pessoal',modulo:'pess',group:'rh',perfis:['rh']},
+  {id:'pnSst',nome:'Painel de Segurança do Trabalho',modulo:'sstq',group:'sst',perfis:['sstgestor','ssttec','sst']},
+  {id:'pnQua',nome:'Painel da Qualidade',modulo:'qsgi',group:'qual',perfis:[]},
+  {id:'pnFrota',nome:'Painel da Frota',modulo:'frota',group:'frota',perfis:[]},
+  {id:'pnEqp',nome:'Painel de Equipamentos',modulo:'equip',group:'ferr',perfis:[]}];
+{const L=(typeof window!=='undefined'&&Array.isArray(window.PAINEIS_SETOR))?window.PAINEIS_SETOR:[];
+  P1_PAINEIS.forEach(p=>{if(!L.some(x=>x.id===p.id))L.push(Object.assign({},p));});
+  if(typeof window!=='undefined')window.PAINEIS_SETOR=L;}
+
+/* menu: "Painel" como primeiro item de cada módulo; o antigo "Painel do DP" deixa o menu e abre o painel de Pessoal */
+P1_PAINEIS.forEach(p=>{GROUP_OF_TAB[p.id]=p.group;const m=MENU.find(x=>x[0]===p.modulo);
+  if(m){const i=m[2].findIndex(x=>x[0]===p.id);if(i>=0)m[2].splice(i,1);m[2].unshift([p.id,'Painel']);}
+  const nm=m?m[1]:p.nome,n=NAV.find(x=>x[0]===p.id);if(n){n[1]='Painel';n[2]=nm;}else NAV.push([p.id,'Painel',nm]);});
+{const m=MENU.find(x=>x[0]==='pess');if(m){const i=m[2].findIndex(x=>x[0]==='dpp');if(i>=0)m[2].splice(i,1);}
+  const k=NAV.findIndex(x=>x[0]==='dpp');if(k>=0)NAV.splice(k,1);}
+if(typeof DBW_TABCOLS!=='undefined')Object.assign(DBW_TABCOLS,{
+  pnPes:[...new Set((DBW_TABCOLS.dpp||[]).concat(['func','ponto','heaut','bhlanc','fofi','pfarq','pajuste','jornada','feriado','rsreq','quadro']))],
+  pnSst:['acid','epi','rhdoc','integ','tterc','aptid','aptlib','cipa','cipam','cipaa','cipar','pte','pgr','trein','rel','func','proj'],
+  pnQua:['nc','pa','gar','trec','fvs','insp','pesq','os','proj'],
+  pnFrota:['veic','vsai','vabas','vman','multa','usr','func'],
+  pnEqp:['ferr','fmov','fman','obrextr','proj','func']});
+
+/* ---------- utilidades ---------- */
+/* perfis que podem ver custos da empresa (combustível etc.) */
+function p1Fin(){const p=PERFIS[me.perfil]||{};return !!me.owner||p.w==='*'||mayW('fin')||mayW('fluxo')||['diretoria','financeiro','fiscal'].includes(me.perfil);}
+const p1N=n=>String(n);
+const p1Pct=(a,b)=>b>0?String(Math.round(a/b*1000)/10).replace('.',',')+'%':'—';
+function p1Tabs(mod){const m=MENU.find(x=>x[0]===mod);const s=new Set(m?m[2].map(i=>i[0]):[]);if(mod==='pess')s.add('dpp');if(mod==='sstq'){['aso','trm','tterc','aptlib'].forEach(t=>s.add(t));}return s;}
+/* pendências do setor: os mesmos alertas do Painel do Início, só das telas do módulo e sem valores em dinheiro */
+function p1Alertas(mod){const tabs=p1Tabs(mod),out=[],vistos=new Set(),fin=p1Fin();
+  const fns=[typeof alertasModulos==='function'?alertasModulos:null,typeof alertasPonto==='function'?alertasPonto:null,typeof alertasCipa==='function'?alertasCipa:null,
+    typeof alertasProc==='function'?alertasProc:null,typeof alertasFunc==='function'?alertasFunc:null,typeof alertasPontoInt==='function'?alertasPontoInt:null,
+    typeof alertasServ==='function'?alertasServ:null,typeof alertasQual==='function'?alertasQual:null,typeof alertasSst2==='function'?alertasSst2:null,
+    typeof alertasFerias==='function'?alertasFerias:null,typeof alertasDp==='function'?alertasDp:null,typeof alertasRs==='function'?alertasRs:null,
+    typeof alertasPesq==='function'?alertasPesq:null];
+  if(isColab())return out;
+  fns.forEach(fn=>{if(!fn)return;let r;try{r=fn();}catch(e){return;}(r||[]).forEach(x=>{if(!x||!tabs.has(x[0]))return;const g=GROUP_OF_TAB[x[0]];if(g&&!mayR(g))return;
+    const t=String(x[1]||''),c=String(x[2]==null?'':x[2]);if(!fin&&/R\$/.test(t))return;const k=x[0]+'|'+t;if(vistos.has(k))return;vistos.add(k);out.push([x[0],t,/R\$/.test(c)?'':c]);});});
+  return out;}
+function p1PendCard(its,self){return '<div class="card"><h2>Pendências do setor</h2>'+(its.length?'<div class="list">'+its.map(x=>'<div class="li"><div class="t">'+esc(x[1])+'</div><div style="display:flex;gap:10px;align-items:center"><span class="mono">'+esc(x[2]||'')+'</span>'+(self&&self.includes(x[0])?'':'<button class="btn sm" data-act="nav" data-tab="'+esc(x[0])+'">Abrir</button>')+'</div></div>').join('')+'</div>':'<p class="sub" style="margin:8px 0 0">Nenhuma pendência no momento.</p>')+'</div>';}
+/* lista curta: linhas [texto (html já escapado), sub (html), selo (html)] com botão para a tela */
+function p1Lista(t,rows,tab,vazio,max){max=max||8;const ab=tab&&mayR(GROUP_OF_TAB[tab]||'')?'<p style="margin:8px 0 0"><button class="btn sm" data-act="nav" data-tab="'+esc(tab)+'">Abrir '+esc(t.toLowerCase())+'</button></p>':'';
+  return '<div class="card"><h2>'+esc(t)+(rows.length>max?' <span class="sub">('+rows.length+')</span>':'')+'</h2><div class="tw" style="border:0"><table style="min-width:0"><tbody>'+(rows.length?rows.slice(0,max).map(r=>'<tr><td>'+r[0]+(r[1]?'<div class="sub">'+r[1]+'</div>':'')+'</td><td style="text-align:right">'+(r[2]||'')+'</td></tr>').join(''):'<tr><td class="sub">'+esc(vazio||'Nada pendente.')+'</td></tr>')+'</tbody></table></div>'+(rows.length>max?'<p class="sub" style="margin:6px 0 0">Mostrando '+max+' de '+rows.length+'.</p>':'')+ab+'</div>';}
+const p1Grid=cards=>'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">'+cards.filter(Boolean).join('')+'</div>';
+const p1Sec=t=>'<div class="sect" style="margin:6px 0 0">'+esc(t)+'</div>';
+const p1Obras=()=>S.proj.filter(p=>(p.status||'ativo')!=='concluido').map(p=>[p.id,projNome(p.id)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+
+/* =====================================================================
+   PESSOAL (pnPes) — parte do Painel do DP (dpp), que continua por baixo como "Visão geral"
+   ===================================================================== */
+ui.pnPes={obra:''};
+const p1DppBase=V.dpp;
+function p1PesDados(obra){const h=todayStr(),m=ym(h),pm=addMonths(m,-1),fo=f=>!obra||f.projId===obra,at=funcAtivos().filter(fo),o={};
+  o.ativos=at.length;o.afast=at.filter(f=>f.status==='afastado').length;
+  o.adm=S.func.filter(f=>fo(f)&&ym(f.admissao)===m).length;o.admAnd=S.adm.filter(r=>!r.funcId&&!r.desistiu&&(!obra||r.projId===obra)).length;
+  o.desl=S.func.filter(f=>fo(f)&&ym(f.demissao)===m).length;o.deslAnd=S.desl.filter(r=>!r.concluidoEm&&(!obra||((get('func',r.funcId)||{}).projId===obra))).length;
+  o.exp=at.filter(f=>f.tipoContrato==='exp'&&[f.expFim1,f.expFim2].some(d=>d&&d>=h&&dTo(d)<=10)).map(f=>{const d=[f.expFim1,f.expFim2].filter(x=>x&&x>=h).sort()[0];return {f,d};}).sort((a,b)=>String(a.d).localeCompare(String(b.d)));
+  o.ferVenc=[];o.ferVcd=[];at.forEach(f=>{let r;try{r=ferResumo(f);}catch(e){return;}r.vencidos.forEach(p=>o.ferVenc.push({f,p}));r.vencendo.forEach(p=>o.ferVcd.push({f,p}));});
+  o.ponto=mayR('ponto');
+  if(o.ponto){o.pdia=[];try{o.pdia=pdDados(h).filter(x=>(!obra||x.obra===obra)&&['falta','sem'].includes(x.sit));}catch(e){o.pdia=null;}
+    o.hePend=S.heaut.filter(r=>r.status==='pendente'&&(!obra||r.projId===obra)).length;
+    o.ajPend=(S.pajuste||[]).filter(r=>r.status==='pendente').length;
+    o.pfarq=null;try{if(typeof pfarqPend==='function')o.pfarq=pfarqPend();}catch(e){}}
+  o.bh=null;try{const ps=at.filter(f=>f.bh);if(ps.length){const P=BHP();const ex=ps.map(f=>({f,e:bhExtrato(f)}));o.bh={n:ps.length,vence:ex.filter(x=>x.e.vence30>0).length,acima:P.limite?ex.filter(x=>x.e.saldo>P.limite*60).length:0,neg:ex.filter(x=>x.e.saldo<0).length};}}catch(e){o.bh=null;}
+  o.folha=mayR('folha');
+  if(o.folha){o.foMes=pm;o.foImp=S.fofi.some(x=>x.comp===pm&&(x.tipo||'mensal')==='mensal');o.foDif=null;if(o.foImp&&typeof foConf==='function'){try{o.foDif=foConf(pm,'mensal').filter(r=>r.st==='dif').length;}catch(e){}}}
+  o.dpsol=S.dpsol.filter(r=>r.status==='pendente').length;
+  return o;}
+V.pnPes=()=>{const u=ui.pnPes,obra=u.obra||'',d=p1PesDados(obra),h=todayStr();
+  let base='';try{base=p1DppBase?p1DppBase():'';}catch(e){base='';}
+  const i=base.indexOf('<div class="stack">'),corpo=i>=0?base.slice(i+19).replace(/<\/div>\s*$/,'').replace(/>NaN%</g,'>0,0%<'):'';/* absenteísmo com base vazia */
+  const ferV=new Set(d.ferVenc.map(x=>x.f.id)).size;
+  let k1=kpi('Colaboradores ativos',p1N(d.ativos),d.afast+' afastado(s)'+(obra?' · '+esc(projNome(obra)):''))+kpi('Admissões no mês',p1N(d.adm),d.admAnd+' em andamento')+kpi('Desligamentos no mês',p1N(d.desl),d.deslAnd+' em andamento')+
+    kpi('Experiência terminando',p1N(d.exp.length),'em até 10 dias',d.exp.length?'warn':'')+kpi('Férias vencidas',p1N(d.ferVenc.length),ferV+' colaborador(es) · pagamento em dobro',d.ferVenc.length?'neg':'')+kpi('Férias vencendo',p1N(d.ferVcd.length),'período(s) em até 90 dias',d.ferVcd.length?'warn':'');
+  let k2='';
+  if(d.ponto){const pr=d.pdia;k2+=kpi('Ponto de hoje com problema',pr==null?'—':p1N(pr.length),'batida faltando ou sem marcação',pr&&pr.length?'neg':'')+kpi('Horas extras aguardando',p1N(d.hePend),'pedidos para aprovar',d.hePend?'warn':'')+kpi('Ajustes de ponto',p1N(d.ajPend),'pedidos pendentes',d.ajPend?'warn':'');
+    if(d.pfarq)k2+=kpi('Arquivo mensal do ponto',p1N(d.pfarq.length),d.pfarq.length?'mês(es) sem AFD, AEJ e espelho':'tudo arquivado',d.pfarq.length?'neg':'pos');}
+  if(d.bh)k2+=kpi('Banco de horas',p1N(d.bh.n)+' participante(s)',d.bh.vence+' com horas vencendo em 30 dias'+(d.bh.acima?' · '+d.bh.acima+' acima do limite':''),d.bh.vence||d.bh.acima?'warn':'');
+  if(d.folha)k2+=kpi('Folha oficial '+fmtYm(d.foMes),d.foImp?'Importada':'Não importada',d.foImp?(d.foDif==null?'':d.foDif+' diferença(s) com a prévia'):'importe a folha da contabilidade',d.foImp?(d.foDif?'warn':'pos'):'neg');
+  k2+=kpi('Solicitações dos colaboradores',p1N(d.dpsol),'aguardando o RH',d.dpsol?'warn':'');
+  const its=p1Alertas('pess');
+  const lExp=d.exp.map(x=>['<a href="#" data-act="funcAbrir" data-id="'+esc(x.f.id)+'">'+esc(x.f.nome)+'</a>',esc(x.f.funcao||''),valPill(x.d,10)]);
+  const lFer=d.ferVenc.map(x=>[esc(x.f.nome),'período '+fmtDate(x.p.aqIni)+' a '+fmtDate(x.p.aqFim)+(x.p.concFim?' · concessivo até '+fmtDate(x.p.concFim):''),pill('Vencido','neg')]).concat(d.ferVcd.slice().sort((a,b)=>String(a.p.concFim||'').localeCompare(String(b.p.concFim||''))).map(x=>[esc(x.f.nome),x.p.concFim?'conceder até '+fmtDate(x.p.concFim):'',x.p.concFim?valPill(x.p.concFim,90):'']));
+  const lPon=d.ponto&&d.pdia?d.pdia.map(x=>[esc(x.f.nome),esc(x.obra?projNome(x.obra):'sem obra')+(x.falta?' · falta: '+esc(x.falta):''),pill(x.sit==='sem'?'Sem marcação':'Batida faltando','neg')]):null;
+  return pageHead('Pessoal','Painel do setor: pendências do dia a dia do RH e do Departamento Pessoal, com a visão geral da equipe logo abaixo.','<button class="btn" data-act="nav" data-tab="adm">Nova admissão</button><button class="btn" data-act="nav" data-tab="afast">Registrar atestado</button>')+
+    '<div class="stack"><div class="bar"><label class="f"><span>Obra</span><select data-filter="pnPes.obra">'+opt(p1Obras(),obra,'Todas')+'</select></label><p class="sub" style="margin:0;align-self:flex-end">A obra filtra os indicadores de pendência e as listas. A visão geral abaixo é da empresa toda.</p></div>'+
+    '<div class="kpis">'+k1+'</div>'+(k2?'<div class="kpis">'+k2+'</div>':'')+
+    p1Grid([p1PendCard(its,['dpp','pnPes']),p1Lista('Contratos de experiência',lExp,'func','Nenhum contrato de experiência terminando em 10 dias.'),p1Lista('Férias',lFer,'ferias','Nenhum período vencido ou vencendo.'),lPon?p1Lista('Ponto de hoje',lPon,'pdia','Ninguém com batida faltando ou sem marcação.'):''])+
+    (corpo?p1Sec('Visão geral da equipe')+corpo:'')+'</div>';};
+/* o antigo Painel do DP abre o mesmo painel (links antigos e alertas continuam funcionando) */
+V.dpp=function(){return V.pnPes();};
+
+/* =====================================================================
+   SEGURANÇA DO TRABALHO (pnSst)
+   ===================================================================== */
+ui.pnSst={obra:''};
+function p1SstDados(obra){const h=todayStr(),ano=h.slice(0,4),o={},fo=f=>!obra||f.projId===obra;
+  const ac=S.acid.filter(a=>!obra||acidObra(a)===obra);
+  const ult=ac.filter(a=>acidLesao(a)&&acidAfast(a)).map(a=>a.data).filter(Boolean).sort().pop();o.dsa=ult?dpDias(ult,h):null;o.ultAc=ult||'';
+  o.acAno=ac.filter(a=>String(a.data).slice(0,4)===ano);o.acAfast=o.acAno.filter(a=>+a.afast>0||a.gravidade==='fatal').length;
+  o.cat=ac.filter(acidCatPend).map(a=>({a,prazo:diaUtil(addDays(a.data,1))}));o.catAtr=o.cat.filter(x=>x.prazo<h).length;
+  o.semAcao=ac.filter(a=>!a.causa||!a.acao).length;
+  /* aptidão (cálculo ao vivo para quem lê ASO/treinamentos; senão, o resumo gravado pelo RH/SST) */
+  o.vivo=typeof aptidFonteOk==='function'&&aptidFonteOk();
+  o.inap=[];try{if(typeof j4Inaptos==='function')o.inap=j4Inaptos().filter(x=>{if(!obra)return true;if(x.k==='f')return ((get('func',x.id)||{}).projId)===obra;const t=(typeof tercLista==='function'?tercLista(''):[]).find(y=>y.id===x.id);return !t||!t.projId||t.projId===obra;});}catch(e){o.inap=[];}
+  o.inapSem=o.inap.filter(x=>!x.lib);
+  o.libHoje=(S.aptlib||[]).filter(l=>!l.revogadaEm&&String(l.de||'')<=h&&h<=String(l.ate||'')&&(!obra||!l.projId||l.projId===obra));
+  o.semResumo=0;if(!o.vivo){o.semResumo=funcAtivos().filter(fo).filter(f=>!get('aptid',f.id)).length;}
+  if(o.vivo){o.aso=asoPend().filter(x=>fo(x.f));o.asoVenc=o.aso.filter(x=>/vencido|Sem ASO/.test(x.mot)).length;
+    o.trein=funcAtivos().filter(fo).map(f=>({f,t:treinStatus(f)})).filter(x=>x.t.some(y=>y.st==='falta'||y.st==='venc'||y.st==='avenc'));
+    o.treinVenc=o.trein.filter(x=>x.t.some(y=>y.st==='falta'||y.st==='venc')).length;
+    const it=S.integ.filter(i=>i.validade&&(!obra||i.projId===obra||(i.funcId&&((get('func',i.funcId)||{}).projId)===obra)));const ult=new Map();it.forEach(i=>{const k=(i.funcId||i.terceiro||i.id)+'|'+(i.tipo||'')+'|'+(i.projId||'');const a=ult.get(k);if(!a||String(i.data||'')>String(a.data||''))ult.set(k,i);});
+    const vi=[...ult.values()].filter(i=>!i.funcId||funcAtivo(i.funcId));o.integVenc=vi.filter(i=>i.validade<h).length;o.integVcd=vi.filter(i=>i.validade>=h&&dTo(i.validade)<=30).length;}
+  else{const res=S.aptid.filter(x=>!x.tercId&&funcAtivo(x.funcId)&&fo(get('func',x.funcId)||{}));const tem=re=>res.filter(x=>(x.motivos||[]).some(m=>re.test(m))).length;
+    o.asoVencR=tem(/ASO/i);o.treinVencR=tem(/NR-|treinamento/i);o.integR=tem(/integra/i);o.valVenc=res.filter(x=>x.valAte&&x.valAte<h).length;}
+  /* terceiros */
+  if(typeof tercFonteOk==='function'&&tercFonteOk()){const at=S.tterc.filter(t=>t.ativo!==false&&(!obra||!t.projId||t.projId===obra));o.terc={n:at.length,pend:at.filter(t=>tercPend(t).length).map(t=>({nome:t.nome,pend:tercPend(t),parc:t.parcId})),fonte:'cadastro'};}
+  else{const L=S.aptid.filter(x=>x.tercId&&(!obra||!x.projId||x.projId===obra));o.terc={n:L.length,pend:L.filter(x=>!x.apto||(x.valAte&&x.valAte<h)).map(x=>({nome:x.nome,pend:(x.motivos||[]).concat(x.valAte&&x.valAte<h?['validade vencida']:[]),parc:x.parcId})),fonte:'resumo'};}
+  /* EPI */
+  const ep=S.epi.filter(e=>!e.devolucao&&funcAtivo(e.funcId)&&fo(get('func',e.funcId)||{}));
+  o.epiVenc=ep.filter(e=>e.troca&&e.troca<h);o.epi15=ep.filter(e=>e.troca&&e.troca>=h&&dTo(e.troca)<=15);o.epiCa=ep.filter(e=>e.caVal&&e.caVal<h);
+  /* CIPA, PTE, PGR, plano de trabalho */
+  o.cipa=null;try{const c=cipaAtual();o.cipa=c?{c,bloq:cipaChecks(c).filter(x=>x.sev==='bloq'),aviso:cipaChecks(c).filter(x=>x.sev==='aviso'),acoes:S.cipaa.filter(x=>x.cipaId===c.id&&x.status!=='concluida'&&x.status!=='cancelada'&&x.prazo&&x.prazo<h).length}:{c:null,bloq:[{txt:'Nenhuma gestão da CIPA cadastrada.'}],aviso:[],acoes:0};}catch(e){}
+  o.pte=S.pte.filter(r=>r.status==='emitida'&&(!obra||r.projId===obra));o.pteAtr=o.pte.filter(r=>r.data<h).length;
+  o.pgr=S.pgr.filter(r=>r.prazo&&r.prazo<h&&r.status!=='concluida').length;
+  o.trm=(S.trein||[]).some(t=>t.mes===ym(h));
+  return o;}
+V.pnSst=()=>{const u=ui.pnSst,obra=u.obra||'',d=p1SstDados(obra),h=todayStr();
+  let k1=kpi('Dias sem acidente',d.dsa==null?'—':p1N(d.dsa),d.ultAc?'com afastamento · último em '+fmtDate(d.ultAc):'nenhum acidente com afastamento registrado',d.dsa!=null&&d.dsa<30?'warn':'pos')+
+    kpi('Acidentes no ano',p1N(d.acAno.length),d.acAfast+' com afastamento')+
+    kpi('CAT a emitir',p1N(d.cat.length),d.catAtr?d.catAtr+' fora do prazo (1º dia útil)':'dentro do prazo',d.catAtr?'neg':d.cat.length?'warn':'')+
+    kpi('Inaptos para obra',p1N(d.inapSem.length),(d.inap.length-d.inapSem.length)+' liberado(s) pelo SST',d.inapSem.length?'neg':'pos')+
+    kpi('Liberações de aptidão hoje',p1N(d.libHoje.length),'vigentes',d.libHoje.length?'warn':'');
+  let k2='';
+  if(d.vivo)k2+=kpi('ASO',p1N(d.asoVenc)+' vencido(s)',(d.aso.length-d.asoVenc)+' vencendo em 30 dias',d.asoVenc?'neg':d.aso.length?'warn':'pos')+kpi('Treinamentos (NR)',p1N(d.treinVenc),'colaborador(es) com NR faltando ou vencida · '+(d.trein.length-d.treinVenc)+' vencendo',d.treinVenc?'neg':d.trein.length?'warn':'pos')+kpi('Integração',p1N(d.integVenc)+' vencida(s)',d.integVcd+' vencendo em 30 dias',d.integVenc?'neg':d.integVcd?'warn':'');
+  else k2+=kpi('ASO vencido',p1N(d.asoVencR),'pelo resumo do RH/SST',d.asoVencR?'neg':'')+kpi('NR vencida ou faltando',p1N(d.treinVencR),'pelo resumo do RH/SST',d.treinVencR?'neg':'')+kpi('Integração pendente',p1N(d.integR),'pelo resumo do RH/SST',d.integR?'neg':'');
+  k2+=kpi('EPI para trocar',p1N(d.epiVenc.length),d.epi15.length+' em 15 dias · '+d.epiCa.length+' com CA vencido',d.epiVenc.length||d.epiCa.length?'neg':d.epi15.length?'warn':'')+
+    kpi('Terceiros com pendência',p1N(d.terc.pend.length),'de '+d.terc.n+' ativo(s)'+(d.terc.fonte==='resumo'?' (resumo)':''),d.terc.pend.length?'neg':'pos');
+  let k3=(d.cipa?kpi('CIPA',d.cipa.bloq.length?'Pendente':'Em dia',d.cipa.c&&d.cipa.c.fim?'mandato até '+fmtDate(d.cipa.c.fim)+(d.cipa.acoes?' · '+d.cipa.acoes+' ação(ões) atrasada(s)':''):esc((d.cipa.bloq[0]||{}).txt||''),d.cipa.bloq.length?'neg':d.cipa.aviso.length||d.cipa.acoes?'warn':'pos'):'')+
+    kpi('Permissões de trabalho abertas',p1N(d.pte.length),d.pteAtr?d.pteAtr+' de dias anteriores':'',d.pteAtr?'neg':'')+kpi('Ações do PGR vencidas',p1N(d.pgr),'',d.pgr?'neg':'')+
+    kpi('Reciclagem do mês (IA)',d.trm?'Gerada':'Não gerada',fmtYm(ym(h)),d.trm?'pos':'warn');
+  const its=p1Alertas('sstq');
+  const lInap=d.inap.map(x=>[esc(x.nome),esc((x.pend||[]).join(', ')),x.lib?pill('Liberado até '+fmtDate(x.lib.ate).slice(0,5),'warn'):pill('Bloqueado','neg')]).sort((a,b)=>(/Bloqueado/.test(a[2])?0:1)-(/Bloqueado/.test(b[2])?0:1));
+  const lCat=d.cat.map(x=>[esc(x.a.funcId?funcNome(x.a.funcId):'Sem colaborador')+' · '+fmtDate(x.a.data),esc(x.a.tipo||''),x.prazo<h?pill('Prazo vencido','neg'):pill('Emitir até '+fmtDate(x.prazo).slice(0,5),'warn')]);
+  const lEpi=d.epiVenc.concat(d.epiCa.filter(e=>!d.epiVenc.includes(e))).concat(d.epi15).map(e=>[esc(funcNome(e.funcId)),esc(e.item||'EPI')+(e.ca?' · CA '+esc(e.ca):''),e.caVal&&e.caVal<h?pill('CA vencido','neg'):valPill(e.troca,15)]);
+  const lAso=d.vivo?d.aso.map(x=>[esc(x.f.nome),esc(x.mot),valPill(x.prazo,30)]):null;
+  const lTer=d.terc.pend.map(x=>[esc(x.nome||'Terceiro'),esc((x.pend||[]).join(', ')),x.parc?'<span class="sub">'+esc(typeof fornNome==='function'?fornNome(x.parc):'')+'</span>':'']);
+  const aviso=!d.vivo&&d.semResumo?'<div class="note">'+d.semResumo+' colaborador(es) sem resumo de aptidão: a situação de ASO, NR e integração deles ainda não foi informada pelo RH/SST.</div>':'';
+  return pageHead('Segurança do Trabalho','Painel do setor: acidentes e CAT, aptidão para obra (ASO, NR e integração), EPI, terceiros, CIPA e permissões de trabalho.','<button class="btn" data-act="nav" data-tab="acid">Registrar ocorrência</button><button class="btn" data-act="nav" data-tab="aptlib">Liberações de aptidão</button>')+
+    '<div class="stack"><div class="bar"><label class="f"><span>Obra</span><select data-filter="pnSst.obra">'+opt(p1Obras(),obra,'Todas')+'</select></label></div>'+aviso+
+    '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div><div class="kpis">'+k3+'</div>'+
+    p1Grid([p1PendCard(its),p1Lista('Aptidão para obra',lInap,'aptlib','Ninguém com ASO, NR ou integração vencidos.'),p1Lista('CAT a emitir',lCat,'acid','Nenhuma CAT pendente.'),lAso?p1Lista('ASO a convocar',lAso,'aso','Nenhum ASO vencido ou vencendo.'):'',p1Lista('EPI para trocar',lEpi,'epi','Nenhuma troca de EPI vencida ou próxima.'),p1Lista('Terceiros com pendência',lTer,'tterc','Nenhum trabalhador terceiro com pendência.')])+'</div>';};
+
+/* =====================================================================
+   QUALIDADE (pnQua) — quantidades; o único valor em dinheiro é o custo das NCs e garantias
+   (o mesmo que já aparece em Qualidade › Não conformidades), sem comparação com o faturamento
+   ===================================================================== */
+ui.pnQua={meses:'12',obra:''};
+function p1QuaDados(obra,meses){const h=todayStr(),de=addMonths(ym(h),-(meses-1))+'-01',o={},fo=r=>!obra||r.projId===obra;
+  const nc=S.nc.filter(fo);o.ncAb=nc.filter(r=>r.status!=='fechada');o.ncVenc=o.ncAb.filter(r=>r.prazo&&r.prazo<h);o.ncPer=nc.filter(r=>(r.data||'')>=de).length;o.ncEfic=nc.filter(r=>r.status==='verificacao').length;
+  const pa=(S.pa||[]).filter(fo);o.paAb=pa.filter(r=>!['concluido','cancelado'].includes(r.status));o.paAtr=pa.filter(r=>typeof paAtras==='function'?paAtras(r):(!['concluido','cancelado'].includes(r.status)&&r.prazo&&r.prazo<h));
+  const gar=S.gar.filter(fo);o.garAb=gar.filter(r=>r.status==='aberto'||r.status==='atendimento');o.garAtr=o.garAb.filter(r=>r.prazo&&r.prazo<h);o.garPer=gar.filter(r=>(r.data||'')>=de).length;
+  const fv=S.fvs.filter(r=>fo(r)&&(r.data||'')>=de);o.fvs=fv.length;o.fvsRep=fv.filter(r=>r.resultado==='reprovado').length;
+  o.insp=null;if(mayR(GROUP_OF_TAB.insp||'sst')){const L=S.insp.filter(r=>fo(r)&&(r.data||'')>=de),ns=L.map(r=>r.nota).filter(n=>n!=null&&n!=='');o.insp={n:L.length,aud:L.filter(r=>r.tipo==='auditoria').length,media:ns.length?sum(ns,x=>+x)/ns.length:null,nc:sum(L,r=>(r.check||[]).filter(c=>c.res==='NC').length)};}
+  o.trec=S.trec.filter(r=>fo(r)&&String(r.pendencias||'').trim()&&r.prazoPend&&r.prazoPend<h&&!r.pendOk).length;
+  o.nps=null;try{o.nps=pesqNps(S.pesq.filter(p=>(pesqData(p)||'')>=de&&(!obra||!p.projId||p.projId===obra)));}catch(e){}
+  o.pesqPend=0;try{o.pesqPend=typeof pesqPendentes==='function'?pesqPendentes().length:0;}catch(e){}
+  o.cnq=null;if(typeof cnqReal==='function'){const its=[].concat(nc.map(r=>({col:'nc',r})),gar.map(r=>({col:'gar',r}))).filter(x=>{const dt=typeof cnqData==='function'?cnqData(x.r):(x.r.custoData||x.r.data||'');return (dt||'')>=de;});
+    o.cnq={nc:sum(its.filter(x=>x.col==='nc'),x=>+cnqReal(x.r)||0),gar:sum(its.filter(x=>x.col==='gar'),x=>+cnqReal(x.r)||0),est:sum(o.ncAb,r=>+r.custoEst||0)};}
+  return o;}
+V.pnQua=()=>{const u=ui.pnQua,obra=u.obra||'',meses=Math.max(1,Math.min(36,+u.meses||12)),d=p1QuaDados(obra,meses),h=todayStr(),per='últimos '+meses+' mes(es)';
+  let k1=kpi('Não conformidades abertas',p1N(d.ncAb.length),d.ncVenc.length+' com prazo vencido · '+d.ncEfic+' para verificar eficácia',d.ncVenc.length?'neg':d.ncAb.length?'warn':'pos')+
+    kpi('NCs registradas',p1N(d.ncPer),per)+
+    kpi('Ações abertas',p1N(d.paAb.length),d.paAtr.length+' atrasada(s)',d.paAtr.length?'neg':'')+
+    kpi('Chamados de garantia',p1N(d.garAb.length)+' aberto(s)',d.garAtr.length+' atrasado(s) · '+d.garPer+' no período',d.garAtr.length?'neg':'');
+  let k2=kpi('Verificações de serviço (FVS)',p1N(d.fvs),d.fvsRep+' reprovada(s) · '+per,d.fvsRep?'warn':'')+
+    (d.insp?kpi('Inspeções e auditorias',p1N(d.insp.n),(d.insp.media==null?'':'conformidade média '+String(Math.round(d.insp.media*10)/10).replace('.',',')+' · ')+d.insp.nc+' item(ns) não conforme(s)'):'')+
+    kpi('Satisfação do cliente (NPS)',d.nps&&d.nps.nps!=null?p1N(d.nps.nps):'—',d.nps&&d.nps.n?d.nps.n+' resposta(s) · '+per:'sem respostas no período')+
+    kpi('Pesquisas a enviar',p1N(d.pesqPend),'termos ou OS sem pesquisa',d.pesqPend?'warn':'')+
+    (d.trec?kpi('Pendências do recebimento',p1N(d.trec),'termos com prazo de pendência vencido','neg'):'')+
+    (d.cnq?kpi('Custo das NCs e garantias',money(d.cnq.nc+d.cnq.gar),'realizado · '+per+' · estimado em aberto '+money(d.cnq.est),d.cnq.nc+d.cnq.gar>0?'warn':''):'');
+  const its=p1Alertas('qsgi');
+  const lNc=d.ncAb.slice().sort((a,b)=>String(a.prazo||'9').localeCompare(String(b.prazo||'9'))).map(r=>[esc(String(r.desc||'Não conformidade').slice(0,90)),esc(r.projId?projNome(r.projId):'sem obra')+(r.resp?' · '+esc(r.resp):''),r.prazo?valPill(r.prazo,7):pill((NC_ST[r.status]||['Aberta'])[0],'warn')]);
+  const lPa=d.paAtr.concat(d.paAb.filter(r=>!d.paAtr.includes(r))).map(r=>[esc((r.numero?r.numero+' · ':'')+String(r.titulo||r.descr||'Ação').slice(0,90)),esc(r.projId?projNome(r.projId):''),r.prazo?valPill(r.prazo,7):'']);
+  const lGar=d.garAb.slice().sort((a,b)=>String(a.prazo||'9').localeCompare(String(b.prazo||'9'))).map(r=>[esc(String(r.desc||'Chamado').slice(0,90)),esc(r.projId?projNome(r.projId):'')+(r.solicitante?' · '+esc(r.solicitante):''),r.prazo?valPill(r.prazo,3):'']);
+  return pageHead('Qualidade','Painel do setor: não conformidades, planos de ação, garantia, verificações, inspeções e satisfação do cliente.','<button class="btn" data-act="nav" data-tab="nc">Não conformidades</button>')+
+    '<div class="stack"><div class="bar"><label class="f"><span>Período</span><select data-filter="pnQua.meses">'+opt([['3','Últimos 3 meses'],['6','Últimos 6 meses'],['12','Últimos 12 meses'],['24','Últimos 24 meses']],String(meses))+'</select></label><label class="f"><span>Obra</span><select data-filter="pnQua.obra">'+opt(p1Obras(),obra,'Todas')+'</select></label></div>'+
+    '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div>'+
+    p1Grid([p1PendCard(its),p1Lista('Não conformidades abertas',lNc,'nc','Nenhuma não conformidade aberta.'),p1Lista('Planos e ações',lPa,'pa','Nenhuma ação aberta.'),p1Lista('Garantia',lGar,'gar','Nenhum chamado de garantia aberto.')])+
+    '<div class="note">O custo mostrado é o realizado nas não conformidades e garantias do período (o mesmo das telas de origem). A comparação com o faturamento fica em Qualidade › Custo da não qualidade, para quem tem acesso ao financeiro.</div></div>';};
+
+/* =====================================================================
+   FROTA (pnFrota) — só os veículos dos locais do usuário
+   ===================================================================== */
+ui.pnFrota={local:'',mes:''};
+function p1FrotaDados(local,m){const h=todayStr(),perm=typeof frLocaisPermitidos==='function'?frLocaisPermitidos():null,o={perm};
+  const ok=v=>v&&(typeof frVeicOk!=='function'||frVeicOk(v,perm))&&(!local||(local==='_sem'?!v.local:v.local===local));
+  o.semLocal=!!(perm&&!perm.size);
+  const vs=o.semLocal?[]:S.veic.filter(v=>ok(v)&&!['baixado','inativo'].includes(v.status||'ativo')),ids=new Set(vs.map(v=>v.id)),de=r=>r&&ids.has(r.veicId);o.vs=vs;
+  const rota=S.vsai.filter(s=>de(s)&&!s.retornoEm);o.rota=rota;o.foraAnt=rota.filter(s=>s.saidaEm<h);
+  const manAb=S.vman.filter(x=>de(x)&&x.status==='agendada');o.manAtr=manAb.filter(x=>x.data<h);o.manAb=manAb;
+  const parado=v=>v.status==='oficina'||manAb.some(x=>x.veicId===v.id&&(x.data||'')<=h);
+  o.oficina=vs.filter(parado);o.disp=vs.filter(v=>!parado(v)&&!rota.some(s=>s.veicId===v.id));
+  o.rev=[];vs.forEach(v=>{let a=[];try{a=manAviso(v);}catch(e){}a.forEach(x=>o.rev.push({v,x}));});
+  o.docs=[];vs.forEach(v=>[['Licenciamento',v.licenciamento],['Seguro',v.seguro],['IPVA',v.ipva]].forEach(x=>{if(x[1]&&dTo(x[1])<=30)o.docs.push({v,t:x[0],d:x[1]});}));o.docs.sort((a,b)=>String(a.d).localeCompare(String(b.d)));
+  const J=typeof J2==='function'?J2():{};const av=+J.multaAviso||10;
+  const mu=S.multa.filter(de);o.multaIndic=mu.filter(r=>typeof multaIndicAberta==='function'?multaIndicAberta(r)&&dTo(multaPrazo(r))<=av:(r.status==='recebida'&&r.prazoIndic&&dTo(r.prazoIndic)<=5)).map(r=>({r,prazo:typeof multaPrazo==='function'?multaPrazo(r):r.prazoIndic})).sort((a,b)=>String(a.prazo).localeCompare(String(b.prazo)));
+  o.multaMes=mu.filter(r=>ym(r.data||'')===m).length;o.multaAbertas=mu.filter(r=>r.status==='recebida').length;
+  const sai=S.vsai.filter(s=>de(s)&&ym(s.saidaEm||'')===m);o.saidas=sai.length;o.km=sum(sai.filter(s=>s.retornoEm&&+s.kmRetorno>+s.kmSaida),s=>(+s.kmRetorno)-(+s.kmSaida));
+  const CK=typeof OBR_VCHK!=='undefined'?OBR_VCHK:[];o.chkLig=CK.length&&typeof obrCfg==='function'?obrCfg().chkVeic!==false:false;
+  o.chkRep=CK.length?sai.filter(s=>CK.some(x=>s['ckS'+x[0]]==='nok'||s['ckR'+x[0]]==='nok')).length:0;o.chkSem=CK.length?sai.filter(s=>!CK.every(x=>s['ckS'+x[0]])).length:0;
+  const ab=S.vabas.filter(a=>de(a)&&ym(a.data||'')===m);o.abN=ab.length;o.litros=sum(ab,a=>+a.litros||0);o.custo=sum(ab,a=>+a.valor||0);
+  const cs=ab.map(a=>{try{return consumoAbas(a);}catch(e){return null;}}).filter(c=>c!=null&&isFinite(c)&&c>0);o.kml=cs.length?sum(cs,x=>x)/cs.length:null;
+  o.anom=[];try{o.anom=abasAnomalias().filter(x=>de(x.a)&&(x.a.data||'')>=addDays(h,-30));}catch(e){}
+  return o;}
+V.pnFrota=()=>{const u=ui.pnFrota,m=u.mes||ym(todayStr()),perm=typeof frLocaisPermitidos==='function'?frLocaisPermitidos():null;
+  const locs=(typeof frLocais==='function'?frLocais():[]).filter(l=>!perm||perm.has(l)),local=u.local&&(u.local==='_sem'?!perm:locs.includes(u.local))?u.local:'';
+  const d=p1FrotaDados(local,m),fin=p1Fin(),h=todayStr();
+  const k1=kpi('Veículos ativos',p1N(d.vs.length),d.rota.length+' em rota agora')+kpi('Disponíveis',p1N(d.disp.length),'no pátio, sem manutenção aberta',d.disp.length?'pos':'')+kpi('Em manutenção',p1N(d.oficina.length),d.manAtr.length+' agendada(s) em atraso',d.manAtr.length?'neg':d.oficina.length?'warn':'')+
+    kpi('Revisões',p1N(d.rev.filter(x=>x.x.neg).length)+' vencida(s)',d.rev.filter(x=>!x.x.neg).length+' próxima(s)',d.rev.some(x=>x.x.neg)?'neg':d.rev.length?'warn':'')+
+    kpi('Documentos',p1N(d.docs.filter(x=>x.d<h).length)+' vencido(s)',d.docs.filter(x=>x.d>=h).length+' vencendo em 30 dias (licenciamento, seguro, IPVA)',d.docs.some(x=>x.d<h)?'neg':d.docs.length?'warn':'');
+  const k2=kpi('Indicação do condutor',p1N(d.multaIndic.length),'multa(s) com prazo vencendo ou vencido',d.multaIndic.length?'neg':'')+kpi('Multas',p1N(d.multaMes),'no mês · '+d.multaAbertas+' em aberto')+
+    kpi('Saídas no mês',p1N(d.saidas),km1(d.km)+' km rodados'+(d.foraAnt.length?' · '+d.foraAnt.length+' fora desde antes de hoje':''),d.foraAnt.length?'warn':'')+
+    kpi('Checklists',p1N(d.chkRep)+' reprovado(s)',(d.chkLig?d.chkSem+' saída(s) sem checklist · ':'')+fmtYm(m),d.chkRep?'neg':d.chkLig&&d.chkSem?'warn':'')+
+    kpi('Abastecimentos',p1N(d.abN),String(r2(d.litros)).replace('.',',')+' litros'+(d.kml?' · '+d.kml.toFixed(1).replace('.',',')+' km/l em média':'')+(d.anom.length?' · '+d.anom.length+' fora do padrão (30 dias)':''),d.anom.length?'warn':'')+
+    (fin?kpi('Combustível no mês',money(d.custo),fmtYm(m)+' · visível só ao Financeiro'):'');
+  const lVei=[];d.oficina.forEach(v=>lVei.push([esc(veicNome(v.id)),'em manutenção'+(v.local?' · '+esc(v.local):''),pill('Parado','warn')]));
+  d.rev.forEach(x=>lVei.push([esc(veicNome(x.v.id)),esc(x.x.txt),pill(x.x.neg?'Vencida':'Próxima',x.x.neg?'neg':'warn')]));
+  d.docs.forEach(x=>lVei.push([esc(veicNome(x.v.id)),esc(x.t),valPill(x.d,30)]));
+  d.foraAnt.forEach(s=>lVei.push([esc(veicNome(s.veicId)),'fora desde '+fmtDate(s.saidaEm)+' com '+esc(funcNome(s.funcId)),pill('Sem retorno','warn')]));
+  const lMul=d.multaIndic.map(x=>[esc(veicNome(x.r.veicId))+' · '+fmtDate(x.r.data),esc(x.r.infracao||x.r.auto||'')+(x.r.funcId?' · condutor: '+esc(funcNome(x.r.funcId)):' · condutor não indicado'),valPill(x.prazo,+((typeof J2==='function'?J2():{}).multaAviso)||10)]);
+  const lMan=d.manAb.slice().sort((a,b)=>String(a.data).localeCompare(String(b.data))).map(x=>[esc(veicNome(x.veicId))+' · '+esc(x.tipo||''),esc(String(x.desc||'').slice(0,90)),x.data<h?pill('Atrasada desde '+fmtDate(x.data).slice(0,5),'neg'):pill(fmtDate(x.data),'')]);
+  const lAn=d.anom.map(x=>[esc(veicNome(x.a.veicId))+' · '+fmtDate(x.a.data),esc((x.mot||[]).join('; ')),pill('Conferir','warn')]);
+  return pageHead('Frota','Painel do setor: disponibilidade, manutenção, documentos, multas e prazo de indicação do condutor, checklists e consumo.','<button class="btn" data-act="nav" data-tab="vsai">Saídas</button><button class="btn" data-act="nav" data-tab="vman">Manutenção</button>')+
+    '<div class="stack">'+(d.semLocal?FR_AVISO:'')+'<div class="bar">'+(locs.length?'<label class="f"><span>Local</span><select data-filter="pnFrota.local">'+opt(locs.map(l=>[l,l]).concat(perm?[]:[['_sem','Sem local']]),local,'Todos os meus locais')+'</select></label>':'')+'<label class="f"><span>Mês</span><input type="month" data-filter="pnFrota.mes" value="'+esc(m)+'"></label>'+(perm&&perm.size?'<p class="sub" style="margin:0;align-self:flex-end">Mostrando só os veículos dos seus locais: '+esc([...perm].join(', '))+'.</p>':'')+'</div>'+
+    '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div>'+
+    p1Grid([p1Lista('Veículos com pendência',lVei,'veic','Nenhum veículo com pendência.',10),p1Lista('Indicação do condutor',lMul,'multa','Nenhuma multa com prazo de indicação perto do fim.'),p1Lista('Manutenções em aberto',lMan,'vman','Nenhuma manutenção agendada.'),p1Lista('Abastecimentos fora do padrão',lAn,'vanal','Nenhum abastecimento fora do padrão nos últimos 30 dias.')])+
+    '<div class="note">Prazo de indicação do condutor: CTB, art. 257, §§ 7º e 8º (prazo da notificação ou '+((typeof J2==='function'?J2():{}).multaDias||30)+' dias contados do recebimento, como configurado).'+(fin?'':' Os custos de combustível e manutenção ficam com o Financeiro.')+'</div></div>';};
+
+/* =====================================================================
+   EQUIPAMENTOS (pnEqp)
+   ===================================================================== */
+ui.pnEqp={obra:'',mes:''};
+function p1EqpAluguel(m,obra){const ini=m+'-01',fim=fimMes(m),h=todayStr(),porF=new Map(),obras=new Set();let dias=0;
+  S.fmov.forEach(mv=>{if(!mv.saidaEm||!mv.projId||(obra&&mv.projId!==obra))return;const f=get('ferr',mv.ferrId);if(!f)return;let dia=0;try{dia=typeof obrDiaria==='function'?+obrDiaria(f)||0:0;}catch(e){}if(!(dia>0))return;
+    const a=mv.saidaEm>ini?mv.saidaEm:ini,b0=mv.retornoEm||h,b=b0<addDays(fim,1)?b0:addDays(fim,1);if(b<=a&&!(mv.saidaEm>=ini&&mv.saidaEm<=fim))return;
+    const n=Math.max(b>a?dpDias(a,b):0,mv.saidaEm>=ini&&mv.saidaEm<=fim&&b<=a?1:0);if(!n)return;dias+=n;porF.set(f.id,(porF.get(f.id)||0)+n);obras.add(mv.projId);});
+  return {dias,itens:porF.size,obras:obras.size};}
+V.pnEqp=()=>{const u=ui.pnEqp,obra=u.obra||'',m=u.mes||ym(todayStr()),h=todayStr();
+  const at=S.ferr.filter(f=>f.status!=='baixado'),sit=at.map(f=>({f,s:ferrSit(f)}));
+  const naObra=sit.filter(x=>(x.s.k==='obra'||x.s.k==='atrasado')&&(!obra||(x.s.mv&&x.s.mv.projId===obra)));
+  const cal=at.map(f=>({f,c:typeof obrCalSit==='function'?obrCalSit(f):{k:'na'}})).filter(x=>x.c.k!=='na'&&x.c.k!=='ok');
+  const calV=cal.filter(x=>x.c.k==='venc'||x.c.k==='sem'),calA=cal.filter(x=>x.c.k==='avenc');
+  const insp=at.map(f=>({f,d:ferrProxInsp(f.id)})).filter(x=>x.d&&dTo(x.d)<=15);
+  const ext=(S.obrextr||[]).filter(o=>o.status!=='concluida'&&(!obra||o.projId===obra));let extP=[];try{extP=typeof obrExtrPendentes==='function'?obrExtrPendentes().filter(x=>!obra||x.m.projId===obra):[];}catch(e){}
+  const alu=p1EqpAluguel(m,obra);
+  const k1=kpi('Equipamentos ativos',p1N(at.length),sit.filter(x=>x.s.k==='disp').length+' disponível(is) no almoxarifado')+kpi('Em obra',p1N(naObra.length),naObra.filter(x=>x.s.k==='atrasado').length+' com devolução atrasada'+(obra?' · '+esc(projNome(obra)):''),naObra.some(x=>x.s.k==='atrasado')?'neg':'')+
+    kpi('Em manutenção',p1N(sit.filter(x=>x.s.k==='manut').length),'')+
+    kpi('Calibração',p1N(calV.length)+' vencida(s)',calA.length+' vencendo em 30 dias · inclui sem registro',calV.length?'neg':calA.length?'warn':'pos')+
+    kpi('Inspeção periódica',p1N(insp.filter(x=>x.d<h).length)+' vencida(s)',insp.filter(x=>x.d>=h).length+' em 15 dias',insp.some(x=>x.d<h)?'neg':insp.length?'warn':'');
+  const k2=kpi('Extravios em apuração',p1N(ext.length),extP.length+' devolução(ões) atrasada(s) ou perdida(s) para abrir',ext.length||extP.length?'warn':'')+
+    kpi('Aluguel interno '+fmtYm(m),p1N(alu.dias)+' dia(s)',alu.itens+' equipamento(s) em '+alu.obras+' obra(s)');
+  const its=p1Alertas('equip');
+  const lCom=naObra.slice().sort((a,b)=>(a.s.k==='atrasado'?0:1)-(b.s.k==='atrasado'?0:1)||String((a.s.mv||{}).saidaEm).localeCompare(String((b.s.mv||{}).saidaEm))).map(x=>{const mv=x.s.mv||{};
+    return [esc(ferrNome(x.f.id)),esc(mv.projId?projNome(mv.projId):'')+(mv.funcId?' · com '+esc(funcNome(mv.funcId)):'')+(mv.saidaEm?' · desde '+fmtDate(mv.saidaEm):''),mv.previsto?(x.s.k==='atrasado'?pill('Atrasado desde '+fmtDate(mv.previsto).slice(0,5),'neg'):pill('Volta '+fmtDate(mv.previsto).slice(0,5),'acc')):pill('Sem previsão','')];});
+  const lCal=calV.concat(calA).map(x=>[esc(ferrNome(x.f.id)),esc(x.c.txt||''),pill(x.c.k==='avenc'?'Vence':'Vencida',x.c.k==='avenc'?'warn':'neg')]).concat(insp.map(x=>[esc(ferrNome(x.f.id)),'inspeção periódica',valPill(x.d,15)]));
+  const lExt=ext.map(o=>[esc(ferrNome(o.ferrId)),esc(o.projId?projNome(o.projId):'')+(o.funcId?' · '+esc(funcNome(o.funcId)):'')+(o.abertura?' · aberta em '+fmtDate(o.abertura):''),pill('Em apuração','warn')]).concat(extP.map(x=>[esc(ferrNome(x.m.ferrId)),esc(x.m.projId?projNome(x.m.projId):'')+' · '+(x.motivo==='perdido'?'voltou como perdido':'devolução atrasada'),pill('Abrir ocorrência','neg')]));
+  return pageHead('Equipamentos','Painel do setor: com quem está cada equipamento, devoluções, calibração e inspeção, extravios e aluguel interno.','<button class="btn" data-act="nav" data-tab="fmov">Envio e retorno</button>')+
+    '<div class="stack"><div class="bar"><label class="f"><span>Obra</span><select data-filter="pnEqp.obra">'+opt(p1Obras(),obra,'Todas')+'</select></label><label class="f"><span>Mês do aluguel interno</span><input type="month" data-filter="pnEqp.mes" value="'+esc(m)+'"></label></div>'+
+    '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div>'+
+    p1Grid([p1PendCard(its),p1Lista('Com quem está',lCom,'fmov','Nenhum equipamento em obra.',12),p1Lista('Calibração e inspeção',lCal,'obrcal','Tudo em dia.'),p1Lista('Extravios',lExt,'obrextr','Nenhum extravio em apuração.')])+
+    '<div class="note">O aluguel interno aparece em dias de uso nas obras. O valor apropriado a cada obra está em Equipamentos › Aluguel interno.</div></div>';};
+
+/* ===== v115 (P2): painéis de setor — Comercial, Obras, Suprimentos, Financeiro e Fiscal =====
+   Cada setor tem a própria tela "Painel" (primeiro item do submenu do módulo), visível só para quem lê o grupo do módulo:
+     pnCom (Comercial, grupo ctr) · pnObr (Obras, proj) · pnSup (Suprimentos, comp) · pnFin (Financeiro, fin) · pnFis (Fiscal, ctb).
+   Regras:
+   - Obras e Suprimentos NUNCA mostram dado financeiro da empresa (saldo, fluxo, contas a pagar/receber, DRE, margem, faturamento).
+     As pendências trazidas dos alertas do sistema perdem a coluna de valor (R$) nesses dois painéis.
+     O painel de Obras mostra o custo da obra (dado da obra, pelo custo único), só para quem grava em Obras ou lê o Financeiro;
+     o Encarregado só vê se a opção estiver ligada em Ajustes do painel.
+   - Cada bloco só usa dados do grupo que o perfil já lê (mayR) e cai sozinho se der erro (o erro fica em pn2Erros).
+   - window.PAINEIS_SETOR recebe {id,nome,modulo,group,perfis} para o P0 mandar cada usuário ao painel do setor dele. */
+const PN2_DEF=[
+  {id:'pnCom',nome:'Painel do Comercial',modulo:'comer',group:'ctr',perfis:['comercial'],extras:['med','cind','opp','hab','ctr']},
+  {id:'pnObr',nome:'Painel de Obras',modulo:'obras',group:'proj',perfis:['projetos','encarregado'],extras:['pobra','curva','etapa']},
+  {id:'pnSup',nome:'Painel de Suprimentos',modulo:'sup',group:'comp',perfis:['comprador','almoxarife','compras'],extras:['nfrec','invaj','devobra']},
+  {id:'pnFin',nome:'Painel do Financeiro',modulo:'finan',group:'fin',perfis:['financeiro'],extras:['aprov','aprovcfg','cfgcheck','ctrlint','adto','adtoit','orcfin']},
+  {id:'pnFis',nome:'Painel do Fiscal',modulo:'fisc',group:'ctb',perfis:['fiscal'],extras:['nfrec','fzfat','fzret','ibs','cfg']}];
+/* painéis que não podem levar valores em R$ dos alertas */
+const PN2_SEM_VALOR=new Set(['pnObr','pnSup']);
+PN2_DEF.forEach(d=>{
+  GROUP_OF_TAB[d.id]=d.group;
+  if(typeof TAB_COLS!=='undefined'&&!TAB_COLS[d.id])TAB_COLS[d.id]=[];
+  const m=MENU.find(x=>x[0]===d.modulo);
+  if(m&&!m[2].some(i=>i[0]===d.id))m[2].unshift([d.id,'Painel']);
+  if(!NAV.some(n=>n[0]===d.id))NAV.push([d.id,d.nome,m?m[1]:'']);
+});
+window.PAINEIS_SETOR=window.PAINEIS_SETOR||[];
+PN2_DEF.forEach(d=>{if(!window.PAINEIS_SETOR.some(p=>p.id===d.id))window.PAINEIS_SETOR.push({id:d.id,nome:d.nome,modulo:d.modulo,group:d.group,perfis:d.perfis.slice()});});
+
+ui.pnCom={meses:'12',area:''};ui.pnObr={proj:''};ui.pnSup={proj:'',mes:''};ui.pnFin={mes:''};ui.pnFis={mes:''};
+const pn2Erros=[];
+const pn2Try=(nome,f,d)=>{try{return f();}catch(e){pn2Erros.push(nome+': '+(e&&e.message||e));return d===undefined?'':d;}};
+/* ajustes do painel (Sistema › Configurações ou botão "Ajustes do painel") */
+const PN2_CFG0={ctrVenceDias:90,sessaoDias:15,venceDias:7,rdoSemDias:3,custoEncarregado:false};
+const pn2Cfg=()=>Object.assign({},PN2_CFG0,(cfg()||{}).pn2||{});
+A.pn2Cfg=()=>{const c=pn2Cfg();modal({title:'Ajustes dos painéis de setor',
+  body:'<div class="fg">'+field('Comercial: avisar contratos que terminam em até (dias)','ctrVenceDias','number',c.ctrVenceDias)+field('Comercial: sessões de licitação nos próximos (dias)','sessaoDias','number',c.sessaoDias)+
+    field('Financeiro: "vence em breve" = próximos (dias)','venceDias','number',c.venceDias)+field('Obras: obra sem diário há mais de (dias)','rdoSemDias','number',c.rdoSemDias)+
+    field('Obras: mostrar o custo da obra também ao perfil Encarregado','custoEncarregado','checkbox',c.custoEncarregado,{full:true})+'</div><p class="sub" style="margin:8px 0 0">Valem para todos os usuários. O custo da obra sempre aparece para quem grava em Obras ou lê o Financeiro.</p>',
+  saveLabel:'Salvar',save:root=>{const v=readForm(root),n=(x,d,a,b)=>{x=Math.round(+x);return isFinite(x)&&x>=a&&x<=b?x:d;};
+    const o={ctrVenceDias:n(v.ctrVenceDias,90,1,365),sessaoDias:n(v.sessaoDias,15,1,90),venceDias:n(v.venceDias,7,1,60),rdoSemDias:n(v.rdoSemDias,3,1,30),custoEncarregado:!!v.custoEncarregado};
+    put('cfg',Object.assign(cl(cfg()),{id:'empresa',pn2:o}));toast('Ajustes dos painéis salvos.','pos');render();}});};
+A.pn2Ir=d=>{if(d.k){const p=String(d.k).split('.');if(ui[p[0]])ui[p[0]][p[1]]=d.v||'';}if(d.tab)ui.tab=d.tab;try{history.replaceState(null,'','#'+ui.tab);}catch(_){}render();try{window.scrollTo(0,0);}catch(_){}};
+Object.assign(ACT_GROUP,{pn2Cfg:'cfg',pn2Ir:null});
+
+/* ---------- peças de tela ---------- */
+const pn2Btn=(tab,l,x)=>tab&&mayR(GROUP_OF_TAB[tab])?'<button class="btn sm" data-act="nav" data-tab="'+esc(tab)+'"'+(x||'')+'>'+esc(l||'Abrir')+'</button>':'';
+const pn2Ir=(tab,k,v,l)=>tab&&mayR(GROUP_OF_TAB[tab])?'<button class="btn sm" data-act="pn2Ir" data-tab="'+esc(tab)+'" data-k="'+esc(k)+'" data-v="'+esc(v||'')+'">'+esc(l||'Abrir')+'</button>':'';
+const pn2Li=(t,sub,dir,btn)=>'<div class="li"><div><div class="t">'+t+'</div>'+(sub?'<div class="sub">'+sub+'</div>':'')+'</div><div style="display:flex;gap:10px;align-items:center">'+(dir||'')+(btn||'')+'</div></div>';
+const pn2Lista=(its,vazio)=>'<div class="list">'+(its.length?its.join(''):'<div class="sub" style="padding:8px 0">'+esc(vazio||'Nada pendente.')+'</div>')+'</div>';
+const pn2Card=(t,small,body,acts)=>'<div class="card"><h2>'+esc(t)+(small?'<small>'+esc(small)+'</small>':'')+'</h2>'+body+(acts?'<div class="acts" style="margin-top:8px">'+acts+'</div>':'')+'</div>';
+const pn2Sem=d=>pageHead(d.nome,'')+'<div class="card"><div class="empty">Seu perfil não tem acesso a este painel. Peça ao administrador se precisar.</div></div>';
+const pn2Head=(d,sub,filtros)=>pageHead(d.nome,sub,(mayW('cfg')?'<button class="btn" data-act="pn2Cfg">Ajustes do painel</button>':''))+(filtros?'<div class="bar">'+filtros+'</div>':'');
+const pn2Ativa=p=>p&&(p.status||'ativo')!=='concluido'&&p.status!=='cancelado'&&!p.interno;
+const pn2Mais=(n,mx)=>n>mx?'<div class="sub" style="padding:6px 0">e mais '+(n-mx)+'…</div>':'';
+const pn2Def=id=>PN2_DEF.find(d=>d.id===id);
+
+/* alertas do sistema (os mesmos do Painel do Início), levados ao painel do setor dono da tela */
+const PN2_ALERTAS=[
+  ['alertasModulos',()=>typeof alertasModulos==='function'?alertasModulos():[]],
+  ['alertasCompras',()=>typeof alertasCompras==='function'?alertasCompras():[]],
+  ['alertasNfrec',()=>typeof alertasNfrec==='function'?alertasNfrec():[]],
+  ['alertasFiscal',()=>typeof alertasFiscal==='function'?alertasFiscal():[]],
+  ['alertasPonto',()=>typeof alertasPonto==='function'?alertasPonto():[]],
+  ['alertasCipa',()=>typeof alertasCipa==='function'?alertasCipa():[]],
+  ['alertasProc',()=>typeof alertasProc==='function'?alertasProc():[]],
+  ['alertasFunc',()=>typeof alertasFunc==='function'?alertasFunc():[]],
+  ['alertasLgpd',()=>typeof alertasLgpd==='function'?alertasLgpd():[]],
+  ['alertasChat',()=>typeof alertasChat==='function'?alertasChat():[]],
+  ['alertasPontoInt',()=>typeof alertasPontoInt==='function'?alertasPontoInt():[]],
+  ['alertasAgenda',()=>typeof alertasAgenda==='function'?alertasAgenda():[]],
+  ['alertasRdo',()=>typeof alertasRdo==='function'?alertasRdo():[]],
+  ['alertasCtr',()=>typeof alertasCtr==='function'?alertasCtr():[]],
+  ['alertasAprov',()=>typeof alertasAprov==='function'?alertasAprov():[]],
+  ['alertasServ',()=>typeof alertasServ==='function'?alertasServ():[]],
+  ['alertasFrota2',()=>typeof alertasFrota2==='function'?alertasFrota2():[]],
+  ['alertasQual',()=>typeof alertasQual==='function'?alertasQual():[]],
+  ['alertasSst2',()=>typeof alertasSst2==='function'?alertasSst2():[]],
+  ['alertasMulta2',()=>typeof alertasMulta2==='function'?alertasMulta2():[]],
+  ['alertasCnpj',()=>typeof alertasCnpj==='function'?alertasCnpj():[]],
+  ['alertasFerias',()=>typeof alertasFerias==='function'?alertasFerias():[]],
+  ['alertasDp',()=>typeof alertasDp==='function'?alertasDp():[]],
+  ['alertasRs',()=>typeof alertasRs==='function'?alertasRs():[]],
+  ['alertasAcesso',()=>typeof alertasAcesso==='function'?alertasAcesso():[]],
+  ['alertasRom',()=>typeof alertasRom==='function'?alertasRom():[]]];
+function pn2Alertas(){const out=[],vis=new Set();
+  PN2_ALERTAS.forEach(a=>{let r=[];try{r=a[1]()||[];}catch(e){pn2Erros.push(a[0]+': '+(e&&e.message||e));return;}
+    r.forEach(x=>{if(!x||!x[0])return;const k=x[0]+'|'+x[1];if(vis.has(k))return;vis.add(k);if(mayR(GROUP_OF_TAB[x[0]]))out.push(x);});});
+  return out;}
+function pn2Tabs(id){const d=pn2Def(id),m=MENU.find(x=>x[0]===d.modulo),s=new Set(d.extras);if(m)m[2].forEach(i=>{if(i[0]!==id)s.add(i[0]);});
+  /* Obras e Suprimentos nunca recebem alertas de telas financeiras, mesmo que alguém as coloque no menu */
+  if(PN2_SEM_VALOR.has(id))[...s].forEach(t=>{if(['fin','fluxo','contas','plano'].includes(GROUP_OF_TAB[t]))s.delete(t);});
+  return s;}
+function pn2AlertasDe(id){const T=pn2Tabs(id),sv=PN2_SEM_VALOR.has(id);
+  return pn2Alertas().filter(x=>T.has(x[0])).map(x=>sv&&/R\$/.test(String(x[2]||''))?[x[0],x[1],'']:x);}
+function pn2Pend(id,titulo){const its=pn2Try(id+':alertas',()=>pn2AlertasDe(id),[]);
+  return pn2Card(titulo||'Pendências e alertas do setor',its.length?its.length+' item(ns)':'',pn2Lista(its.map(x=>pn2Li(esc(x[1]),'','<span class="mono">'+(x[2]||'')+'</span>',pn2Btn(x[0]))),'Nenhuma pendência do setor agora.'));}
+
+/* =============================== COMERCIAL =============================== */
+V.pnCom=()=>{const d=pn2Def('pnCom');if(!mayR(d.group))return pn2Sem(d);
+  const f=ui.pnCom,c=pn2Cfg(),h=todayStr(),n=+f.meses||12,de=addMonths(ym(h),-(n-1))+'-01';
+  const ops=S.opp.filter(o=>!f.area||o.area===f.area),abertas=ops.filter(o=>['prospeccao','elaboracao','enviada','negociacao'].includes(o.etapa));
+  const fech=ops.filter(o=>['ganha','perdida','desistencia'].includes(o.etapa)&&String(o.resultadoEm||o.prev||'')>=de),ganhas=fech.filter(o=>o.etapa==='ganha');
+  const goPend=S.opp.filter(o=>o.goReq&&o.goReq.st==='pendente');
+  const vig=S.ctr.filter(x=>x.status==='vigente');
+  const carteira=pn2Try('carteira',()=>r2(sum(vig,x=>Math.max(0,ctrAtual(x)-ctrMedido(x)))),0);
+  const medRasc=S.med.filter(m=>m.status==='rascunho'),medApr=S.med.filter(m=>m.status==='aprovada');
+  const filtros='<label class="f"><span>Resultado das propostas</span><select id="s_pncom_m" data-filter="pnCom.meses">'+opt([['3','Últimos 3 meses'],['6','Últimos 6 meses'],['12','Últimos 12 meses'],['24','Últimos 24 meses']],f.meses)+'</select></label>'+
+    '<label class="f"><span>Área</span><select id="s_pncom_a" data-filter="pnCom.area">'+opt(OPP_AREA,f.area,'Todas')+'</select></label>';
+  const kp='<div class="kpis">'+
+    kpi('Oportunidades em aberto',String(abertas.length),money(sum(abertas,oppPreco))+' em propostas')+
+    kpi('Go/no-go pendentes',String(goPend.length),'propostas abaixo da margem aguardando a diretoria',goPend.length?'neg':'')+
+    kpi('Taxa de conversão',fech.length?pctV(ganhas.length/fech.length):'—',ganhas.length+' ganha(s) de '+fech.length+' decidida(s) no período')+
+    kpi('Contratos vigentes',String(vig.length),'carteira a executar '+money(carteira))+
+    kpi('Medições ao cliente a aprovar',String(medRasc.length),medApr.length+' aprovada(s) aguardando faturamento',medRasc.length?'neg':'')+'</div>';
+  /* funil por fase */
+  const funil=pn2Try('funil',()=>{const fases=OPP_ET.filter(e=>!['ganha','perdida','desistencia'].includes(e[0]));const mx=Math.max(1,...fases.map(e=>ops.filter(o=>o.etapa===e[0]).length));
+    return pn2Card('Funil de propostas por fase','em aberto','<div style="margin-top:8px">'+fases.map(e=>{const ls=ops.filter(o=>o.etapa===e[0]),v=sum(ls,oppPreco);
+      return '<div style="display:grid;grid-template-columns:minmax(120px,230px) 1fr 130px;gap:8px;align-items:center;margin:4px 0"><span>'+esc(e[1])+'</span><div style="height:20px;background:var(--line);border-radius:5px;overflow:hidden"><div style="height:100%;width:'+Math.max(2,ls.length/mx*100)+'%;background:var(--accent)"></div></div><span class="num mono">'+ls.length+' · '+money(v)+'</span></div>';}).join('')+'</div>',pn2Btn('opp','Oportunidades e licitações')+pn2Btn('cind','Indicadores comerciais'));});
+  /* propostas: go/no-go, margem, exequibilidade e sessões */
+  const props=pn2Try('propostas',()=>{const its=[];
+    goPend.forEach(o=>its.push(pn2Li('<b>'+esc(o.titulo)+'</b>','Go/no-go pedido · margem '+pctV(o.goReq.margem)+' · preço '+money(o.goReq.preco),pill('aguardando diretoria','warn'),pn2Btn('opp'))));
+    abertas.forEach(o=>{const x=typeof oppInexeq==='function'?oppInexeq(o):null;if(x&&(x.inexeq||x.garAdic>0))its.push(pn2Li('<b>'+esc(o.titulo)+'</b>','Preço em '+pctV(x.pct)+' do orçamento da Administração'+(x.inexeq?' · abaixo de 75%: demonstre a exequibilidade (art. 59, § 4º)':' · garantia adicional de '+money(x.garAdic)+' (art. 59, § 5º)'),pill(x.inexeq?'inexequível presumida':'garantia adicional',x.inexeq?'neg':'warn'),pn2Btn('opp')));});
+    abertas.filter(o=>o.etapa==='elaboracao'&&typeof fzOppMargem==='function'&&fzOppMargem(o)==null).forEach(o=>its.push(pn2Li('<b>'+esc(o.titulo)+'</b>','Proposta em elaboração sem orçamento: sem ele não dá para enviar',pill('sem orçamento','warn'),pn2Btn('opp'))));
+    const lim=addDays(h,c.sessaoDias),ses=abertas.filter(o=>o.dataSessao&&o.dataSessao>=h&&o.dataSessao<=lim).sort((a,b)=>String(a.dataSessao).localeCompare(String(b.dataSessao)));
+    ses.forEach(o=>its.push(pn2Li('<b>'+esc(o.titulo)+'</b>','Sessão em '+fmtDate(o.dataSessao)+(o.horaSessao?' às '+esc(o.horaSessao):'')+(o.plataforma?' · '+esc(o.plataforma):''),pill(dTo(o.dataSessao)===0?'hoje':'em '+dTo(o.dataSessao)+' d','acc'),pn2Btn('opp'))));
+    return pn2Card('Propostas: aprovação, exequibilidade e sessões','go/no-go, margem e próximas sessões ('+c.sessaoDias+' dias)',pn2Lista(its.slice(0,12),'Nenhuma proposta pendente.')+pn2Mais(its.length,12));});
+  /* contratos */
+  const ctrs=pn2Try('contratos',()=>{const its=[];
+    vig.forEach(x=>{const fim=ctrFim(x),dd=fim?dTo(fim):null,al=ctrAlertas(x)||[],rq=typeof ctrReeqAviso==='function'?ctrReeqAviso(x):null;
+      const vence=dd!=null&&dd<=c.ctrVenceDias;if(!vence&&!al.length&&!(rq&&!rq.ab))return;
+      const sub=[fim?'Vigência até '+fmtDate(fim)+(dd<0?' (terminou)':' ('+dd+' d)'):'']
+        .concat(al.map(a=>a[1])).concat(rq&&!rq.ab&&!al.some(a=>/reequil/i.test(a[1]))?['Avalie pedir reequilíbrio antes do fim da vigência (Lei 14.133, art. 131)']:[]).filter(Boolean);
+      its.push(pn2Li('<b>'+esc(x.numero||'—')+'</b> · '+esc(parcNome(x.parcId)),esc(sub.join(' · ')),rq&&!rq.ab?pill('reequilíbrio a pedir','warn'):dd!=null&&dd<0?pill('vencido','neg'):vence?pill('vencendo','warn'):pill('alerta','warn'),pn2Btn('ctr')));});
+    (S.reeq||[]).filter(r=>typeof fzReeqAberto==='function'&&fzReeqAberto(r)).forEach(r=>{const x=get('ctr',r.ctrId)||{};const venc=typeof fzReeqVencido==='function'&&fzReeqVencido(r);
+      its.push(pn2Li('Reequilíbrio · contrato <b>'+esc(x.numero||'—')+'</b>','Protocolo '+esc(r.protocolo||'—')+(r.prazo?' · resposta até '+fmtDate(r.prazo):'')+(r.valor?' · pleito '+money(+r.valor||0):''),pill(venc?'sem resposta no prazo':'em análise',venc?'neg':'acc'),pn2Btn('ctr')));});
+    return pn2Card('Contratos com clientes','vencendo em '+c.ctrVenceDias+' dias, alertas e reequilíbrio',pn2Lista(its.slice(0,12),'Nenhum contrato com alerta.')+pn2Mais(its.length,12),pn2Btn('ctr','Contratos'));});
+  /* medições ao cliente */
+  const meds=pn2Try('medicoes',()=>{const its=medRasc.concat(medApr).sort((a,b)=>String(a.fim||'').localeCompare(String(b.fim||''))).map(m=>{const x=get('ctr',m.ctrId)||{},t=medTot(m,x);
+      return pn2Li('Medição nº '+esc(m.numero||'—')+' · contrato <b>'+esc(x.numero||'—')+'</b>',esc(parcNome(x.parcId))+(m.fim?' · até '+fmtDate(m.fim):''),'<span class="mono">'+money(t.fat)+'</span> '+pill(m.status==='rascunho'?'a aprovar':'aprovada, sem faturar',m.status==='rascunho'?'warn':'acc'),pn2Btn('med'));});
+    return pn2Card('Medições ao cliente','a aprovar e a faturar',pn2Lista(its.slice(0,10),'Nenhuma medição pendente.')+pn2Mais(its.length,10),pn2Btn('med','Medições ao cliente'));});
+  /* pedidos de venda (grupo nf) */
+  const psv=mayR('nf')?pn2Try('psv',()=>{const ls=(S.psv||[]).filter(p=>['orcamento','aprovado'].includes(p.status));if(!ls.length)return '';
+    return pn2Card('Pedidos de venda','orçamentos e aprovados para faturar',pn2Lista(ls.slice(0,8).map(p=>pn2Li('Pedido nº '+esc(p.numero||'—')+' · '+esc(parcNome(p.parcId)),(p.validade?'validade '+fmtDate(p.validade):'')+(p.entrega?' · entrega '+fmtDate(p.entrega):''),pill(p.status==='aprovado'?'aprovado':'orçamento',p.status==='aprovado'?'acc':''),pn2Btn('psv')))));}):'';
+  return pn2Head(d,'Funil de propostas, aprovações, contratos e medições do Comercial.',filtros)+'<div class="stack">'+kp+'<div class="g2">'+funil+props+'</div><div class="g2">'+ctrs+meds+'</div>'+psv+pn2Pend('pnCom')+'</div>';
+};
+
+/* =============================== OBRAS =============================== */
+const pn2VeCusto=()=>mayR('fin')||(mayW('proj')&&(me.perfil!=='encarregado'||pn2Cfg().custoEncarregado));
+V.pnObr=()=>{const d=pn2Def('pnObr');if(!mayR(d.group))return pn2Sem(d);
+  const f=ui.pnObr,c=pn2Cfg(),h=todayStr(),m=ym(h),dia=+h.slice(8,10),veC=pn2VeCusto();
+  const obras=S.proj.filter(p=>pn2Ativa(p)&&(!f.proj||p.id===f.proj)),ids=new Set(obras.map(p=>p.id));
+  const filtros='<label class="f grow"><span>Obra</span><select id="s_pnobr_p" data-filter="pnObr.proj">'+opt(S.proj.filter(pn2Ativa).map(p=>[p.id,projNome(p.id)]),f.proj,'Todas as obras em andamento')+'</select></label>';
+  const linhas=obras.map(p=>pn2Try('obra '+p.id,()=>{const av=projAvanco(p.id),rd=S.rdo.filter(r=>r.projId===p.id).sort((a,b)=>String(b.data).localeCompare(String(a.data))),eaps=obraEaps(p.id).length;
+    const base=typeof obrBaseDe==='function'?obrBaseDe(p.id):[],mud=base.length&&typeof obrBaseMudou==='function'?obrBaseMudou(p.id):false,prev=eaps?!!get('obrprev','pv_'+p.id+'_'+m):null;
+    let cus=null;if(veC){try{if(eaps){const pv=obrPrevisao(p.id);cus={orc:pv.orc,gasto:pv.gasto,eac:pv.eac,desv:r2(pv.eac-pv.orc)};}else cus={orc:+p.orcamento||0,gasto:custoObraUnico(p.id).tot,eac:null,desv:null};}catch(e){pn2Erros.push('custo '+p.id+': '+e.message);}}
+    return {p,av,ult:rd[0]||null,semAss:rd.filter(r=>r.status!=='assinado'&&r.data<h).length,eaps,base,mud,prev,cus};},null)).filter(Boolean);
+  const etAtr=S.etapa.filter(e=>ids.has(e.projId)&&pn2Try('etapa',()=>etapaSit(e).k==='atrasada',false)).length;
+  const rdoPend=sum(linhas,x=>x.semAss),semDiario=linhas.filter(x=>x.av&&(!x.ult||dpDiasPn2(x.ult.data,h)>c.rdoSemDias)).length;
+  const meAg=S.medemp.filter(x=>x.status==='aguardando'&&ids.has((get('ctremp',x.ctrId)||{}).projId));
+  const ceVig=S.ctremp.filter(x=>x.status==='vigente'&&ids.has(x.projId)),ceSemMed=ceVig.filter(x=>!S.medemp.some(md=>md.ctrId===x.id&&md.status!=='cancelada'&&ym(md.fim||md.ini||'')===m));
+  const he=S.heaut.filter(r=>r.status==='pendente'&&(!f.proj||r.projId===f.proj)&&String(r.data||'')>=addDays(h,-1));
+  const prevFalta=dia>=5?linhas.filter(x=>x.prev===false).length:0;
+  const avs=linhas.filter(x=>x.av),avMed=avs.length?sum(avs,x=>x.av.pct)/avs.length:null;
+  const kp='<div class="kpis">'+
+    kpi('Obras em andamento',String(obras.length),avMed!=null?'avanço físico médio '+Math.round(avMed)+'%':'sem etapas cadastradas')+
+    kpi('Etapas atrasadas',String(etAtr),'pelo cronograma',etAtr?'neg':'')+
+    kpi('Diários de obra pendentes',String(rdoPend),'sem assinatura · '+semDiario+' obra(s) sem diário há mais de '+c.rdoSemDias+' d',rdoPend?'neg':'')+
+    kpi('Medições de empreiteiro',String(meAg.length),'aguardando aprovação · '+ceSemMed.length+' contrato(s) sem medição em '+fmtYm(m),meAg.length?'neg':'')+
+    kpi('Horas extras pedidas',String(he.length),'aguardando aprovação',he.length?'neg':'')+
+    (dia>=5?kpi('Previsão no término',String(prevFalta),'obra(s) sem a previsão de '+fmtYm(m),prevFalta?'neg':''):'')+'</div>';
+  const th='<th>Obra</th><th>Avanço físico</th><th>Último diário</th><th>Linha de base</th><th>Previsão do mês</th>'+(veC?'<th class="num">Orçado (EAP)</th><th class="num">Gasto até hoje</th><th class="num">Custo final previsto</th><th class="num">Desvio</th>':'')+'<th></th>';
+  const tab='<div class="card"><h2>Obras em andamento<small>'+(veC?'avanço, diário, linha de base e custo da obra (custo único)':'avanço, diário e linha de base')+'</small></h2><div class="tw" style="border:0;margin-top:8px"><table style="min-width:'+(veC?1100:760)+'px"><thead><tr>'+th+'</tr></thead><tbody>'+
+    (linhas.length?linhas.map(x=>{const av=x.av,dv=av&&av.exp!=null?av.pct-av.exp:null;
+      return '<tr><td><b>'+esc(projNome(x.p.id))+'</b>'+(x.p.respObra?'<div class="sub">resp.: '+esc(nameOf(x.p.respObra))+'</div>':'')+'</td>'+
+        '<td>'+(av?pbar(av.pct)+'<div class="sub">'+(av.exp!=null?'previsto '+Math.round(av.exp)+'%':'sem datas')+(av.late?' · '+av.late+' etapa(s) atrasada(s)':'')+'</div>'+(dv!=null&&dv<-10?pill('atrasada '+Math.round(-dv)+' p.p.','neg'):''):'<span class="mut">sem etapas</span>')+'</td>'+
+        '<td>'+(x.ult?fmtDate(x.ult.data)+(x.semAss?'<div>'+pill(x.semAss+' sem assinatura','warn')+'</div>':''):'<span class="mut">nenhum</span>')+'</td>'+
+        '<td>'+(x.base.length?pill('versão '+(x.base[x.base.length-1].versao||x.base.length),'pos')+(x.mud?'<div>'+pill('orçamento alterado sem revisão','neg')+'</div>':''):x.eaps?pill('sem linha de base','warn'):'<span class="mut">sem EAP</span>')+'</td>'+
+        '<td>'+(x.prev==null?'<span class="mut">—</span>':x.prev?pill('informada','pos'):dia>=5?pill('falta','neg'):pill('até o dia 5','')) +'</td>'+
+        (veC?(x.cus?'<td class="num">'+money(x.cus.orc)+'</td><td class="num">'+money(x.cus.gasto)+'</td><td class="num">'+(x.cus.eac!=null?money(x.cus.eac):'—')+'</td><td class="num '+(x.cus.desv>0.5?'neg':'')+'">'+(x.cus.desv!=null?money(x.cus.desv):'—')+'</td>':'<td colspan="4" class="mut">—</td>'):'')+
+        '<td class="act">'+pn2Ir('pobra','pobra.proj',x.p.id,'Painel da obra')+'</td></tr>';}).join(''):emptyRow(veC?10:6,'Nenhuma obra em andamento.'))+'</tbody></table></div>'+
+    (veC?'<p class="sub" style="margin:8px 0 0">Custo da obra pelo custo único (contas da obra, empreiteiros, material consumido, mão de obra apropriada, equipamentos e frota). Custo final previsto = gasto + o que falta (Painel da obra › Previsão no término).</p>':'')+'</div>';
+  const emp=pn2Try('empreiteiros',()=>{const its=meAg.map(x=>{const ce=get('ctremp',x.ctrId)||{};return pn2Li('Medição nº '+esc(x.numero||'—')+' · '+esc(parcNome(ce.parcId)),esc(projNome(ce.projId)),pill('aguardando aprovação','warn'),pn2Btn('medemp'));})
+      .concat(ceSemMed.map(x=>pn2Li('Contrato '+esc(x.numero||'—')+' · '+esc(parcNome(x.parcId)),esc(projNome(x.projId))+' · nenhuma medição lançada em '+fmtYm(m),pill('a lançar',''),pn2Btn('medemp'))));
+    return pn2Card('Medições de empreiteiros','a aprovar e a lançar',pn2Lista(its.slice(0,10),'Nenhuma medição de empreiteiro pendente.')+pn2Mais(its.length,10),pn2Btn('ctremp','Contratos de empreiteiros'));});
+  const hes=pn2Try('horas extras',()=>{const its=he.sort((a,b)=>String(a.data).localeCompare(String(b.data))).map(r=>pn2Li(fmtDate(r.data)+' · '+esc(String(r.horas||0).replace('.',','))+' h',esc(projNome(r.projId))+(r.motivo?' · '+esc(String(r.motivo).slice(0,80)):''),pill('aguardando','warn'),pn2Btn('hepedir')));
+    return pn2Card('Horas extras pedidas','aguardando aprovação',pn2Lista(its.slice(0,8),'Nenhum pedido de hora extra aguardando.')+pn2Mais(its.length,8),pn2Btn('hepedir','Horas extras (pedidos)'));});
+  /* alocação: só o resumo (sem nomes nem dados de saúde) */
+  const aloc=pn2Try('alocacao',()=>{if(typeof alocPendRdo!=='function')return '';const de7=addDays(h,-7),rs=S.rdo.filter(r=>ids.has(r.projId)&&r.data>=de7);let nr=0;const fs=new Set();
+    rs.forEach(r=>{const ps=alocPendRdo(r)||[];if(ps.length){nr++;ps.forEach(p=>fs.add(p.funcId));}});
+    return pn2Card('Alocação com pendência de aptidão','diários dos últimos 7 dias',fs.size?'<p style="margin:6px 0"><b class="neg">'+fs.size+' colaborador(es)</b> com ASO, NR ou integração pendente apareceram no efetivo de '+nr+' diário(s). A Segurança do trabalho e o RH tratam os detalhes.</p>':'<p class="sub" style="margin:6px 0">Nenhum colaborador com pendência de aptidão no efetivo dos diários recentes.</p>',pn2Btn('rdo','Diário de obra'));});
+  return pn2Head(d,'Avanço físico, diário de obra, medições de empreiteiros, horas extras e linha de base das obras.',filtros)+'<div class="stack">'+kp+tab+'<div class="g2">'+emp+hes+'</div>'+aloc+pn2Pend('pnObr')+'</div>';
+};
+const dpDiasPn2=(a,b)=>Math.round((new Date(String(b).slice(0,10)+'T12:00:00')-new Date(String(a).slice(0,10)+'T12:00:00'))/864e5);
+
+/* =============================== SUPRIMENTOS =============================== */
+V.pnSup=()=>{const d=pn2Def('pnSup');if(!mayR(d.group))return pn2Sem(d);
+  const f=ui.pnSup,h=todayStr();if(!f.mes)f.mes=ym(h);const pj=r=>!f.proj||r.projId===f.proj;
+  const filtros='<label class="f grow"><span>Obra</span><select id="s_pnsup_p" data-filter="pnSup.proj">'+opt(S.proj.filter(pn2Ativa).map(p=>[p.id,projNome(p.id)]),f.proj,'Todas')+'</select></label>'+
+    '<label class="f"><span>Mês das exceções</span><input type="month" id="m_pnsup" data-filter="pnSup.mes" value="'+esc(f.mes)+'"></label>';
+  const sc=S.sc.filter(s=>['rascunho','aprovacao','enviada','cotacao'].includes(s.status)&&pj(s));
+  const cot=S.cot.filter(x=>x.status==='aberta'&&pj(x));
+  const peds=S.ped.filter(p=>p.status!=='cancelado'&&pj(p));
+  const aAprov=peds.filter(p=>p.status!=='recebido'&&pn2Try('precisaAprov',()=>precisaAprov('ped',p)&&!(p.aprov&&p.aprov.ok),false));
+  const aguard=peds.filter(p=>pn2Try('aguard',()=>supAguardAprov(p),false));
+  const aReceber=peds.filter(p=>(p.status==='aberto'||p.status==='enviado')&&!aguard.includes(p)),atras=aReceber.filter(p=>p.previsao&&p.previsao<h);
+  const div=pn2Try('divergencias',()=>supConfLista().filter(n=>{const cf=n.pedId?supConf(n):null;return cf&&cf.div&&!supConfAprov(n,cf);}),[]);
+  const low=mayR('est')?S.prod.filter(p=>p.ativo!==false&&pn2Try('stockLow',()=>stockLow(p),false)):[];
+  const inv=mayR('est')?(S.invaj||[]).filter(x=>x.status==='pendente'):[];
+  const sep=(S.sep||[]).filter(x=>x.status==='pendente'&&pj(x));
+  const E=pn2Try('excecoes',()=>supExcecoes(f.mes),null);
+  const kp='<div class="kpis">'+
+    kpi('Solicitações abertas',String(sc.length),sc.filter(s=>s.status==='aprovacao').length+' aguardando aprovação do gestor')+
+    kpi('Cotações abertas',String(cot.length),'mapas de cotação em andamento')+
+    kpi('Pedidos a aprovar',String(aAprov.length),'acima da alçada',aAprov.length?'neg':'')+
+    kpi('Pedidos a receber',String(aReceber.length),atras.length+' com entrega atrasada',atras.length?'neg':'')+
+    kpi('Recebido aguardando aprovação',String(aguard.length),'nota e pagamento travados',aguard.length?'neg':'')+
+    kpi('Notas com divergência',String(div.length),'pedido × nota × recebimento',div.length?'neg':'')+
+    (mayR('est')?kpi('Estoque no mínimo',String(low.length),'itens no mínimo ou abaixo',low.length?'neg':''):'')+'</div>';
+  const cSc=pn2Try('solicitacoes',()=>{const SN={rascunho:'rascunho',aprovacao:'aguardando aprovação',enviada:'aguardando cotação',cotacao:'em cotação'};
+    const its=sc.slice().sort((a,b)=>String(a.necessidade||'9').localeCompare(String(b.necessidade||'9'))).map(s=>{const dd=s.necessidade?dTo(s.necessidade):null;
+      return pn2Li('SC nº '+esc(s.numero||'—')+' · '+esc(projNome(s.projId)),(s.necessidade?'necessidade '+fmtDate(s.necessidade):'sem data')+(s.solicitante?' · '+esc(s.solicitante):''),pill(SN[s.status]||s.status,s.status==='aprovacao'?'warn':'')+(dd!=null&&dd<=3?' '+pill(dd<0?'atrasada':'urgente','neg'):''),pn2Btn(s.status==='aprovacao'?'aprov':'sc'));});
+    cot.forEach(x=>its.push(pn2Li('Cotação nº '+esc(x.numero||'—')+' · '+esc(projNome(x.projId)),(x.forn||[]).length+' fornecedor(es) · '+(x.itens||[]).length+' item(ns)',pill('aberta','acc'),pn2Btn('cot'))));
+    return pn2Card('Solicitações e cotações','abertas, por necessidade',pn2Lista(its.slice(0,10),'Nenhuma solicitação ou cotação aberta.')+pn2Mais(its.length,10),pn2Btn('sc','Solicitações')+pn2Btn('cot','Cotações'));});
+  const cPed=pn2Try('pedidos',()=>{const its=aguard.map(p=>pn2Li('Pedido nº '+esc(p.numero||'—')+' · '+esc(parcNome(p.parcId)),esc(projNome(p.projId)),pill('recebido aguardando aprovação','neg'),pn2Btn('ped')))
+      .concat(aAprov.filter(p=>!aguard.includes(p)).map(p=>pn2Li('Pedido nº '+esc(p.numero||'—')+' · '+esc(parcNome(p.parcId)),esc(projNome(p.projId)),pill('a aprovar','warn'),pn2Btn('ped'))))
+      .concat(aReceber.slice().sort((a,b)=>String(a.previsao||'9').localeCompare(String(b.previsao||'9'))).map(p=>pn2Li('Pedido nº '+esc(p.numero||'—')+' · '+esc(parcNome(p.parcId)),esc(projNome(p.projId))+(p.previsao?' · entrega '+fmtDate(p.previsao):''),p.previsao&&p.previsao<h?pill('atrasado','neg'):pill(p.recParcial?'parcialmente recebido':PED_ST[p.status]?PED_ST[p.status][0]:p.status,p.recParcial?'acc':''),pn2Btn('ped'))));
+    return pn2Card('Pedidos de compra','a aprovar e a receber',pn2Lista(its.slice(0,12),'Nenhum pedido pendente.')+pn2Mais(its.length,12),pn2Btn('ped','Pedidos de compra'));});
+  const cDiv=pn2Try('notas',()=>{const its=div.map(n=>pn2Li('NF '+esc(n.numero||'s/n')+' · '+esc(parcNome(n.parcId)),'divergência acima da tolerância',pill('aguardando aprovação','warn'),pn2Btn('nfrec')));
+    return pn2Card('Divergências de nota','pedido × nota × recebimento',pn2Lista(its.slice(0,8),'Nenhuma nota com divergência pendente.')+pn2Mais(its.length,8),pn2Btn('nfrec','NFs recebidas'));});
+  const cEst=mayR('est')?pn2Try('estoque',()=>{const its=low.map(p=>{const s=stockAll().of(p.id);return pn2Li(esc(p.nome),'mínimo '+fmtQ(p.minimo)+' '+esc(p.un||''),'<span class="mono neg">'+fmtQ(s.saldo)+' '+esc(p.un||'')+'</span>',pn2Btn('est'));})
+      .concat(inv.map(x=>pn2Li('Ajuste de inventário · '+esc((get('prod',x.prodId)||{}).nome||x.desc||'item'),(x.data?fmtDate(x.data):'')+' · aguardando outra pessoa aprovar',pill('pendente','warn'),pn2Btn('invaj'))))
+      .concat(sep.map(x=>pn2Li('Separação nº '+esc(x.numero||'—')+' · '+esc(projNome(x.projId)),x.necessidade?'necessidade '+fmtDate(x.necessidade):'',pill('a separar','warn'),pn2Btn('sep'))));
+    return pn2Card('Estoque, inventário e separação','mínimo, ajustes pendentes e pedidos de separação',pn2Lista(its.slice(0,12),'Estoque em ordem.')+pn2Mais(its.length,12),pn2Btn('est','Estoque')+pn2Btn('invaj','Ajustes de inventário'));}):'';
+  const cExc=E?pn2Card('Exceções de compras de '+fmtYm(f.mes),'política de cotação, acordos, notas e inventário',pn2Lista([
+      pn2Li('Pedidos sem a cotação mínima',E.peds.length+' pedido(s) no mês','<span class="mono">'+E.cot.length+'</span>',''),
+      pn2Li('Pedidos acima do acordo de preço','','<span class="mono">'+E.acima.length+'</span>',''),
+      pn2Li('Notas com divergência do pedido',E.notasPed+' nota(s) com pedido','<span class="mono">'+E.notas.length+'</span>',''),
+      pn2Li('Notas de entrada sem pedido (acima do limite)','','<span class="mono">'+E.semPed.length+'</span>',''),
+      pn2Li('Ajustes de inventário acima do limite','','<span class="mono">'+E.aj.length+'</span>','')]),pn2Btn('supctl','Controles de compras')):'';
+  return pn2Head(d,'Solicitações, cotações, pedidos, recebimento, notas, estoque e exceções de compras.',filtros)+'<div class="stack">'+kp+'<div class="g2">'+cSc+cPed+'</div><div class="g2">'+cDiv+cExc+'</div>'+cEst+pn2Pend('pnSup')+'</div>';
+};
+
+/* =============================== FINANCEIRO =============================== */
+V.pnFin=()=>{const d=pn2Def('pnFin');if(!mayR(d.group))return pn2Sem(d);
+  const f=ui.pnFin,c=pn2Cfg(),h=todayStr(),cur=f.mes||ym(h);
+  const open=S.lanc.filter(l=>l.status!=='cancelado'&&!l.pago),rec=open.filter(l=>l.tipo==='receber'),pag=open.filter(l=>l.tipo==='pagar');
+  const lateR=rec.filter(l=>l.venc<h),lateP=pag.filter(l=>l.venc<h),lim=addDays(h,c.venceDias),breve=pag.filter(l=>l.venc>=h&&l.venc<=lim);
+  const rel=mayR('fluxo')?pn2Try('relatorio',()=>relatorio(cur,cur),null):null;
+  const filtros='<label class="f"><span>Resultado do mês</span><input type="month" id="m_pnfin" data-filter="pnFin.mes" value="'+esc(cur)+'"></label>';
+  const kp='<div class="kpis">'+
+    (mayR('contas')?kpi('Saldo em caixa',money(pn2Try('saldo',()=>saldoTotal(),0)),S.conta.length+' conta(s)'):'')+
+    kpi('A receber',money(sum(rec,l=>l.valor)),rec.length+' título(s) em aberto','pos')+
+    kpi('A pagar',money(sum(pag,l=>l.valor)),pag.length+' título(s) em aberto','neg')+
+    kpi('Em atraso',money(sum(lateR,l=>l.valor)+sum(lateP,l=>l.valor)),lateR.length+' a receber · '+lateP.length+' a pagar',lateR.length+lateP.length?'neg':'')+
+    kpi('A pagar em '+c.venceDias+' dias',money(sum(breve,l=>l.valor)),breve.length+' título(s)')+
+    (rel?kpi('Resultado de '+fmtYm(cur),money(rel.t.res),'competência, já com rateio',rel.t.res<0?'neg':'pos'):'')+'</div>';
+  /* pendências próprias do Financeiro (as do antigo Painel do Início) */
+  const pend=pn2Try('pendencias',()=>{const it=[];
+    if(lateR.length)it.push(['rec',lateR.length+' título(s) a receber vencido(s)',money(sum(lateR,l=>l.valor))]);
+    if(lateP.length)it.push(['pag',lateP.length+' título(s) a pagar vencido(s)',money(sum(lateP,l=>l.valor))]);
+    const rc=sum(S.recor.filter(r=>r.ativo!==false),r=>recorPendentes(r,ym(h)));if(rc)it.push(['recor',rc+' título(s) de recorrência por gerar','']);
+    if(mayR('contas')){const ex=S.extrato.filter(x=>x.status==='pendente').length;if(ex)it.push(['conc',ex+' linha(s) de extrato sem conciliar','']);}
+    const vis=new Set(it.map(x=>x[1]));pn2AlertasDe('pnFin').forEach(x=>{if(!vis.has(x[1]))it.push(x);});
+    return pn2Card('Pendências do Financeiro',it.length?it.length+' item(ns)':'',pn2Lista(it.map(x=>pn2Li(esc(x[1]),'','<span class="mono">'+(x[2]||'')+'</span>',pn2Btn(x[0]))),'Nenhuma pendência financeira agora.'));});
+  /* aprovações, pagos sem aprovação, retenções de empreiteiros e remessa */
+  const ctl=pn2Try('controles',()=>{const its=[];
+    const ap=(typeof aprovPend==='function'?aprovPend():[]).concat(typeof aprovExtras==='function'?pn2Try('aprovExtras',()=>aprovExtras(),[]):[]);its.push(pn2Li('Aprovações aguardando',ap.length?(typeof podeAprovar==='function'&&podeAprovar()?'você pode aprovar':'aguardando os aprovadores da alçada'):'nada na fila','<span class="mono">'+ap.length+'</span>',pn2Btn('aprov')));
+    if(typeof finPagosSemAprov==='function'){const de=addMonths(ym(h),-2),ls=finPagosSemAprov().filter(i=>ym(i.data)>=de);its.push(pn2Li('Pagos sem aprovação (3 meses)',ls.length?money(sum(ls,i=>i.valor))+' pagos fora da alçada':'nenhum','<span class="mono '+(ls.length?'neg':'')+'">'+ls.length+'</span>',pn2Btn('ctrlint')));}
+    if(typeof j4RetLancs==='function'){const all=j4RetLancs(),ab=all.filter(l=>!l.pago),lib=ab.filter(l=>l.retLib);its.push(pn2Li('Retenções de empreiteiros','saldo retido '+money(sum(ab,l=>+l.valor||0))+' · liberado aguardando pagamento '+money(sum(lib,l=>+l.valor||0)),'<span class="mono">'+ab.length+'</span>',pn2Btn('retemp')));}
+    if(typeof remLista==='function'){const ls=remLista(lim),ok=ls.filter(x=>!x.motivo),bl=ls.filter(x=>x.motivo);its.push(pn2Li('Remessa ao banco (vencendo em '+c.venceDias+' dias)',ok.length+' pronto(s) para a remessa · '+money(sum(ok,x=>+x.l.valor||0))+(bl.length?' · '+bl.length+' bloqueado(s)':''),'<span class="mono '+(bl.length?'neg':'')+'">'+ls.length+'</span>',pn2Btn('remessa')));}
+    if(mayR('contas')&&typeof concSaldoOk==='function'){const pm=addMonths(ym(h),-1);S.conta.filter(x=>x.ativo!==false&&x.tipo!=='caixinha').forEach(x=>{const r=pn2Try('conc',()=>concSaldoOk(x.id,pm),null);if(!r)return;const pe=S.extrato.filter(e=>e.contaId===x.id&&e.status==='pendente').length;
+      its.push(pn2Li('Conciliação · '+esc(x.nome),(r.ok?'saldo de '+fmtYm(pm)+' confere':r.explicacao?'diferença explicada':esc(r.motivo||'saldo de '+fmtYm(pm)+' não confere'))+(pe?' · '+pe+' linha(s) sem conciliar':''),r.ok||r.explicacao?pill('ok','pos'):pill('conferir','warn'),pn2Btn('conc')));});}
+    return pn2Card('Controles do Financeiro','aprovações, alçada, retenções, remessa e conciliação',pn2Lista(its));});
+  const flx=mayR('fluxo')?pn2Try('fluxo',()=>pn2Card('Fluxo de caixa','realizado e previsto, 8 meses',chartFluxo(fluxo(addMonths(ym(h),-2),8,'').rows),pn2Btn('fc90','Fluxo de 90 dias')+pn2Btn('fluxo','Fluxo de caixa'))):'';
+  const prox=pn2Try('vencimentos',()=>{const ls=open.slice().sort((a,b)=>a.venc.localeCompare(b.venc)).slice(0,8);
+    return pn2Card('Próximos vencimentos','',pn2Lista(ls.map(l=>pn2Li(esc(l.desc),fmtDate(l.venc)+(l.venc<h?' · <span class="neg">atrasado</span>':'')+' · '+(l.tipo==='receber'?'a receber':'a pagar'),'<span class="mono '+(l.tipo==='receber'?'pos':'neg')+'">'+money(l.valor)+'</span>',mayW('fin')?'<button class="btn sm" data-act="baixar" data-id="'+esc(l.id)+'">Baixar</button>':'')),'Nada em aberto.'),pn2Btn('pag','Contas a pagar')+pn2Btn('rec','Contas a receber'));});
+  const res=rel?pn2Try('resultado',()=>{const top=rel.rows.filter(r=>r.receita||r.custo).sort((a,b)=>b.res-a.res).slice(0,6);
+    return pn2Card('Resultado por obra',fmtYm(cur),pn2Lista(top.map(r=>pn2Li(esc(projNome(r.p.id)),'Receita '+money(r.receita)+' · Custos '+money(r.custo),'<span class="mono '+(r.res<0?'neg':'pos')+'">'+money(r.res)+'</span>','')),'Sem movimento de obras neste mês.'),pn2Btn('dre','DRE'));}):'';
+  return pn2Head(d,'Caixa, contas a pagar e a receber, aprovações, conciliação e fluxo. Posição de '+fmtDate(h)+'.',filtros)+'<div class="stack">'+kp+'<div class="g2">'+pend+ctl+'</div>'+flx+'<div class="g2">'+prox+res+'</div></div>';
+};
+
+/* =============================== FISCAL =============================== */
+V.pnFis=()=>{const d=pn2Def('pnFis');if(!mayR(d.group))return pn2Sem(d);
+  const f=ui.pnFis,h=todayStr(),m=f.mes||addMonths(ym(h),-1);
+  const filtros='<label class="f"><span>Competência</span><input type="month" id="m_pnfis" data-filter="pnFis.mes" value="'+esc(m)+'"></label>';
+  const ent=mayR('nf')?S.notas.filter(n=>n.tipo==='entrada'&&n.status==='rascunho'):[];
+  const inbox=mayR('nf')&&typeof inboxList==='function'?pn2Try('inbox',()=>inboxList(),[]):[];
+  const nfse=mayR('nf')?S.nfse.filter(n=>n.status==='rascunho'):[];
+  const canc=mayR('nf')?S.nfse.filter(n=>n.canc&&n.canc.st==='pendente'&&n.status==='emitida'):[];
+  const sem=pn2Try('medSemNfse',()=>fatMedSemNfse(),{n:0,valor:0,dias:10,lista:[]});
+  const conf=pn2Try('conferencia',()=>fzMedLinhas(m).filter(x=>x.prob&&x.prob.length),[]);
+  const ret=pn2Try('retencoes',()=>fzRetPendentes(),[]);
+  const fe=pn2Try('fechamento',()=>ctbFech(m),null),ped=pn2Try('pedido',()=>typeof fzPedDoc==='function'?fzPedDoc(m):null,null);
+  const fechSt=fe&&fe.st==='fechado'?['Fechado','pos']:ped&&ped.st==='pedido'?['Pedido, aguardando o diretor','warn']:['Aberto','neg'];
+  const ext=pn2Try('extemporaneos',()=>fzExtemp(m).filter(x=>!(typeof fzExtRev==='function'&&fzExtRev(m,x.k))),[]);
+  const ob=pn2Try('obrigacoes',()=>{const out=[];[addMonths(ym(h),-1),ym(h)].forEach(mm=>{const prox=addMonths(mm,1),feitos=(S.obrig||[]).filter(o=>o.mes===mm);obrigList().forEach((o,i)=>{const dd=monthDay(prox,+o[1]||20);if(feitos.some(x=>x.i===i))return;out.push({nome:o[0],mes:mm,venc:dd});});});return out.sort((a,b)=>a.venc.localeCompare(b.venc));},[]);
+  const obAtr=ob.filter(o=>o.venc<h),ob10=ob.filter(o=>o.venc>=h&&o.venc<=addDays(h,10));
+  const kp='<div class="kpis">'+
+    kpi('Notas a escriturar',String(ent.length+inbox.filter(n=>n.valid==='validada').length),ent.length+' nota(s) de entrada em rascunho',ent.length?'neg':'')+
+    kpi('NFS-e a emitir',String(nfse.length),'em rascunho'+(canc.length?' · '+canc.length+' cancelamento(s) pedido(s)':''),nfse.length?'neg':'')+
+    kpi('Medições sem NFS-e',String(sem.n),'há mais de '+sem.dias+' dias · '+money(sem.valor),sem.n?'neg':'')+
+    kpi('Conferência de faturamento',String(conf.length),'medição(ões) com problema em '+fmtYm(m),conf.length?'neg':'')+
+    kpi('Retenções sem comprovante',String(ret.length),money(sum(ret,e=>e.semComp))+' (12 meses)',ret.length?'neg':'')+
+    kpi('Fechamento de '+fmtYm(m),fechSt[0],ext.length+' extemporâneo(s) a revisar',fechSt[1])+'</div>';
+  const cNotas=pn2Try('notas',()=>{const its=ent.map(n=>pn2Li('NF '+esc(n.numero||'s/n')+' · '+esc(parcNome(n.parcId)),n.emissao?'emissão '+fmtDate(n.emissao):'',pill('rascunho','warn'),pn2Btn('nf','Abrir',' data-nftipo="entrada"')))
+      .concat(nfse.map(n=>pn2Li('NFS-e '+esc(n.numero||'s/n')+' · '+esc(parcNome(n.parcId)),n.emissao?'emissão prevista '+fmtDate(n.emissao):'',pill('a emitir','warn'),pn2Btn('nfse'))))
+      .concat(canc.map(n=>pn2Li('NFS-e '+esc(n.numOficial||n.numero||'s/n')+' · pedido de cancelamento',esc(parcNome(n.parcId)),pill('aguardando o Financeiro','warn'),pn2Btn('nfse'))));
+    const ag=inbox.filter(n=>!n.valid).length,va=inbox.filter(n=>n.valid==='validada').length;
+    if(ag||va)its.push(pn2Li('NFs recebidas (SEFAZ)',ag+' aguardando validação do comprador · '+va+' validada(s) aguardando lançamento','<span class="mono">'+(ag+va)+'</span>',pn2Btn('nfrec')));
+    return pn2Card('Notas a escriturar e NFS-e','entrada em rascunho, NFS-e a emitir e cancelamentos',pn2Lista(its.slice(0,12),'Nenhuma nota pendente.')+pn2Mais(its.length,12),pn2Btn('nfse','NFS-e')+pn2Btn('nf','Notas de entrada',' data-nftipo="entrada"'));});
+  const cFat=pn2Try('faturamento',()=>{const its=sem.lista.slice(0,6).map(md=>{const x=get('ctr',md.ctrId)||{};return pn2Li('Medição nº '+esc(md.numero||'—')+' · contrato '+esc(x.numero||'—'),esc(parcNome(x.parcId))+' · sem NFS-e há '+fzDiasSemNota(md)+' dias','<span class="mono">'+money(medTot(md).fat)+'</span>',pn2Btn('fzfat'));})
+      .concat(conf.filter(x=>!sem.lista.includes(x.md)).slice(0,6).map(x=>pn2Li('Medição nº '+esc(x.md.numero||'—')+' · contrato '+esc(x.c.numero||'—'),esc(x.prob.map(p=>Array.isArray(p)?p[1]||p[0]:(p&&p.t)||p).join(' · ')),pill('conferir','warn'),pn2Btn('fzfat'))));
+    return pn2Card('Medições sem NFS-e e conferência','medição × NFS-e × conta a receber de '+fmtYm(m),pn2Lista(its,'Faturamento conferido.'),pn2Btn('fzfat','Conferência de faturamento'));});
+  const cFech=pn2Try('fechamento card',()=>{const its=[pn2Li('Competência '+fmtYm(m),fe&&fe.st==='fechado'?'fechada'+(fe.em?' em '+fmtDate(new Date(fe.em).toISOString().slice(0,10)):''):ped&&ped.st==='pedido'?'pedido de fechamento feito por '+esc(nameOf(ped.porPed))+': falta a confirmação do diretor':'ainda aberta: o Financeiro pede o fechamento e um diretor confirma',pill(fechSt[0],fechSt[1]),pn2Btn('ctb'))];
+    if(ext.length)its.push(pn2Li('Lançamentos extemporâneos',ext.length+' item(ns) de '+fmtYm(m)+' sem revisão da contabilidade','<span class="mono">'+ext.length+'</span>',pn2Btn('ctb')));
+    if(ret.length)its.push(pn2Li('Retenções sofridas sem comprovante',new Set(ret.map(e=>e.parcId)).size+' cliente(s) · '+money(sum(ret,e=>e.semComp)),'<span class="mono">'+ret.length+'</span>',pn2Btn('fzret')));
+    return pn2Card('Fechamento do mês e retenções','',pn2Lista(its),pn2Btn('ctb','Fechamento e exportação')+pn2Btn('fzret','Retenções sofridas'));});
+  const cOb=pn2Try('obrigacoes card',()=>{const ls=obAtr.concat(ob10);
+    return pn2Card('Obrigações e prazos','vencidas e nos próximos 10 dias',pn2Lista(ls.map(o=>pn2Li(esc(o.nome),'competência '+fmtYm(o.mes)+' · vence '+fmtDate(o.venc),valPill(o.venc,10),pn2Ir('trib','trib.mes',o.mes,'Abrir'))),'Nenhuma obrigação vencida ou para os próximos 10 dias.')+'<p class="sub" style="margin:8px 0 0">Datas de referência; confirme sempre com a assessoria contábil.</p>',pn2Btn('trib','Tributos e obrigações'));});
+  return pn2Head(d,'Escrituração, NFS-e, conferência de faturamento, retenções, fechamento do mês e obrigações.',filtros)+'<div class="stack">'+kp+'<div class="g2">'+cNotas+cFat+'</div><div class="g2">'+cFech+cOb+'</div>'+pn2Pend('pnFis')+'</div>';
+};
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='114',APP_DATA='2026-10-27';
+const APP_VER='115',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['115','2026-10-27',['Painel do Início e Painel da diretoria só para o Administrador e o dono (a diretoria pode ser liberada em Sistema › Configurações). Ao entrar, cada pessoa vai para o painel do seu setor.', 'Painéis por setor, como primeiro item de cada módulo: Pessoal, Segurança do Trabalho, Qualidade, Frota, Equipamentos, Comercial, Obras, Suprimentos, Financeiro e Fiscal — cada um só com os indicadores e pendências da atividade.', 'Dados financeiros (lançamentos, contas, extrato, remessa, orçamento, fluxo e DRE) só para Financeiro, Fiscal, Administrador e Diretoria, também no servidor; alertas e e-mails sem valores para os demais.', 'Integração Sólides: credenciais nunca aparecem em mensagens ou no log, e links de arquivo são seguidos sem enviar a credencial a outro endereço.']],
   ['114','2026-10-27',['Sistema › Perfis de acesso: crie, duplique e edite perfis escolhendo para cada módulo Sem acesso, Consulta ou Grava, com opções de ver salários, dados bancários, todos os locais da frota e aprovar como diretoria. O servidor aplica os perfis criados; só o Administrador e o dono alteram, com registro na auditoria.', 'Perfis prontos novos: Comprador, Almoxarife, Gestor de segurança do trabalho e Técnico de segurança do trabalho. Os perfis antigos Comprador / almoxarife e Segurança do trabalho continuam para quem já usa, marcados como antigos.']],
   ['113.1','2026-10-27',['Importação da Folha de Ponto da Sólides: datas lidas também quando o Excel as entrega como número ou como texto mês/dia; se o relatório for reconhecido sem nenhuma marcação, a tela explica em vez de mostrar 0 marcações.','Ponto (Sólides) › Locais de trabalho e obras: a obra escolhida é gravada na hora (antes dependia do botão Salvar vínculos e a escolha se perdia se a tela atualizasse).','Conferência do mês: feriados, atestados, férias, folgas e afastamentos abonados pela Sólides entram nas horas do sistema; a etiqueta diferença só aparece em divergência real.']],
   ['113','2026-10-27',['Diário de obra: colaborador com ASO, NR ou integração vencidos não entra no efetivo; liberação só pelo SST, com justificativa e validade (CIPA e SST › Liberações de aptidão).', 'Empreiteiros: com FGTS ou folha pendentes, a medição só é aprovada com retenção (padrão: o maior entre o valor informado e 10%); conta do líquido e conta de retenção a liberar pela diretoria. Financeiro › Retenções de empreiteiros.', 'Desligamento: o servidor confere CIPA, retorno de acidente, gestante (5 meses após o parto) e garantias cadastradas e exige o parecer jurídico anexado.', 'Ponto (Sólides): o relatório padrão Folha de Ponto (RFP detalhado) em Excel é reconhecido sozinho — marcações em ordem, local de trabalho, férias, atestados, afastamentos e feriados como ocorrência.']],
