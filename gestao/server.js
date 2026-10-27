@@ -70,7 +70,7 @@ const q = {
   arqDel: db.prepare('DELETE FROM arquivos WHERE id=?'),
   blobRefs: db.prepare("SELECT path, data FROM docs WHERE data LIKE ? ESCAPE '\\' LIMIT 200")
 };
-const END = require('./endurece.js')({ db, q, SEG, DATA, PUB, fn: () => ({ perfilDe, cookies, ipDe, esc, pag, json, CONEX, gestorContas, MAX_BLOB }) }); /* 2FA obrigatória, sessão, reautenticação, CSP, bibliotecas locais */
+const END = require('./endurece.js')({ db, q, SEG, DATA, PUB, fn: () => ({ perfilDe, cookies, ipDe, esc, pag, json, CONEX, gestorContas, MAX_BLOB, PERM, papelDe }) }); /* 2FA obrigatória, sessão, reautenticação, CSP, bibliotecas locais */
 const uid = (n = 20) => crypto.randomBytes(n).toString('base64url').replace(/[^A-Za-z0-9]/g, '').slice(0, n);
 const CORES = ['#2457d6', '#0e7c66', '#b54708', '#7a2eb8', '#c11574', '#2e7d32', '#00838f', '#6d4c41'];
 
@@ -100,6 +100,8 @@ const SENS_RH = new Set(['rhdoc', 'fpag', 'ferias', 'afast', 'adm', 'dpmov', 'de
 const PERF_RH = new Set(['admin', 'rh', 'leituratotal', 'diretoria']); /* v111: a Diretoria lê tudo (inclusive custo de obra com salário) */
 /* v111: o perfil Segurança do trabalho lê e grava a parte de SST da lista sensível (terceiros, ASO e documentos, acidentes, PPP) */
 const SENS_SST = new Set(['tterc', 'rhdoc', 'acid', 'ppp', 'rel', 'psicamp']), SENS_SST_LE = new Set([...SENS_SST, 'afast']); /* afastamentos: só leitura (retorno ao trabalho e aptidão) */
+/* v114: Técnico de segurança do trabalho: terceiros e registro de acidente. ASO só pelo resumo de aptidão (apto/inapto e validade) */
+const SENS_TEC = new Set(['tterc', 'acid']);
 /* v111: prestação de contas de adiantamento pela Minha área (relatorios/feito_v111_B.md): pt/<uid>/fa/adto (Financeiro → colaborador)
    e pt/<uid>/pc/<id> (comprovante do colaborador). O Financeiro lê e grava as duas; as regras de campo ficam em regras.js. */
 const ehAdtoc = p => /^pt\/[^/]+\/(fa|pc)(\/|$)/.test(p);
@@ -110,23 +112,49 @@ function perfilDe(conta) {
   if (!perfilMapa) { perfilMapa = new Map(); for (const r of q.colGet.all('usr')) { try { const d = JSON.parse(r.data); if (d && d.uid) perfilMapa.set(d.uid, d); } catch (e) { } } }
   if (!perfilMapa.size) return 'admin'; /* controle de acesso ainda desligado */
   const d = perfilMapa.get(conta.id); if (!d || d.ativo === false) return 'pendente';
-  return String(d.perfil || 'leitura');
+  const pf = String(d.perfil || 'leitura');
+  /* v114: perfil que o servidor não conhece (personalizado desativado ou nome inválido) não vale como acesso total */
+  if (!PERF_BASE_N || PERM.perfis[pf]) return pf;
+  return /^c_/.test(pf) ? 'pendente' : 'leitura';
+}
+/* v114: papel do perfil nas regras que usam o nome (Gestor de SST tem o papel 'sst'); perfil personalizado nunca tem papel */
+const papelDe = pf => { const d = PERM.perfis[pf]; return (d && !d.custom && d.papel) || pf; };
+const papelConta = conta => conta && conta.nivel === 'owner' ? 'admin' : papelDe(perfilDe(conta));
+const defConta = conta => PERM.perfis[perfilDe(conta)] || null;
+/* v114: perfil personalizado e os dados sensíveis, pelo MESMO mapa módulo → coleções do perfis.json:
+   - grava a coleção sensível de RH quando tem "ver dados de RH e salários" e grava o módulo dela; lê quando consulta ou grava o módulo;
+   - quem grava o módulo de SST lê e grava a parte de SST da lista sensível (como o perfil SST) e só lê afastamentos. */
+const gruposDe = c0 => [...new Set([].concat(PERM.colecoes[c0] || [], (PERM.leitura && PERM.leitura[c0]) || []))];
+function customSens(d, c0, modo) {
+  if (!d || !d.custom) return false;
+  const w = d.w || [], r = d.r || [];
+  if (w.includes('sst') && (SENS_SST.has(c0) || (modo === 'r' && SENS_SST_LE.has(c0)))) return true;
+  if (!d.sensRh) return false;
+  const gs = modo === 'w' ? (PERM.colecoes[c0] || []) : gruposDe(c0);
+  return gs.some(g => w.includes(g) || (modo === 'r' && r.includes(g)));
+}
+/* "ver dados de RH e salários": perfis do RH e personalizado com a opção (e que consulte o módulo de RH) */
+function veRh(conta) {
+  const pf = perfilDe(conta), pp = papelDe(pf); if (PERF_RH.has(pp)) return true;
+  const d = PERM.perfis[pf]; return !!(d && d.custom && d.sensRh && ((d.w || []).includes('rh') || (d.r || []).includes('rh')));
 }
 const SOMENTE_LEITURA = new Set(['leitura', 'leituratotal', 'pendente', 'semnivel', 'semid']);
 const AREAS_PROPRIAS = new Set(['cm', 'pt', 'usrreq']);
 function perfilPermite(conta, p, modo) {
   if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true; /* colaborador: valem as regras de nível */
-  const c0 = p.split('/')[0], pf = perfilDe(conta);
+  const c0 = p.split('/')[0], pf = perfilDe(conta), pp = papelDe(pf), d = PERM.perfis[pf];
   if (c0 === 'cm' || c0 === 'usrreq') return true;
-  if (c0 === 'pt') { if (p.split('/')[1] === conta.id) return true; if (ehAdtoc(p) && gravaFin(conta)) return true; return modo === 'w' ? (perfilDe(conta) === 'admin' || perfilDe(conta) === 'rh') : PERF_RH.has(perfilDe(conta)); }
+  if (c0 === 'pt') { if (p.split('/')[1] === conta.id) return true; if (ehAdtoc(p) && gravaFin(conta)) return true; if (d && d.custom && d.sensRh && (d.w || []).includes('rh')) return true; /* v114: personalizado que grava RH com dados de RH */ return modo === 'w' ? (pp === 'admin' || pp === 'rh') : PERF_RH.has(pp); }
+  if (c0 === 'perfc') return modo === 'r' || pp === 'admin';
+  if (c0 === 'rhdoc' && d && !d.custom && d.rhdocNr && !SOMENTE_LEITURA.has(pf)) return true; /* v114: Técnico de SST: só certificados de NR (filtro e recusa em regras.js › rhdocNr) */ /* v114: perfis personalizados: todos leem (sem dado pessoal); só o Administrador (e o dono) grava */
   if (modo === 'w') {
     if (SOMENTE_LEITURA.has(pf)) return false;
-    if (c0 === 'usr') return pf === 'admin';
-    if (SENS_RH.has(c0)) return pf === 'admin' || pf === 'rh' || (pf === 'sst' && SENS_SST.has(c0));
+    if (c0 === 'usr') return pp === 'admin';
+    if (SENS_RH.has(c0)) return pp === 'admin' || pp === 'rh' || (pp === 'sst' && SENS_SST.has(c0)) || (pp === 'ssttec' && SENS_TEC.has(c0)) || customSens(d, c0, 'w');
     return true;
   }
-  if (pf === 'pendente' || pf === 'semnivel' || pf === 'semid') return c0 === 'usr' || c0 === 'cfg';
-  if (SENS_RH.has(c0)) return PERF_RH.has(pf) || (pf === 'sst' && SENS_SST_LE.has(c0));
+  if (pf === 'pendente' || pf === 'semnivel' || pf === 'semid') return c0 === 'usr' || c0 === 'cfg' || c0 === 'perfc';
+  if (SENS_RH.has(c0)) return PERF_RH.has(pp) || (pp === 'sst' && SENS_SST_LE.has(c0)) || (pp === 'ssttec' && SENS_TEC.has(c0)) || customSens(d, c0, 'r');
   return true;
 }
 /* gestão de contas: só o perfil Administrador; contas de nível Equipe só o dono altera (evita que um administrador tome a conta de outro) */
@@ -137,7 +165,7 @@ const protegida = (conta, c) => c.id !== conta.id && conta.nivel !== 'owner' && 
    Ao gravar, o servidor mantém os campos ocultos como estavam. */
 const FUNC_SENS = /^(cpf|rg|pis|ctps|nasc|salario|ben[A-Z]|tr(Valor|Modo|Linhas|Dist|Tempo|Dias)|banco|agencia|conta[A-Z]?|pix|dep[A-Z]|insal|pericul|end$|numero$|compl$|bairro$|cep$|rec[A-Z]|mae$|pai$|raca|sexo|estadoCivil|escolaridade|defic|sangue|alerg|tituloEleitor|reservista|gest[A-Z]|estab[A-Z])/; /* v113: gravidez comunicada e garantia de emprego cadastrada só para RH */
 const ehDocFunc = p => /^func\/[^/]+$/.test(p);
-const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin || PERF_RH.has(perfilDe(conta));
+const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin || veRh(conta);
 function redigir(conta, p, data) {
   data = REG.redigir(conta, p, data);
   if (!data || !ehDocFunc(p) || veFuncCompleto(conta)) return data;
@@ -155,6 +183,27 @@ function preservarFunc(conta, p, novo) {
    seria bloqueado, para conferir antes. */
 let PERM = { perfis: {}, colecoes: {} };
 try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'utf8')); } catch (e) { console.log('perfis.json não encontrado: gravação por módulo desligada'); }
+/* ---- v114: perfis personalizados (Sistema › Perfis de acesso), guardados na coleção perfc ----
+   Cada perfil: nome, descrição, mod {grupo: 'r'|'w'} e opc {rh, banco, frota, dir}. O servidor monta o perfil com o
+   mesmo formato do perfis.json (w, r) e o junta aos perfis padrão. Nunca tem '*', papel, "so" nem os módulos de
+   Usuários, Configurações e Lixeira: um perfil personalizado nunca tem mais poder que o Administrador. */
+const PERF_BASE = PERM.perfis || {}, PERF_BASE_N = Object.keys(PERF_BASE).length;
+const PERFC_PROIBIDOS = new Set(['usr', 'cfg', 'lixo']), PERFC_SO_LEITURA = new Set(['painel', 'dir', 'meu', 'ajuda']);
+const PERFC_ID = /^c_[a-z0-9]{4,24}$/;
+const perfcGrupoValido = g => typeof g === 'string' && !PERFC_PROIBIDOS.has(g) && ((PERM.modulos || []).some(m => m[0] === g) || g === 'agenda' || g === 'chat');
+function perfcCompilar(d) {
+  const w = [], r = [];
+  for (const [g, v] of Object.entries((d && d.mod) || {})) { if (!perfcGrupoValido(g)) continue; if (v === 'w' && !PERFC_SO_LEITURA.has(g)) w.push(g); else if (v === 'w' || v === 'r') r.push(g); }
+  ['meu', 'ajuda'].forEach(g => { if (!r.includes(g)) r.push(g); });
+  const o = (d && d.opc) || {};
+  return { w, r, custom: true, nome: String((d && d.nome) || '').slice(0, 60), sensRh: o.rh === true, banco: o.banco === true, frotaTodos: o.frota === true, aprovDir: o.dir === true };
+}
+function perfcRecarregar() {
+  if (!PERF_BASE_N) return; const novo = Object.assign({}, PERF_BASE);
+  for (const r of q.colGet.all('perfc')) { try { const d = JSON.parse(r.data); if (PERFC_ID.test(r.id) && d && d.ativo !== false && !PERF_BASE[r.id]) novo[r.id] = perfcCompilar(d); } catch (e) { } }
+  PERM.perfis = novo; perfilMapa = null;
+}
+perfcRecarregar();
 const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'bloquear').toLowerCase() === 'avisar' ? 'avisar' : 'bloquear';
 const LIVRES = new Set(['cfg', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'usr']);
 function gravacaoPermitida(conta, p) {
@@ -165,7 +214,7 @@ function gravacaoPermitida(conta, p) {
   return gs.some(g => pr.w.includes(g) && !(pr.so && Array.isArray(pr.so[g]) && !pr.so[g].includes(c0)));
 }
 const permLogPut = db.prepare('INSERT INTO perm_log(dia,conta,perfil,col,n,ult) VALUES(?,?,?,?,1,?) ON CONFLICT(dia,conta,col) DO UPDATE SET n=n+1, ult=excluded.ult, perfil=excluded.perfil');
-const perfilEm = (conta, lista) => conta && (conta.nivel === 'owner' || lista.includes(perfilDe(conta)));
+const perfilEm = (conta, lista) => conta && (conta.nivel === 'owner' || lista.includes(papelDe(perfilDe(conta)))); /* v114: pelo papel (o Gestor de SST conta como 'sst'); perfil personalizado não entra em nenhuma lista */
 /* chat: mensagens, áudios e conversas só para quem participa da conversa (o canal Geral é de todos) */
 function chatVisivel(conta, p, data, memo) {
   const s = p.split('/'); if (s[0] !== 'cm' || s.length < 4 || s[1] === conta.id) return true;
@@ -186,6 +235,7 @@ const CONEX = new Map(); /* id -> {res, conta, presence, updatedAt} */
 function sse(res, ev, obj) { try { res.write('event: ' + ev + '\ndata: ' + JSON.stringify(obj) + '\n\n'); } catch (e) { } }
 function avisarDoc(op, p, data, ts) {
   if (p.startsWith('usr/')) perfilMapa = null;
+  if (p.startsWith('perfc/')) perfcRecarregar(); /* v114 */
   const parent = p.split('/').slice(0, -1).join('/'), id = p.split('/').pop();
   for (const [cid, c] of CONEX) {
     const ca = q.contaPorId.get(c.conta.id); if (!ca || !ca.ativo) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } continue; }
@@ -300,7 +350,7 @@ function pagBackup(eu) {
   return BACKUP.cartao(esc) + END.cartaoServidor(eu);
 }
 function pagPermLog(eu) {
-  if (eu.nivel !== 'owner' && perfilDe(eu) !== 'admin') return '';
+  if (eu.nivel !== 'owner' && papelConta(eu) !== 'admin') return '';
   const desde = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
   const ls = db.prepare('SELECT conta, perfil, col, SUM(n) AS n, MAX(ult) AS ult FROM perm_log WHERE dia>=? GROUP BY conta, col ORDER BY n DESC LIMIT 50').all(desde);
   const nome = id => { const c = q.contaPorId.get(id); return c ? (c.nome || c.email) : id; };
@@ -731,11 +781,13 @@ async function rotear(req, res) {
   if (p === '/api/ia' && m === 'POST') { /* v112 (B9): o uso fica na auditoria (quem, quando, função, tamanho), sem o conteúdo */
     let corpo = {}; try { corpo = await lerJson(req); const r = await ia(Object.assign({}, corpo, { nivel: NIV[conta.nivel] })); REG.auditarIa(conta, req, corpo, true); return json(res, 200, r); }
     catch (e) { REG.auditarIa(conta, req, corpo, false, e.msg || e.message); return json(res, e.st || 500, { code: e.code || (e.st === 503 ? 'capability_disabled' : 'upstream_error'), erro: e.msg || 'Falha na IA.' }); } }
-  if (p.startsWith('/api/solides/') && !perfilEm(conta, ['admin', 'rh'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar a integração de ponto.' });
-  if (p.startsWith('/api/bancos/') && !perfilEm(conta, ['admin', 'financeiro'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar o extrato automático.' });
-  if (p.startsWith('/api/fiscal/') && !perfilEm(conta, ['admin', 'financeiro', 'fiscal', 'projetos', 'leitura', 'leituratotal'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite acessar as notas fiscais.' });
+  /* v114: perfil personalizado usa as integrações pelo módulo: ponto (com dados de RH), contas bancárias (com dados bancários), notas fiscais */
+  const dcu = defConta(conta), cu = dcu && dcu.custom ? dcu : null, cuW = g => !!cu && cu.w.includes(g), cuR = g => !!cu && (cu.w.includes(g) || cu.r.includes(g));
+  if (p.startsWith('/api/solides/') && !perfilEm(conta, ['admin', 'rh']) && !(cuW('ponto') && cu.sensRh)) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar a integração de ponto.' });
+  if (p.startsWith('/api/bancos/') && !perfilEm(conta, ['admin', 'financeiro']) && !(cuW('contas') && cu.banco)) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar o extrato automático.' });
+  if (p.startsWith('/api/fiscal/') && !perfilEm(conta, ['admin', 'financeiro', 'fiscal', 'projetos', 'leitura', 'leituratotal']) && !cuR('nf')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite acessar as notas fiscais.' });
   /* conector fiscal: consultar (GET) para quem lê notas; emitir, cancelar e demais ações só Administrador, Financeiro e Fiscal */
-  if (p.startsWith('/api/fiscal/') && m !== 'GET' && m !== 'HEAD' && !perfilEm(conta, ['admin', 'financeiro', 'fiscal'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil só consulta as notas fiscais; emitir ou cancelar fica com Administrador, Financeiro ou Fiscal.' });
+  if (p.startsWith('/api/fiscal/') && m !== 'GET' && m !== 'HEAD' && !perfilEm(conta, ['admin', 'financeiro', 'fiscal']) && !cuW('nf')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil só consulta as notas fiscais; emitir ou cancelar fica com Administrador, Financeiro ou Fiscal.' });
   if (p.startsWith('/api/fiscal/')) {
     if (!FISCAL_URL) return json(res, 503, { erro: 'Conector fiscal não configurado (FISCAL_URL).' });
     if (NIV[conta.nivel] < NIV.admin) return json(res, 403, { erro: 'Apenas administradores.' });
@@ -763,7 +815,7 @@ async function rotear(req, res) {
       for (const a of lista) { const e = z.entradas.find(x => x.nome === 'blobs/' + a.id); if (!e) continue; const b = z.ler(e); fs.writeFileSync(path.join(DATA, 'blobs', String(a.id).replace(/[^A-Za-z0-9_-]/g, '')), b); q.arqNovo.run(String(a.id).replace(/[^A-Za-z0-9_-]/g, ''), a.ct || 'application/octet-stream', b.length, conta.id, ts); na++; }
       db.exec('COMMIT');
     } catch (e) { try { db.exec('ROLLBACK'); } catch (x) { } z.fechar(); fs.unlinkSync(tmp); return json(res, 400, { erro: e.msg || String(e.message || e) }); }
-    z.fechar(); fs.unlinkSync(tmp); perfilMapa = null; blobMemo.clear();
+    z.fechar(); fs.unlinkSync(tmp); perfilMapa = null; perfcRecarregar(); blobMemo.clear();
     for (const c of CONEX.values()) sse(c.res, 'recarregar', {});
     return json(res, 200, { docs: nd, arquivos: na, contas: nc });
   }
@@ -786,6 +838,7 @@ async function rotear(req, res) {
 
 /* regras de negócio aplicadas pelo servidor (aprovações, bancos, competência, anexos, auditoria...) */
 const REG = require('./regras.js')({ db, q, json, html, lerJson, lerCorpo, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH,
+  papelDe, veRh, perfcCompilar, perfcGrupoValido, PERFC_ID, PERF_BASE, PERFC_PROIBIDOS,
   pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa, BACKUP });
 /* v111: a sincronização da Sólides não grava ponto (pmmes) de mês travado (Fontes do ponto) nem de competência fechada; o que foi ignorado vai para a auditoria */
 const solIgnorados = new Set();

@@ -28,6 +28,14 @@ const crypto = require('node:crypto');
 module.exports = function (X) {
   const { db, q, json, lerJson, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH } = X;
   const END = X.END || { reautenticado: () => true, exigirReauth: () => false };
+  /* v114: papel do perfil (o Gestor de SST tem o papel 'sst') e definição do perfil (inclui os personalizados) */
+  const papelDe = X.papelDe || (pf => pf), defDe = conta => (conta && PERM.perfis[perfilDe(conta)]) || null;
+  const papelConta = conta => !conta ? '' : conta.nivel === 'owner' ? 'admin' : papelDe(perfilDe(conta));
+  const veRh = c => X.veRh ? X.veRh(c) : PERF_RH.has(perfilDe(c));
+  /* v114: perfil personalizado que grava o módulo g (com a opção pedida, quando houver) */
+  const cuGrava = (conta, g, opc) => { const d = defDe(conta); return !!(d && d.custom && (d.w || []).includes(g) && (!opc || d[opc] === true)); };
+  /* v114: grava a coleção c respeitando o "so" do perfil (o Almoxarife grava em Compras, mas não cotações) */
+  const gravaCol = (conta, c) => { if (ehDono(conta)) return true; const pr = defDe(conta); if (!pr) return false; if (pr.w === '*') return true; const gs = PERM.colecoes[c] || []; return gs.some(g => (pr.w || []).includes(g) && !(pr.so && Array.isArray(pr.so[g]) && !pr.so[g].includes(c))); };
   const pode = (...a) => X.pode(...a), perfilPermite = (...a) => X.perfilPermite(...a), podeVer = (...a) => X.podeVer(...a), gravacaoPermitida = (...a) => X.gravacaoPermitida(...a), veFuncCompleto = c => X.veFuncCompleto(c);
   const MODO_LEIT = (process.env.PERFIL_LEITURA || 'bloquear').toLowerCase() === 'avisar' ? 'avisar' : 'bloquear';
   const AUD_DIAS = Math.max(366, +process.env.AUDITORIA_DIAS || 400);
@@ -150,8 +158,9 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* v111: quem vê dados bancários (fornecedores e remessa): dono, Administrador, Diretoria e quem grava no Financeiro */
   function veBanco(conta) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
-    const pf = perfilDe(conta); if (pf === 'admin' || pf === 'diretoria') return true;
-    const pr = PERM.perfis[pf]; return !!pr && (pr.w === '*' || (pr.w || []).includes('fin'));
+    const pf = perfilDe(conta), pp = papelDe(pf); if (pp === 'admin' || pp === 'diretoria') return true;
+    const pr = PERM.perfis[pf]; if (pr && pr.custom) return pr.banco === true; /* v114: perfil personalizado só com "ver dados bancários" */
+    return !!pr && (pr.w === '*' || (pr.w || []).includes('fin'));
   }
   function regraParc(conta, req, velho, novo, ctx) {
     const ov = velho || {};
@@ -191,7 +200,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     ctx.alertas.push(['Troca de dados bancários pedida', ['Foi pedida a troca dos dados bancários de ' + (novo.nome || ov.nome || 'um cadastro') + ' por ' + nomeConta(conta.id) + '.', 'Hoje: ' + bkTxt(ob) + '.', 'Pedido: ' + bkTxt(desejo) + '.', 'A troca só vale depois que outra pessoa do Financeiro confirmar por telefone. Enquanto isso, os pagamentos a este cadastro ficam bloqueados.']]);
   }
   function rotaBanco(acao, conta, req, b) {
-    if (!perfilEm(conta, ['admin', 'financeiro'])) return erro('Só o Financeiro ou um administrador confirma dados bancários.');
+    if (!perfilEm(conta, ['admin', 'financeiro']) && !cuGrava(conta, 'fin', 'banco')) return erro('Só o Financeiro ou um administrador confirma dados bancários.'); /* v114: ou personalizado que grava o Financeiro e vê dados bancários */
     const p = 'parc/' + String(b.id || ''), velho = doc(p); if (!velho) return erro('Cadastro não encontrado.', 404);
     const pd = velho.bancoPend; if (!pd) return erro('Não há alteração pendente.', 409);
     const n = JSON.parse(JSON.stringify(velho)), agora = Date.now(), ip = ipDe(req);
@@ -272,7 +281,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     let u = []; for (let k = i; k <= 3; k++) u = u.concat(aprovadoresDe('n' + k)); u = [...new Set(u)];
     return u.length ? u : comSubst(alcadas().aprov, 'n' + i);
   }
-  const ehDiretor = conta => !!conta && (ehDono(conta) || perfilDe(conta) === 'diretoria' || (aprovadoresDe('diretoria').length ? aprovadoresDe('diretoria') : comSubst(alcadas().aprov, 'diretoria')).includes(conta.id));
+  const ehDiretor = conta => !!conta && (ehDono(conta) || papelConta(conta) === 'diretoria' || !!((defDe(conta) || {}).custom && defDe(conta).aprovDir) || (aprovadoresDe('diretoria').length ? aprovadoresDe('diretoria') : comSubst(alcadas().aprov, 'diretoria')).includes(conta.id));
   const todosAprovadores = () => [...new Set(quemAprova(1).concat(comSubst(alcadas().aprov, 'n1')))];
   const NIV_NOME = ['', 'Nível 1 · gestor da área', 'Nível 2 · diretor', 'Nível 3 · dois aprovadores'];
   /* campos de aprovação: só mudam pela rota (ou nas transições livres listadas) */
@@ -327,7 +336,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       const papel = ex.papel === 'comp' || ex.papel === 'gest' ? ex.papel : ''; if (!papel) return erro('Informe o papel (comprador ou gestor).', 400);
       if (dec === 'nao') return erro('Para recusar a divergência, devolva a nota ao comprador ou cancele o lançamento.', 400);
       if (velho.crBy && velho.crBy === eu && !dono) return erro('Quem lançou a nota não aprova a divergência dela. Peça a outra pessoa.');
-      if (papel === 'comp' && !gravaGrupo(conta, 'comp')) return erro('Só quem tem acesso de compras dá a aprovação do comprador.');
+      if (papel === 'comp' && !gravaCol(conta, 'cot')) return erro('Só quem faz as compras (grava cotações) dá a aprovação do comprador.'); /* v114: o Almoxarife não aprova como comprador */
       if (papel === 'gest' && !podeGestorNota(conta, velho)) return erro('Esta aprovação é do solicitante da compra, de um aprovador das alçadas, da diretoria ou do dono.');
       if (papel === 'comp' && !obs) return erro('Explique por que a divergência pode ser aceita.', 400);
       const sig = typeof ex.sig === 'string' ? ex.sig.slice(0, 20000) : '', a0 = velho.confAprov && velho.confAprov.sig === sig ? velho.confAprov : { sig };
@@ -711,7 +720,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     salvar(p, n, conta, req, 'EPI_ASSINAR', e); return { ok: true, data: n, msg: 'Assinatura registrada.' };
   }
   function rotaMinhaArea(conta, req, b) {
-    if (!(ehDono(conta) || perfilEm(conta, ['admin', 'rh']))) return erro('Só o RH registra as confirmações da Minha área.');
+    if (!(ehDono(conta) || perfilEm(conta, ['admin', 'rh']) || cuGrava(conta, 'rh', 'sensRh'))) return erro('Só o RH registra as confirmações da Minha área.'); /* v114: ou personalizado que grava RH com dados de RH */
     const uidc = String(b.uid || ''), sl = String(b.slId || ''); if (!/^[\w\-]{1,80}$/.test(uidc) || !/^[\w\-]{1,80}$/.test(sl)) return erro('Pedido inválido.', 400);
     const ps = 'pt/' + uidc + '/sl/' + sl, x = doc(ps); if (!x) return erro('Pedido não encontrado.', 404);
     const quando = +x.srvEm || docTs(ps), apaga = () => { q.docDel.run(ps); avisarDoc('del', ps, null, Date.now()); };
@@ -751,12 +760,12 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   const AREAS = new Set(['cm', 'pt', 'usrreq']);
   const contaObj = id => id ? q.contaPorId.get(id) : null;
-  const ehRhOuAdmin = id => { const c = contaObj(id); return !!c && (c.nivel === 'owner' || ['admin', 'rh'].includes(perfilDe(c))); };
+  const ehRhOuAdmin = id => { const c = contaObj(id); return !!c && (c.nivel === 'owner' || ['admin', 'rh'].includes(papelConta(c))); };
   function citaAinda(p, id) { const r = q.docGet.get(p); return r && r.data.includes(id) ? r : null; }
   function blobPermitido(conta, a) {
     if (!conta) return false; if (conta.nivel === 'owner' || a.por === conta.id) return !a.lixo || conta.nivel === 'owner';
     if (a.lixo) return false;
-    if (a.restrito && !PERF_RH.has(perfilDe(conta))) return false;
+    if (a.restrito && !veRh(conta)) return false;
     const memo = new Map();
     if (a.origem) { const r = citaAinda(a.origem, a.id); if (r) { let d = null; try { d = JSON.parse(r.data); } catch (e) { } if (podeVer(conta, a.origem, d, memo)) return true; } }
     for (const c of st.citDoBlob.all(a.id)) {
@@ -791,9 +800,9 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   function colsDoAnexo(a) { if (a.origem) return [a.origem.split('/')[0]]; return [...new Set(st.citDoBlob.all(a.id).map(c => c.path.split('/')[0]))]; }
   function areaApaga(conta, a) {
     if (!conta || NIV[conta.nivel] < NIV.admin) return '';
-    const pf = perfilDe(conta), cs = colsDoAnexo(a); if (!cs.length) return '';
+    const pf = papelConta(conta), cs = colsDoAnexo(a); if (!cs.length) return '';
     if (['admin', 'rh'].includes(pf) && cs.every(c => RH_ANX.has(c))) return pf;
-    if (pf === 'sst' && cs.every(c => SST_ANX.has(c))) return pf;
+    if (pf === 'sst' && cs.every(c => SST_ANX.has(c))) return pf; /* o Técnico de SST e os perfis personalizados não apagam anexos dos outros */
     return '';
   }
   function excluirAnexo(conta, req, res, id) {
@@ -846,7 +855,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* =====================================================================
      5 e 11. LEITURA POR MÓDULO, FOLHA EM CONTAS A PAGAR E VEÍCULOS POR LOCAL
      ===================================================================== */
-  const LEIT_LIVRE = new Set(['cfg', 'usr', 'cm', 'pt', 'usrreq', 'lgpdc', 'implog', 'ctbfech', 'aptid', 'tercsit', 'moapr', 'aptlib']); /* v113: liberações do SST (sem dado de saúde: só nome, obra, validade e motivo técnico); v111: resumos sem dado sensível, para toda a Equipe */
+  const LEIT_LIVRE = new Set(['cfg', 'usr', 'cm', 'pt', 'usrreq', 'lgpdc', 'implog', 'ctbfech', 'aptid', 'tercsit', 'moapr', 'aptlib', 'perfc']); /* v114: definições dos perfis personalizados (sem dado pessoal; o app de cada pessoa precisa delas); v113: liberações do SST (sem dado de saúde: só nome, obra, validade e motivo técnico); v111: resumos sem dado sensível, para toda a Equipe */
   const VEIC_COLS = new Set(['veic', 'vsai', 'vabas', 'vman', 'multa', 'mult', 'vrota', 'ventr']);
   const permLog = db.prepare('INSERT INTO perm_log(dia,conta,perfil,col,n,ult) VALUES(?,?,?,?,1,?) ON CONFLICT(dia,conta,col) DO UPDATE SET n=n+1, ult=excluded.ult, perfil=excluded.perfil');
   function leModulo(conta, c0) {
@@ -873,15 +882,18 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* v112 (B3/B10): checklist mensal dos empreiteiros (tdoc: CND, folha e guias dos empregados do empreiteiro) e os anexos
      dele só para Financeiro, RH, SST, Administrador e Diretoria (e Leitura completa, que já lê os dados de RH).
      O resumo tercsit continua na leitura livre. */
-  const TDOC_LE = new Set(['admin', 'financeiro', 'rh', 'sst', 'diretoria', 'leituratotal']), TDOC_GRAVA = new Set(['admin', 'financeiro', 'rh', 'sst']);
-  const tdocLe = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin ? !!conta && conta.nivel === 'owner' : TDOC_LE.has(perfilDe(conta));
-  const tdocGrava = conta => !!conta && (conta.nivel === 'owner' || (NIV[conta.nivel] >= NIV.admin && TDOC_GRAVA.has(perfilDe(conta))));
+  const TDOC_LE = new Set(['admin', 'financeiro', 'rh', 'sst', 'ssttec', 'diretoria', 'leituratotal']), TDOC_GRAVA = new Set(['admin', 'financeiro', 'rh', 'sst', 'ssttec']);
+  /* v114: perfil personalizado pelo módulo "Documentos mensais dos empreiteiros" (empdoc) */
+  const cuEmpdoc = (conta, modo) => { const d = defDe(conta); return !!(d && d.custom && ((d.w || []).includes('empdoc') || (modo === 'r' && (d.r || []).includes('empdoc')))); };
+  const tdocLe = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin ? !!conta && conta.nivel === 'owner' : (TDOC_LE.has(papelConta(conta)) || cuEmpdoc(conta, 'r'));
+  const tdocGrava = conta => !!conta && (conta.nivel === 'owner' || (NIV[conta.nivel] >= NIV.admin && (TDOC_GRAVA.has(papelConta(conta)) || cuEmpdoc(conta, 'w'))));
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
     if (c0 === 'lixo') { if (!data || !data.col) return true; if (data.col === 'func' && !veFuncCompleto(conta)) return false; const pp = data.col + '/' + (data.rid || 'x'); return perfilPermite(conta, pp, 'r') && podeLer(conta, pp, data.rec || null, memo); }
     if (VEIC_COLS.has(c0) && !veicOk(conta, c0, data, memo)) return false;
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
+    if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
     const k = 'plog:' + c0; if (!memo || !memo.has(k)) { if (memo) memo.set(k, 1); try { permLog.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), 'leitura:' + c0, Date.now()); } catch (e) { } }
     return MODO_LEIT !== 'bloquear';
@@ -892,6 +904,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   function veFolha(conta) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const pf = perfilDe(conta), pr = PERM.perfis[pf]; if (!pr || pr.w === '*' || pr.r === '*') return true;
+    if (pr.custom && !pr.sensRh) return false; /* v114: personalizado só vê a conta da folha com "ver dados de RH e salários" */
     return ['folha', 'rh'].some(g => pr.w.includes(g) || pr.r.includes(g));
   }
   function redigir(conta, p, data) {
@@ -1066,7 +1079,10 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const addDias = (d, n) => { const x = new Date(String(d).slice(0, 10) + 'T12:00:00Z'); if (isNaN(x)) return ''; x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
   const diasEntre = (a, b) => Math.round((Date.parse(String(b).slice(0, 10) + 'T12:00:00Z') - Date.parse(String(a).slice(0, 10) + 'T12:00:00Z')) / 864e5);
   const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
-  const ehSstAdm = conta => ehDono(conta) || perfilEm(conta, ['sst', 'admin']);
+  /* v114: Técnico de SST (rhdocNr): em Documentos e ASO, só os certificados de NR */
+  const docNr = d => /^NR-/.test(String((d && d.tipo) || ''));
+  const soNr = conta => { if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return false; const d = defDe(conta); return !!(d && !d.custom && d.rhdocNr); };
+  const ehSstAdm = conta => ehDono(conta) || perfilEm(conta, ['sst', 'ssttec', 'admin']) || !!((defDe(conta) || {}).custom && (defDe(conta).w || []).includes('sst')); /* v114: Gestor e Técnico de SST; personalizado que grava SST */
   /* ---- A1 ---- */
   function aptServ(fid, tid, pid) {
     const r = doc('aptid/' + (tid ? 't_' + tid : fid));
@@ -1125,6 +1141,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (!!fid === !!tid) return erro('Informe o colaborador ou o trabalhador terceiro da liberação.', 400);
     if (!dataOk(novo.de) || !dataOk(novo.ate) || novo.ate < novo.de) return erro('Informe o dia da liberação e a validade.', 400);
     if (diasEntre(novo.de, novo.ate) + 1 > J.libMaxDias) return erro('Validade acima do permitido (' + J.libMaxDias + ' dia(s); ajuste em Configurações).', 400);
+    if ((defDe(conta) || {}).aptLibDia && !ehDono(conta) && !(novo.de === hojeSP() && novo.ate === hojeSP())) return erro('O Técnico de segurança do trabalho libera só para o dia de hoje. Liberação mais longa fica com o Gestor de SST.', 400); /* v114 */
     const just = String(novo.motivo || '').trim(); if (just.length < 20) return erro('Escreva a justificativa técnica do SST (ao menos 20 caracteres).', 400);
     const a = aptServ(fid, tid, String(novo.projId || ''));
     Object.assign(novo, carimbo(conta, req, { motivo: just.slice(0, 1000), pendSrv: a.ni ? ['situação não informada pelo RH/SST'] : a.motivos.slice(0, 20), perfil: perfilDe(conta) }));
@@ -1353,8 +1370,69 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     return null;
   }
+  /* =====================================================================
+     v114: PERFIS DE ACESSO PERSONALIZADOS (coleção perfc) E REGRAS FINAS DOS PERFIS PADRÃO
+     - perfc: só o Administrador (ou o dono), com a senha de novo, e registro na auditoria. O servidor limpa o registro:
+       só nome, descrição, módulos válidos (nunca Usuários, Configurações ou Lixeira), opções sim/não e ativo.
+       Desativar (ou excluir) só quando nenhum usuário usa o perfil.
+     - usr: o perfil escolhido precisa existir (padrão ou personalizado ativo).
+     - regras finas (perfis.json, vindas do app): "campos" (só altera estes campos, não cria nem exclui),
+       "camposSt" (valores aceitos no status), "rascunho" (só documentos em rascunho), "naoExclui", "cfgNao".
+     ===================================================================== */
+  const PERFC_ID = X.PERFC_ID || /^c_[a-z0-9]{4,24}$/, PERF_BASE = X.PERF_BASE || {};
+  const perfcUsado = id => col('usr').filter(u => u && String(u.perfil || '') === id).length;
+  const perfcAtivo = id => { const d = doc('perfc/' + id); return !!(d && d.ativo !== false); };
+  function regraPerfc(conta, req, p, velho, novo) {
+    const s = p.split('/'); if (s.length !== 2) return erro('Caminho inválido.', 400);
+    if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono criam e alteram perfis de acesso.');
+    const id = s[1]; if (!PERFC_ID.test(id) || PERF_BASE[id]) return erro('Identificador de perfil inválido.', 400);
+    const nome = String(novo.nome || '').replace(/\s+/g, ' ').trim(); if (nome.length < 3) return erro('Dê um nome ao perfil (ao menos 3 letras).', 400);
+    const mod = {}, rec = [];
+    for (const [g, v] of Object.entries(novo.mod && typeof novo.mod === 'object' ? novo.mod : {})) { if (v !== 'w' && v !== 'r') continue; if (!X.perfcGrupoValido || !X.perfcGrupoValido(g)) { rec.push(g); continue; } mod[g] = v; }
+    if (rec.length) return erro('Um perfil personalizado não pode ter: ' + rec.slice(0, 5).join(', ') + '. Usuários, configurações e lixeira ficam só com o Administrador.', 400);
+    const o = novo.opc && typeof novo.opc === 'object' ? novo.opc : {}, opc = { rh: o.rh === true, banco: o.banco === true, frota: o.frota === true, dir: o.dir === true };
+    const ativo = novo.ativo !== false;
+    if (!ativo && (!velho || velho.ativo !== false)) { const n = perfcUsado(id); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas em Sistema › Usuários antes de desativar.', 409); }
+    if (!END.reautenticado(req)) return { reauth: true }; /* criar ou mudar perfil pede a senha de novo */
+    const v = velho || {}, agora = Date.now();
+    const out = { id, nome: nome.slice(0, 60), desc: String(novo.desc || '').slice(0, 500), mod, opc, ativo, base: String(novo.base || v.base || '').slice(0, 40),
+      criadoPor: v.criadoPor || conta.id, criadoEm: v.criadoEm || agora, alteradoPor: conta.id, alteradoEm: agora, ts: +novo.ts || agora };
+    ['cr', 'crBy', 'ed', 'edBy'].forEach(k => { if (novo[k] !== undefined) out[k] = novo[k]; });
+    Object.keys(novo).forEach(k => delete novo[k]); Object.assign(novo, out);
+    auditar(conta, req, velho ? (ativo === (v.ativo !== false) ? 'PERFIL_ACESSO_ALTERADO' : (ativo ? 'PERFIL_ACESSO_REATIVADO' : 'PERFIL_ACESSO_DESATIVADO')) : 'PERFIL_ACESSO_CRIADO', p, null,
+      { nome: out.nome, mod, opc, ativo, pede: X.perfcCompilar ? X.perfcCompilar(out) : null });
+    return null;
+  }
+  function regraUsrPerfil(velho, novo) {
+    if (!Object.keys(PERF_BASE).length || novo.perfil == null || (velho && velho.perfil === novo.perfil)) return null;
+    const pf = String(novo.perfil);
+    if (PERF_BASE[pf] || (PERFC_ID.test(pf) && perfcAtivo(pf))) return null;
+    return erro('Perfil de acesso inexistente ou desativado (' + pf.slice(0, 40) + '). Escolha um perfil da lista.', 400);
+  }
+  function regraFina(conta, p, velho, novo, m) {
+    if (ehDono(conta)) return null;
+    const d = defDe(conta), s = p.split('/'), c0 = s[0]; if (!d || d.custom || s.length !== 2) return null;
+    const cp = d.campos && Array.isArray(d.campos[c0]) ? d.campos[c0] : null;
+    if (cp) {
+      if (m === 'DELETE' || !velho) return erro('Seu perfil não cria nem exclui este registro aqui; só registra ' + (c0 === 'ped' ? 'o recebimento do pedido' : 'o andamento') + '.');
+      const livre = new Set(cp.concat(['id', 'ts', 'cr', 'crBy', 'ed', 'edBy', 'hist']));
+      for (const k of new Set(Object.keys(velho).concat(Object.keys(novo)))) if (!livre.has(k) && !igual(velho[k], novo[k])) return erro('Seu perfil só altera ' + (c0 === 'ped' ? 'o recebimento' : 'o andamento') + ' deste registro (campo "' + k + '").');
+      const sts = d.camposSt && d.camposSt[c0]; if (Array.isArray(sts) && !igual(velho.status, novo.status) && !sts.includes(novo.status)) return erro('Seu perfil não muda a situação deste registro para "' + String(novo.status || '') + '".');
+    }
+    if (Array.isArray(d.rascunho) && d.rascunho.includes(c0)) {
+      if (m === 'DELETE') { if (velho && velho.status !== 'rascunho') return erro('Seu perfil só exclui notas em rascunho.'); }
+      else if ((velho && velho.status !== 'rascunho') || novo.status !== 'rascunho') return erro('Seu perfil só cria e altera notas em rascunho (do recebimento). Quem lança a nota é o Comprador, o Fiscal ou o Financeiro.');
+    }
+    if (m === 'DELETE' && velho && Array.isArray(d.naoExclui) && d.naoExclui.includes(c0)) return erro('Seu perfil não exclui este registro (fica com o Gestor de segurança do trabalho ou um administrador).');
+    if (c0 === 'cfg' && m !== 'DELETE' && Array.isArray(d.cfgNao)) { const k = d.cfgNao.find(k => !igual((velho || {})[k], novo[k])); if (k) return erro('Seu perfil não altera esta configuração (' + k + '). Fica com o Gestor de segurança do trabalho ou um administrador.'); }
+    return null;
+  }
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
+    if (c0 === 'perfc') { const e = regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114 */
+    if (c0 === 'usr' && s.length === 2) { const e = regraUsrPerfil(velho, novo); if (e) return e; }
+    { const e = regraFina(conta, p, velho, novo, 'PUT'); if (e) return e; }
+    if (c0 === 'rhdoc' && soNr(conta) && ((velho && !docNr(velho)) || !docNr(novo))) return erro('Seu perfil registra só certificados de NR. ASO, contrato e os outros documentos ficam com o Gestor de segurança do trabalho ou o RH.');
     if (c0 === 'ctbfech') return erro('Fechar e reabrir competência só pelos botões de Fiscal › Fechamento (o servidor registra quem fez e o motivo).');
     /* autor carimbado pelo servidor */
     if (!AREAS.has(c0) && c0 !== 'cfg' && c0 !== 'usr') {
@@ -1396,10 +1474,13 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'lanc' && !velho && novo.foFunc && /^fo\|/.test(String(novo.foKey || ''))) novo.sens = 'rh';
     return { data: novo, ctx };
   }
-  function antesExcluir(conta, p, velho) {
+  function antesExcluir(conta, p, velho, req) {
     const s = p.split('/'), c0 = s[0];
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
     if (!velho) return null;
+    if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome }); } /* v114 */
+    { const e = regraFina(conta, p, velho, null, 'DELETE'); if (e) return e; }
+    if (c0 === 'rhdoc' && soNr(conta) && !docNr(velho)) return erro('Seu perfil exclui só certificados de NR.'); /* v114 */
     if (s.length === 2) { const e = travaCompetencia(c0, velho, null) || travaPonto(c0, velho, null); if (e) return e; }
     if (c0 === 'pesqlink') return erro('Link de pesquisa não se exclui por aqui.');
     if (c0 === 'aptlib' && !ehDono(conta)) return erro('Liberação do SST não se exclui: use Revogar (fica registrada).');

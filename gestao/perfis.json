@@ -1,10 +1,11 @@
 {
- "gerado": "2026-10-27T14:21:51.237Z",
+ "gerado": "2026-10-27T17:11:41.356Z",
  "perfis": {
   "admin": {
    "w": "*",
    "r": "*",
-   "frotaTodos": true
+   "frotaTodos": true,
+   "nome": "Administrador"
   },
   "financeiro": {
    "w": [
@@ -34,7 +35,8 @@
     "meu",
     "ajuda"
    ],
-   "frotaTodos": true
+   "frotaTodos": true,
+   "nome": "Financeiro"
   },
   "fiscal": {
    "w": [
@@ -59,7 +61,8 @@
     "ctr",
     "meu",
     "ajuda"
-   ]
+   ],
+   "nome": "Fiscal e estoque"
   },
   "projetos": {
    "w": [
@@ -84,7 +87,8 @@
     "contas",
     "meu",
     "ajuda"
-   ]
+   ],
+   "nome": "Gestor de projetos"
   },
   "leitura": {
    "w": [
@@ -113,7 +117,8 @@
     "qual",
     "meu",
     "ajuda"
-   ]
+   ],
+   "nome": "Somente leitura"
   },
   "rh": {
    "w": [
@@ -135,11 +140,13 @@
     "meu",
     "ajuda"
    ],
-   "frotaTodos": true
+   "frotaTodos": true,
+   "nome": "Recursos humanos"
   },
   "pendente": {
    "w": [],
-   "r": []
+   "r": [],
+   "nome": "Sem acesso liberado"
   },
   "colaborador": {
    "w": [
@@ -150,19 +157,22 @@
     "ponto",
     "meu",
     "ajuda"
-   ]
+   ],
+   "nome": "Só ponto e Minha área"
   },
   "semnivel": {
    "w": [],
    "r": [
     "ajuda"
-   ]
+   ],
+   "nome": "Liberado, falta permissão na página"
   },
   "semid": {
    "w": [],
    "r": [
     "ajuda"
-   ]
+   ],
+   "nome": "Identificação pendente"
   },
   "leituratotal": {
    "w": [
@@ -196,7 +206,8 @@
     "meu",
     "empdoc",
     "ajuda"
-   ]
+   ],
+   "nome": "Leitura completa"
   },
   "encarregado": {
    "w": [
@@ -222,7 +233,208 @@
     "comp": [
      "sc"
     ]
-   }
+   },
+   "nome": "Encarregado / campo"
+  },
+  "comercial": {
+   "w": [
+    "ctr",
+    "cad",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "serv",
+    "qual",
+    "dir",
+    "meu",
+    "ajuda"
+   ],
+   "nome": "Comercial"
+  },
+  "diretoria": {
+   "w": [
+    "chat",
+    "agenda"
+   ],
+   "r": "*",
+   "frotaTodos": true,
+   "nome": "Diretoria"
+  },
+  "comprador": {
+   "w": [
+    "comp",
+    "nf",
+    "cad",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "est",
+    "proj",
+    "meu",
+    "ajuda"
+   ],
+   "so": {
+    "comp": [
+     "sc",
+     "cot",
+     "acordo",
+     "parc",
+     "prod"
+    ],
+    "nf": [
+     "ped"
+    ],
+    "cad": [
+     "parc",
+     "transp"
+    ]
+   },
+   "nome": "Comprador"
+  },
+  "almoxarife": {
+   "w": [
+    "est",
+    "comp",
+    "nf",
+    "ferr",
+    "sst",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "cad",
+    "meu",
+    "ajuda"
+   ],
+   "so": {
+    "est": [
+     "almox",
+     "devobra",
+     "invaj",
+     "mov",
+     "prod"
+    ],
+    "comp": [
+     "sep",
+     "almox",
+     "invaj",
+     "mov",
+     "prod",
+     "sc"
+    ],
+    "nf": [
+     "ped",
+     "notas"
+    ],
+    "sst": [
+     "epi"
+    ]
+   },
+   "campos": {
+    "ped": [
+     "recebs",
+     "notaId",
+     "notaIds",
+     "status",
+     "recParcial",
+     "recAguardAprov",
+     "saldoEnc",
+     "recebidoEm"
+    ],
+    "sc": [
+     "status"
+    ]
+   },
+   "camposSt": {
+    "ped": [
+     "enviado",
+     "recebido"
+    ],
+    "sc": [
+     "atendida"
+    ]
+   },
+   "rascunho": [
+    "notas"
+   ],
+   "nome": "Almoxarife"
+  },
+  "sstgestor": {
+   "w": [
+    "sst",
+    "empdoc",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "rh",
+    "ferr",
+    "frota",
+    "meu",
+    "ajuda"
+   ],
+   "papel": "sst",
+   "sensRh": true,
+   "nome": "Gestor de segurança do trabalho"
+  },
+  "ssttec": {
+   "w": [
+    "sst",
+    "empdoc",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "rh",
+    "meu",
+    "ajuda"
+   ],
+   "so": {
+    "sst": [
+     "acid",
+     "ambind",
+     "ambres",
+     "aptlib",
+     "cipaa",
+     "cipar",
+     "epi",
+     "hht",
+     "insp",
+     "integ",
+     "pa",
+     "pte",
+     "rda",
+     "rhdoc",
+     "sstv",
+     "tercsit",
+     "trein",
+     "treinc",
+     "tterc"
+    ]
+   },
+   "papel": "ssttec",
+   "naoExclui": [
+    "acid"
+   ],
+   "cfgNao": [
+    "matrizTrein",
+    "nrCurso",
+    "isstPar"
+   ],
+   "aptLibDia": true,
+   "rhdocNr": true,
+   "nome": "Técnico de segurança do trabalho"
   },
   "compras": {
    "w": [
@@ -240,7 +452,9 @@
     "frota",
     "meu",
     "ajuda"
-   ]
+   ],
+   "antigo": true,
+   "nome": "Comprador / almoxarife (antigo — troque por Comprador ou Almoxarife)"
   },
   "sst": {
    "w": [
@@ -257,32 +471,10 @@
     "frota",
     "meu",
     "ajuda"
-   ]
-  },
-  "comercial": {
-   "w": [
-    "ctr",
-    "cad",
-    "chat",
-    "agenda"
    ],
-   "r": [
-    "painel",
-    "proj",
-    "serv",
-    "qual",
-    "dir",
-    "meu",
-    "ajuda"
-   ]
-  },
-  "diretoria": {
-   "w": [
-    "chat",
-    "agenda"
-   ],
-   "r": "*",
-   "frotaTodos": true
+   "sensRh": true,
+   "antigo": true,
+   "nome": "Segurança do trabalho (antigo — troque por Gestor ou Técnico de segurança do trabalho)"
   }
  },
  "colecoes": {
@@ -720,6 +912,9 @@
   ],
   "aptlib": [
    "sst"
+  ],
+  "perfc": [
+   "usr"
   ],
   "ctremp": [
    "proj",
@@ -1181,6 +1376,7 @@
    "lgpd"
   ],
   "aptlib": [],
+  "perfc": [],
   "ctremp": [
    "proj",
    "fin"
@@ -1193,5 +1389,127 @@
   ],
   "aptid": [],
   "tercsit": []
- }
+ },
+ "modulos": [
+  [
+   "painel",
+   "Painel"
+  ],
+  [
+   "fin",
+   "Financeiro: contas a receber, a pagar e lançamentos"
+  ],
+  [
+   "fluxo",
+   "Fluxo de caixa e DRE"
+  ],
+  [
+   "nf",
+   "Notas fiscais e pedidos de compra e de venda"
+  ],
+  [
+   "est",
+   "Estoque"
+  ],
+  [
+   "proj",
+   "Projetos e rateio"
+  ],
+  [
+   "cad",
+   "Clientes e fornecedores"
+  ],
+  [
+   "contas",
+   "Contas bancárias e conciliação"
+  ],
+  [
+   "plano",
+   "Plano de contas e categorias"
+  ],
+  [
+   "comp",
+   "Compras: solicitações, cotações e separação de estoque"
+  ],
+  [
+   "rh",
+   "Recursos humanos: colaboradores, documentos, ASO e EPI"
+  ],
+  [
+   "frota",
+   "Frota: veículos, saídas, abastecimento e manutenção"
+  ],
+  [
+   "ferr",
+   "Ferramentas e equipamentos nas obras"
+  ],
+  [
+   "usr",
+   "Usuários"
+  ],
+  [
+   "cfg",
+   "Configurações"
+  ],
+  [
+   "ctb",
+   "Contabilidade: fechamento e exportação mensal"
+  ],
+  [
+   "ponto",
+   "Ponto: registro, ajustes e espelho"
+  ],
+  [
+   "sst",
+   "CIPA e segurança do trabalho"
+  ],
+  [
+   "jur",
+   "Processos trabalhistas e análise de risco"
+  ],
+  [
+   "folha",
+   "Salários e benefícios dos colaboradores"
+  ],
+  [
+   "lgpd",
+   "Privacidade (LGPD): titulares, anonimização, incidentes"
+  ],
+  [
+   "chat",
+   "Chat interno"
+  ],
+  [
+   "lixo",
+   "Lixeira: restaurar registros excluídos"
+  ],
+  [
+   "agenda",
+   "Agenda de reuniões"
+  ],
+  [
+   "ctr",
+   "Comercial, contratos e medições"
+  ],
+  [
+   "dir",
+   "Painel da diretoria (indicadores e metas)"
+  ],
+  [
+   "serv",
+   "Serviços: PMOC, equipamentos de clientes e ordens de serviço"
+  ],
+  [
+   "qual",
+   "Qualidade: FVS, não conformidades, recebimento e garantia"
+  ],
+  [
+   "empdoc",
+   "Documentos mensais dos empreiteiros (folha e guias dos empregados deles)"
+  ],
+  [
+   "ajuda",
+   "Tutoriais e novidades"
+  ]
+ ]
 }

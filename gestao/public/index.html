@@ -20844,9 +20844,228 @@ const pmEhAbono=o=>!!(o&&o.oc&&!(o.m||[]).length&&!(/\bfalta\b/i.test(o.oc)&&!/j
 {const v0=V.pmimp;V.pmimp=function(){let h=v0.apply(this,arguments);
   return h.replace('<small>horas da Sólides × cálculo deste sistema</small></h2>','<small>horas da Sólides × cálculo deste sistema</small></h2><p class="sub" style="margin:0 0 8px">"Trabalhadas (sistema)" soma as horas marcadas e as horas abonadas pela Sólides (feriado, atestado, férias, folga de banco de horas, afastamento), como a Sólides faz. A etiqueta <b>diferença</b> aparece quando sobra mais de 30 minutos: costuma ser marcação que não chegou, colaborador ligado ao cadastro errado ou tolerância configurada só na Sólides. Para a folha valem os totais da Sólides.</p>');};}
 
+/* ===== v114: perfis de acesso editáveis e perfis prontos novos =====
+   - Sistema › Perfis de acesso (só Administrador e dono): lista os perfis padrão e os personalizados, com quantas
+     pessoas usam cada um; Novo perfil, Duplicar (a partir de qualquer perfil), Editar e Desativar (só os personalizados,
+     e desativar só quando ninguém usa). Para cada módulo: Sem acesso, Consulta ou Grava; opções: dados de RH e salários,
+     dados bancários, todos os locais da frota e aprovar como diretoria. Resumo do que o perfil pode fazer.
+   - Os perfis personalizados ficam na coleção perfc. O servidor (server.js › perfcCompilar) monta o mesmo perfil e aplica
+     leitura, gravação e redação pelo mesmo mapa módulo → coleções do perfis.json. Nunca têm Usuários, Configurações
+     nem Lixeira.
+   - Perfis padrão novos: Comprador, Almoxarife, Gestor de segurança do trabalho e Técnico de segurança do trabalho.
+     "Comprador / almoxarife" e "Segurança do trabalho" continuam para quem já usa, marcados como antigos.
+   - "so", "campos", "rascunho", "naoExclui" e "cfgNao": regras finas dos perfis padrão. O servidor recusa
+     (regras.js › regraFina); aqui a tela avisa antes de gravar. */
+
+/* ---------- perfis padrão novos ---------- */
+/* Técnico de SST grava só o dia a dia. Fora da lista (só consulta): PGR (pgr, pgrdoc), CIPA: gestão e eleição (cipa) e membros (cipam),
+   documentos de SST e laudos (sstdoc), documentos e cadastros ambientais (ambdoc, ambforn, isochk), PPP, pesquisa psicossocial e canal
+   de relatos (psicamp, rel) e o resumo de aptidão (aptid, calculado por quem lê o ASO).
+   rhdoc (Pessoal › Documentos e ASO): o certificado de NR (treinamento) fica lá; com rhdocNr o Técnico lê e grava só os documentos
+   "NR-..."; ASO, contrato, ficha e os outros não chegam a ele (o servidor filtra e recusa) */
+const P2_SST_TEC_GRAVA=['acid','ambind','ambres','aptlib','cipaa','cipar','epi','hht','insp','integ','pa','pte','rda','rhdoc','sstv','tercsit','trein','treinc','tterc'];
+const p2DocNr=d=>/^NR-/.test(String((d&&d.tipo)||''));
+Object.assign(PERFIS,{
+  comprador:{nome:'Comprador',desc:'Cotações, pedidos de compra, acordos de preço, solicitações e cadastro de fornecedores (dados bancários ficam pendentes até o Financeiro confirmar). Consulta estoque, notas de entrada e obras. Não lança nota, não mexe no estoque e não vê contas a pagar nem dados bancários.',
+    w:['comp','nf','cad','chat','agenda'],r:['painel','est','proj','meu','ajuda'],
+    so:{comp:['sc','cot','acordo','parc','prod'],nf:['ped'],cad:['parc','transp']}},
+  almoxarife:{nome:'Almoxarife',desc:'Recebimento de material (pela tela do pedido), entradas e saídas de estoque, almoxarifados, separação, devolução de sobras, inventário (o ajuste continua dependendo de aprovação de outra pessoa), ferramentas e equipamentos e entrega de EPI. Consulta pedidos, fornecedores e obras. Não cria pedido nem lança nota.',
+    w:['est','comp','nf','ferr','sst','chat','agenda'],r:['painel','proj','cad','meu','ajuda'],
+    so:{est:['almox','devobra','invaj','mov','prod'],comp:['sep','almox','invaj','mov','prod','sc'],nf:['ped','notas'],sst:['epi']},
+    campos:{ped:['recebs','notaId','notaIds','status','recParcial','recAguardAprov','saldoEnc','recebidoEm'],sc:['status']},camposSt:{ped:['enviado','recebido'],sc:['atendida']},rascunho:['notas']},
+  sstgestor:{nome:'Gestor de segurança do trabalho',desc:'Tudo de SST: EPI, treinamentos e matriz de NRs, integração, CIPA, acidentes e CAT, PGR, terceiros e documentos dos empreiteiros, ASO e documentos dos colaboradores, liberações de aptidão. Consulta obras, colaboradores (sem salário), ferramentas e frota. Não vê folha, salários nem financeiro.',
+    w:['sst','empdoc','chat','agenda'],r:['painel','proj','rh','ferr','frota','meu','ajuda'],sensRh:true,papel:'sst'},
+  ssttec:{nome:'Técnico de segurança do trabalho',desc:'Dia a dia de SST: EPI, treinamentos, integração, inspeções, registro de acidente e quase acidente, terceiros e checklist dos empreiteiros, liberações de aptidão do dia. Não altera PGR, matriz de NRs, configurações de SST nem CIPA (eleição e membros) e não exclui acidente. Vê o ASO só como apto/inapto e validade. Consulta obras e colaboradores (sem salário).',
+    w:['sst','empdoc','chat','agenda'],r:['painel','proj','rh','meu','ajuda'],papel:'ssttec',
+    so:{sst:P2_SST_TEC_GRAVA.slice()},naoExclui:['acid'],cfgNao:['matrizTrein','nrCurso','isstPar'],aptLibDia:true,rhdocNr:true}
+});
+/* os antigos continuam para quem já usa, no fim da lista */
+{const ant={compras:'Comprador / almoxarife (antigo — troque por Comprador ou Almoxarife)',sst:'Segurança do trabalho (antigo — troque por Gestor ou Técnico de segurança do trabalho)'};
+  Object.keys(ant).forEach(k=>{const p=PERFIS[k];if(!p)return;delete PERFIS[k];PERFIS[k]=Object.assign(p,{nome:ant[k],antigo:true});});}
+['comprador','almoxarife','sstgestor','ssttec'].forEach(k=>{const p=PERFIS[k];['meu','ajuda'].forEach(g=>{if(!p.r.includes(g))p.r.push(g);});});
+
+/* ---------- papel e opções ---------- */
+const P2_PERF_RH=['admin','rh','leituratotal','diretoria'];
+const p2Def=k=>PERFIS[k]||null;
+const p2Papel=k=>{const p=p2Def(k);return (p&&!p.custom&&p.papel)||k;};
+const p2PapelMe=()=>me.owner?'admin':p2Papel(me.perfil);
+function p2SstLibera(){if(me.owner)return true;const pp=p2PapelMe(),p=p2Def(me.perfil)||{};return pp==='admin'||pp==='sst'||pp==='ssttec'||(!!p.custom&&Array.isArray(p.w)&&p.w.includes('sst'));}
+/* as telas da v113 conferem o nome 'sst'; o Gestor, o Técnico e o personalizado que grava SST passam como 'sst' só durante a chamada
+   (o servidor confere de novo: o Técnico só libera o dia de hoje) */
+function p2ComoSst(fn){return function(){if(p2SstLibera()&&!['admin','sst'].includes(me.perfil)&&!me.owner){const p0=me.perfil;me.perfil='sst';try{return fn.apply(this,arguments);}finally{me.perfil=p0;}}return fn.apply(this,arguments);};}
+if(typeof A.j4LibNova==='function')A.j4LibNova=p2ComoSst(A.j4LibNova);
+if(typeof A.j4LibRevogar==='function')A.j4LibRevogar=p2ComoSst(A.j4LibRevogar);
+if(typeof V.aptlib==='function')V.aptlib=p2ComoSst(V.aptlib);
+if(typeof j4BoxHtml==='function')j4BoxHtml=p2ComoSst(j4BoxHtml);
+if(typeof j4LibGravar==='function'){const g0=p2ComoSst(j4LibGravar);j4LibGravar=function(v){const p=p2Def(me.perfil)||{},h=todayStr();
+  if(p.aptLibDia&&!me.owner&&v&&(v.de!==h||v.ate!==h))return 'O Técnico de segurança do trabalho libera só para o dia de hoje. Liberação mais longa fica com o Gestor de SST.';
+  return g0.apply(this,arguments);};}
+if(typeof j3ApagaArea==='function'){const a0=j3ApagaArea;j3ApagaArea=function(col){if(!me.owner&&p2Papel(me.perfil)==='sst'&&me.perfil!=='sst')return J3_SST_ANX.has(col);return a0.apply(this,arguments);};}
+if(typeof obrDiretoria==='function'){const o0=obrDiretoria;obrDiretoria=function(){if(o0.apply(this,arguments))return true;const p=p2Def(me.perfil)||{};
+  try{if(typeof aprovadoresDe==='function'&&(aprovadoresDe('diretoria')||[]).filter(Boolean).length)return false;}catch(e){}return !!(p.custom&&p.aprovDir);};}
+/* o personalizado que grava SST lê ASO e documentos de SST (o servidor libera como ao perfil SST): calcula a aptidão e o resumo dos terceiros */
+if(typeof v111LeRh==='function'){const l0=v111LeRh;v111LeRh=function(){if(l0.apply(this,arguments))return true;const p=p2Def(me.perfil)||{};return !!(p.custom&&Array.isArray(p.w)&&p.w.includes('sst'));};}
+if(typeof obrMoVivoOk==='function'){const m0=obrMoVivoOk;obrMoVivoOk=function(){if(m0.apply(this,arguments))return true;try{const p=p2Def(me.perfil)||{};
+  return !!(p.custom&&p.sensRh&&mayR('rh')&&mayR(GROUP_OF_TAB.ponto||'ponto')&&!(S.func||[]).some(f=>f&&f._restrito));}catch(e){return false;}};}
+
+/* ---------- módulos que um perfil personalizado pode ter ---------- */
+const P2_MODS=[['painel','Painel inicial','r'],['dir','Painel da diretoria e indicadores','r'],['fin','Financeiro: contas a pagar, a receber e lançamentos'],['fluxo','Fluxo de caixa e DRE'],
+  ['contas','Contas bancárias e conciliação'],['plano','Plano de contas e categorias'],['nf','Notas fiscais, pedidos de compra e NFS-e'],['ctb','Contabilidade, tributos e fechamento'],
+  ['comp','Compras: solicitações, cotações e acordos'],['est','Estoque e almoxarifados'],['cad','Clientes e fornecedores'],['proj','Obras, diário e medições de empreiteiros'],
+  ['ctr','Comercial, contratos e medições ao cliente'],['serv','Serviços: PMOC e ordens de serviço'],['qual','Qualidade'],['ferr','Ferramentas e equipamentos'],['frota','Frota'],
+  ['rh','Recursos humanos: colaboradores e documentos'],['folha','Salários e folha'],['ponto','Ponto'],['jur','Processos trabalhistas'],['sst','CIPA e segurança do trabalho'],
+  ['empdoc','Documentos mensais dos empreiteiros'],['lgpd','Privacidade (LGPD)'],['agenda','Agenda de reuniões'],['chat','Chat interno']];
+const P2_PROIBIDOS=['usr','cfg','lixo'],P2_SO_LEITURA=['painel','dir','meu','ajuda'];
+const P2_OPC=[['rh','Ver dados de RH e salários','Salário, documentos pessoais, folha e dados sensíveis dos módulos de RH que o perfil consulta ou grava.'],
+  ['banco','Ver dados bancários','Banco, agência, conta e PIX de fornecedores e o arquivo da remessa. Sem a opção, o perfil vê "dados bancários ocultos".'],
+  ['frota','Ver todos os locais da frota','Sem a opção, vê só os veículos dos locais liberados para a pessoa.'],
+  ['dir','Aprovar como diretoria','Liberações e decisões da diretoria (documentos de empreiteiro, medições, retenções, go/no-go). Quando há diretores na matriz de aprovação, vale a matriz.']];
+const P2_ID=/^c_[a-z0-9]{4,24}$/;
+/* mesmo cálculo do servidor (server.js › perfcCompilar) */
+function p2Compilar(d){const w=[],r=[];Object.entries((d&&d.mod)||{}).forEach(([g,v])=>{if(P2_PROIBIDOS.includes(g)||!P2_MODS.some(m=>m[0]===g))return;
+    if(v==='w'&&!P2_SO_LEITURA.includes(g))w.push(g);else if(v==='w'||v==='r')r.push(g);});
+  ['meu','ajuda'].forEach(g=>{if(!r.includes(g))r.push(g);});const o=(d&&d.opc)||{};
+  return {nome:String((d&&d.nome)||'Perfil sem nome').slice(0,60),desc:String((d&&d.desc)||''),w,r,custom:true,sensRh:o.rh===true,banco:o.banco===true,frotaTodos:o.frota===true,aprovDir:o.dir===true};}
+
+/* ---------- coleção perfc ---------- */
+if(!COLS.includes('perfc')){COLS.push('perfc');S.perfc=S.perfc||[];IDX.perfc=new Map();}
+COL_NOME.perfc='Perfil de acesso personalizado';GROUP_OF_TAB.perfc='usr';TAB_COLS.perfc=['perfc','usr'];
+if(typeof LIVE_COLS!=='undefined'&&!LIVE_COLS.includes('perfc'))LIVE_COLS.push('perfc');
+if(!NAV.some(n=>n[0]==='perfc'))NAV.push(['perfc','Perfis de acesso','Sistema']);
+MENU.filter(m=>m[0]==='sis').forEach(m=>{if(!m[2].some(i=>i[0]==='perfc')){const i=m[2].findIndex(x=>x[0]==='usr');m[2].splice(i<0?0:i+1,0,['perfc','Perfis de acesso']);}});
+Object.assign(ACT_GROUP,{perfcNovo:'usr',perfcDup:'usr',perfcEdit:'usr',perfcDesativar:'usr',perfcAtivar:'usr',perfcVer:null});
+/* os perfis personalizados entram em PERFIS antes de cada desenho da tela (a escolha do perfil em Usuários e no convite usa PERFIS) */
+function p2Sync(){const vistos=new Set();
+  (S.perfc||[]).forEach(d=>{if(!d||!P2_ID.test(d.id)||(PERFIS[d.id]&&!PERFIS[d.id].custom))return;vistos.add(d.id);
+    PERFIS[d.id]=d.ativo===false?{nome:(d.nome||d.id)+' (desativado)',desc:'',w:[],r:[],custom:true,inativo:true,interno:true}:p2Compilar(d);});
+  Object.keys(PERFIS).forEach(k=>{if(PERFIS[k]&&PERFIS[k].custom&&!vistos.has(k))delete PERFIS[k];});}
+/* antes de saber o perfil da pessoa (render chama resolvePerfil a cada desenho) */
+{const r0=resolvePerfil;resolvePerfil=function(){try{p2Sync();}catch(e){}return r0.apply(this,arguments);};}
+{const p0=put;put=function(col,rec){const r=p0.apply(this,arguments);if(col==='perfc')try{p2Sync();}catch(e){}return r;};}
+
+/* ---------- regras finas também na tela (o servidor recusa do mesmo jeito) ---------- */
+let P2_CM=null;
+/* coleção → módulos, igual ao gen_perm.js (perfis.json › colecoes) */
+function p2ColMods(){if(P2_CM)return P2_CM;const col={},add=(c,g)=>{if(!c||!g)return;(col[c]=col[c]||new Set()).add(g);};
+  const TL={ctrlint:['acordo','cot','invaj','parc','prod'],cfgcheck:'*',aprovcfg:'*'},soLe=(tab,c)=>{const t=TL[tab];return t==='*'||(Array.isArray(t)&&t.includes(c));};
+  const M2=typeof MODS2!=='undefined'?MODS2:{};
+  Object.entries(GROUP_OF_TAB).forEach(([tab,g])=>{(TAB_COLS[tab]||[]).forEach(c=>{if(!soLe(tab,c))add(c,g);});const m=M2[tab];if(m)add(m.col,m.group||g);});
+  Object.entries(M2).forEach(([tab,m])=>add(m.col,m.group||GROUP_OF_TAB[tab]));
+  const EX={medemp:['proj'],ctremp:['proj','fin'],heaut:['proj'],obrbase:['proj'],obrprev:['proj'],aptid:['rh','sst'],tercsit:['rh','sst'],moapr:['rh'],rhdoc:['sst']};
+  Object.entries(EX).forEach(([c,gs])=>gs.forEach(g=>add(c,g)));
+  const SL={lanc:['folha','qual']};const out={};Object.entries(col).forEach(([c,g])=>{out[c]=[...g].filter(x=>!(SL[c]||[]).includes(x));});
+  if(store.ready)P2_CM=out;return out;}
+const P2_LIVRES=['cfg','lixo','lgpdc','implog','cm','pt','usrreq','usr','perfc'];
+const p2Igual=(a,b)=>{const e=v=>{if(v===undefined||v===null)return 'null';if(Array.isArray(v))return '['+v.map(e).join(',')+']';if(typeof v==='object')return '{'+Object.keys(v).filter(k=>v[k]!==undefined&&v[k]!==null).sort().map(k=>JSON.stringify(k)+':'+e(v[k])).join(',')+'}';return JSON.stringify(v);};return e(a)===e(b);};
+/* '' = pode; senão, a mensagem */
+function p2PodeGravar(col,velho,novo,exclui){if(me.owner)return '';const d=p2Def(me.perfil);if(!d||d.w==='*'||d.custom)return '';
+  const nome=(COL_NOME[col]||col).toLowerCase();
+  if(d.so&&!P2_LIVRES.includes(col)){const gs=p2ColMods()[col]||[];if(gs.length&&!gs.some(g=>Array.isArray(d.w)&&d.w.includes(g)&&!(Array.isArray(d.so[g])&&!d.so[g].includes(col))))return 'Seu perfil ('+d.nome+') só consulta '+nome+'.';}
+  const cp=d.campos&&d.campos[col];
+  if(cp){if(exclui||!velho)return 'Seu perfil ('+d.nome+') não cria nem exclui '+nome+'; só registra '+(col==='ped'?'o recebimento':'o andamento')+'.';
+    const livre=new Set(cp.concat(['id','ts','cr','crBy','ed','edBy','hist']));const k=[...new Set(Object.keys(velho).concat(Object.keys(novo||{})))].find(k=>!livre.has(k)&&!p2Igual(velho[k],(novo||{})[k]));
+    if(k)return 'Seu perfil ('+d.nome+') só altera '+(col==='ped'?'o recebimento':'o andamento')+' deste registro.';
+    const sts=d.camposSt&&d.camposSt[col];if(Array.isArray(sts)&&!p2Igual(velho.status,novo.status)&&!sts.includes(novo.status))return 'Seu perfil ('+d.nome+') não muda a situação para "'+String(novo.status||'')+'".';}
+  if(Array.isArray(d.rascunho)&&d.rascunho.includes(col)){if(exclui){if(velho&&velho.status!=='rascunho')return 'Seu perfil só exclui notas em rascunho.';}
+    else if((velho&&velho.status!=='rascunho')||(novo&&novo.status!=='rascunho'))return 'Seu perfil ('+d.nome+') só registra notas em rascunho (do recebimento). Quem lança a nota é o Comprador, o Fiscal ou o Financeiro.';}
+  if(d.rhdocNr&&col==='rhdoc'&&((velho&&!p2DocNr(velho))||(!exclui&&!p2DocNr(novo))))return 'Seu perfil ('+d.nome+') registra só certificados de NR. ASO, contrato e os outros documentos ficam com o Gestor de segurança do trabalho ou o RH.';
+  if(exclui&&velho&&Array.isArray(d.naoExclui)&&d.naoExclui.includes(col))return 'Seu perfil ('+d.nome+') não exclui '+nome+'.';
+  if(col==='cfg'&&!exclui&&Array.isArray(d.cfgNao)){const k=d.cfgNao.find(k=>!p2Igual((velho||{})[k],(novo||{})[k]));if(k)return 'Seu perfil ('+d.nome+') não altera esta configuração de SST.';}
+  return '';}
+let P2_AVISO=0;const p2Avisa=m=>{const t=Date.now();if(t-P2_AVISO>1500){P2_AVISO=t;toast(m,'neg');}};
+{const p0=put;put=function(col,rec){if(store.mode==='db'&&rec&&IDX[col]){const ex=IDX[col].get(rec.id)||null;const m=p2PodeGravar(col,ex&&ex!==rec?ex:(ex===rec?cl(ex):null),rec,false);
+    if(m){p2Avisa(m);return ex||rec;}}return p0.apply(this,arguments);};}
+{const d0=del;del=function(col,id){if(store.mode==='db'&&IDX[col]){const ex=IDX[col].get(id);if(ex){const m=p2PodeGravar(col,ex,null,true);if(m){p2Avisa(m);return;}}}return d0.apply(this,arguments);};}
+
+/* ---------- resumo legível ---------- */
+const p2ModNome=g=>{const m=P2_MODS.find(x=>x[0]===g);if(m)return m[1];const x=(typeof MODS!=='undefined'?MODS:[]).find(x=>x[0]===g);return x?x[1]:g;};
+const P2_OCULTOS=['chat','agenda','meu','ajuda','painel'];
+function p2Opcoes(k){const p=p2Def(k)||{},pp=p2Papel(k),tudo=p.w==='*';
+  return {rh:tudo||P2_PERF_RH.includes(pp)||(!!p.custom&&!!p.sensRh&&((p.w||[]).includes('rh')||(p.r||[]).includes('rh'))),
+    banco:tudo||pp==='diretoria'||(p.custom?!!p.banco:Array.isArray(p.w)&&p.w.includes('fin')),
+    frota:tudo||!!p.frotaTodos,dir:tudo||pp==='diretoria'||(!!p.custom&&!!p.aprovDir),sst:pp==='sst'||(!!p.custom&&Array.isArray(p.w)&&p.w.includes('sst'))};}
+function p2Resumo(k){const p=p2Def(k);if(!p)return '';const o=p2Opcoes(k);
+  if(p.w==='*')return 'Acesso total: grava e consulta todos os módulos, inclusive usuários, perfis e configurações.';
+  const ls=v=>v==='*'?['todos os módulos']:(v||[]).filter(g=>!P2_OCULTOS.includes(g)).map(p2ModNome);
+  const w=ls(p.w),r=p.r==='*'?['todos os módulos']:ls(p.r).filter(x=>!w.includes(x));
+  const t=[];t.push(w.length?'Grava: '+w.join('; ')+'.':'Não grava em nenhum módulo.');if(r.length)t.push('Consulta: '+r.join('; ')+'.');
+  if(p.so){const cs=[...new Set([].concat(...Object.values(p.so)))].map(c=>COL_NOME[c]||c);t.push('Dentro desses módulos, grava só: '+cs.join(', ')+'.');}
+  if(p.campos)t.push('Em '+Object.keys(p.campos).map(c=>(COL_NOME[c]||c).toLowerCase()).join(' e ')+', só registra o recebimento ou o andamento.');
+  if(p.rascunho)t.push('Notas: só em rascunho (do recebimento).');
+  if(p.naoExclui)t.push('Não exclui: '+p.naoExclui.map(c=>(COL_NOME[c]||c).toLowerCase()).join(', ')+'.');
+  if(p.cfgNao)t.push('Não altera a matriz de NRs nem as configurações de SST; não altera PGR nem CIPA (eleição e membros).');
+  if(p.aptLibDia)t.push('Libera aptidão só para o dia de hoje.');
+  if(p2Papel(k)==='ssttec')t.push('Vê o ASO só como apto ou inapto e a validade (sem o documento).');
+  if(p.rhdocNr)t.push('Em Documentos e ASO, vê e registra só os certificados de NR.');
+  const sim=[],nao=[];[['rh','dados de RH e salários'],['banco','dados bancários'],['frota','todos os locais da frota']].forEach(([x,n])=>(o[x]?sim:nao).push(n));
+  if(o.sst&&!o.rh)sim.push('ASO, acidentes e documentos de SST (sem salário)');
+  if(sim.length)t.push('Vê: '+sim.join(', ')+'.');if(nao.length)t.push('Não vê: '+nao.join(', ')+'.');
+  if(o.dir)t.push('Aprova como diretoria.');
+  t.push('Usuários, perfis de acesso e configurações do sistema: só o Administrador.');
+  return t.join(' ');}
+/* quadro de Sistema › Usuários (new_perf.js): marca personalizado e antigo */
+if(typeof perfResumo==='function'){const r0=perfResumo;perfResumo=function(k){let h=r0.apply(this,arguments);const p=p2Def(k)||{};
+  const tag=p.custom?pill('personalizado','acc'):p.antigo?pill('antigo','warn'):'';return tag?h.replace('</b>','</b> '+tag):h;};}
+
+/* ---------- Sistema › Perfis de acesso ---------- */
+const p2Usam=k=>(S.usr||[]).filter(u=>u&&u.perfil===k);
+function p2Lista(){const ks=Object.keys(PERFIS).filter(k=>!['pendente','semnivel','semid'].includes(k)&&PERFIS[k]&&!(PERFIS[k].interno&&!PERFIS[k].custom));
+  (S.perfc||[]).forEach(d=>{if(d&&P2_ID.test(d.id)&&!ks.includes(d.id))ks.push(d.id);});
+  return ks;}
+V.perfc=()=>{if(!(me.owner||mayW('usr')))return pageHead('Perfis de acesso','')+'<div class="card"><p>Só o Administrador ou o dono veem e alteram os perfis de acesso.</p></div>';
+  const ks=p2Lista(),pad=ks.filter(k=>!PERFIS[k]||!PERFIS[k].custom),cus=ks.filter(k=>PERFIS[k]&&PERFIS[k].custom);
+  const linha=k=>{const p=PERFIS[k]||{},d=get('perfc',k),us=p2Usam(k),ati=us.filter(u=>u.ativo!==false).length,ina=us.length-ati;
+    const tag=p.custom?(p.inativo?pill('desativado','neg'):pill('personalizado','acc')):p.antigo?pill('antigo','warn'):pill('perfil padrão do sistema');
+    const nome=p.custom&&d?d.nome:(p.nome||k);
+    let acts='<button class="btn sm" data-act="perfcDup" data-id="'+esc(k)+'">Duplicar</button>';
+    if(p.custom&&d){acts='<button class="btn sm" data-act="perfcEdit" data-id="'+esc(k)+'">Editar</button>'+acts+(d.ativo===false?'<button class="btn sm" data-act="perfcAtivar" data-id="'+esc(k)+'">Reativar</button>':(us.length?'<button class="btn sm" disabled title="Usado por '+us.length+' pessoa(s): troque o perfil delas antes">Desativar</button>':'<button class="btn sm dng" data-act="perfcDesativar" data-id="'+esc(k)+'">Desativar</button>'));}
+    return '<tr><td><b>'+esc(nome)+'</b> '+tag+(p.custom&&d&&d.desc?'<div class="sub">'+esc(d.desc)+'</div>':(!p.custom&&p.desc?'<div class="sub">'+esc(p.desc)+'</div>':''))+(!p.custom?'<div class="sub">Perfil padrão do sistema: não se edita. Use Duplicar para criar um parecido.</div>':'')+'</td>'+
+      '<td class="num">'+ati+(ina?'<div class="sub">+'+ina+' suspensa(s)</div>':'')+'</td><td class="sub" style="max-width:520px">'+esc(p.inativo?'Desativado: ninguém pode usar.':p2Resumo(k))+'</td><td><div class="acts" style="flex-wrap:wrap">'+acts+'</div></td></tr>';};
+  const tab=(t,ls,vazio)=>'<div class="card"><h2>'+t+'</h2>'+(ls.length?'<div class="tw" style="border:0"><table style="min-width:860px"><thead><tr><th>Perfil</th><th class="num">Pessoas</th><th>O que pode fazer</th><th></th></tr></thead><tbody>'+ls.map(linha).join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">'+vazio+'</p>')+'</div>';
+  return pageHead('Perfis de acesso','Perfis padrão do sistema e perfis criados pela empresa. O servidor aplica as mesmas regras: o que o perfil não grava é recusado.','<button class="btn pri" data-act="perfcNovo">Novo perfil</button>')+
+    '<div class="note" style="margin-bottom:12px">Escolha o perfil mais restrito que permita o trabalho da pessoa. Um perfil personalizado nunca administra usuários, perfis nem configurações do sistema (isso fica com o Administrador). Criar, alterar ou desativar um perfil pede a sua senha de novo e fica na auditoria. Para dar o perfil a alguém, use Sistema › Usuários.</div>'+
+    '<div class="kpis">'+kpi('Perfis padrão',String(pad.length))+kpi('Personalizados ativos',String(cus.filter(k=>!PERFIS[k].inativo).length))+kpi('Pessoas com perfil personalizado',String((S.usr||[]).filter(u=>u&&u.ativo!==false&&PERFIS[u.perfil]&&PERFIS[u.perfil].custom).length))+'</div>'+
+    tab('Perfis personalizados',cus,'Nenhum ainda. Use "Novo perfil" ou "Duplicar" num perfil padrão.')+tab('Perfis padrão do sistema',pad,'');};
+/* modo de cada módulo a partir de um perfil existente (para Duplicar) */
+function p2ModDe(k){const p=PERFIS[k]||{},m={};P2_MODS.forEach(([g,,so])=>{const w=p.w==='*'||(Array.isArray(p.w)&&p.w.includes(g)),r=p.r==='*'||(Array.isArray(p.r)&&p.r.includes(g));m[g]=w&&so!=='r'?'w':(w||r)?'r':'';});return m;}
+function p2Form(d,titulo,avisos){const m=d.mod||{},o=d.opc||{};
+  const lin=([g,n,so])=>'<tr><td>'+esc(n)+'</td><td style="width:170px"><select data-f="m_'+g+'" aria-label="Acesso a '+esc(n)+'">'+opt([['','Sem acesso'],['r','Consulta']].concat(so==='r'?[]:[['w','Grava']]),m[g]||'')+'</select></td></tr>';
+  return modal({title:titulo,wide:true,nofocus:true,body:'<div id="perfcForm">'+(avisos||'')+'<div class="fg">'+field('Nome do perfil','nome','text',d.nome||'',{ph:'Ex.: Assistente de compras'})+field('Para quem (descrição)','desc','text',d.desc||'',{full:true})+'</div>'+
+    '<div class="sect">Módulos</div><p class="sub" style="margin:0 0 6px">Consulta: vê as telas e os dados do módulo. Grava: também cria, altera e exclui. Usuários, perfis, configurações e lixeira ficam só com o Administrador.</p>'+
+    '<div class="tw" style="border:0;max-height:340px;overflow:auto"><table><tbody>'+P2_MODS.map(lin).join('')+'</tbody></table></div>'+
+    '<div class="sect">Opções</div>'+P2_OPC.map(([k,n,h])=>field(n,'o_'+k,'checkbox',o[k]===true,{full:true}).replace('</span></label>','<div class="sub">'+esc(h)+'</div></span></label>')).join('')+
+    '<div class="sect">O que este perfil pode fazer</div><p class="sub" id="perfcRes" style="margin:0">'+esc(p2ResumoForm(d))+'</p></div>',
+    saveLabel:'Salvar perfil',save:root=>{const v=readForm(root),e=p2Gravar(d,v);if(e){toast(e,'neg');return false;}toast('Perfil salvo. Já aparece em Sistema › Usuários.','pos');}});}
+function p2LerForm(v){const mod={};P2_MODS.forEach(([g,,so])=>{const x=v['m_'+g];if(x==='r'||(x==='w'&&so!=='r'))mod[g]=x;});
+  const opc={};P2_OPC.forEach(([k])=>{opc[k]=v['o_'+k]===true;});return {mod,opc};}
+function p2ResumoForm(d){const k='__p2prev';PERFIS[k]=p2Compilar(d);try{return p2Resumo(k);}finally{delete PERFIS[k];}}
+function p2Gravar(d,v){const nome=String(v.nome||'').replace(/\s+/g,' ').trim();if(nome.length<3)return 'Dê um nome ao perfil (ao menos 3 letras).';
+  const x=p2LerForm(v);if(!Object.keys(x.mod).some(g=>!P2_SO_LEITURA.includes(g)))return 'Escolha ao menos um módulo para consultar ou gravar.';
+  const outro=p2Lista().find(k=>k!==d.id&&PERFIS[k]&&!PERFIS[k].inativo&&String((get('perfc',k)||PERFIS[k]).nome||'').toLowerCase()===nome.toLowerCase());if(outro)return 'Já existe um perfil com este nome.';
+  const id=d.id&&P2_ID.test(d.id)?d.id:'c_'+uid(10).toLowerCase().replace(/[^a-z0-9]/g,'x');
+  const ant=get('perfc',id);put('perfc',Object.assign(ant?cl(ant):{},{id,nome:nome.slice(0,60),desc:String(v.desc||'').slice(0,500),mod:x.mod,opc:x.opc,ativo:ant?ant.ativo!==false:true,base:d.base||(ant&&ant.base)||''}));return '';}
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.closest||!t.closest('#perfcForm'))return;const f=$('#perfcForm'),r=$('#perfcRes');if(!f||!r)return;
+  try{const v=readForm(f);r.textContent=p2ResumoForm(Object.assign({nome:v.nome},p2LerForm(v)));}catch(err){}});
+A.perfcNovo=()=>{if(!(me.owner||mayW('usr'))){toast('Só o Administrador cria perfis.','neg');return;}p2Form({mod:{painel:'r',chat:'w',agenda:'w'},opc:{}},'Novo perfil de acesso');};
+A.perfcDup=d=>{if(!(me.owner||mayW('usr'))){toast('Só o Administrador cria perfis.','neg');return;}const k=d.id,p=PERFIS[k];if(!p)return;const pc=get('perfc',k);
+  const base=pc?{mod:cl(pc.mod||{}),opc:cl(pc.opc||{})}:{mod:p2ModDe(k),opc:(o=>({rh:o.rh,banco:o.banco,frota:o.frota,dir:o.dir}))(p2Opcoes(k))};
+  const av=[];if(p.w==='*')av.push('A cópia do Administrador não inclui Usuários, perfis, Configurações e Lixeira: isso fica só com o Administrador.');
+  if(p.so||p.campos||p.rascunho||p.naoExclui||p.cfgNao||p.aptLibDia)av.push('Este perfil padrão tem limites dentro dos módulos (por exemplo, só algumas telas ou só o recebimento). A cópia não leva esses limites: ela grava o módulo inteiro. Revise antes de salvar.');
+  if(p2Papel(k)==='sst'&&!p.custom)av.push('Na cópia, quem grava "CIPA e segurança do trabalho" lê e grava ASO, acidentes e terceiros, como o perfil de SST.');
+  p2Form(Object.assign(base,{nome:'Cópia de '+String((pc&&pc.nome)||p.nome||k).replace(/\s*\(antigo[^)]*\)/,''),desc:(pc&&pc.desc)||'',base:k}),'Duplicar perfil',av.length?'<div class="note" style="margin:0 0 10px">'+av.map(esc).join('<br>')+'</div>':'');};
+A.perfcEdit=d=>{const pc=get('perfc',d.id);if(!pc){toast('Perfil padrão do sistema: não se edita. Use Duplicar.','neg');return;}p2Form(cl(pc),'Editar perfil: '+pc.nome);};
+A.perfcDesativar=d=>{const pc=get('perfc',d.id);if(!pc)return;const n=p2Usam(pc.id).length;if(n){toast('Este perfil é usado por '+n+' pessoa(s). Troque o perfil delas em Sistema › Usuários antes de desativar.','neg');return;}
+  confirmBox('Desativar o perfil "'+esc(pc.nome)+'"? Ele some da escolha em Usuários. Dá para reativar depois.',()=>{put('perfc',Object.assign(cl(pc),{ativo:false}));toast('Perfil desativado.','pos');},'Desativar',true);};
+A.perfcAtivar=d=>{const pc=get('perfc',d.id);if(!pc)return;put('perfc',Object.assign(cl(pc),{ativo:true}));toast('Perfil reativado.','pos');};
+
+/* Sistema › Usuários: atalho para os perfis */
+{const vu=V.usr;V.usr=function(){const h=vu.apply(this,arguments);if(!(me.owner||mayW('usr')))return h;
+  return h+'<div class="acts" style="margin-top:10px"><button class="btn" data-act="nav" data-mod="sis" data-tab="perfc">Criar ou editar perfis de acesso</button></div>';};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='113.1',APP_DATA='2026-10-27';
+const APP_VER='114',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['114','2026-10-27',['Sistema › Perfis de acesso: crie, duplique e edite perfis escolhendo para cada módulo Sem acesso, Consulta ou Grava, com opções de ver salários, dados bancários, todos os locais da frota e aprovar como diretoria. O servidor aplica os perfis criados; só o Administrador e o dono alteram, com registro na auditoria.', 'Perfis prontos novos: Comprador, Almoxarife, Gestor de segurança do trabalho e Técnico de segurança do trabalho. Os perfis antigos Comprador / almoxarife e Segurança do trabalho continuam para quem já usa, marcados como antigos.']],
   ['113.1','2026-10-27',['Importação da Folha de Ponto da Sólides: datas lidas também quando o Excel as entrega como número ou como texto mês/dia; se o relatório for reconhecido sem nenhuma marcação, a tela explica em vez de mostrar 0 marcações.','Ponto (Sólides) › Locais de trabalho e obras: a obra escolhida é gravada na hora (antes dependia do botão Salvar vínculos e a escolha se perdia se a tela atualizasse).','Conferência do mês: feriados, atestados, férias, folgas e afastamentos abonados pela Sólides entram nas horas do sistema; a etiqueta diferença só aparece em divergência real.']],
   ['113','2026-10-27',['Diário de obra: colaborador com ASO, NR ou integração vencidos não entra no efetivo; liberação só pelo SST, com justificativa e validade (CIPA e SST › Liberações de aptidão).', 'Empreiteiros: com FGTS ou folha pendentes, a medição só é aprovada com retenção (padrão: o maior entre o valor informado e 10%); conta do líquido e conta de retenção a liberar pela diretoria. Financeiro › Retenções de empreiteiros.', 'Desligamento: o servidor confere CIPA, retorno de acidente, gestante (5 meses após o parto) e garantias cadastradas e exige o parecer jurídico anexado.', 'Ponto (Sólides): o relatório padrão Folha de Ponto (RFP detalhado) em Excel é reconhecido sozinho — marcações em ordem, local de trabalho, férias, atestados, afastamentos e feriados como ocorrência.']],
   ['112','2026-10-27',['Empréstimos sem juros por padrão (juros só simples, com teto); soma de todos os descontos do mês limitada (padrão 30%) e teto de um salário na rescisão.', 'Descontos por dano, extravio e multa só com apuração registrada e cláusula no contrato; termos saem preenchidos.', 'Desligamento: perguntas obrigatórias de estabilidade, gestante até 5 meses após o parto, liberação só com parecer anexado; o pedido de demissão passa a ser de próprio punho anexado.', 'Férias fora da escala ficam a conferir (quitação só com recibo e aviso anexados); alertas de férias vencidas e de pagamento até 2 dias antes.', 'Ponto: app próprio só gerencial; ajuste vira solicitação na Sólides; Pessoal › Arquivo mensal do ponto (AFD, AEJ, espelho).', 'Hora extra: texto de que é devida, teto de 2 h somadas por dia (exceção do art. 61), insalubridade exige licença do art. 60; banco de horas só com acordo anexado.', 'LGPD: auditoria só com campos alterados e dados sensíveis protegidos; registro de quem consulta a auditoria e de leitura de dados de saúde; relatório do titular completo gerado no servidor; Sistema › Temporalidade e descarte; novo aviso de privacidade (nova ciência); registro do uso de IA.', 'Também: alerta do prazo de indicação do condutor; reequilíbrio e exequibilidade em contratos públicos; código de verificação na entrega de EPI; reciclagem complementar no lugar de treinamento por IA; cotas e transparência salarial; documentos dos empreiteiros restritos a Financeiro, RH e SST.']],
@@ -20975,7 +21194,7 @@ const TUT=[
   {id:'vei',t:'Veículos',g:'frota',ver:'56',p:['Rota diária: planeje as viagens de cada dia com veículo, motorista, obra, quem pediu e o material. Na saída, clique em Gerar saída: o km atual já vem preenchido.','Entregas com frete: registre os pedidos da Lalamove e de outras plataformas com o custo, que vai para contas a pagar no projeto.','Na saída do veículo, informe a hora do retorno, marque se houve abastecimento (o sistema abre o lançamento) e anexe as fotos do painel e do veículo.','Adicional de condutor: até 15 dias no mês paga R$ 32 por dia; acima disso, adicional mensal de dupla função (salário × 20%). Veja o resumo por condutor, projeto ou total.','Multas: use Importar multas para trazer as infrações do e-Frotas ou do portal da Senatran; o sistema identifica veículo, condutor e prazos e gera a conta a pagar com o desconto do SNE.','Veículos com documentos, saídas (bloqueia CNH vencida), abastecimentos e manutenção.','Multas com o condutor identificado pela saída do veículo e prazo de indicação.','Análise da frota: consumo, custo por km, custo por obra e abastecimentos fora do padrão.']},
   {id:'eqp',t:'Equipamentos',g:'ferr',ver:'28',p:['Envio e retorno: use Envio para mandar itens à obra ou à oficina e Retorno para trazer de volta, informando o estado de cada item.','Fotos: no cadastro do item use Tirar foto ou Escolher arquivo; a miniatura aparece na lista e abre ampliada ao clicar.','Ferramentas e equipamentos com código, número de série e responsável.','Envios para obras com responsável, previsão de retorno e devolução.','Manutenção de equipamentos com histórico e custo.']},
   {id:'ctb',t:'Contabilidade, tributos e assessorias',g:'ctb',ver:'50',p:['Reforma tributária (IBS/CBS): veja o que o sistema já atende e o que fazer, o cronograma até 2033, a apuração estimada do mês e o simulador de contratos. Em Parâmetros cadastre o NBS, a cClassTrib e a redução da atividade.','Tributos: retenções do mês, CNO das obras e calendário de obrigações.','Assessorias: checklist de fechamento e pacote de dados para contabilidade, medicina do trabalho e jurídico.','Confira as pendências do mês antes de fechar.','Gere o pacote ZIP com os arquivos para a assessoria contábil.','O relatório de fechamento registra quem fechou e quando.']},
-  {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'112',p:['Sistema › Temporalidade e descarte: prazos de guarda e rotina anual que lista o que venceu para você aprovar (nada é apagado sozinho).','Novo aviso de privacidade: preencha o encarregado e o canal de contato; os colaboradores darão ciência de novo.','Perfis novos em Usuários: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Confira o perfil de cada pessoa depois da versão 111.','Segurança (versão 110): quem é da equipe e grava precisa ligar a verificação em duas etapas no primeiro acesso (aplicativo autenticador no celular). Guarde os códigos de recuperação.','Ações sensíveis, como mexer em contas de acesso, baixar cópia de segurança ou exportar dados, pedem a senha de novo se a última confirmação tiver mais de 15 minutos.','Troca de dados bancários de fornecedor ou colaborador fica pendente até outra pessoa com permissão confirmar.','Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
+  {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'114',p:['Sistema › Perfis de acesso: use Duplicar a partir do perfil mais parecido e ajuste módulo a módulo; depois escolha o perfil da pessoa em Sistema › Usuários.','Sistema › Temporalidade e descarte: prazos de guarda e rotina anual que lista o que venceu para você aprovar (nada é apagado sozinho).','Novo aviso de privacidade: preencha o encarregado e o canal de contato; os colaboradores darão ciência de novo.','Perfis novos em Usuários: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Confira o perfil de cada pessoa depois da versão 111.','Segurança (versão 110): quem é da equipe e grava precisa ligar a verificação em duas etapas no primeiro acesso (aplicativo autenticador no celular). Guarde os códigos de recuperação.','Ações sensíveis, como mexer em contas de acesso, baixar cópia de segurança ou exportar dados, pedem a senha de novo se a última confirmação tiver mais de 15 minutos.','Troca de dados bancários de fornecedor ou colaborador fica pendente até outra pessoa com permissão confirmar.','Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
   {id:'ctr2',t:'Comercial e contratos',g:'ctr',ver:'49',p:['EAP e cronograma: monte as etapas com materiais, mão de obra e ferramentas, ou importe do MS Project (Salvar como XML); envie as etapas para o projeto.','Indicadores: conversão por etapa do funil, POC, prazo médio de recebimento e inadimplência.','Oportunidade ganha: marque Resultado = Ganhamos e use Gerar contrato; no contrato, Gerar projeto cria a obra. Habilitação: anexe o PDF de cada certidão e baixe o pacote ZIP.','Oportunidades e licitações: funil com etapa, valor, chance, sessão e motivo de perda.','Habilitação: certidões com alerta de vencimento.','Contratos: planilha orçamentária, BDI, aditivos com limite legal, reajuste, garantia e retenção.','Medições: boletim por item com acumulado; ao faturar, a NFS-e é criada em rascunho.']},
   {id:'srv',t:'Serviços (PMOC e OS)',g:'serv',ver:'15',p:['Cadastre os equipamentos de cada cliente.','Contrato PMOC com responsável técnico, periodicidade e cobrança mensal; gere as preventivas do mês.','Ordem de serviço com checklist, materiais, fotos e assinatura do cliente no celular; ao concluir, baixa o estoque e cria a conta a receber.']},
   {id:'qld',t:'Qualidade',g:'qual',ver:'15',p:['Fichas de verificação de serviço com modelos prontos.','Reprovação vira não conformidade com causa, ação e eficácia.','Termos de recebimento provisório e definitivo e chamados de garantia.']},

@@ -59,7 +59,8 @@ module.exports = function criar(o) {
   /* ---------------- política de duas etapas e de senha ---------------- */
   const MODO_2F = () => { const v = String(env.DOIS_FATORES_OBRIGATORIO || 'equipe').toLowerCase(); return ['equipe', 'dono', 'nao'].includes(v) ? v : 'equipe'; };
   const MIN_EQ = () => Math.max(8, +env.SENHA_MINIMA_EQUIPE || 12);
-  function perfilGrava(pf) { const pr = PERM.perfis && PERM.perfis[pf]; if (!pr) return !SEM_GRAVACAO.has(pf); if (pr.w === '*') return true; return (pr.w || []).some(g => !PESSOAIS.has(g)); }
+  const PERMv = () => { try { const x = F().PERM; if (x && x.perfis) return x; } catch (e) { } return PERM; }; /* v114: o mapa do server.js já inclui os perfis personalizados */
+  function perfilGrava(pf) { const P = PERMv(), pr = P.perfis && P.perfis[pf]; if (!pr) return !SEM_GRAVACAO.has(pf); if (pr.w === '*') return true; return (pr.w || []).some(g => !PESSOAIS.has(g)); }
   function equipeQueGrava(c) { if (!c) return false; if (c.nivel === 'owner') return true; if ((NIV[c.nivel] || 0) < NIV.admin) return false; return perfilGrava(F().perfilDe(c)); }
   function exige2f(c) { const m = MODO_2F(); if (m === 'nao' || !c) return false; if (c.nivel === 'owner') return true; if (m === 'dono') return false; return equipeQueGrava(c); }
   const minSenha = c => equipeQueGrava(c) ? MIN_EQ() : 8;
@@ -154,8 +155,9 @@ module.exports = function criar(o) {
   const apcAssina = t => crypto.createHmac('sha256', apcChave()).update(t).digest('base64url');
   function aparelhoElegivel(c) {
     if (!APC_LIGADO() || !c || c.nivel === 'owner') return false;
-    const pf = F().perfilDe(c); if (['admin', 'financeiro', 'diretoria'].includes(pf)) return false;
-    const pr = PERM.perfis && PERM.perfis[pf]; if (pr && (pr.w === '*' || pr.r === '*' || (pr.w || []).includes('fin'))) return false;
+    const pf = F().perfilDe(c), P = PERMv(); if (['admin', 'financeiro', 'diretoria'].includes(pf)) return false;
+    const pr = P.perfis && P.perfis[pf]; if (pr && (pr.w === '*' || pr.r === '*' || (pr.w || []).includes('fin'))) return false;
+    if (pr && pr.custom && (pr.banco || pr.aprovDir || pr.sensRh)) return false; /* v114: personalizado com dados bancários, RH ou decisão da diretoria não usa aparelho confiável */
     return true;
   }
   /* devolve o cabeçalho Set-Cookie do aparelho confiável (para somar ao da sessão) */
