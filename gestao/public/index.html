@@ -19544,9 +19544,923 @@ function pedAprovadoPara(nota){const n=typeof nota==='string'?get('notas',nota):
   if(base.valorNota>base.valorAprovado+base.tolerancia+0.005)return nao('Nota de '+money(base.valorNota)+' acima do aprovado no pedido ('+money(base.valorAprovado)+' + tolerância de '+money(base.tolerancia)+').',base);
   return Object.assign({ok:true,motivo:'Aprovação herdada do pedido nº '+p.numero+'.'},base);}
 
+/* ===== v112 (J1): parecer jurídico — empréstimos, descontos, desligamento e férias =====
+   1. Empréstimos (A6): padrão sem juros; juros só simples e até a taxa máxima configurada; contrato sem "tabela Price";
+      bloqueio pela soma de todos os descontos do mês do colaborador (empréstimo, adiantamento, extravio, multa e eventos
+      lançados na folha) acima de um percentual do salário; na rescisão, compensações limitadas a uma remuneração (art. 477 § 5º).
+   2. Descontos por dano, extravio e multa (A7): apuração registrada (fato, defesa, decisão, quem decidiu), cláusula prévia de
+      desconto por dano culposo (cadastro do colaborador ou padrão da empresa; sem ela, só dolo comprovado) e termo preenchido.
+   3. Desligamento (A8): perguntas obrigatórias de garantia de emprego, estabilidade da gestante pela data do parto, liberação só
+      com parecer jurídico anexado e pedido de demissão de próprio punho anexado (o sistema não redige mais o pedido).
+   4. Férias (A5): períodos que não aparecem na escala da contabilidade ficam "a conferir" até anexar recibo e aviso;
+      alertas do art. 137 (dobro) e do art. 145 (pagamento até 2 dias antes). */
+
+/* ---------- configuração ---------- */
+const JUR1_DEF={emJuros:false,emJurosMax:1,descPct:30,descBase:'liquido',clDanoPadrao:false};
+function jur1Cfg(){const c=Object.assign({},JUR1_DEF,cfg().jur1||{});c.emJurosMax=Math.max(0,+c.emJurosMax||0);c.descPct=Math.max(1,Math.min(100,+c.descPct||30));return c;}
+function jur1Grava(p){put('cfg',Object.assign(cl(cfg()),{jur1:Object.assign({},cfg().jur1||{},p)}));}
+function jur1CfgAplicar(v){const p={};
+  if(v.emJuros!==undefined)p.emJuros=v.emJuros==='sim'||v.emJuros===true;
+  if(v.emJurosMax!==undefined&&v.emJurosMax!==null&&v.emJurosMax!==''){const n=+v.emJurosMax;if(isNaN(n)||n<0||n>10)return 'Taxa máxima de juros entre 0% e 10% ao mês.';p.emJurosMax=n;}
+  if(v.descPct!==undefined&&v.descPct!==null&&v.descPct!==''){const n=+v.descPct;if(isNaN(n)||n<1||n>70)return 'Limite de descontos entre 1% e 70%.';p.descPct=n;}
+  if(v.descBase!==undefined)p.descBase=v.descBase==='bruto'?'bruto':'liquido';
+  if(v.clDanoPadrao!==undefined)p.clDanoPadrao=v.clDanoPadrao==='sim'||v.clDanoPadrao===true;
+  jur1Grava(p);return '';}
+const JUR1_TXT_LIM=c=>'A soma de todos os descontos do mês de cada colaborador (empréstimo, adiantamento, extravio, multa e eventos lançados na folha) não pode passar de <b>'+c.descPct+'% do salário '+(c.descBase==='bruto'?'bruto':'líquido estimado (salário menos INSS e IRRF)')+'</b>. Esse percentual é uma referência de prudência: a margem de 35% da Lei 10.820/2003 vale para o consignado com bancos, e a lei não fixa um teto específico para o empréstimo feito pela própria empresa. Confirme o percentual com o advogado da empresa.';
+A.jurCfgAbrir=()=>{const c=jur1Cfg(),w=mayW('cfg');
+  modal({title:'Empréstimos e descontos em folha: regras',wide:true,body:'<div class="fg">'+
+    field('Cobrar juros nos empréstimos a colaboradores','emJuros','select',c.emJuros?'sim':'nao',{opts:[['nao','Não (padrão: sem juros)'],['sim','Sim, juros simples até a taxa máxima']]})+
+    field('Taxa máxima de juros simples (% ao mês)','emJurosMax','number',c.emJurosMax)+
+    field('Limite da soma dos descontos do mês (%)','descPct','number',c.descPct)+
+    field('Base do limite','descBase','select',c.descBase,{opts:[['liquido','Salário líquido estimado (salário − INSS − IRRF)'],['bruto','Salário bruto']]})+
+    field('O contrato de trabalho padrão da empresa prevê desconto por dano culposo','clDanoPadrao','select',c.clDanoPadrao?'sim':'nao',{opts:[['nao','Não (desconto por dano só com dolo comprovado)'],['sim','Sim, a cláusula consta dos contratos assinados']],full:true})+'</div>'+
+    '<div class="note" style="margin-top:10px"><b>Juros.</b> Se a empresa optar por juros, o sistema usa só juros simples (sem capitalização e sem tabela Price), limitados à taxa acima. Confirme a taxa com o advogado da empresa antes de ligar esta opção (Código Civil, arts. 406 e 591, e Lei de Usura).</div>'+
+    '<div class="note" style="margin-top:8px"><b>Limite de descontos.</b> '+JUR1_TXT_LIM(c)+' Na rescisão, as compensações (empréstimo, multa, extravio, adiantamento) ficam limitadas a uma remuneração mensal (CLT art. 477, § 5º).</div>'+
+    '<div class="note" style="margin-top:8px"><b>Dano culposo.</b> A CLT (art. 462, § 1º) só permite descontar dano causado por culpa quando isso foi combinado antes, no contrato de trabalho. Cada colaborador pode ter a resposta própria no cadastro (Colaboradores › Editar › Descontos); quando não informada, vale a resposta acima.</div>',
+    saveLabel:'Salvar',save:w?root=>{const e=jur1CfgAplicar(readForm(root));if(e){toast(e,'neg');return false;}toast('Regras salvas.','pos');render();}:null});};
+ACT_GROUP.jurCfgAbrir=null;
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!mayR('cfg'))return h;const c=jur1Cfg();
+  const card='<div class="card" id="jur1CfgBox"><h2>Empréstimos, descontos em folha e dano</h2><p style="margin:0 0 6px">Juros nos empréstimos: <b>'+(c.emJuros?'juros simples até '+String(c.emJurosMax).replace('.',',')+'% ao mês':'sem juros')+'</b> · limite da soma dos descontos do mês: <b>'+c.descPct+'% do salário '+(c.descBase==='bruto'?'bruto':'líquido')+'</b> · contrato padrão prevê desconto por dano culposo: <b>'+(c.clDanoPadrao?'sim':'não')+'</b>.</p><div class="acts" style="justify-content:flex-start"><button class="btn" data-act="jurCfgAbrir">'+(mayW('cfg')?'Alterar regras':'Ver regras')+'</button></div></div>';
+  const j=h.lastIndexOf('</div>');return j>0?h.slice(0,j)+card+h.slice(j):h+card;};}
+
+/* ---------- soma dos descontos do mês ---------- */
+function jurBase(f){const c=jur1Cfg(),sal=+(f&&f.salario)||0;if(!sal)return {sal:0,base:0,lim:0,pct:c.descPct,tipo:c.descBase};let base=sal;
+  if(c.descBase!=='bruto'){const P=dpPar(),inss=calcINSS(sal,P);let ir=0;try{ir=+calcIRRF(sal,inss,+f.depIR||0,0,P).irrf||0;}catch(e){ir=0;}base=r2(sal-inss-ir);}
+  return {sal,base,lim:r2(base*c.descPct/100),pct:c.descPct,tipo:c.descBase};}
+/* parcelas do desconto de extravio (só as concluídas com o fluxo novo: valor, parcelas e mês inicial) */
+function jurExtrParcelas(o){if(!o||o.status!=='concluida'||o.destino!=='desconto'||!o.resp||o.descCancelado||!/^\d{4}-\d{2}$/.test(o.descIni||''))return [];
+  const v=r2(+o.descValor||+o.valor||0);if(!(v>0))return [];const n=Math.max(1,Math.min(24,Math.round(+o.descParc||1))),pv=r2(v/n),out=[];
+  for(let k=0;k<n;k++)out.push({n:k+1,comp:addMonths(o.descIni,k),valor:k===n-1?r2(v-pv*(n-1)):pv});return out;}
+function jurDescMes(fid,m,excl){excl=excl||{};const out=[],sk=(t,id)=>excl.t===t&&excl.id===id;
+  (S.emprest||[]).forEach(e=>{if(e.funcId!==fid||e.status!=='ativo'||e.forma!=='folha'||sk('emprest',e.id))return;(e.parcelas||[]).forEach(p=>{if(p.comp===m&&!p.pago)out.push({t:'emprest',id:e.id,desc:'empréstimo nº '+e.numero,valor:r2(+p.valor||0)});});});
+  (S.adto||[]).forEach(a=>{if(a.funcId!==fid||a.status==='cancelado'||sk('adto',a.id))return;(a.movs||[]).forEach(x=>{if(x.t==='desc'&&x.comp===m)out.push({t:'adto',id:a.id,desc:'adiantamento nº '+a.numero,valor:r2(+x.valor||0)});});});
+  if(typeof multaDescParcelas==='function')(S.multa||[]).forEach(x=>{if(x.funcId!==fid||sk('multa',x.id))return;const p=multaDescParcelas(x).find(p=>p.comp===m);if(p)out.push({t:'multa',id:x.id,desc:'multa'+(x.auto?' '+x.auto:''),valor:r2(p.valor)});});
+  (S.obrextr||[]).forEach(o=>{if(o.resp!==fid||sk('obrextr',o.id))return;const p=jurExtrParcelas(o).find(p=>p.comp===m);if(p)out.push({t:'obrextr',id:o.id,desc:'extravio nº '+o.numero,valor:p.valor});});
+  (S.fpag||[]).forEach(x=>{if(x.funcId!==fid||x.comp!==m||(x.tipo||'mensal')!=='mensal'||sk('aj',x.id))return;(x.ajustes||[]).forEach(a=>{if(+a.dsc>0)out.push({t:'aj',id:x.id,desc:'evento "'+String(a.desc||'').slice(0,40)+'"',valor:r2(+a.dsc)});});});
+  return out;}
+/* novos: [{comp,valor}] — devolve a mensagem de bloqueio ou '' */
+function jurLimiteErro(fid,novos,excl){const f=get('func',fid);if(!f)return '';const b=jurBase(f);if(!b.lim)return '';const by={};
+  (novos||[]).forEach(n=>{if(!n||!n.comp)return;by[n.comp]=r2((by[n.comp]||0)+(+n.valor||0));});
+  for(const m of Object.keys(by).sort()){const ex=jurDescMes(fid,m,excl),tot=r2(sum(ex,x=>x.valor)+by[m]);
+    if(tot>b.lim+0.009)return 'Limite de descontos: na folha de '+fmtYm(m)+' os descontos de '+f.nome+' somariam '+money(tot)+' ('+(ex.length?ex.map(x=>x.desc+' '+money(x.valor)).join(', ')+' + ':'')+'este '+money(by[m])+'), acima de '+b.pct+'% do salário '+(b.tipo==='bruto'?'bruto':'líquido estimado')+' ('+money(b.lim)+'). Reduza o valor, aumente o número de parcelas ou comece mais tarde.';}
+  return '';}
+
+/* ---------- 1. empréstimos ---------- */
+/* parcelas: sem juros, valor igual; com juros, juros SIMPLES sobre o valor emprestado (sem capitalização). A última absorve o arredondamento. */
+emGerar=function(valor,n,juros,inicio){const P=r2(+valor||0),N=Math.max(1,Math.min(60,Math.round(+n||1))),i=Math.max(0,+juros||0)/100,am=r2(P/N),jm=i>0?r2(P*i):0,out=[];let saldo=P;
+  for(let k=1;k<=N;k++){const a=k===N?r2(saldo):am;saldo=r2(saldo-a);out.push({n:k,comp:addMonths(inicio,k-1),valor:r2(a+jm),amort:a,juros:jm,pago:'',via:''});}
+  return out;};
+function jurEmErro(v,exclId){const c=jur1Cfg(),j=+v.juros||0;
+  if(j<0)return 'Os juros não podem ser negativos.';
+  if(j>0&&!c.emJuros)return 'A empresa está configurada para empréstimos sem juros (Sistema › Configurações › Empréstimos e descontos). Deixe os juros em 0%.';
+  if(j>c.emJurosMax+1e-9)return 'Juros acima da taxa máxima configurada ('+String(c.emJurosMax).replace('.',',')+'% ao mês, juros simples). Confirme a taxa com o advogado da empresa.';
+  if(v.forma==='folha'&&v.funcId&&+v.valor>0&&v.inicio){const ps=emGerar(v.valor,v.n,j,v.inicio);return jurLimiteErro(v.funcId,ps.map(p=>({comp:p.comp,valor:p.valor})),exclId?{t:'emprest',id:exclId}:null);}
+  return '';}
+A.emNovo=()=>{const fs=S.func.filter(x=>x.status!=='desligado').slice().sort(byNome).map(x=>[x.id,x.nome]);if(!fs.length){toast('Cadastre os colaboradores primeiro.','neg');return;}
+  const ini=addMonths(todayStr().slice(0,7),1),c=jur1Cfg();
+  const fJ=c.emJuros?field('Juros simples ao mês (%) · máx. '+String(c.emJurosMax).replace('.',','),'juros','number',0):'<input type="hidden" data-f="juros" id="f_juros" value="0">';
+  modal({title:'Novo empréstimo a colaborador',wide:true,body:'<div class="fg">'+field('Colaborador *','funcId','select','',{opts:fs,blank:'Selecione…',full:true})+field('Data do contrato *','data','date',todayStr())+field('Valor emprestado (R$) *','valor','number','')+field('Número de parcelas *','n','number',6)+fJ+
+    field('Primeira parcela (mês) *','inicio','month',ini)+field('Forma de pagamento','forma','select','folha',{opts:[['folha','Desconto em folha (com autorização)'],['pix','PIX ou transferência'],['dinheiro','Dinheiro']]})+field('Finalidade (opcional)','finalidade','text','',{full:true})+
+    field('Conta de onde sai o dinheiro','contaId','select',S.conta[0]?S.conta[0].id:'',{opts:S.conta.map(c=>[c.id,c.nome]),blank:'Não lançar no financeiro'})+field('Testemunha 1 (nome)','test1','text','')+field('Testemunha 2 (nome)','test2','text','')+field('Observações','obs','textarea','',{full:true,rows:2})+'</div><p class="sub" id="emPrev" style="margin:10px 0 0">Preencha valor e parcelas para ver a parcela.</p>'+
+    '<div class="note" style="margin-top:10px">'+(c.emJuros?'Juros simples sobre o valor emprestado, sem capitalização. Confirme a taxa com o advogado da empresa. ':'Empréstimo sem juros e sem correção (padrão da empresa). ')+JUR1_TXT_LIM(c)+'</div>',saveLabel:'Criar empréstimo',
+    save:root=>{const v=readForm(root);if(!v.funcId){toast('Escolha o colaborador.','neg');return false;}if(!(+v.valor>0)){toast('Informe o valor.','neg');return false;}if(!(+v.n>=1&&+v.n<=60)){toast('Parcelas entre 1 e 60.','neg');return false;}if(!v.inicio){toast('Informe o mês da primeira parcela.','neg');return false;}
+      const er=jurEmErro(v);if(er){toast(er,'neg');return false;}
+      const fn=get('func',v.funcId),ps=emGerar(v.valor,v.n,v.juros,v.inicio);
+      const id=uid(),num=String(S.emprest.reduce((m,e)=>Math.max(m,+e.numero||0),0)+1).padStart(4,'0');
+      let lid='';if(v.contaId){lid=uid();put('lanc',{id:lid,tipo:'pagar',desc:'Empréstimo nº '+num+' a '+fn.nome,valor:r2(+v.valor),venc:v.data,comp:ym(v.data),pago:v.data,valorPago:r2(+v.valor),contaId:v.contaId,categoria:EM_CAT,status:'aberto',estoqueValor:0,emprestId:id,comum:false,projId:'',parcId:'',obs:'Liberação de empréstimo a colaborador (não entra no DRE).'});}
+      put('emprest',{id,numero:num,funcId:v.funcId,data:v.data,valor:r2(+v.valor),n:+v.n,juros:+v.juros||0,jurosTipo:'simples',inicio:v.inicio,forma:v.forma,finalidade:v.finalidade||'',contaId:v.contaId||'',test1:v.test1||'',test2:v.test2||'',obs:v.obs||'',status:'ativo',parcelas:ps,liberadoLancId:lid,por:actorId(),em:Date.now()});
+      closeModal();toast('Empréstimo nº '+num+' criado. Imprima o contrato para assinatura.','pos');setTimeout(()=>A.emContrato({xid:id}),200);return false;}});};
+{const a0=A.emEditar;A.emEditar=d=>{const antes=mSave;a0(d);if(!mSave||mSave===antes)return;const s0=mSave,e=get('emprest',d.xid);if(!e)return;
+  mSave=root=>{const v=readForm(root);let er='';
+    if(v.valor!=null&&v.valor!==''&&v.n!=null){er=jurEmErro(Object.assign({},v,{forma:v.forma||e.forma}),e.id);if(!er&&+v.juros!==+e.juros)v.__jt=1;}
+    else if(v.forma==='folha'&&e.forma!=='folha')er=jurLimiteErro(e.funcId,emAbertas(e).map(p=>({comp:p.comp,valor:p.valor})),{t:'emprest',id:e.id});
+    if(er){toast(er,'neg');return false;}const r=s0(root);if(r!==false&&v.__jt){const n=get('emprest',e.id);if(n)put('emprest',Object.assign(cl(n),{jurosTipo:'simples'}));}return r;};};}
+/* contrato: sem "tabela Price"; juros simples; cláusula do limite de descontos */
+function jurContratoTxt(raw,e){if(!raw||!e)return raw;const c=jur1Cfg();
+  raw=raw.replace(/\s*\(tabela Price\)/g,'');
+  if(+e.juros>0)raw=raw.replace(/com juros de ([0-9.,]+)% ao mês/,e.jurosTipo==='simples'?'com juros simples de $1% ao mês sobre o valor emprestado, sem capitalização':'com juros de $1% ao mês, conforme a tabela de parcelas');
+  if(e.forma==='folha'&&!/Cláusula 7ª/.test(raw)){const k=raw.indexOf('<p>E, por estarem de acordo');const cl7='<p><b>Cláusula 7ª.</b> Somadas aos demais descontos autorizados do mês, as parcelas descontadas em folha não passarão de '+c.descPct+'% do salário '+(c.descBase==='bruto'?'bruto':'líquido')+' do(a) EMPREGADO(A). Se em algum mês a soma passar desse limite, a parcela é transferida para o mês seguinte ou paga diretamente.</p>';if(k>=0)raw=raw.slice(0,k)+cl7+raw.slice(k);else raw+=cl7;}
+  return raw;}
+{const a0=A.emContrato;A.emContrato=d=>{const e=get('emprest',d&&(d.xid||d.id));const sd=showDoc;showDoc=function(o){if(o&&o.raw)o.raw=jurContratoTxt(o.raw,e);return sd.apply(this,arguments);};try{a0(d);}finally{showDoc=sd;}};}
+{const v0=V.emprest;V.emprest=function(){let h=v0.apply(this,arguments);const c=jur1Cfg();
+  h=h.replace(/Recomenda-se que a parcela não passe de 30% do salário\./,'Limite: '+JUR1_TXT_LIM(c).replace(/<\/?b>/g,'')+' '+(c.emJuros?'Juros: só simples, até '+String(c.emJurosMax).replace('.',',')+'% ao mês.':'Os empréstimos são sem juros (padrão).'));
+  h=h.replace('<div class="acts">','<div class="acts"><button class="btn" data-act="jurCfgAbrir">Regras de juros e descontos</button>');return h;};}
+/* rescisão: todas as compensações juntas, limitadas a uma remuneração (art. 477 § 5º) */
+function jurFolhaFechada(fid,comp){return S.fpag.some(x=>x.funcId===fid&&x.comp===comp&&(x.tipo||'mensal')==='mensal'&&x.status==='fechada');}
+function jurDebitosRescisao(f){const out=[];
+  (S.emprest||[]).filter(e=>e.funcId===f.id&&e.status==='ativo').forEach(e=>{const s=emSaldo(e);if(s>0)out.push({t:'emprest',desc:'Empréstimo nº '+e.numero+': saldo devedor',valor:r2(s)});});
+  if(typeof multaDescParcelas==='function')(S.multa||[]).filter(x=>x.funcId===f.id).forEach(x=>{const v=r2(sum(multaDescParcelas(x).filter(p=>!jurFolhaFechada(f.id,p.comp)),p=>p.valor));if(v>0)out.push({t:'multa',desc:'Multa de trânsito'+(x.auto?' (auto '+x.auto+')':'')+': saldo autorizado',valor:v});});
+  (S.obrextr||[]).filter(o=>o.resp===f.id).forEach(o=>{const v=r2(sum(jurExtrParcelas(o).filter(p=>!jurFolhaFechada(f.id,p.comp)),p=>p.valor));if(v>0)out.push({t:'obrextr',desc:'Extravio nº '+o.numero+': saldo autorizado',valor:v});});
+  (S.adto||[]).filter(a=>a.funcId===f.id&&a.status!=='cancelado').forEach(a=>{const v=r2(sum((a.movs||[]).filter(x=>x.t==='desc'&&!jurFolhaFechada(f.id,x.comp)),x=>+x.valor||0));if(v>0)out.push({t:'adto',desc:'Adiantamento nº '+a.numero+': desconto autorizado',valor:v});});
+  return out;}
+{const dl=deslCalc;deslCalc=function(r){const c=dl.apply(this,arguments),f=get('func',r&&r.funcId);if(!f||!c||!c.itens)return c;
+  const it=c.itens.filter(i=>!/^Empréstimo nº /.test(i.desc)),deb=jurDebitosRescisao(f),lim=r2(+f.salario||0);let tot=0,exc=0;
+  deb.forEach(d=>{const v=lim>0?Math.max(0,Math.min(d.valor,r2(lim-tot))):d.valor;if(v>0){tot=r2(tot+v);it.push({desc:d.desc+(v<d.valor?' (limitado a uma remuneração, art. 477 § 5º; restam '+money(r2(d.valor-v))+')':''),ref:'',prov:0,dsc:r2(v)});}if(v<d.valor)exc=r2(exc+d.valor-v);});
+  c.itens=it;c.dsc=r2(sum(it,x=>+x.dsc||0));c.liquido=r2((+c.prov||0)-c.dsc);c.jurComp={tot,lim,exc};
+  let av='';if(exc>0)av+=' Compensações limitadas a uma remuneração (CLT art. 477, § 5º): '+money(exc)+' não pode(m) ser descontado(s) na rescisão; a cobrança é à parte, combinada por escrito.';
+  try{if(ferPeriodos(f).some(p=>p.aConferir))av+=' Há período(s) de férias "a conferir" (não aparecem na escala da contabilidade e não têm recibo anexado): confirme com a contabilidade antes do TRCT.';}catch(e){}
+  if(av)c.saldoFgtsAviso=(c.saldoFgtsAviso||'')+av+' ';return c;};}
+
+/* ---------- anexos dentro de formulário e de registro ---------- */
+const JA={tab:'',rid:'',keys:[],k:{},busy:0};
+function jaBox(){return JA.keys.map(([k,l,dica])=>{const ls=JA.k[k]||[];return '<div style="margin:6px 0"><div class="sect" style="margin:8px 0 4px">'+esc(l)+' ('+ls.length+')</div>'+(ls.length?'<div style="display:flex;gap:8px;flex-wrap:wrap">'+ls.map((a,i)=>'<span class="sub"><a href="/_blob/'+esc(a.id)+'" target="_blank" rel="noopener">'+esc(String(a.nome||'arquivo').slice(0,50))+'</a> <button type="button" class="btn sm dng" data-act="jaTira" data-k="'+esc(k)+'" data-i="'+i+'">Remover</button></span>').join('')+'</div>':'<p class="sub" style="margin:0">'+esc(dica||'Nenhum arquivo.')+'</p>')+'<div class="acts" style="margin-top:4px"><button type="button" class="btn sm" data-act="jaAdd" data-k="'+esc(k)+'">Anexar arquivo</button>'+(JA.busy?'<span class="sub">Enviando…</span>':'')+'</div></div>';}).join('');}
+function jaRender(){const b=$('#jaWrap');if(b)b.innerHTML=jaBox();}
+function jaAbre(tab,rid,keys,rec){JA.tab=tab;JA.rid=rid;JA.keys=keys;JA.busy=0;JA.k={};keys.forEach(([k])=>{JA.k[k]=anxArr(rec||{},k).slice();});}
+A.jaAdd=d=>{if(store.mode!=='db'){toast('Anexos funcionam na página publicada.','neg');return;}const k=d.k,alvo=JA.rid;
+  arqEscolher('application/pdf,.pdf,image/*',async fs=>{JA.busy++;jaRender();for(const f of fs){try{const a=await arqSalvar(f);if(JA.rid===alvo)(JA.k[k]=JA.k[k]||[]).push(a);}catch(e){toast(f.name+': '+arqErr(e),'neg');}}JA.busy=Math.max(0,JA.busy-1);jaRender();},true);};
+A.jaTira=d=>{(JA.k[d.k]||[]).splice(+d.i,1);jaRender();};
+Object.assign(ACT_GROUP,{jaAdd:null,jaTira:null});
+const jurAnxTem=(r,k)=>anxArr(r,k).length>0;
+
+/* ---------- 2. descontos por dano, extravio e multa ---------- */
+{const d=MODS2.func;if(d){const f0=d.fields,b0=d.blank;d.fields=r=>f0(r).concat([{t:'sect',l:'Descontos (CLT art. 462, § 1º)'},F('clDano','O contrato de trabalho prevê desconto por dano culposo','select',{o:[['sim','Sim (cláusula assinada no contrato)'],['nao','Não']],blank:'Não informado (vale o padrão da empresa)'})]);if(b0)d.blank=()=>Object.assign(b0(),{clDano:''});}}
+function jurClausula(f){const c=jur1Cfg();return !!f&&(f.clDano==='sim'||(f.clDano!=='nao'&&c.clDanoPadrao));}
+const JUR_NAT=[['culpa','Culpa (descuido, imprudência)'],['dolo','Dolo (intenção comprovada)']];
+function jurApurErro(ap,fid){const f=get('func',fid),t=s=>String(s||'').trim();
+  if(t(ap.apFato).length<5)return 'Registre o fato apurado (o que aconteceu).';
+  if(t(ap.apDefesa).length<3)return 'Registre a defesa do colaborador (a versão dele). Se ele não quis se manifestar, escreva isso.';
+  if(t(ap.apDecisao).length<5)return 'Registre a decisão e o motivo.';
+  if(t(ap.apDecPor).length<3)return 'Informe quem decidiu.';
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(ap.apDecEm||''))return 'Informe a data da decisão.';
+  if(!JUR_NAT.some(x=>x[0]===ap.apNatureza))return 'Informe se o dano foi por culpa ou por dolo.';
+  if(ap.apNatureza==='culpa'&&!jurClausula(f))return 'Sem cláusula de desconto por dano culposo no contrato de trabalho (cadastro do colaborador ou Sistema › Configurações), o desconto só é permitido com dolo comprovado (CLT art. 462, § 1º).';
+  if(ap.apNatureza==='dolo'&&t(ap.apDoloProva).length<10)return 'Descreva a prova do dolo (intenção): testemunhas, imagens, documentos.';
+  return '';}
+const jurApurCampos=(o,fatoLabel)=>(fatoLabel?field(fatoLabel,'apFato','textarea',o.apFato||'',{full:true,rows:2}):'')+field('Defesa do colaborador (versão dele) *','apDefesa','textarea',o.apDefesa||'',{full:true,rows:2})+field('Decisão e motivo *','apDecisao','textarea',o.apDecisao||'',{full:true,rows:2})+field('Quem decidiu *','apDecPor','text',o.apDecPor||'')+field('Data da decisão *','apDecEm','date',o.apDecEm||'')+field('Natureza *','apNatureza','select',o.apNatureza||'',{opts:JUR_NAT,blank:'Selecione…'})+field('Prova do dolo (se dolo)','apDoloProva','text',o.apDoloProva||'',{full:true});
+const JUR_AP_K=['apFato','apDefesa','apDecisao','apDecPor','apDecEm','apNatureza','apDoloProva'];
+const jurApurPega=v=>{const o={};JUR_AP_K.forEach(k=>{if(v[k]!==undefined)o[k]=v[k];});return o;};
+/* extravio: apuração completa e parcelas do desconto na folha */
+{const c0=obrExtrConcluir;obrExtrConcluir=function(o,v){v=v||{};let ex=null;
+  if(v.destino==='desconto'&&o){const fid=v.resp;if(fid){const ap=Object.assign({},v,{apFato:v.apFato||v.apuracao});const e=jurApurErro(ap,fid);if(e)return e;
+      const vd=r2(+v.descValor||+v.valor||+o.valor||0);if(!(vd>0))return 'Informe o valor a descontar.';const n=Math.max(1,Math.min(24,Math.round(+v.descParc||1)));const ini=/^\d{4}-\d{2}$/.test(v.descIni||'')?v.descIni:addMonths(ym(todayStr()),1);
+      ex=Object.assign(jurApurPega(ap),{descValor:vd,descParc:n,descIni:ini});
+      if(v.autDescEm){const ps=jurExtrParcelas({status:'concluida',destino:'desconto',resp:fid,descValor:vd,descParc:n,descIni:ini});const le=jurLimiteErro(fid,ps,{t:'obrextr',id:o.id});if(le)return le;}}}
+  const r=c0.apply(this,arguments);if(r)return r;
+  if(ex){const n=get('obrextr',o.id);if(n)put('obrextr',Object.assign(cl(n),ex));}return '';};}
+{const a0=A.obrExtrApurar;A.obrExtrApurar=d=>{a0(d);const o=get('obrextr',d.id),fg=$('#mb .fg');if(!o||!fg||typeof fg.insertAdjacentHTML!=='function')return;const c=jur1Cfg();
+  fg.insertAdjacentHTML('beforeend','<div class="sect" style="grid-column:1/-1;margin:10px 0 0">Se o destino for desconto: apuração e autorização</div>'+jurApurCampos(o)+field('Valor a descontar (R$)','descValor','number',o.descValor||'')+field('Parcelas do desconto','descParc','number',o.descParc||1)+field('Desconto a partir da folha de','descIni','month',o.descIni||addMonths(ym(todayStr()),1))+
+    '<p class="sub" style="grid-column:1/-1;margin:4px 0 0">Antes de descontar: ouça o colaborador, registre a decisão e quem decidiu. Dano por culpa só pode ser descontado se o contrato de trabalho tiver a cláusula (cadastro do colaborador; padrão da empresa: '+(c.clDanoPadrao?'sim':'não')+'); sem ela, só com dolo comprovado. Imprima o termo já preenchido, colha a assinatura e informe a data acima. A soma dos descontos do mês respeita o limite de '+c.descPct+'%.</p>');
+  const mf=$('#mf');if(mf&&mf.insertAdjacentHTML)mf.insertAdjacentHTML('afterbegin','<button class="btn" data-act="jurExtrTermo" data-id="'+esc(o.id)+'" style="margin-right:auto">Termo de autorização</button>');};}
+function jurFormVal(k){try{const el=document.getElementById('f_'+k);return el&&el.value!=null?String(el.value).trim():'';}catch(e){return '';}}
+function jurExtrTermoDoc(o,v){const c=cfg(),fid=v.resp||o.resp||o.funcId,f=get('func',fid)||{},emp=c.razao||c.fantasia||'[EMPRESA]';
+  const vd=r2(+v.descValor||+o.descValor||+v.valor||+o.valor||0),n=Math.max(1,Math.round(+v.descParc||+o.descParc||1)),ini=v.descIni||o.descIni||'',nat=v.apNatureza||o.apNatureza||'',fato=v.apuracao||o.apuracao||'';
+  const g=k=>v[k]||o[k]||'';
+  return {tipo:'Autorização de desconto · dano ou extravio',numero:o.numero,meta:[['Empresa',emp],['Colaborador(a)',f.nome||''],['CPF',f.cpf||''],['Item',typeof ferrNome==='function'?ferrNome(o.ferrId):''],['Obra',typeof projNome==='function'?projNome(o.projId):''],['Valor a descontar',money(vd)],['Parcelas',n+' de '+money(r2(vd/n))],['A partir da folha de',ini?fmtYm(ini):'']],
+    raw:'<p><b>Motivo:</b> '+esc(fato||'extravio do item acima')+'.</p><p><b>Apuração:</b> defesa do colaborador: '+esc(g('apDefesa')||'—')+'. Decisão: '+esc(g('apDecisao')||'—')+(g('apDecPor')?', por '+esc(g('apDecPor')):'')+(g('apDecEm')?', em '+fmtDate(g('apDecEm')):'')+'.</p>'+
+      '<p>Eu, <b>'+esc(f.nome||'')+'</b>'+(f.cpf?', CPF '+esc(f.cpf):'')+', autorizo '+esc(emp)+' a descontar do meu salário o valor de <b>'+money(vd)+'</b>, em <b>'+n+' parcela(s)</b>'+(ini?' a partir da folha de <b>'+fmtYm(ini)+'</b>':'')+', nos termos do art. 462, § 1º, da CLT, '+(nat==='dolo'?'por ter sido apurado que o dano foi causado com dolo':'conforme a cláusula de desconto por dano culposo do meu contrato de trabalho')+'.</p><p>Declaro que pude apresentar a minha versão dos fatos antes desta decisão e que esta autorização vale só para este caso.</p>',
+    sign:[(f.nome||'Colaborador(a)'),emp,'Testemunha']};}
+A.jurExtrTermo=d=>{const o=get('obrextr',d.id);if(!o)return;const v={};['apuracao','resp','valor','descValor','descParc','descIni','apNatureza','apDefesa','apDecisao','apDecPor','apDecEm'].forEach(k=>{const x=jurFormVal(k);if(x)v[k]=x;});
+  showDoc(jurExtrTermoDoc(o,v),slug('autorizacao-desconto-extravio-'+o.numero));};
+ACT_GROUP.jurExtrTermo=null;
+{const v0=V.obrextr;if(v0)V.obrextr=function(){let h=v0.apply(this,arguments);
+  S.obrextr.filter(o=>o.status==='concluida'&&o.destino==='desconto').forEach(o=>{const m='data-act="obrExtrApurar" data-id="'+o.id+'">';const i=h.indexOf(m);if(i<0)return;const j=h.indexOf('</button>',i);if(j<0)return;h=h.slice(0,j+9)+'<button class="btn sm" data-act="jurExtrTermo" data-id="'+o.id+'">Termo</button>'+h.slice(j+9);});
+  return h.replace('<div class="stack">','<div class="stack"><div class="note">Desconto por extravio: só depois da apuração registrada (fato, defesa do colaborador, decisão e quem decidiu), com termo preenchido e assinado. Dano por culpa exige cláusula prévia no contrato de trabalho; sem ela, só com dolo comprovado. O desconto entra na prévia da folha e conta no limite mensal de descontos.</div>');};}
+/* folha: parcela do desconto de extravio */
+{const dc=dpCalcMensal;dpCalcMensal=function(f,m,P){const r=dc.apply(this,arguments);if(!f||!r||!r.itens)return r;let n=0;
+  (S.obrextr||[]).filter(o=>o.resp===f.id).forEach(o=>{const ps=jurExtrParcelas(o),p=ps.find(p=>p.comp===m);if(!p)return;n++;r.itens.push({cod:'097',desc:'Extravio nº '+o.numero+' · parcela '+p.n+'/'+ps.length+' · desconto autorizado'+(o.autDescEm?' em '+fmtDate(o.autDescEm):''),ref:'',prov:0,dsc:p.valor});});
+  if(n){r.dsc=r2(sum(r.itens,x=>+x.dsc||0));r.liquido=r2((+r.prov||0)-r.dsc);}return r;};}
+/* multa: apuração antes do desconto do condutor, cláusula e limite */
+{const d=MODS2.multa;if(d){const f0=d.fields,b0=d.blank,v0=d.validate;
+  d.fields=r=>f0(r).concat([{t:'sect',l:'Apuração para descontar do condutor (obrigatória se cobrar do condutor)'},F('apDefesa','Defesa do condutor (versão dele)','textarea',{full:true}),F('apDecisao','Decisão e motivo','textarea',{full:true}),F('apDecPor','Quem decidiu','text'),F('apDecEm','Data da decisão','date'),F('apNatureza','Natureza','select',{o:JUR_NAT,blank:'Selecione…'}),F('apDoloProva','Prova do dolo (se dolo)','text',{full:true}),F('descIni','Desconto a partir da folha de','month')]);
+  d.blank=()=>Object.assign(b0(),{apDefesa:'',apDecisao:'',apDecPor:'',apDecEm:'',apNatureza:'',apDoloProva:'',descIni:''});
+  d.validate=(r,n)=>{const e=v0?v0(r,n):'';if(e)return e;return jurMultaErro(r);};}}
+function jurMultaErro(r){if(!r||!r.cobrarCondutor||!r.funcId||r.status==='recorrida')return '';
+  const ap=Object.assign({},r,{apFato:r.apFato||('Infração de trânsito'+(r.infracao?' ('+r.infracao+')':'')+(r.data?' em '+r.data:''))});const e=jurApurErro(ap,r.funcId);if(e)return 'Multa: '+e;
+  if(typeof multaDescParcelas==='function'&&r.autDescEm){const ps=multaDescParcelas(r);const le=jurLimiteErro(r.funcId,ps,{t:'multa',id:r.id});if(le)return le;}return '';}
+{const a0=A.obrMultaAut;if(a0)A.obrMultaAut=d=>{const r=get('multa',d.id);const sd=showDoc;showDoc=function(o){if(o&&r){const ps=typeof multaDescParcelas==='function'?multaDescParcelas(r):[];
+      o.meta=(o.meta||[]).concat([['A partir da folha de',ps.length?fmtYm(ps[0].comp):(r.descIni?fmtYm(r.descIni):'')]]);
+      o.raw='<p><b>Motivo:</b> multa de trânsito'+(r.auto?' (auto '+esc(r.auto)+')':'')+', infração '+esc([r.codigo,r.infracao].filter(Boolean).join(' · ')||'—')+', em '+fmtDate(r.data)+(r.local?', '+esc(r.local):'')+', na condução do veículo '+esc(veicNome(r.veicId))+'.</p><p><b>Apuração:</b> defesa do condutor: '+esc(r.apDefesa||'—')+'. Decisão: '+esc(r.apDecisao||'—')+(r.apDecPor?', por '+esc(r.apDecPor):'')+(r.apDecEm?', em '+fmtDate(r.apDecEm):'')+'.</p>'+o.raw;}
+    return sd.apply(this,arguments);};try{a0(d);}finally{showDoc=sd;}};}
+/* adiantamento: termo preenchido com valor, mês e motivo; limite mensal */
+{const a0=A.adtoTermo;A.adtoTermo=d=>{const a=get('adto',d.xid);if(!a)return a0(d);const c=adtoCalc(a),vv=+jurFormVal('valor')||c.naoJust,comp=jurFormVal('comp');
+  const sd=showDoc;showDoc=function(o){if(o&&o.raw){o.raw=o.raw.replace(/<p>Valor autorizado: R\$ _+ · Parcelas: _+ · A partir da folha de _+\/_+\.<\/p>/,'<p>Valor autorizado: <b>'+money(vv)+'</b> · Parcelas: <b>1</b>'+(comp?' · Na folha de <b>'+fmtYm(comp)+'</b>':'')+'.</p><p><b>Motivo:</b> saldo de '+esc((ADTO_TIPO[a.tipo]||'adiantamento').toLowerCase())+' nº '+esc(a.numero)+' sem comprovante de despesa.</p>');o.meta=(o.meta||[]).concat([['Valor autorizado',money(vv)]]);}return sd.apply(this,arguments);};
+  try{a0(d);}finally{showDoc=sd;}};}
+{const a0=adtoDescontar;adtoDescontar=function(aid,o){const a=get('adto',aid);o=o||{};if(a&&o.autorizado&&o.comp&&+o.valor>0){const e=jurLimiteErro(a.funcId,[{comp:o.comp,valor:+o.valor}]);if(e)return {ok:false,msg:e};}return a0.apply(this,arguments);};}
+/* evento manual de desconto na folha: avisa quando passa do limite */
+{const a0=A.fpagAjuste;if(a0)A.fpagAjuste=d=>{const antes=mSave;a0(d);const x=get('fpag',d&&d.id);if(!x||!mSave||mSave===antes)return;const s0=mSave;
+  mSave=root=>{const v=readForm(root);if(+v.dsc>0){const e=jurLimiteErro(x.funcId,[{comp:x.comp,valor:+v.dsc}]);if(e)setTimeout(()=>toast('Atenção: '+e,'neg'),60);}return s0(root);};};}
+
+/* ---------- 3. desligamento e garantias de emprego ---------- */
+const JUR_DISP=['sem_justa','acordo','antec_emp'];
+const JUR_EST_Q=[['qGrav','Gravidez em curso ou suspeita, mesmo que a empresa não tenha sido avisada (a garantia independe da ciência da empresa)','gestante'],
+  ['qCipa','Membro eleito da CIPA (titular ou suplente), no mandato ou até 1 ano depois','membro eleito da CIPA'],
+  ['qSind','Dirigente sindical (candidatura registrada, mandato ou até 1 ano depois)','dirigente sindical'],
+  ['qDoenca','Doença relacionada ao trabalho, mesmo sem afastamento ou CAT','doença relacionada ao trabalho'],
+  ['qAcid','Voltou de afastamento por acidente de trabalho ou doença ocupacional há menos de 12 meses','retorno de acidente ou doença ocupacional'],
+  ['qPreap','Garantia de pré-aposentadoria prevista na convenção coletiva','pré-aposentadoria pela convenção'],
+  ['qPai','Pai com filho nascido ou adotado recentemente (licença-paternidade ou garantia a confirmar com o advogado)','pai com nascimento ou adoção recente']];
+const JUR_RESP=[['nao','Não'],['sim','Sim'],['nao_sei','Não sei']];
+{const d=MODS2.desl;if(d){const f0=d.fields,b0=d.blank;
+  d.fields=r=>f0(r).concat([{t:'sect',l:'Garantias de emprego: respostas obrigatórias na dispensa sem justa causa, no acordo, na rescisão antecipada da experiência e no pedido de demissão'}].concat(JUR_EST_Q.map(q=>F(q[0],q[1],'select',{o:JUR_RESP,blank:'Responda…',full:true})),[F('dataParto','Data do parto (se a colaboradora teve filho nos últimos meses)','date')]));
+  d.blank=()=>{const o=b0();JUR_EST_Q.forEach(q=>{o[q[0]]='';});o.dataParto='';return o;};
+  d.fnote='Na justa causa, descreva o fato, a data em que a empresa soube e as provas (o fato precisa ser grave e a punição imediata). Antes de dispensar, responda às perguntas de garantia de emprego. A estabilidade da gestante vai da confirmação da gravidez até 5 meses após o parto, mesmo que a empresa não soubesse. Havendo qualquer garantia (ou dúvida), o desligamento só é liberado com o parecer do advogado da empresa anexado. O pedido de demissão não é redigido pelo sistema: o colaborador escreve de próprio punho, assina e o arquivo é anexado aqui.';}}
+function jurPartoLim(parto){return parto?ferAddMes(parto,5):'';}
+/* garantias encontradas (automáticas e pelas respostas) */
+function jurDeslEst(r,f){const est=[],said=r.saida||todayStr();
+  if(S.cipam&&S.cipam.some(m=>m.funcId===f.id&&m.lado==='empregados'&&m.status==='ativo'))est.push('membro eleito da CIPA (cadastro da CIPA)');
+  if(S.afast.some(a=>a.funcId===f.id&&['acidente','doenca_ocup'].includes(a.tipo)&&a.status!=='cancelado'&&+a.dias>15&&afastFim(a)<=said&&dpDias(afastFim(a),said)<=365))est.push('retorno de afastamento por acidente ou doença ocupacional há menos de 12 meses (cadastro de afastamentos)');
+  if(S.afast.some(a=>a.funcId===f.id&&a.tipo==='doenca_ocup'&&a.status!=='cancelado'&&afastFim(a)>=said))est.push('afastamento por doença ocupacional em curso');
+  if(r.dataParto&&said<=jurPartoLim(r.dataParto))est.push('gestante: estabilidade até '+fmtDate(jurPartoLim(r.dataParto))+' (5 meses após o parto em '+fmtDate(r.dataParto)+')');
+  JUR_EST_Q.forEach(q=>{if(r[q[0]]==='sim')est.push(q[2]);else if(r[q[0]]==='nao_sei')est.push(q[2]+' (não confirmado)');});
+  return est;}
+function jurDeslErro(r){const f=get('func',r&&r.funcId);if(!f)return '';const disp=JUR_DISP.includes(r.tipo),ped=r.tipo==='pedido';if(!disp&&!ped)return '';
+  if(ped&&!jurAnxTem(r,'pedidoAnx'))return 'Pedido de demissão: o sistema não redige o pedido. O colaborador escreve de próprio punho, com data e assinatura; anexe a foto ou o PDF em "Pedido de demissão de próprio punho".';
+  const falta=JUR_EST_Q.filter(q=>!r[q[0]]);if(falta.length)return 'Responda às perguntas de garantia de emprego antes de '+(ped?'registrar o pedido':'confirmar o desligamento')+': '+falta.map(q=>q[2]).join(', ')+'.';
+  const mat=S.afast.some(a=>a.funcId===f.id&&/maternidade/.test(a.tipo)&&a.status!=='cancelado'&&a.ini&&dpDias(a.ini,r.saida||todayStr())<=400);
+  if(mat&&!r.dataParto)return 'Há licença-maternidade recente no cadastro: informe a data do parto (a estabilidade vai até 5 meses após o parto).';
+  const est=jurDeslEst(r,f);
+  if(est.length&&!jurAnxTem(r,'parecerAnx'))return 'Possível garantia de emprego: '+est.join('; ')+'. '+(ped?'O pedido de demissão de quem tem estabilidade só vale com assistência do sindicato (CLT art. 500). ':'')+'Para seguir, anexe o parecer do advogado da empresa em "Parecer jurídico". Uma observação escrita não libera mais o desligamento.';
+  return '';}
+{const d=MODS2.desl;if(d){const v0=d.validate,p0=d.pre;
+  /* a validação antiga liberava com a palavra "estabilidade" na observação: a checagem de estabilidade agora é a de cima */
+  d.validate=(r,n)=>{if(JA.tab==='desl'&&JA.rid===r.id){if(JA.busy)return 'Aguarde o envio dos arquivos terminar.';r.parecerAnx=(JA.k.parecerAnx||[]).slice();r.pedidoAnx=(JA.k.pedidoAnx||[]).slice();}
+    const e=v0?v0(Object.assign({},r,{obs:String(r.obs||'')+' [estabilidade conferida pelo sistema v112]'}),n):'';if(e)return e;return jurDeslErro(r);};
+  d.pre=(r,n)=>{if(JA.tab==='desl'&&JA.rid===r.id){r.parecerAnx=(JA.k.parecerAnx||[]).slice();r.pedidoAnx=(JA.k.pedidoAnx||[]).slice();}if(p0)p0(r,n);};
+  const c0=d.cols;d.cols=c0.concat([['Garantias',r=>{if(!JUR_DISP.includes(r.tipo)&&r.tipo!=='pedido')return '<span class="mut">—</span>';const e=jurDeslErro(r);return e?pill('Pendente','neg'):(jurAnxTem(r,'parecerAnx')?pill('Parecer anexado','acc'):pill('Conferidas','pos'));}]]);}}
+const JA_DESL=[['parecerAnx','Parecer jurídico (obrigatório se houver garantia de emprego ou dúvida)','Nenhum parecer anexado.'],['pedidoAnx','Pedido de demissão de próprio punho, assinado (obrigatório no pedido de demissão)','Nenhum pedido anexado.']];
+{const fm=formMod;formMod=function(d,rec){const h=fm.apply(this,arguments);if(d!==MODS2.desl||!d)return h;jaAbre('desl',rec.id,JA_DESL,rec);
+  const fg=$('#mb .fg');if(fg&&typeof fg.insertAdjacentHTML==='function')fg.insertAdjacentHTML('beforeend','<div id="jaWrap" style="grid-column:1/-1">'+jaBox()+'</div>');return h;};}
+/* pedido de demissão: orientação e anexo, sem texto redigido */
+function jurRecAnxModal(col,id,k,titulo,orient){const r=get(col,id);if(!r)return;const ls=anxArr(r,k),w=mayW(GROUP_OF_TAB[col]||'rh');
+  modal({title:titulo,wide:true,nofocus:true,body:orient+'<div class="sect">Arquivos anexados ('+ls.length+')</div>'+(ls.length?'<ul style="margin:0;padding-left:18px">'+ls.map((a,i)=>'<li><a href="/_blob/'+esc(a.id)+'" target="_blank" rel="noopener">'+esc(a.nome||'arquivo')+'</a>'+(w?' <button class="btn sm dng" data-act="jurRecAnxTira" data-col="'+esc(col)+'" data-id="'+esc(id)+'" data-k="'+esc(k)+'" data-i="'+i+'">Remover</button>':'')+'</li>').join('')+'</ul>':'<p class="sub">Nenhum arquivo anexado.</p>'),
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(w?'<button class="btn pri" data-act="jurRecAnxAdd" data-col="'+esc(col)+'" data-id="'+esc(id)+'" data-k="'+esc(k)+'">Anexar arquivo</button>':'')});
+  JA.rec={col,id,k,titulo,orient};}
+A.jurRecAnxAdd=d=>{const R=JA.rec;if(!R||!mayW(GROUP_OF_TAB[R.col]||'rh')){toast('Seu perfil não permite anexar aqui.','neg');return;}if(store.mode!=='db'){toast('Anexos funcionam na página publicada.','neg');return;}
+  arqEscolher('application/pdf,.pdf,image/*',async fs=>{const add=[];for(const f of fs){try{add.push(await arqSalvar(f));}catch(e){toast(f.name+': '+arqErr(e),'neg');}}const r=get(R.col,R.id);if(!r||!add.length)return;put(R.col,Object.assign(cl(r),{[R.k]:anxArr(r,R.k).concat(add)}));toast('Arquivo anexado.','pos');jurRecAnxModal(R.col,R.id,R.k,R.titulo,R.orient);},true);};
+A.jurRecAnxTira=d=>{const R=JA.rec;if(!R||!mayW(GROUP_OF_TAB[R.col]||'rh'))return;const r=get(R.col,R.id);if(!r)return;const ls=anxArr(r,R.k).slice();ls.splice(+d.i,1);put(R.col,Object.assign(cl(r),{[R.k]:ls}));jurRecAnxModal(R.col,R.id,R.k,R.titulo,R.orient);};
+Object.assign(ACT_GROUP,{jurRecAnxAdd:null,jurRecAnxTira:null});
+{const a0=A.deslAviso;A.deslAviso=x=>{const r=get('desl',x.id);if(!r)return;if(r.tipo!=='pedido')return a0(x);const f=get('func',r.funcId)||{};
+  jurRecAnxModal('desl',r.id,'pedidoAnx','Pedido de demissão · '+(f.nome||''),'<div class="note" style="margin:0 0 10px"><b>O sistema não redige o pedido de demissão.</b> O pedido precisa ser escrito de próprio punho pelo colaborador, com a data, a assinatura e a informação se vai cumprir o aviso prévio ou pede a dispensa dele. Não entregue modelo pronto para ele copiar. Fotografe ou digitalize o pedido assinado e anexe aqui. Se houver qualquer garantia de emprego (gravidez, CIPA, dirigente sindical, acidente), o pedido só vale com assistência do sindicato (CLT art. 500): fale com o advogado da empresa.</div>');};}
+{const k=DESL_CHK.find(x=>x[0]==='aviso');if(k)k[1]='Aviso prévio assinado ou pedido de demissão de próprio punho anexado';}
+{const a0=A.deslConcluir;A.deslConcluir=x=>{const r=get('desl',x.id);if(r){const e=jurDeslErro(r);if(e){toast(e+' Use Editar no desligamento para responder e anexar.','neg');return;}}return a0(x);};}
+
+/* ---------- 4. férias ---------- */
+FER_SIT.conferir=['A conferir','warn'];
+const jurQuitOk=z=>!!z&&((anxArr(z,'recibo').length&&anxArr(z,'aviso').length)||(z.lote&&anxArr(z,'anx').length));
+{const fp1=ferPeriodos;ferPeriodos=function(f){const ps=fp1.apply(this,arguments);if(!f||!ps||!ps.some(p=>p.escQuit))return ps;const q=f.ferQuit||{},h=todayStr();
+  return ps.map(p=>{if(!p.escQuit)return p;const z=q[p.aqIni];if(jurQuitOk(z))return Object.assign({},p,{quitDoc:z});
+    const gz=sum((p.recs||[]).filter(x=>ferFim(x)&&ferFim(x)<h),x=>(+x.dias||0)+(+x.abono||0));if(gz>=(+p.direito||30))return Object.assign({},p,{quitSistema:true});
+    return Object.assign({},p,{sit:'conferir',aConferir:true});});};}
+function jurFerQuitar(fid,aq,o){const f=get('func',fid);if(!f)return 'Colaborador não encontrado.';o=o||{};
+  const p=ferPeriodos(f).find(x=>x.aqIni===aq);if(!p)return 'Período não encontrado.';
+  if(!anxArr(o,'recibo').length)return 'Anexe o recibo de férias assinado.';if(!anxArr(o,'aviso').length)return 'Anexe o aviso de férias assinado.';
+  const q=Object.assign({},f.ferQuit||{});q[aq]={recibo:anxArr(o,'recibo'),aviso:anxArr(o,'aviso'),obs:String(o.obs||''),em:Date.now(),por:actorId()};put('func',Object.assign(cl(f),{ferQuit:q}));return '';}
+function jurFerQuitarLote(pares,anx,confirma){if(!pares||!pares.length)return 'Marque ao menos um período.';if(!(anx||[]).filter(anxOk).length)return 'Anexe o arquivo com os recibos e avisos assinados.';
+  if(!confirma)return 'Confirme que o arquivo contém o recibo e o aviso assinados de cada período marcado.';const lote='fq_'+Date.now().toString(36);const by={};
+  pares.forEach(([fid,aq])=>{(by[fid]=by[fid]||[]).push(aq);});const muda=[];
+  Object.keys(by).forEach(fid=>{const f=get('func',fid);if(!f)return;const q=Object.assign({},f.ferQuit||{});by[fid].forEach(aq=>{q[aq]={lote,anx:anx.filter(anxOk),em:Date.now(),por:actorId()};});muda.push(Object.assign(cl(f),{ferQuit:q}));});
+  if(muda.length)bulkPut('func',muda);return '';}
+function jurFerConferir(){const out=[];S.func.forEach(f=>{try{ferPeriodos(f).forEach(p=>{if(p.aConferir)out.push([f,p]);});}catch(e){}});return out.sort((a,b)=>String(a[0].nome).localeCompare(String(b[0].nome))||a[1].aqIni.localeCompare(b[1].aqIni));}
+A.jurFerQuit=d=>{const f=get('func',d.id);if(!f)return;const aq=d.aq,p=ferPeriodos(f).find(x=>x.aqIni===aq);if(!p)return;if(!mayW('rh')){toast('Seu perfil não pode alterar férias.','neg');return;}
+  jaAbre('ferq',f.id+'|'+aq,[['recibo','Recibo de férias assinado *','Nenhum recibo anexado.'],['aviso','Aviso de férias assinado *','Nenhum aviso anexado.']],{});
+  modal({title:'Quitar férias · '+f.nome,wide:true,body:'<p style="margin:0 0 8px">Período aquisitivo <b>'+fmtDate(p.aqIni)+' a '+fmtDate(p.aqFim)+'</b>. Este período não aparece na escala da contabilidade. Para marcar como quitado, anexe o recibo e o aviso de férias assinados (peça cópia à contabilidade se não estiverem com a empresa).</p><div class="fg"><div id="jaWrap" style="grid-column:1/-1">'+jaBox()+'</div>'+field('Observação','obs','text','',{full:true})+'</div>',saveLabel:'Marcar como quitado',
+    save:root=>{if(JA.busy){toast('Aguarde o envio dos arquivos.','neg');return false;}const v=readForm(root),e=jurFerQuitar(f.id,aq,{recibo:JA.k.recibo,aviso:JA.k.aviso,obs:v.obs});if(e){toast(e,'neg');return false;}toast('Período quitado com os documentos anexados.','pos');render();}});};
+A.jurFerLote=()=>{if(!mayW('rh')){toast('Seu perfil não pode alterar férias.','neg');return;}const L=jurFerConferir();if(!L.length){toast('Nenhum período a conferir.');return;}
+  jaAbre('ferl','lote',[['anx','Arquivo com os recibos e avisos assinados *','Nenhum arquivo anexado.']],{});
+  modal({title:'Quitar férias em lote',xwide:true,wide:true,body:'<p style="margin:0 0 8px">Marque os períodos cujos recibos e avisos de férias assinados estão no arquivo que você vai anexar (por exemplo, o PDF com os recibos digitalizados).</p><div class="tw" style="max-height:360px;overflow:auto"><table><thead><tr><th></th><th>Colaborador</th><th>Período aquisitivo</th></tr></thead><tbody>'+L.map(([f,p])=>'<tr><td><input type="checkbox" data-jfl="'+esc(f.id+'|'+p.aqIni)+'" aria-label="Marcar"></td><td>'+esc(f.nome)+(f.status==='desligado'?' <span class="sub">(desligado)</span>':'')+'</td><td class="mono">'+fmtDate(p.aqIni)+' a '+fmtDate(p.aqFim)+'</td></tr>').join('')+'</tbody></table></div><div class="fg"><div id="jaWrap" style="grid-column:1/-1">'+jaBox()+'</div>'+field('Confirmo que o arquivo contém o recibo e o aviso assinados de cada período marcado','conf','checkbox',false,{full:true})+'</div>',saveLabel:'Quitar marcados',
+    save:root=>{if(JA.busy){toast('Aguarde o envio dos arquivos.','neg');return false;}const v=readForm(root),pares=$$('[data-jfl]',root).filter(i=>i.checked).map(i=>i.dataset.jfl.split('|'));const e=jurFerQuitarLote(pares,JA.k.anx||[],!!v.conf);if(e){toast(e,'neg');return false;}toast(pares.length+' período(s) quitado(s).','pos');render();}});};
+Object.assign(ACT_GROUP,{jurFerQuit:'rh',jurFerLote:'rh'});
+/* ficha de férias: períodos a conferir com botão */
+{const f0=ferFuncHtml;ferFuncHtml=function(f,acoes){let h=f0.apply(this,arguments);const ps=f?ferPeriodos(f).filter(p=>p.aConferir):[];if(!ps.length)return h;
+  return h+'<div class="note" style="margin-top:8px"><b>'+ps.length+' período(s) a conferir.</b> Não aparecem na escala da contabilidade e não têm recibo nem aviso anexados, por isso não são tratados como quitados. '+ps.map(p=>'<div style="margin-top:4px"><span class="mono">'+fmtDate(p.aqIni)+' a '+fmtDate(p.aqFim)+'</span>'+(acoes&&mayW('rh')?' <button class="btn sm" data-act="jurFerQuit" data-id="'+esc(f.id)+'" data-aq="'+esc(p.aqIni)+'">Anexar recibo e aviso</button>':'')+'</div>').join('')+'</div>';};}
+{const d=MODS2.ferias;if(d){const t0=d.top,f0=d.fields,b0=d.blank,v0=d.validate;
+  d.top=function(){const h=t0?t0.apply(this,arguments):'',L=jurFerConferir();const pg=jurFerPagPend();
+    const card=(L.length?'<div class="card"><h2>Períodos a conferir ('+L.length+')</h2><p class="sub" style="margin:0 0 8px">Períodos anteriores à escala da contabilidade que não aparecem nela. Ficam "a conferir" até que o recibo e o aviso de férias assinados sejam anexados (um a um ou em lote).</p><div class="tw" style="border:0;max-height:260px;overflow:auto"><table style="min-width:640px"><tbody>'+L.slice(0,150).map(([f,p])=>'<tr><td>'+esc(f.nome)+'</td><td class="mono">'+fmtDate(p.aqIni)+' a '+fmtDate(p.aqFim)+'</td><td>'+pill('A conferir','warn')+'</td><td class="act">'+(mayW('rh')?'<button class="btn sm" data-act="jurFerQuit" data-id="'+esc(f.id)+'" data-aq="'+esc(p.aqIni)+'">Anexar recibo e aviso</button>':'')+'</td></tr>').join('')+'</tbody></table></div>'+(mayW('rh')?'<div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="jurFerLote">Quitar em lote com anexo</button></div>':'')+'</div>':'')+
+      (pg.length?'<div class="note"><b>Pagamento das férias (CLT art. 145):</b> '+pg.length+' férias começam em até 2 dias (ou já começaram) sem pagamento registrado. O pagamento deve ser feito até 2 dias antes do início.</div>':'')+
+      '<div class="note">Férias gozadas depois do fim do período concessivo são pagas em dobro (CLT art. 137). O pagamento, com o 1/3, deve ser feito até 2 dias antes do início (art. 145): registre a data em "Pagamento feito em".</div>';
+    return card+h;};
+  d.fields=r=>f0(r).concat([F('pagoEm','Pagamento feito em','date')]);
+  if(b0)d.blank=()=>Object.assign(b0(),{pagoEm:''});
+  d.validate=(r,n)=>{const e=v0?v0(r,n):'';if(e)return e;if(r.ini&&r.pagto&&r.pagto>addDays(r.ini,-2))return 'O pagamento das férias deve ser feito até 2 dias antes do início (CLT art. 145): até '+fmtDate(addDays(r.ini,-2))+'.';return '';};}}
+function jurFerPagPend(){const h=todayStr();return S.ferias.filter(x=>x.status!=='cancelada'&&x.ini&&!x.pagoEm&&addDays(x.ini,-2)<=h&&ferFim(x)>=h);}
+{const af=alertasFerias;alertasFerias=function(){const it=af.apply(this,arguments);if(isColab()||!mayR('rh'))return it;
+  it.forEach(a=>{if(a[0]==='ferias'&&/vencido\(s\): pagamento em dobro$/.test(a[1]))a[1]=a[1].replace(/pagamento em dobro$/,'risco de pagamento em dobro (CLT art. 137)');});
+  const c=jurFerConferir().filter(x=>x[0].status!=='desligado').length;if(c)it.push(['ferias',c+' período(s) de férias a conferir: anexe recibo e aviso para quitar',String(c)]);
+  const pg=jurFerPagPend().length;if(pg)it.push(['ferias',pg+' férias sem pagamento registrado até 2 dias antes do início (CLT art. 145)',String(pg)]);return it;};}
+/* importador da escala: textos e confirmação */
+{const t0=impTopo;impTopo=function(){return t0.apply(this,arguments).replace('Os períodos que não aparecem na escala ficam como quitados.','Os períodos anteriores que não aparecem na escala ficam "a conferir" até o recibo e o aviso de férias serem anexados.');};}
+{const f0=feiView;feiView=function(){return f0.apply(this,arguments).replace('os períodos anteriores ao primeiro da escala ficam como <b>quitados</b> (a contabilidade só lista o que está em aberto)','os períodos anteriores ao primeiro da escala ficam <b>a conferir</b> (a contabilidade só lista o que está em aberto, mas isso não prova o pagamento): para quitá-los, anexe recibo e aviso de férias em Férias › Períodos a conferir');};}
+{const a0=A.feiConfirmar;A.feiConfirmar=d=>{const cb=confirmBox;confirmBox=function(m){arguments[0]=String(m).replace('Os períodos que não aparecem na escala ficam como quitados.','Os períodos anteriores que não aparecem na escala ficam "a conferir" (anexe recibo e aviso para quitar).');return cb.apply(this,arguments);};try{return a0(d);}finally{confirmBox=cb;}};}
+
+/* ===== v112 (agente J2): itens do parecer jurídico v3 =====
+   (relatorios/juridico_v3.md: A2, A3, A4, A11, A13, C2, C3; plano #5, #7, #9, #16, #21, #23, #25 e #28)
+   1. Ponto: o app próprio deixa de ser fonte oficial (só gerencial); ajuste aprovado vira "solicitação de ajuste na
+      Sólides" registrada, sem mexer na marcação; arquivo mensal do AFD, do AEJ e do espelho oficial da Sólides.
+   2. Hora extra: texto fixo "é devida"; teto de 2 h somadas por colaborador e dia (exceção do art. 61 com motivo e
+      comunicação); heMax limitado a 2 h; bloqueio com insalubridade sem licença do art. 60; advertência por extra não
+      autorizada só com política escrita configurada.
+   3. Banco de horas: inclusão só com o acordo assinado anexado e a data; bloqueio de insalubridade sem licença;
+      saldo negativo zerado por padrão (descontar exige confirmar que o acordo prevê); "convenção conferida em".
+   4. Frota: prazo de indicação do condutor (CTB, art. 257, § 7º) calculado da data de recebimento e avisado a quem
+      trata multas, independentemente dos locais da frota.
+   5. Contratos públicos: alerta de reequilíbrio antes do fim da vigência (Lei 14.133, art. 131, par. único);
+      conferência de inexequibilidade (75%) e garantia adicional (85%) na proposta (art. 59, §§ 4º e 5º).
+   6. EPI: SHA-256 do conteúdo da entrega e identificação do aparelho na assinatura; código no comprovante.
+   7. Treinamentos por IA viram "reciclagem complementar"; matriz das NRs com carga horária, instrutor e conteúdo.
+   8. Transparência salarial (Lei 14.611/2023) perto de 100 empregados e cotas de PcD e aprendiz no quadro de pessoal.
+   Regras configuráveis: Sistema › Configurações › "Regras jurídicas (J2)" (cfg().j2). */
+
+/* ---------- configuração ---------- */
+const J2DEF={art60Num:'',art60Val:'',art60Cct:'',hePolitica:'',heImpMax:4,multaDias:30,multaAviso:10,multaResp:[],reeqAntec:90,transpLimiar:90,pfarqDia:5,pfarqIni:''};
+const J2=()=>{const c=cfg().j2||{};return Object.assign({},J2DEF,c,{multaResp:Array.isArray(c.multaResp)?c.multaResp:[]});};
+function j2Salvar(o){put('cfg',Object.assign({},cfg(),{id:'empresa',j2:Object.assign({},cfg().j2||{},o)}));}
+const j2Num=(x,d,mn,mx)=>x===''||x==null||isNaN(+x)?d:Math.min(mx,Math.max(mn,+x));
+const j2Hm=h=>String(Math.round((+h||0)*100)/100).replace('.',',')+' h';
+
+/* ---------- anexos dentro dos modais deste módulo ---------- */
+const J2A={arqs:[],busy:0,label:'Arquivos',accept:'application/pdf,.pdf,image/*'};
+function j2AnxIni(arqs,label,accept){J2A.arqs=(arqs||[]).filter(anxOk).slice();J2A.busy=0;J2A.label=label||'Arquivos';J2A.accept=accept||'application/pdf,.pdf,image/*';}
+function j2AnxBox(){return '<div class="sect" style="margin:10px 0 6px">'+esc(J2A.label)+' ('+J2A.arqs.length+')</div>'+(J2A.arqs.length?'<div style="display:flex;gap:8px;flex-wrap:wrap">'+J2A.arqs.map((a,i)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:6px;display:flex;gap:6px;align-items:center"><a href="/_blob/'+esc(a.id)+'" target="_blank" rel="noopener" class="sub">'+esc(String(a.nome||'arquivo').slice(0,40))+'</a><button type="button" class="btn sm dng" data-act="j2AnxTira" data-i="'+i+'">Remover</button></div>').join('')+'</div>':'<p class="sub" style="margin:0 0 6px">Nenhum arquivo anexado.</p>')+
+  '<div class="acts" style="margin-top:6px"><button type="button" class="btn sm" data-act="j2AnxAdd">Anexar arquivo</button>'+(J2A.busy?'<span class="sub">Enviando…</span>':'')+'</div>';}
+function j2AnxRender(){const b=$('#j2anx');if(b)b.innerHTML=j2AnxBox();}
+A.j2AnxAdd=()=>{if(store.mode!=='db'){toast('Anexos funcionam na página publicada.','neg');return;}
+  arqEscolher(J2A.accept,async fs=>{fs=Array.from(fs||[]);if(!fs.length)return;J2A.busy++;j2AnxRender();
+    for(const f0 of fs){try{const f=await imgReduz(f0,1600);J2A.arqs.push(await arqSalvar(f));}catch(err){toast(f0.name+': '+arqErr(err),'neg');}}
+    J2A.busy=Math.max(0,J2A.busy-1);j2AnxRender();},true);};
+A.j2AnxTira=d=>{J2A.arqs.splice(+d.i,1);j2AnxRender();};
+Object.assign(ACT_GROUP,{j2AnxAdd:null,j2AnxTira:null});
+
+/* =====================================================================
+   1. PONTO: fonte oficial, ajustes pela Sólides e arquivo mensal (A2, plano #9)
+   ===================================================================== */
+PF_FONTES[0][1]='App próprio (só gerencial: não é REP-P certificado)';
+const PF_MSG_APP='O app próprio não é um REP-P certificado e não pode ser a fonte oficial do ponto. Escolha a Sólides (ou o Pontomais, para períodos antigos). Períodos já gravados com o app continuam como estão, marcados como gerenciais.';
+/* período novo com o app próprio como fonte oficial é recusado; os antigos ficam (histórico) */
+{const s0=pfSalvarCfg;pfSalvarCfg=function(periodos,trava){const ant=new Set(pfCfg().periodos.filter(p=>p.fonte==='app').map(p=>p.ini));
+  if((periodos||[]).some(p=>p&&p.fonte==='app'&&!ant.has(p.ini)))return PF_MSG_APP;return s0.apply(this,arguments);};}
+const pfSemApp=h=>String(h).replace(/<option value="app">[^<]*<\/option>/g,'');
+A.pfLinha=()=>{const tb=$('#pfBody');if(tb&&tb.insertAdjacentHTML)tb.insertAdjacentHTML('beforeend',pfSemApp(pfLinhaHtml({ini:todayStr(),fonte:'solides'})));};
+{const v0=V.pfonte;V.pfonte=function(){let h=pfSemApp(v0.apply(this,arguments));const c=pfCfg(),velhos=c.periodos.filter(p=>p.fonte==='app');
+  const nota='<div class="note"><b>Fonte oficial do ponto: só um REP-P certificado (Sólides).</b> O app próprio (Central de Gestão) não é REP-P certificado: as marcações feitas nele servem só como controle gerencial e não substituem o registro oficial (Portaria MTP 671/2021). '+(velhos.length?'Há '+velhos.length+' período(s) antigo(s) gravado(s) com o app próprio: eles continuam valendo como histórico gerencial. ':'')+'Ajustes de marcação são pedidos e feitos na Sólides; aqui fica só o registro da solicitação. <a href="#" data-act="nav" data-mod="pess" data-tab="pfarq">Arquivo mensal do AFD, do AEJ e do espelho</a>.</div>';
+  const i=h.indexOf('<div class="stack">');return i>=0?h.slice(0,i+19)+nota+h.slice(i+19):nota+h;};}
+
+/* ajuste "aprovado" = solicitação registrada na Sólides; a marcação oficial não muda */
+PAJ_ST.solides=['Solicitado na Sólides','acc'];
+function pajSolides(id,o){o=o||{};const r=get('pajuste',id);if(!r||r.status!=='pendente')return 'Pedido não encontrado ou já tratado.';
+  const em=String(o.em||'').trim();if(!/^\d{4}-\d{2}-\d{2}$/.test(em))return 'Informe a data em que a solicitação foi feita na Sólides.';if(em>todayStr())return 'A data não pode ser futura.';
+  put('pajuste',Object.assign(cl(r),{status:'solides',solidesEm:em,solidesRef:String(o.ref||'').trim().slice(0,120),parecer:String(o.parecer||'').slice(0,500),decididoPor:actorId(),decididoEm:Date.now()}));return '';}
+{const a0=A.pajusteDec;A.pajusteDec=d=>{if(d.dec!=='aprovado')return a0(d);if(!mayW('rh')){toast('Só o RH registra ajustes.','neg');return;}
+  const r=get('pajuste',d.id);if(!r||r.status!=='pendente')return;
+  modal({title:'Registrar a solicitação de ajuste na Sólides',body:'<p style="margin:0 0 8px">'+esc(funcNome(r.funcId))+' · '+esc(PAJ_TIPO[r.tipo]||r.tipo)+' · '+fmtDate(r.data)+(r.hora?' às '+esc(r.hora):'')+'</p><p class="sub" style="margin:0 0 10px">“'+esc(r.motivo||'')+'”</p>'+
+    '<div class="note" style="margin:0 0 10px">A marcação oficial fica na Sólides (REP-P). Faça o ajuste ou a justificativa lá, com o tratamento que a Portaria MTP 671/2021 exige, e registre aqui que a solicitação foi feita. Este sistema não altera nem inclui marcação.</div>'+
+    '<div class="fg">'+field('Solicitado na Sólides em *','em','date',todayStr())+field('Nº ou referência da solicitação na Sólides','ref','text','')+field('Observação','parecer','textarea','',{full:true,rows:2})+'</div>',saveLabel:'Registrar solicitação',
+    save:root=>{const e=pajSolides(r.id,readForm(root));if(e){toast(e,'neg');return false;}toast('Solicitação registrada. A marcação oficial continua a da Sólides.','pos');}});};}
+{const d=MODS2.pajuste;if(d){const ra=d.rowActs;d.rowActs=r=>String(ra?ra(r):'').replace('data-dec="aprovado">Aprovar<','data-dec="aprovado">Registrar na Sólides<');
+  d.cols=d.cols.map(c=>c[0]==='Situação'?['Situação',r=>c[1](r)+(r.status==='solides'?'<div class="sub">'+fmtDate(r.solidesEm)+(r.solidesRef?' · ref. '+esc(r.solidesRef):'')+'</div>':'')]:c);}}
+{const v0=V.pajuste;V.pajuste=function(){const h=v0.apply(this,arguments),nota='<div class="note">Ajustes não mudam a marcação oficial. O pedido do colaborador é tratado na Sólides; aqui o RH registra a solicitação (data e referência). Pedidos antigos aprovados antes desta versão continuam no histórico.</div>';const i=h.indexOf('<div class="stack">');return i>=0?h.slice(0,i+19)+nota+h.slice(i+19):h;};}
+
+/* arquivo mensal: AFD, AEJ e espelho oficial da Sólides */
+if(!COLS.includes('pfarq')){COLS.push('pfarq');S.pfarq=S.pfarq||[];IDX.pfarq=new Map();}
+COL_NOME.pfarq='Arquivo mensal do ponto (AFD, AEJ e espelho)';TAB_COLS.pfarq=['pfarq'];
+rhTab('pfarq','Arquivo mensal do ponto','Ponto','ponto','pess','pfonte','Obrigações e regras');
+const PFA_IT=[['afd','AFD (arquivo-fonte de dados)'],['aej','AEJ (arquivo eletrônico de jornada)'],['esp','Espelho de ponto oficial da Sólides']];
+const pfarqDe=m=>get('pfarq','pfa_'+m);
+const pfarqOk=r=>!!(r&&r.afd&&r.aej&&r.esp&&anxArr(r,'anexos').length);
+function pfarqMeses(){const J=J2(),cur=ym(todayStr()),ult=addMonths(cur,-1);let ini=J.pfarqIni&&/^\d{4}-\d{2}$/.test(J.pfarqIni)?J.pfarqIni:'';
+  if(!ini){const s=pfCfg().periodos.find(p=>p.fonte==='solides');ini=s?s.ini.slice(0,7):addMonths(cur,-6);}
+  if(ini<addMonths(cur,-24))ini=addMonths(cur,-24);const out=[];for(let m=ult;m>=ini&&out.length<25;m=addMonths(m,-1))out.push(m);return out;}
+const pfarqPend=()=>pfarqMeses().filter(m=>!pfarqOk(pfarqDe(m)));
+function pfarqSalvar(m,o){o=o||{};if(!/^\d{4}-\d{2}$/.test(m||''))return 'Mês inválido.';if(m>=ym(todayStr()))return 'Arquive só meses encerrados.';
+  const an=(o.anexos||[]).filter(anxOk),it={afd:!!o.afd,aej:!!o.aej,esp:!!o.esp};
+  if((it.afd||it.aej||it.esp)&&!an.length)return 'Anexe os arquivos (AFD, AEJ e espelho; um arquivo compactado também serve).';
+  const ant=pfarqDe(m);put('pfarq',Object.assign(ant?cl(ant):{id:'pfa_'+m,ym:m},it,{anexos:an,obs:String(o.obs||'').slice(0,400),em:Date.now(),por:actorId()}));return '';}
+A.pfarqAbrir=d=>{const m=d.id,r=pfarqDe(m)||{};j2AnxIni(anxArr(r,'anexos'),'AFD, AEJ e espelho oficial (arquivos da Sólides)','application/pdf,.pdf,text/plain,.txt,.afd,.aej,.zip,application/zip,.p7s,image/*');
+  modal({title:'Arquivo do ponto · '+fmtYm(m),body:'<p class="sub" style="margin:0 0 8px">Baixe da Sólides os arquivos do mês e anexe aqui. Marque o que foi anexado.</p><div class="fg">'+PFA_IT.map(x=>field(x[1],x[0],'checkbox',!!r[x[0]],{full:true})).join('')+field('Observação','obs','text',r.obs||'',{full:true})+'</div><div id="j2anx">'+j2AnxBox()+'</div>',saveLabel:'Salvar',
+    save:root=>{if(J2A.busy){toast('Aguarde o envio dos arquivos.','neg');return false;}const v=readForm(root),e=pfarqSalvar(m,Object.assign(v,{anexos:J2A.arqs}));if(e){toast(e,'neg');return false;}toast(pfarqOk(pfarqDe(m))?'Mês arquivado.':'Registro salvo (ainda falta arquivo).','pos');}});};
+ACT_GROUP.pfarqAbrir='ponto';
+V.pfarq=()=>{const ms=pfarqMeses(),pend=ms.filter(m=>!pfarqOk(pfarqDe(m))),w=mayW('ponto');
+  let h=pageHead('Arquivo mensal do ponto','Todo mês, guarde o AFD, o AEJ e o espelho oficial gerados pela Sólides (REP-P). São a prova da jornada numa fiscalização ou ação trabalhista.')+'<div class="stack">'+
+    '<div class="kpis">'+kpi('Meses no quadro',String(ms.length),'')+kpi('Pendentes',String(pend.length),pend.length?'falta arquivo':'tudo arquivado',pend.length?'neg':'pos')+kpi('Lembrete','dia '+J2().pfarqDia,'de cada mês, para o mês anterior')+'</div>'+
+    '<div class="tw"><table style="min-width:720px"><thead><tr><th>Mês</th>'+PFA_IT.map(x=>'<th>'+esc(x[0].toUpperCase()==='ESP'?'Espelho':x[0].toUpperCase())+'</th>').join('')+'<th>Arquivos</th><th>Situação</th><th></th></tr></thead><tbody>'+
+    (ms.length?ms.map(m=>{const r=pfarqDe(m)||{};return '<tr><td>'+fmtYm(m)+'</td>'+PFA_IT.map(x=>'<td>'+(r[x[0]]?pill('Sim','pos'):pill('Falta','neg'))+'</td>').join('')+'<td>'+anxCel(r,'anexos')+'</td><td>'+(pfarqOk(r)?pill('Arquivado','pos'):pill('Pendente','neg'))+(r.por?'<div class="sub">'+esc(nameOf(r.por))+' · '+fmtDT(r.em)+'</div>':'')+'</td><td class="act">'+(w?'<button class="btn sm'+(pfarqOk(r)?'':' pri')+'" data-act="pfarqAbrir" data-id="'+m+'">'+(pfarqOk(r)?'Abrir':'Arquivar')+'</button>':'')+'</td></tr>';}).join(''):emptyRow(6,'Nenhum mês encerrado no período.'))+'</tbody></table></div>'+
+    '<div class="note">O AFD e o AEJ são os arquivos previstos na Portaria MTP 671/2021 para o REP-P. Guarde também o espelho assinado ou confirmado pelo colaborador, conforme a rotina combinada com a contabilidade. O quadro começa '+(J2().pfarqIni?'em '+fmtYm(J2().pfarqIni):'no início do período da Sólides (ou 6 meses atrás)')+'; ajuste em Sistema › Configurações › Regras jurídicas.</div></div>';
+  return h;};
+{const ap=alertasPonto;alertasPonto=function(){const it=ap.apply(this,arguments)||[];try{if(mayW('ponto')&&!isColab()){const p=pfarqPend(),ant=addMonths(ym(todayStr()),-1),dia=+todayStr().slice(8,10);
+  const atras=p.filter(m=>m<ant);if(p.includes(ant)&&dia>=(+J2().pfarqDia||5))it.push(['pfarq','Arquive o AFD, o AEJ e o espelho oficial da Sólides de '+fmtYm(ant),'!']);if(atras.length)it.push(['pfarq',atras.length+' mês(es) anterior(es) sem o AFD, o AEJ e o espelho arquivados',String(atras.length)]);}}catch(e){}return it;};}
+
+/* =====================================================================
+   2. HORA EXTRA (A3, plano #7)
+   ===================================================================== */
+const HE_TXT='Hora extra prestada é devida e vai para a folha, com ou sem autorização prévia.';
+const heTxtNota=()=>'<div class="note" style="border-color:#2563eb"><b>'+HE_TXT+'</b> A autorização é um controle interno da obra; ela não reduz o pagamento.</div>';
+const HE_TETO=2;
+const heTeto=()=>Math.min(HE_TETO,+RHX().heMax||HE_TETO);
+/* heMax não passa de 2 h (art. 59); acima disso só o pedido marcado como art. 61 */
+{const s0=rhxSalvar;rhxSalvar=function(o){if(o&&o.heMax!=null)o=Object.assign({},o,{heMax:Math.min(HE_TETO,Math.max(0.5,+o.heMax||HE_TETO))});return s0.call(this,o);};}
+/* insalubridade sem licença do art. 60 */
+function art60Ok(f){if(!f||!(+f.insal>0))return true;const J=J2(),h=todayStr();if(f.art60Val&&f.art60Val>=h)return true;if(J.art60Val&&J.art60Val>=h)return true;return !!String(J.art60Cct||'').trim();}
+const art60Msg=f=>(f&&f.nome?f.nome:'O colaborador')+' recebe adicional de insalubridade e não há licença do art. 60 da CLT registrada (no cadastro do colaborador ou em Sistema › Configurações › Regras jurídicas). Sem ela, a prorrogação da jornada em atividade insalubre não é permitida (CLT, art. 60; Súmula 85, VI, do TST). Se a convenção coletiva dispensar a licença (CLT, art. 611-A, XIII), registre a cláusula nas Regras. Confirme com o advogado da empresa.';
+{const d=MODS2.func,f0=d.fields;d.fields=r=>{const fs=f0(r);if(!mayW('rh'))return fs;return fs.concat([{t:'sect',l:'Insalubridade: licença do art. 60 (hora extra e banco de horas)'},F('art60Lic','Nº ou referência da licença do art. 60','text'),F('art60Val','Licença válida até','date')]);};}
+Object.assign(FLABEL,{art60Lic:'Licença do art. 60',art60Val:'Licença do art. 60 válida até'});
+const heDiaHoras=(fid,data)=>sum(S.heaut.filter(r=>r.funcId===fid&&r.data===data&&(r.status==='pendente'||r.status==='aprovada')),r=>+r.horas||0);
+heCriar=function(o){o=o||{};const fids=(o.funcIds||[]).filter(id=>get('func',id));if(!fids.length)return {erro:'Escolha ao menos um colaborador.'};if(!o.data)return {erro:'Informe a data.'};
+  const h=+o.horas,imp=!!o.imperiosa,J=J2(),teto=imp?Math.max(HE_TETO,+J.heImpMax||4):heTeto();
+  if(!(h>0))return {erro:'Informe as horas extras previstas.'};if(!String(o.motivo||'').trim())return {erro:'Informe o motivo.'};
+  if(imp){if(!String(o.impMotivo||'').trim())return {erro:'Necessidade imperiosa (art. 61): descreva o fato (força maior, serviço inadiável ou que, se não feito, causa prejuízo manifesto).'};
+    if(!String(o.impComunic||'').trim())return {erro:'Necessidade imperiosa (art. 61): informe a quem e quando a situação foi comunicada (equipe, sindicato ou autoridade, conforme a convenção).'};}
+  for(const fid of fids){const f=get('func',fid);if(!art60Ok(f))return {erro:art60Msg(f)};const ja=heDiaHoras(fid,o.data);
+    if(ja+h>teto+1e-9)return {erro:f.nome+': '+(ja?'já há '+j2Hm(ja)+' pedidas para '+fmtDate(o.data)+'; ':'')+'o total do dia passaria de '+j2Hm(teto)+(imp?' (limite configurado para a necessidade imperiosa; CLT, art. 61, § 2º).':' (CLT, art. 59: até 2 horas extras por dia, somando todos os pedidos). Acima disso, só marcando "necessidade imperiosa (art. 61)".')};}
+  const rs=fids.map(fid=>put('heaut',Object.assign({id:uid(),funcId:fid,data:o.data,horas:h,projId:o.projId||(get('func',fid)||{}).projId||'',motivo:String(o.motivo).trim().slice(0,400),solPor:actorId(),solEm:Date.now(),status:'pendente'},imp?{imperiosa:true,impMotivo:String(o.impMotivo).trim().slice(0,600),impComunic:String(o.impComunic).trim().slice(0,400)}:{})));
+  if(imp)setTimeout(()=>toast('Pedido marcado como necessidade imperiosa (art. 61). Guarde a prova do fato e da comunicação.','neg'),300);
+  return {ids:rs.map(r=>r.id)};};
+A.heNovo=()=>{if(isColab()||!(mayW('ponto')||mayW('proj')||mayW('rh'))){toast('Seu perfil não pede hora extra.','neg');return;}const pid=(ui.hextra&&ui.hextra.proj)||(ui.hepedir&&ui.hepedir.proj)||'';
+  const fs=funcAtivos().slice().sort((a,b)=>(a.projId===pid?0:1)-(b.projId===pid?0:1)||byNome(a,b));
+  modal({title:'Pedir autorização de hora extra',wide:true,body:heTxtNota()+'<div class="fg">'+field('Data','data','date',todayStr())+field('Horas extras previstas por pessoa (até '+j2Hm(heTeto())+' por dia, somando os pedidos)','horas','number',Math.min(2,heTeto()))+field('Obra','projId','select',pid,{opts:projOpts(),blank:'Obra de cada colaborador'})+field('Motivo (o que precisa ser feito e por quê)','motivo','textarea','',{full:true,rows:2})+
+    field('Necessidade imperiosa (art. 61): força maior ou serviço inadiável','imperiosa','checkbox',false,{full:true})+field('Fato da necessidade imperiosa (obrigatório se marcado)','impMotivo','textarea','',{full:true,rows:2})+field('Comunicação: a quem e quando foi comunicado (obrigatório se marcado)','impComunic','text','',{full:true})+'</div>'+
+    '<div class="sect">Colaboradores</div><div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));max-height:300px;overflow:auto">'+fs.map(f=>'<label class="ch-pk"><input type="checkbox" data-hef="'+f.id+'"> <span>'+esc(f.nome)+'<span class="sub"> · '+esc(f.projId?projNome(f.projId):(f.funcao||''))+(+f.insal>0&&!art60Ok(f)?' · insalubridade sem licença do art. 60':'')+'</span></span></label>').join('')+'</div><p class="sub" style="margin:8px 0 0">O limite é de 2 horas extras por dia, somando todos os pedidos do colaborador. Acima disso, só na necessidade imperiosa (CLT, art. 61), com o fato e a comunicação registrados. Quem recebe insalubridade só faz extra com a licença do art. 60 registrada.</p>',
+    saveLabel:'Enviar pedido',save:root=>{const v=readForm(root),ids=$$('[data-hef]',root).filter(c=>c.checked).map(c=>c.dataset.hef);const r=heCriar({funcIds:ids,data:v.data,horas:v.horas,projId:v.projId,motivo:v.motivo,imperiosa:v.imperiosa,impMotivo:v.impMotivo,impComunic:v.impComunic});if(r.erro){toast(r.erro,'neg');return false;}toast(r.ids.length+' pedido(s) enviado(s) para aprovação.','pos');}});};
+const heIns=(h,x)=>{const i=h.indexOf('<div class="stack">');return i>=0?h.slice(0,i+19)+x+h.slice(i+19):x+h;};
+{const v0=V.hextra;V.hextra=function(){let h=v0.apply(this,arguments);h=heIns(h,heTxtNota());
+  if((ui.hextraAba||'ped')==='sem'){const J=J2();h=h.replace(/<\/div><\/div>$/,'</div><div class="note">'+(String(J.hePolitica||'').trim()?'<b>Política escrita da empresa sobre hora extra:</b> '+esc(J.hePolitica)+'<br>Medida disciplinar só com critério igual para todos e depois de ouvir o colaborador.':'<b>Sem política escrita de hora extra configurada.</b> Extra sem autorização é paga normalmente e não gera advertência. Para usar medida disciplinar, a empresa precisa de uma política escrita, divulgada e aplicada igual para todos (Sistema › Configurações › Regras jurídicas). Confirme com o advogado da empresa.')+'</div></div>');}
+  return h;};}
+{const v0=V.hepedir;V.hepedir=function(){return heIns(v0.apply(this,arguments),heTxtNota()).replace(/Limite de [\d,]+ h extras por dia \(CLT art\. 59\)\./,'Limite de 2 h extras por dia por colaborador, somando os pedidos (CLT, art. 59); acima disso, só necessidade imperiosa (art. 61).');};}
+{const v0=V.pespelho;V.pespelho=function(){return heIns(v0.apply(this,arguments),heTxtNota());};}
+{const d0=pontoDoc;pontoDoc=function(){const o=d0.apply(this,arguments);if(o)o.obs=HE_TXT+' '+(o.obs||'');return o;};}
+/* pedidos marcados como necessidade imperiosa aparecem para quem aprova */
+{const h0=hePendHtml;hePendHtml=function(){const h=h0.apply(this,arguments);if(!h)return h;const ls=S.heaut.filter(r=>r.status==='pendente'&&r.imperiosa);if(!ls.length)return h;
+  return h+'<div class="note" style="border-color:#b91c1c"><b>Pedidos de necessidade imperiosa (CLT, art. 61):</b><ul style="margin:4px 0 0;padding-left:18px">'+ls.map(r=>'<li>'+esc(funcNome(r.funcId))+' · '+fmtDate(r.data)+' · '+j2Hm(r.horas)+': '+esc(r.impMotivo||'')+' <span class="sub">(comunicação: '+esc(r.impComunic||'')+')</span></li>').join('')+'</ul></div>';};}
+/* advertência ou suspensão por extra não autorizada só com política escrita configurada */
+const heDiscExtra=r=>['advert','suspensao'].includes(r&&r.tipo)&&/hora[s]?\s*extra|extra\s+(sem|n[aã]o)\s+autoriza/i.test(String(r.motivo||'')+' '+String(r.obs||''));
+{const d=MODS2.dpmov;if(d){const v0=d.validate;d.validate=(r,n)=>{const e=v0?v0(r,n):'';if(e)return e;if(heDiscExtra(r)&&!String(J2().hePolitica||'').trim())return 'Medida disciplinar por hora extra sem autorização só com política escrita da empresa, divulgada aos colaboradores e aplicada igual para todos. Cadastre o texto em Sistema › Configurações › Regras jurídicas. A hora extra feita continua devida.';return '';};}}
+
+/* =====================================================================
+   3. BANCO DE HORAS (A4, plano #5)
+   ===================================================================== */
+const bhAcordoOk=f=>!!(f&&f.bhAcordoEm&&anxArr(f,'bhAcordoAnx').length);
+function bhIncluirErro(f,o){o=o||{};if(!f)return 'Colaborador não encontrado.';if(!f.jornadaId)return 'Cadastre a jornada do colaborador antes de incluir no banco.';
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(o.acordoEm||''))return 'Informe a data em que o acordo foi assinado.';if(o.acordoEm>todayStr())return 'A data de assinatura não pode ser futura.';
+  if(!(o.anexos||[]).filter(anxOk).length)return 'Anexe o acordo assinado (PDF ou foto). Sem o acordo anexado o colaborador não entra no banco de horas.';
+  if(o.desde&&o.desde<o.acordoEm)return 'O banco não pode começar antes da assinatura do acordo.';
+  if(!art60Ok(f))return art60Msg(f);return '';}
+function bhIncluir(fid,o){o=o||{};const f=get('func',fid),e=bhIncluirErro(f,o);if(e)return e;const P=BHP();
+  const desde=o.desde||(P.inicio&&P.inicio>=o.acordoEm&&P.inicio<=todayStr()?P.inicio:todayStr());
+  put('func',Object.assign(cl(f),{bh:true,bhDesde:f.bh&&f.bhDesde?f.bhDesde:desde,bhAcordoEm:o.acordoEm,bhAcordoAnx:o.anexos.filter(anxOk),bhAcordoPor:actorId(),bhAcordoReg:Date.now()}));return '';}
+A.bhPart=d=>{const f=get('func',d.id);if(!f)return;if(!art60Ok(f)){msgModal('Não é possível incluir no banco de horas',[art60Msg(f)]);return;}
+  const P=BHP();j2AnxIni(anxArr(f,'bhAcordoAnx'),'Acordo assinado (obrigatório)');
+  modal({title:(f.bh?'Acordo do banco de horas · ':'Incluir no banco de horas · ')+f.nome,body:'<p class="sub" style="margin:0 0 8px">Gere o modelo pelo botão "Acordo" da linha do colaborador, colha a assinatura do colaborador e anexe o documento assinado. Sem o anexo o colaborador não entra no banco.</p>'+(P.convConf?'':'<div class="note" style="border-color:#b91c1c"><b>Convenção coletiva não conferida.</b> Antes de usar o banco, confira se a convenção do sindicato permite o banco, o prazo e o desconto, e registre a data em Regras do banco. Confirme com o advogado da empresa.</div>')+
+    '<div class="fg">'+field('Acordo assinado em *','acordoEm','date',f.bhAcordoEm||'')+(f.bh?'':field('No banco a partir de (vazio = data da assinatura ou hoje)','desde','date',''))+'</div><div id="j2anx">'+j2AnxBox()+'</div>',
+    saveLabel:f.bh?'Salvar acordo':'Incluir no banco',save:root=>{if(J2A.busy){toast('Aguarde o envio do arquivo.','neg');return false;}const v=readForm(root),e=bhIncluir(f.id,{acordoEm:v.acordoEm,desde:v.desde||'',anexos:J2A.arqs});if(e){toast(e,'neg');return false;}toast(f.bh?'Acordo anexado.':'Incluído no banco de horas.','pos');}});};
+/* o cadastro do colaborador não inclui no banco sem o acordo */
+{const d=MODS2.func,v0=d.validate;d.validate=(r,n)=>{const e=v0?v0(r,n):'';if(e)return e;const old=get('func',r.id);
+  if(r.bh&&!(old&&old.bh)){if(!bhAcordoOk(r))return 'Para incluir no banco de horas use Pessoal › Banco de horas › Incluir no banco: o acordo assinado precisa estar anexado.';if(!art60Ok(r))return art60Msg(r);}return '';};}
+/* saldo negativo: zerar por padrão; descontar só com a confirmação de que o acordo prevê */
+const bhNegEf=P=>(P||BHP()).negativo==='descontar'&&(P||BHP()).negConf?'descontar':'zerar';
+function j2ComBhNeg(fn,ctx,args){let P;try{P=BHP();}catch(e){return fn.apply(ctx,args);}if(P.negativo!=='descontar'||P.negConf)return fn.apply(ctx,args);
+  const doc=IDX.cfg.get('empresa');let bp={};try{bp=JSON.parse((doc&&doc.bhPar)||'{}');}catch(e){bp={};}
+  IDX.cfg.set('empresa',Object.assign({},doc||{id:'empresa'},{bhPar:JSON.stringify(Object.assign(bp,{negativo:'zerar'}))}));
+  try{return fn.apply(ctx,args);}finally{if(doc)IDX.cfg.set('empresa',doc);else IDX.cfg.delete('empresa');}}
+{const d0=dpCalcMensal;dpCalcMensal=function(){return j2ComBhNeg(d0,this,arguments);};}
+{const d0=deslCalc;deslCalc=function(){return j2ComBhNeg(d0,this,arguments);};}
+{const d0=bhExtrato;bhExtrato=function(){return j2ComBhNeg(d0,this,arguments);};}
+A.bhPar=()=>{const P=BHP(),neg=bhNegEf(P);modal({title:'Regras do banco de horas',body:'<div class="fg">'+field('Tipo de acordo e prazo de compensação','acordo','select',P.acordo,{opts:BH_ACORDO,full:true})+field('Início do banco (horas antes desta data não contam)','inicio','date',P.inicio)+field('Limite de saldo por pessoa (horas, 0 = sem limite)','limite','number',P.limite)+field('Horas em domingos e feriados','ext100','select',P.ext100,{opts:[['pagar','Pagar a 100% na folha (recomendado)'],['banco','Lançar no banco']]})+
+  field('Saldo negativo no fim do período','negativo','select',neg,{opts:[['zerar','Zerar (padrão: a empresa abre mão)'],['descontar','Descontar em folha (só se o acordo assinado prever)']]})+field('Confirmo que o acordo assinado prevê o desconto do saldo negativo','negConf','checkbox',!!P.negConf,{full:true})+field('Faltas injustificadas','faltas','select',P.faltas,{opts:[['nao','Descontar na folha como falta (padrão)'],['banco','Debitar do banco de horas']]})+
+  '</div><div class="sect">Convenção coletiva</div><div class="fg">'+field('Convenção conferida em','convConf','date',P.convConf||'')+field('Convenção / cláusula conferida (sindicato, vigência, cláusula do banco)','convRef','text',P.convRef||'',{full:true})+'</div><p class="sub" style="margin:10px 0 0">A convenção coletiva pode limitar o banco, exigir acordo coletivo ou fixar o prazo. Confirme com o advogado da empresa. Estas regras valem para todos os participantes.</p>',saveLabel:'Salvar regras',
+  save:root=>{const v=readForm(root);if(v.negativo==='descontar'&&!v.negConf){toast('Para descontar o saldo negativo, confirme que o acordo assinado prevê o desconto. Sem isso, o padrão é zerar.','neg');return false;}
+    put('cfg',Object.assign({},cfg(),{id:'empresa',bhPar:JSON.stringify({acordo:v.acordo,inicio:v.inicio||'',limite:+v.limite||0,ext100:v.ext100,negativo:v.negativo==='descontar'?'descontar':'zerar',negConf:v.negativo==='descontar'&&!!v.negConf,faltas:v.faltas,convConf:v.convConf||'',convRef:String(v.convRef||'').slice(0,300)})}));toast('Regras salvas.','pos');}});};
+function bhAvisosHtml(){const P=BHP(),part=funcAtivos().filter(f=>f.bh),sem=part.filter(f=>!bhAcordoOk(f)),ins=part.filter(f=>!art60Ok(f)),out=[];
+  if(!P.convConf)out.push('<div class="note" style="border-color:#b91c1c"><b>Convenção coletiva não conferida.</b> Registre em Regras do banco a data em que a convenção foi conferida (ela pode limitar ou proibir o banco). Confirme com o advogado da empresa.</div>');
+  else out.push('<p class="sub" style="margin:0">Convenção conferida em '+fmtDate(P.convConf)+(P.convRef?' · '+esc(P.convRef):'')+'.</p>');
+  if(P.negativo==='descontar'&&!P.negConf)out.push('<div class="note"><b>Saldo negativo vencido será zerado.</b> As regras pedem desconto, mas falta confirmar que o acordo assinado prevê o desconto (Regras do banco).</div>');
+  if(sem.length)out.push('<div class="note" style="border-color:#b91c1c"><b>'+sem.length+' participante(s) sem o acordo assinado anexado:</b> '+sem.map(f=>esc(f.nome)).join(', ')+'. Anexe o acordo (botão "Acordo anexo" na linha) ou retire do banco.</div>');
+  if(ins.length)out.push('<div class="note" style="border-color:#b91c1c"><b>'+ins.length+' participante(s) com insalubridade sem licença do art. 60:</b> '+ins.map(f=>esc(f.nome)).join(', ')+'. A compensação em atividade insalubre sem licença não é válida (Súmula 85, VI, do TST). Confirme com o advogado da empresa.</div>');
+  return out.join('');}
+{const v0=V.bh;V.bh=function(){let h=v0.apply(this,arguments);h=h.replace(/Saldo negativo vencido: (descontado em folha|zerado)\./,'Saldo negativo vencido: '+(bhNegEf()==='descontar'?'descontado em folha (previsto no acordo)':'zerado')+'.');
+  h=h.replace(/<button class="btn sm" data-act="bhAcordo" data-id="([^"]+)">Acordo<\/button>/g,(m,id)=>{const f=get('func',id);return m+(mayW('rh')?'<button class="btn sm'+(bhAcordoOk(f)?'':' dng')+'" data-act="bhPart" data-id="'+id+'">'+(bhAcordoOk(f)?'Acordo anexo':'Anexar acordo')+'</button>':'');});
+  return heIns(h,bhAvisosHtml());};}
+
+/* =====================================================================
+   4. FROTA: prazo de indicação do condutor (A11, plano #16)
+   ===================================================================== */
+const multaPrazo=r=>r?(r.prazoIndic||(r.notificadaEm?addDays(r.notificadaEm,+J2().multaDias||30):'')):'';
+const multaIndicAberta=r=>!!r&&r.status==='recebida'&&!!multaPrazo(r);
+{const d=MODS2.multa;if(d){const p0=d.pre;d.pre=(r,n)=>{if(p0)p0(r,n);if(!r.prazoIndic&&r.notificadaEm){r.prazoIndic=addDays(r.notificadaEm,+J2().multaDias||30);r.prazoAuto=true;}};
+  const f0=d.fields;d.fields=r=>f0(r).map(f=>f.k==='prazoIndic'?Object.assign({},f,{l:'Prazo para indicar o condutor (vazio = recebida + '+(+J2().multaDias||30)+' dias)'}):f.k==='notificadaEm'?Object.assign({},f,{l:'Notificação recebida em'}):f);
+  d.fnote='Prazo de indicação do condutor: '+(+J2().multaDias||30)+' dias a partir do recebimento da notificação (CTB, art. 257, § 7º; confira na própria notificação). Se a empresa não indicar, recebe nova multa (art. 257, § 8º). O aviso vai para quem trata multas, qualquer que seja o local do veículo.';}}
+function multaResp(){const J=J2();if(J.multaResp.length)return J.multaResp.slice();return S.usr.filter(u=>u.uid&&u.ativo!==false&&['admin','financeiro','rh'].includes(u.perfil)).map(u=>u.uid);}
+function multaEstagio(r){if(!multaIndicAberta(r))return '';const n=dTo(multaPrazo(r));if(n<0)return 'venc';if(n<=1)return 'd1';if(n<=(+J2().multaAviso||10))return 'av';return '';}
+function multaAvisoTxt(r){const n=dTo(multaPrazo(r));return 'Multa '+(r.auto?r.auto+' ':'')+'do veículo '+veicNome(r.veicId)+(r.funcId?' (condutor: '+funcNome(r.funcId)+')':'')+': '+(n<0?'o prazo para indicar o condutor venceu em '+fmtDate(multaPrazo(r)):'indique o condutor até '+fmtDate(multaPrazo(r))+' ('+n+' dia(s))')+'. Sem a indicação, a empresa recebe nova multa (CTB, art. 257, §§ 7º e 8º). Frota › Multas.';}
+/* avisos no chat: uma vez por estágio (10 dias, véspera, vencido), para cada responsável */
+function multaAvisar(enviar){const out=[];enviar=enviar||avisoChat;(S.multa||[]).forEach(r=>{const st=multaEstagio(r);if(!st||(r.indicAv||[]).includes(st))return;const us=multaResp();let ok=0;us.forEach(u=>{if(enviar(u,multaAvisoTxt(r)))ok++;});
+  if(ok||!us.length){put('multa',Object.assign(cl(r),{indicAv:(r.indicAv||[]).concat([st])}));out.push({id:r.id,st,n:ok});}});return out;}
+let MULTA_ULT=0;
+RH_POST.push(()=>{if(store.mode!=='db'||!store.ready||isColab()||!mayW(GROUP_OF_TAB.multa||'frota')||typeof CH==='undefined'||!CH||!CH.convs||!CH.convs.size)return;const now=Date.now();if(now-MULTA_ULT<60000)return;MULTA_ULT=now;try{multaAvisar();}catch(e){}});
+{const am=alertasModulos;alertasModulos=function(){const it=am.apply(this,arguments);try{if(!isColab()&&mayR(GROUP_OF_TAB.multa||'frota')){const ls=(S.multa||[]).filter(r=>multaIndicAberta(r)&&dTo(multaPrazo(r))<=(+J2().multaAviso||10));
+  if(ls.length){const ve=ls.filter(r=>dTo(multaPrazo(r))<0).length;it.push(['multa',ls.length+' multa(s) com prazo de indicação do condutor '+(ve?'vencido ('+ve+') ou ':'')+'nos próximos '+(+J2().multaAviso||10)+' dias',String(ls.length)]);}}}catch(e){}return it;};}
+
+/* =====================================================================
+   5. CONTRATOS PÚBLICOS: reequilíbrio e inexequibilidade (C2, plano #21)
+   ===================================================================== */
+function ctrReeqAviso(c){if(!c||c.status!=='vigente'||!fzCtrPub(c))return null;const fim=ctrFim(c);if(!fim)return null;const n=dTo(fim);if(n<0||n>(+J2().reeqAntec||90))return null;
+  const ab=(S.reeq||[]).some(r=>r.ctrId===c.id&&fzReeqAberto(r));return {fim,n,ab};}
+{const ca=ctrAlertas;ctrAlertas=function(c){const a=ca.apply(this,arguments);const x=ctrReeqAviso(c);if(x&&!x.ab)a.push(['warn','Se houver desequilíbrio, peça o reequilíbrio antes do fim da vigência ('+fmtDate(x.fim)+') ou da prorrogação (Lei 14.133/2021, art. 131, parágrafo único)']);return a;};}
+{const am=alertasModulos;alertasModulos=function(){const it=am.apply(this,arguments);try{if(!isColab()&&mayR('ctr')){const ls=S.ctr.map(c=>ctrReeqAviso(c)).filter(x=>x&&!x.ab);if(ls.length)it.push(['ctr',ls.length+' contrato(s) público(s) perto do fim da vigência: avalie pedir reequilíbrio antes (art. 131, par. único, Lei 14.133)',String(ls.length)]);}}catch(e){}return it;};}
+/* proposta para cliente público de obra ou serviço de engenharia */
+const OPP_POS_ENVIO=['enviada','negociacao','ganha'];
+function oppInexeq(o){if(!o||o.tipo!=='publico'||o.engenharia===false)return null;const orc=+o.orcAdm||0,pr=+oppPreco(o)||0;if(!(orc>0)||!(pr>0))return null;
+  const p=pr/orc;return {pct:p,inexeq:p<0.75,garAdic:p<0.85?r2(orc-pr):0,orc,preco:pr};}
+function oppInexeqErro(r){const x=oppInexeq(r);if(!x||!OPP_POS_ENVIO.includes(r.etapa))return '';
+  if(x.inexeq&&!String(r.inexeqJust||'').trim())return 'Preço em '+pctV(x.pct)+' do orçamento da Administração, abaixo de 75%: a lei presume a proposta inexequível em obra ou serviço de engenharia (Lei 14.133/2021, art. 59, § 4º). Registre a demonstração de exequibilidade (composição de custos, cotações) no campo próprio antes de enviar. Confirme com o advogado da empresa.';
+  if(x.garAdic>0&&!r.garAdicOk)return 'Preço abaixo de 85% do orçamento da Administração: se vencer, a empresa terá de prestar garantia adicional de '+money(x.garAdic)+' (diferença entre o orçamento e a proposta; art. 59, § 5º). Marque "Garantia adicional prevista" depois de confirmar com a seguradora ou o banco.';return '';}
+{const d=MODS2.opp;if(d){const b0=d.blank;d.blank=()=>Object.assign(b0(),{engenharia:true,orcAdm:'',inexeqJust:'',garAdicOk:false});
+  const f0=d.fields;d.fields=r=>{const fs=f0(r),i=fs.findIndex(x=>x&&x.k==='valor');const add=[F('engenharia','Obra ou serviço de engenharia (público)','checkbox'),F('orcAdm','Orçamento estimado da Administração (R$)','number'),F('garAdicOk','Garantia adicional prevista (proposta abaixo de 85%)','checkbox'),F('inexeqJust','Demonstração de exequibilidade (proposta abaixo de 75%)','textarea',{full:true,rows:2})];fs.splice(i<0?fs.length:i+1,0,...add);return fs;};
+  const v0=d.validate;d.validate=(r,n)=>{const e=v0?v0(r,n):'';if(e)return e;const rr=Object.assign({},r);if(rr.resultado)rr.etapa=rr.resultado;return oppInexeqErro(rr);};
+  const ci=d.cols.findIndex(c=>c[0]==='Valor');d.cols.splice(ci>=0?ci+1:d.cols.length,0,['Exequibilidade',r=>{const x=oppInexeq(r);if(!x)return r.tipo==='publico'&&r.engenharia!==false?'<span class="mut">sem orçamento da Adm.</span>':'<span class="mut">—</span>';return pill(pctV(x.pct)+' do orçado',x.inexeq?'neg':x.garAdic?'warn':'pos')+'<div class="sub">'+(x.inexeq?'abaixo de 75%: presunção de inexequível':x.garAdic?'garantia adicional '+money(x.garAdic):'acima de 85%')+'</div>';}]);
+  d.minw=Math.max(+d.minw||0,1240);
+  d.fnote=(d.fnote?d.fnote+' ':'')+'Licitação de obra ou serviço de engenharia: informe o orçamento estimado da Administração. Abaixo de 75% a lei presume a proposta inexequível (art. 59, § 4º); abaixo de 85% o vencedor presta garantia adicional (§ 5º).';}}
+
+/* =====================================================================
+   6. EPI: hash do conteúdo e aparelho (C3, plano #25)
+   ===================================================================== */
+const J2_K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+function j2Sha256(str){const s=unescape(encodeURIComponent(String(str==null?'':str))),l=s.length,n=(((l+8)>>6)+1)*16,W=new Array(n).fill(0);
+  for(let i=0;i<l;i++)W[i>>2]|=(s.charCodeAt(i)&255)<<(24-(i%4)*8);W[l>>2]|=0x80<<(24-(l%4)*8);W[n-1]=(l*8)>>>0;W[n-2]=Math.floor(l/0x20000000);
+  const r=(x,k)=>(x>>>k)|(x<<(32-k)),w=new Array(64);let H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  for(let j=0;j<n;j+=16){for(let i=0;i<64;i++){if(i<16)w[i]=W[j+i]|0;else{const a=w[i-15],b=w[i-2];w[i]=(w[i-16]+(r(a,7)^r(a,18)^(a>>>3))+w[i-7]+(r(b,17)^r(b,19)^(b>>>10)))|0;}}
+    let [a,b,c,d,e,f,g,h]=H;
+    for(let i=0;i<64;i++){const t1=(h+(r(e,6)^r(e,11)^r(e,25))+((e&f)^(~e&g))+J2_K[i]+w[i])|0,t2=((r(a,2)^r(a,13)^r(a,22))+((a&b)^(a&c)^(b&c)))|0;h=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;}
+    H=[H[0]+a|0,H[1]+b|0,H[2]+c|0,H[3]+d|0,H[4]+e|0,H[5]+f|0,H[6]+g|0,H[7]+h|0];}
+  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');}
+/* conteúdo canônico da entrega (versão 1): a mesma string no navegador e no servidor */
+function epiHashBase(e){return JSON.stringify({v:1,epi:String(e.id||''),colab:String(e.funcId||''),entrega:String(e.entrega||''),itens:[{item:String(e.item||''),ca:String(e.ca||''),qtd:+e.qtd||1,tam:String(e.tam||'')}]});}
+const epiHash=e=>j2Sha256(epiHashBase(e));
+function uaResumo(ua){ua=String(ua==null?((typeof navigator!=='undefined'&&navigator&&navigator.userAgent)||''):ua);if(!ua)return 'aparelho não identificado';
+  const so=/Android ([\d.]+)/.exec(ua)?'Android '+/Android ([\d.]+)/.exec(ua)[1].split('.')[0]:/(iPhone|iPad).*OS (\d+)/.exec(ua)?/(iPhone|iPad)/.exec(ua)[1]+' iOS '+/OS (\d+)/.exec(ua)[1]:/Windows NT/.test(ua)?'Windows':/Mac OS X/.test(ua)?'macOS':/Linux/.test(ua)?'Linux':'sistema desconhecido';
+  const nav=/Edg\/(\d+)/.exec(ua)?'Edge '+/Edg\/(\d+)/.exec(ua)[1]:/SamsungBrowser\/(\d+)/.exec(ua)?'Samsung Internet '+/SamsungBrowser\/(\d+)/.exec(ua)[1]:/Firefox\/(\d+)/.exec(ua)?'Firefox '+/Firefox\/(\d+)/.exec(ua)[1]:/Chrome\/(\d+)/.exec(ua)?'Chrome '+/Chrome\/(\d+)/.exec(ua)[1]:/Version\/(\d+).*Safari/.exec(ua)?'Safari '+/Version\/(\d+)/.exec(ua)[1]:'navegador desconhecido';
+  return (/Mobi|Android|iPhone/.test(ua)?'celular':/iPad|Tablet/.test(ua)?'tablet':'computador')+' · '+so+' · '+nav;}
+const epiIntegr=e=>{const a=e&&e.assin;if(!a||!a.hash)return null;return {hash:a.hash,ok:a.hash===epiHash(e),disp:a.disp||''};};
+epiAssinarReg=function(id,sig,nome){const e=get('epi',id);if(!e)return null;const img=safeImg(sig);if(!img)return null;
+  return put('epi',Object.assign(cl(e),{assinado:true,assin:{modo:'tela',img,nome:nome||funcNome(e.funcId),em:Date.now(),por:actorId(),hash:epiHash(e),hashAlg:'SHA-256',hashV:1,imgHash:j2Sha256(img),disp:uaResumo()}}));};
+/* servidor próprio: a assinatura vai pela rota /api/epi/assinar com o hash e o aparelho (o servidor confere e carimba) */
+{const p0=put;put=function(col,rec){if(col==='epi'&&rec&&typeof SEGA_SRV==='function'&&SEGA_SRV()&&rec.assin&&rec.assin.modo==='tela'&&rec.assin.img&&rec.assin.hash){const old=rec.id?get(col,rec.id):null;if(!(old&&old.assin)){segaLocal(col,rec);
+    segaPost('/api/epi/assinar',{id:rec.id,img:rec.assin.img,nome:rec.assin.nome||'',hash:rec.assin.hash,hashV:1,imgHash:rec.assin.imgHash||'',disp:rec.assin.disp||''}).then(j=>segaLocal('epi',j.data),e=>{if(old)segaLocal('epi',old);toast('A assinatura não foi gravada: '+e.message,'neg');});return rec;}}
+  return p0.apply(this,arguments);};}
+/* Minha área: o colaborador envia o hash do que viu e o aparelho; o RH grava com o hash */
+A.meuEpiOk=d=>{const e=((meuDoc()||{}).epiConf||[]).find(x=>x.id===d.id);if(!e)return;const fid=((PTC.doc||{}).func||{}).id||'';
+  confirmBox('Confirmo que recebi '+fmtQ(e.qtd)+' × '+esc(e.item)+(e.ca?' (CA '+esc(e.ca)+')':'')+' em '+fmtDate(e.entrega)+', gratuitamente, e que fui orientado sobre o uso, a guarda e a conservação (NR-6).',()=>{put('dpsol',{id:uid(),tipo:'epiok',epiId:e.id,em:Date.now(),hash:epiHash(Object.assign({funcId:fid},e)),disp:uaResumo()});toast('Recebimento confirmado.','pos');},'Confirmar');};
+{const r0=rhSlProc;rhSlProc=function(f,u,x){if((typeof SEGA_SRV==='function'&&SEGA_SRV())||!x||x.tipo!=='epiok')return r0.apply(this,arguments);if(!f)return false;
+  const e=get('epi',x.epiId);if(e&&e.funcId===f.id&&!e.assin){const h=epiHash(e);put('epi',Object.assign(cl(e),{assinado:true,assin:{modo:'minha_area',em:typeof x.em==='number'?x.em:Date.now(),uid:u||'',nome:f.nome||'',regEm:Date.now(),hash:h,hashAlg:'SHA-256',hashV:1,hashColab:/^[0-9a-f]{64}$/.test(x.hash||'')?x.hash:'',disp:String(x.disp||'').slice(0,120)}}));}return true;};}
+const epiIntTxt=e=>{const x=epiIntegr(e);if(!x)return '';return 'Código de integridade (SHA-256): '+x.hash+(x.ok?'':' (o conteúdo da entrega mudou depois da assinatura)')+(x.disp?' · aparelho: '+x.disp:'');};
+{const v0=A.epiAssinVer;A.epiAssinVer=d=>{v0(d);const e=get('epi',d.id),x=epiIntegr(e),mb=$('#mb');if(!x||!mb||!mb.insertAdjacentHTML)return;
+  mb.insertAdjacentHTML('beforeend','<div class="sect">Integridade</div><p style="margin:0;word-break:break-all"><span class="mono" style="font-size:12px">'+esc(x.hash)+'</span></p><p class="sub" style="margin:4px 0 0">'+(x.ok?pill('Conteúdo confere','pos'):pill('Conteúdo alterado depois da assinatura','neg'))+' SHA-256 de: colaborador, item, CA, quantidade, tamanho e data da entrega.'+(x.disp?' Aparelho: '+esc(x.disp)+'.':'')+'</p>');};}
+{const fd0=epiFichaDoc;epiFichaDoc=function(fid,de,ate){const o=fd0.apply(this,arguments);const es=S.epi.filter(e=>e.funcId===fid&&(!de||e.entrega>=de)&&(!ate||e.entrega<=ate)&&epiIntegr(e)).sort((a,b)=>String(a.entrega).localeCompare(String(b.entrega)));
+  if(es.length){o.tables=(o.tables||[]).concat([{head:['Entrega','Item','CA','Código de integridade (SHA-256)','Aparelho'],rows:es.map(e=>{const x=epiIntegr(e);return [fmtDate(e.entrega),e.item||'',e.ca||'',x.hash+(x.ok?'':' (alterado)'),x.disp||''];})}]);
+    o.obs=(o.obs?o.obs+' ':'')+'O código de integridade é o SHA-256 do conteúdo de cada entrega (colaborador, item, CA, quantidade, tamanho e data), gravado no momento da assinatura.';}
+  return o;};}
+
+/* =====================================================================
+   7. TREINAMENTOS GERADOS POR IA = RECICLAGEM COMPLEMENTAR (A13, plano #23)
+   ===================================================================== */
+const TR_NOME='Reciclagem complementar (IA)';
+NAV.forEach(n=>{if(n[0]==='treinm')n[1]=TR_NOME;});MENU.forEach(m=>(m[2]||[]).forEach(i=>{if(i[0]==='treinm')i[1]=TR_NOME;}));
+const trTroca=h=>String(h).replace(/Treinamento obrigatório do mês/g,'Reciclagem complementar do mês').replace(/treinamento obrigatório do mês/g,'reciclagem complementar do mês').replace(/Treinamentos mensais/g,'Reciclagem complementar').replace(/Concluíram o obrigatório/g,'Concluíram a principal').replace(/Ainda não concluíram o obrigatório/g,'Ainda não assistiram à reciclagem principal do mês').replace(/<span class="pill warn">Obrigatório<\/span>/g,'<span class="pill warn">Principal do mês</span>').replace(/, com certificado\./g,', com comprovante de participação.').replace(/>Certificado</g,'>Comprovante<').replace(/Um é obrigatório por mês\./g,'Um é o principal do mês.').replace(/ e recebe o certificado\./g,' e recebe o comprovante de participação.').replace(/ e receba o certificado\./g,' e receba o comprovante de participação.');
+const TR_AVISO='<div class="note"><b>Reciclagem complementar, não treinamento obrigatório de NR.</b> Os vídeos gerados por IA reforçam o conteúdo, mas não substituem a capacitação exigida pelas NRs (NR-1, item 1.7: carga horária, instrutor qualificado, conteúdo programático e certificado). A obrigação vem da matriz abaixo.</div>';
+/* matriz das NRs: carga horária, instrutor e conteúdo por norma */
+const NR_CURSO_PAD={'NR-10':{ch:40,rec:'a cada 2 anos',conteudo:'Curso básico de segurança em instalações e serviços em eletricidade (Anexo II da NR-10).'},'NR-35':{ch:8,rec:'a cada 2 anos (8 h)',conteudo:'Normas, análise de risco, sistemas de proteção contra quedas, EPI, acidentes típicos e resgate.'},'NR-33':{ch:16,rec:'anual (8 h)',conteudo:'Trabalhador autorizado e vigia: reconhecimento de riscos, procedimentos, equipamentos e resgate.'},'NR-18':{ch:4,rec:'conforme o PGR',conteudo:'Treinamento inicial: condições e meio ambiente de trabalho, riscos da função, EPC e EPI.'}};
+const nrCurso=()=>{const c=cfg().nrCurso||{},o={};TREIN_T.forEach(t=>{const k=t.replace(/^(NR-\d+).*/,'$1');o[t]=Object.assign({ch:'',rec:'',instrutor:'',conteudo:''},NR_CURSO_PAD[k]||{},c[t]||{});});return o;};
+function nrMatrizHtml(edit){const mx=matriz(),cs=nrCurso(),nrs=TREIN_T.filter(t=>Object.keys(mx).some(fn=>(mx[fn]||[]).includes(t)));
+  return '<div class="card"><h2>Fonte da obrigação: matriz de NRs por função</h2>'+(nrs.length?'<div class="tw" style="border:0"><table style="min-width:820px"><thead><tr><th>Norma</th><th>Funções que exigem</th><th class="num">Carga horária</th><th>Reciclagem</th><th>Instrutor / entidade</th><th>Conteúdo programático</th></tr></thead><tbody>'+
+    nrs.map(t=>{const c=cs[t];return '<tr><td><b>'+esc(t)+'</b></td><td>'+esc(Object.keys(mx).filter(fn=>(mx[fn]||[]).includes(t)).sort().join(', '))+'</td><td class="num">'+(c.ch?esc(String(c.ch))+' h':'<span class="neg">informar</span>')+'</td><td>'+esc(c.rec||'—')+'</td><td>'+(c.instrutor?esc(c.instrutor):'<span class="neg">informar</span>')+'</td><td class="sub">'+esc(c.conteudo||'—')+'</td></tr>';}).join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Nenhuma NR marcada por função ainda. Marque em CIPA e SST › Matriz de treinamentos.</p>')+
+    '<p class="sub" style="margin:6px 0 0">Cargas horárias sugeridas a partir do texto das NRs; confira na norma vigente e no PGR. Os certificados desses cursos são anexados em RH › Documentos.</p>'+(edit&&mayW('sst')?'<div class="acts" style="margin-top:8px"><button class="btn sm" data-act="nrCursoEd">Editar carga horária, instrutor e conteúdo</button></div>':'')+'</div>';}
+A.nrCursoEd=()=>{const cs=nrCurso(),mx=matriz(),nrs=TREIN_T.filter(t=>Object.keys(mx).some(fn=>(mx[fn]||[]).includes(t)));const ls=nrs.length?nrs:TREIN_T;
+  modal({title:'Matriz das NRs: carga horária, instrutor e conteúdo',wide:true,body:ls.map((t,i)=>'<div class="sect">'+esc(t)+'</div><div class="fg">'+field('Carga horária (horas)','ch_'+i,'number',cs[t].ch)+field('Reciclagem','rec_'+i,'text',cs[t].rec)+field('Instrutor / entidade','ins_'+i,'text',cs[t].instrutor)+field('Conteúdo programático','con_'+i,'textarea',cs[t].conteudo,{full:true,rows:2})+'</div>').join(''),saveLabel:'Salvar',
+    save:root=>{const v=readForm(root),o=Object.assign({},cfg().nrCurso||{});ls.forEach((t,i)=>{o[t]={ch:v['ch_'+i]==null?'':+v['ch_'+i],rec:v['rec_'+i]||'',instrutor:v['ins_'+i]||'',conteudo:String(v['con_'+i]||'').slice(0,800)};});put('cfg',Object.assign({},cfg(),{id:'empresa',nrCurso:o}));toast('Matriz das NRs salva.','pos');}});};
+ACT_GROUP.nrCursoEd='sst';
+{const v0=V.treinm;V.treinm=function(){let h=trTroca(v0.apply(this,arguments));h=h.replace(/Um treinamento obrigatório por mês \(até/,'Uma reciclagem principal por mês (até').replace(/Gerar os treinamentos do mês com IA/g,'Gerar a reciclagem do mês com IA').replace(/Gerar outro treinamento do mês/g,'Gerar outra reciclagem do mês');
+  return heIns(h,TR_AVISO)+'';};}
+{const v0=V.treinm;V.treinm=function(){const h=v0.apply(this,arguments),i=h.lastIndexOf('</div>');return i>=0?h.slice(0,i)+nrMatrizHtml(false)+h.slice(i):h+nrMatrizHtml(false);};}
+{const v0=V.trm;V.trm=function(){const h=v0.apply(this,arguments),i=h.lastIndexOf('</div>');return i>=0?h.slice(0,i)+nrMatrizHtml(true)+h.slice(i):h+nrMatrizHtml(true);};}
+{const t0=treinMeuView;treinMeuView=function(){return trTroca(t0.apply(this,arguments));};}
+{const m0=meuInicio;meuInicio=function(){return trTroca(m0.apply(this,arguments));};}
+{const v0=V.meu;V.meu=function(){const h=v0.apply(this,arguments);return ui.meu&&ui.meu.aba==='trein'?trTroca(h):h;};}
+treinCert=function(c){const emp=cfg();showDoc({tipo:'Comprovante de participação: reciclagem complementar',numero:c.titulo,situacao:'',meta:[['Colaborador',c.nome],['Conteúdo',c.titulo],['Norma de referência',c.norma||'—'],['Concluído em',new Date(c.em).toLocaleString('pt-BR')],['Aproveitamento no questionário',c.nota+' de '+(c.de||3)+' acertos'],['Empresa',emp.razao||emp.fantasia||'']],tables:[],
+  raw:'<p style="margin:16px 0;font-size:15px"><b>'+esc(c.nome)+'</b> assistiu ao vídeo de reciclagem complementar <b>"'+esc(c.titulo)+'"</b> e respondeu ao questionário de verificação em '+fmtDate(new Date(c.em).toISOString().slice(0,10))+'.</p>',
+  obs:'Reciclagem complementar de conscientização, com conteúdo gerado por IA e revisado pela segurança do trabalho. Não é certificado de capacitação de NR e não substitui os treinamentos com carga horária, instrutor e conteúdo programático exigidos pelas NRs (NR-1, item 1.7).',sign:['Responsável pela segurança do trabalho','Colaborador']},slug('reciclagem-'+c.nome+'-'+c.titulo));};
+alertasTrein=function(){if(isColab()||!mayR('sst'))return [];const m=ym(todayStr());if(!S.trein.some(t=>t.mes===m))return [['treinm','Reciclagem complementar de '+fmtYm(m)+' ainda não foi gerada','']];return [];};
+let TR_TUT=false;
+RH_PRE.push(()=>{if(TR_TUT)return;try{if(typeof TUT==='undefined')return;TR_TUT=true;TUT.forEach(t=>{if(Array.isArray(t.p))t.p=t.p.map(trTroca);});}catch(e){}});
+
+/* =====================================================================
+   8. TRANSPARÊNCIA SALARIAL E COTAS (plano #28)
+   ===================================================================== */
+function quadroLegal(){const at=funcAtivos(),emp=at.filter(f=>f.tipoContrato!=='estagio'),n=emp.length,lim=+J2().transpLimiar||90;
+  const pcdReq=n>=1001?0.05:n>=501?0.04:n>=201?0.03:n>=100?0.02:0,pcdMin=Math.ceil(n*pcdReq),pcdTem=emp.filter(f=>f.pcd).length;
+  let rs={};try{rs=typeof dpRsCfg==='function'?dpRsCfg():{};}catch(e){rs={};}const base=+rs.baseAprendiz||n,aprTem=emp.filter(f=>f.tipoContrato==='aprendiz').length,aprMin=n>=7?Math.ceil(base*0.05):0,aprMax=Math.floor(base*0.15);
+  return {n,lim,transp:n>=100?'obrig':n>=lim?'perto':'',pcdReq,pcdMin,pcdTem,aprTem,aprMin,aprMax,base,baseInf:!!rs.baseAprendiz};}
+function quadroLegalHtml(){const q=quadroLegal();
+  return '<div class="card"><h2>Cotas e transparência salarial</h2><div class="kpis">'+kpi('Empregados ativos',String(q.n),'sem estagiários')+kpi('PcD (Lei 8.213, art. 93)',q.pcdReq?q.pcdTem+' de '+q.pcdMin:String(q.pcdTem),q.pcdReq?(q.pcdTem<q.pcdMin?'abaixo da cota':'dentro da cota'):'cota começa em 100 empregados (faltam '+Math.max(0,100-q.n)+')',q.pcdReq&&q.pcdTem<q.pcdMin?'neg':'')+kpi('Aprendizes (CLT, art. 429)',q.aprTem+' (mín. '+q.aprMin+', máx. '+q.aprMax+')','base '+q.base+(q.baseInf?' (informada)':' (todos; informe a base da CBO em Recrutamento › Configurar)'),q.aprTem<q.aprMin?'neg':'')+'</div>'+
+    (q.transp==='obrig'?'<div class="note" style="border-color:#b91c1c"><b>Transparência salarial obrigatória.</b> Com 100 ou mais empregados, a empresa precisa publicar duas vezes por ano (março e setembro) o Relatório de Transparência Salarial e de Critérios Remuneratórios e preencher as informações no Portal Emprega Brasil (Lei 14.611/2023 e Decreto 11.795/2023). Confirme a rotina com a contabilidade e o advogado da empresa.</div>':q.transp==='perto'?'<div class="note"><b>A empresa está chegando a 100 empregados ('+q.n+').</b> A partir de 100: relatório semestral de transparência salarial (Lei 14.611/2023) e cota de PcD de 2% (Lei 8.213/1991, art. 93). Prepare-se com a contabilidade.</div>':'<p class="sub" style="margin:0">Transparência salarial (Lei 14.611/2023): obrigatória a partir de 100 empregados. Aviso a partir de '+q.lim+'.</p>')+'</div>';}
+{const v0=V.quadro;V.quadro=function(){const h=v0.apply(this,arguments);return heIns(h,quadroLegalHtml());};}
+{const am=alertasModulos;alertasModulos=function(){const it=am.apply(this,arguments);try{if(!isColab()&&mayR('rh')){const q=quadroLegal();
+  if(q.transp==='obrig')it.push(['quadro','Empresa com '+q.n+' empregados: relatório de transparência salarial obrigatório em março e setembro (Lei 14.611/2023)','!']);else if(q.transp==='perto')it.push(['quadro','Empresa com '+q.n+' empregados, perto de 100: prepare o relatório de transparência salarial (Lei 14.611/2023) e a cota de PcD','']);
+  if(q.pcdReq&&q.pcdTem<q.pcdMin)it.push(['quadro','Cota de PcD abaixo do mínimo: '+q.pcdTem+' de '+q.pcdMin+' (Lei 8.213, art. 93)',String(q.pcdMin-q.pcdTem)]);
+  if(q.aprTem<q.aprMin)it.push(['quadro','Cota de aprendizes abaixo do mínimo: '+q.aprTem+' de '+q.aprMin+' (CLT, art. 429)',String(q.aprMin-q.aprTem)]);}}catch(e){}return it;};}
+
+/* =====================================================================
+   REGRAS JURÍDICAS (Sistema › Configurações)
+   ===================================================================== */
+A.j2Regras=()=>{const J=J2(),us=typeof usrOpts==='function'?usrOpts():[];
+  modal({title:'Regras jurídicas: ponto, hora extra, frota, contratos e pessoal',wide:true,body:
+    '<div class="sect">Insalubridade: licença do art. 60 da CLT (hora extra e banco de horas)</div><div class="fg">'+field('Nº ou referência da licença da empresa','art60Num','text',J.art60Num)+field('Licença válida até','art60Val','date',J.art60Val)+field('Ou: cláusula da convenção coletiva que dispensa a licença (CLT, art. 611-A, XIII)','art60Cct','text',J.art60Cct,{full:true})+'</div><p class="sub" style="margin:4px 0">Também dá para registrar a licença no cadastro de cada colaborador. Confirme com o advogado da empresa.</p>'+
+    '<div class="sect">Hora extra</div><div class="fg">'+field('Política escrita sobre hora extra sem autorização (texto divulgado aos colaboradores; vazio = sem advertência por esse motivo)','hePolitica','textarea',J.hePolitica,{full:true,rows:3})+field('Necessidade imperiosa (art. 61): máximo de horas extras no dia','heImpMax','number',J.heImpMax)+'</div>'+
+    '<div class="sect">Ponto</div><div class="fg">'+field('Lembrete do arquivo mensal (AFD, AEJ, espelho): a partir do dia','pfarqDia','number',J.pfarqDia)+field('Quadro de arquivo começa no mês','pfarqIni','month',J.pfarqIni)+'</div>'+
+    '<div class="sect">Frota: indicação do condutor</div><div class="fg">'+field('Prazo para indicar o condutor (dias após receber a notificação)','multaDias','number',J.multaDias)+field('Avisar quantos dias antes','multaAviso','number',J.multaAviso)+'</div><p class="sub" style="margin:4px 0">Quem recebe o aviso no chat (sem ninguém marcado: Administrador, Financeiro e RH):</p>'+
+    (us.length?'<div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">'+us.map(u=>'<label class="ch-pk"><input type="checkbox" data-j2u="multaResp" value="'+esc(u[0])+'"'+(J.multaResp.includes(u[0])?' checked':'')+'> <span>'+esc(u[1])+'</span></label>').join('')+'</div>':'<p class="sub">Nenhum usuário cadastrado.</p>')+
+    '<div class="sect">Contratos públicos e pessoal</div><div class="fg">'+field('Alerta de reequilíbrio: dias antes do fim da vigência','reeqAntec','number',J.reeqAntec)+field('Aviso de transparência salarial a partir de (empregados)','transpLimiar','number',J.transpLimiar)+'</div>',
+    saveLabel:'Salvar regras',save:root=>{const v=readForm(root),mr=$$('[data-j2u="multaResp"]',root).filter(c=>c.checked).map(c=>c.value),e=j2RegrasSalvar(Object.assign(v,{multaResp:mr}));if(e){toast(e,'neg');return false;}toast('Regras salvas.','pos');}});};
+function j2RegrasSalvar(v){if(v.art60Val&&!/^\d{4}-\d{2}-\d{2}$/.test(v.art60Val))return 'Data da licença inválida.';if(v.pfarqIni&&!/^\d{4}-\d{2}$/.test(v.pfarqIni))return 'Mês inválido.';
+  j2Salvar({art60Num:String(v.art60Num||'').slice(0,120),art60Val:v.art60Val||'',art60Cct:String(v.art60Cct||'').slice(0,300),hePolitica:String(v.hePolitica||'').slice(0,2000),heImpMax:j2Num(v.heImpMax,4,2,6),pfarqDia:j2Num(v.pfarqDia,5,1,28),pfarqIni:v.pfarqIni||'',multaDias:j2Num(v.multaDias,30,5,90),multaAviso:j2Num(v.multaAviso,10,1,30),multaResp:(v.multaResp||[]).filter(Boolean),reeqAntec:j2Num(v.reeqAntec,90,15,365),transpLimiar:j2Num(v.transpLimiar,90,50,100)});return '';}
+ACT_GROUP.j2Regras='cfg';
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!mayR('cfg'))return h;const J=J2();
+  const card='<div class="card"><h2>Regras jurídicas (ponto, hora extra, frota, contratos)</h2><p class="sub" style="margin:0 0 8px">Licença do art. 60: '+(J.art60Val?'válida até '+fmtDate(J.art60Val):J.art60Cct?'dispensada pela convenção (cláusula registrada)':'não registrada')+' · política escrita de hora extra: '+(String(J.hePolitica).trim()?'sim':'não')+' · indicação do condutor: '+J.multaDias+' dias · reequilíbrio: aviso '+J.reeqAntec+' dias antes · transparência salarial: aviso a partir de '+J.transpLimiar+' empregados.</p>'+(mayW('cfg')?'<div class="acts" style="justify-content:flex-start"><button class="btn" data-act="j2Regras">Abrir as regras</button></div>':'')+'</div>';
+  const i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+card+h.slice(i):h+card;};}
+
+/* ===== v112 (J3): privacidade (relatorios/juridico_v3.md: B2, B3, B4, B5, B7, B9, B10; plano #11, #13, #19 e #20) =====
+   O servidor (deploy/gestao/privacidade.js e regras.js) faz a parte que precisa ser confiável: auditoria só com os campos
+   alterados e dados protegidos, leitura de dados de saúde registrada, relatório do titular completo, uso da IA registrado,
+   checklist dos empreiteiros restrito. Este módulo:
+   1. Documentos mensais dos empreiteiros (tdoc: folha e guias dos empregados deles): novo módulo de permissão "empdoc",
+      só para Financeiro, RH, Segurança do trabalho, Administrador e Diretoria (e Leitura completa). Quem não lê (Projetos,
+      Encarregado) usa o resumo tercsit, que continua aberto a todos.
+   2. Anexos: a exclusão que falha aparece na tela (antes era silenciosa); o RH apaga os arquivos que tirar dos cadastros
+      de RH e SST; a anonimização de candidatos só conclui quando o currículo foi apagado do servidor.
+   3. Sistema › Temporalidade e descarte: tabela de prazos configurável e rotina anual que lista o que venceu para aprovação
+      (nada é apagado sozinho).
+   4. Direitos do titular: relatório completo gerado no servidor (com auditoria e chat só em metadados); atendimento também
+      para candidato e trabalhador terceiro, com anonimização.
+   5. Aviso de privacidade: nova versão do aviso padrão (pede nova ciência) e avisos curtos para terceiros e candidatos.
+   6. IA: aviso antes de enviar imagens ou documentos longos e o nome da tela no pedido (o servidor registra o uso). */
+const J3={iaOk:false,iaConfirma:null,anxPend:[],rel:null,relErro:'',relCarregando:false,prazos:null};
+const J3_SRV=()=>typeof SEGA_SRV==='function'&&SEGA_SRV();
+const j3Msg=e=>String((e&&(e.message||e.erro||e.code))||'erro desconhecido');
+
+/* =====================================================================
+   1. DOCUMENTOS MENSAIS DOS EMPREITEIROS (tdoc)
+   ===================================================================== */
+MODS.push(['empdoc','Documentos mensais dos empreiteiros (folha e guias dos empregados deles)']);
+['financeiro','rh','sst'].forEach(k=>{const p=PERFIS[k];if(p&&Array.isArray(p.w)&&!p.w.includes('empdoc'))p.w.push('empdoc');});
+{const p=PERFIS.leituratotal;if(p&&Array.isArray(p.r)&&!p.r.includes('empdoc'))p.r.push('empdoc');}
+GROUP_OF_TAB.tercd='empdoc';
+const j3TdocLe=()=>mayR('empdoc');
+/* quem não lê o checklist usa a parte "Empresa" do resumo tercsit (gravado pelo RH/SST) */
+{const t0=tdPendEmp;tdPendEmp=function(parcId,mesRef){if(j3TdocLe())return t0.apply(this,arguments);
+  const s=typeof tercSitDe==='function'?tercSitDe(parcId,''):null;
+  if(!s)return ['Situação dos documentos da empresa não informada (o Financeiro, o RH ou a Segurança do trabalho conferem em Obras › Documentos dos empreiteiros)'];
+  return (s.pend||[]).filter(x=>/^Empresa: /.test(x)).map(x=>x.slice(9));};}
+{const s0=tdSalvar;tdSalvar=function(){if(!mayW('empdoc')){toast('Os documentos mensais dos empreiteiros ficam com o Financeiro, o RH e a Segurança do trabalho.','neg');return false;}return s0.apply(this,arguments);};}
+{const v0=V.tercd;V.tercd=function(){if(!j3TdocLe())return pageHead('Documentos dos empreiteiros','Acesso restrito.')+'<div class="note">A folha, as guias e as certidões dos empreiteiros têm dados dos empregados deles. Ficam com o Financeiro, o RH e a Segurança do trabalho (LGPD, art. 6º, III). A situação resumida (em dia ou pendente) aparece na medição do empreiteiro.</div>';
+  return v0.apply(this,arguments).replace('A medição só é aprovada e paga com tudo em dia;','Acesso restrito ao Financeiro, ao RH e à Segurança do trabalho (dados dos empregados do empreiteiro). A medição só é aprovada e paga com tudo em dia;');};}
+
+/* =====================================================================
+   2. ANEXOS: exclusão visível, RH apaga os de RH, currículo apagado na anonimização
+   ===================================================================== */
+const J3_RH_ANX=new Set(['rhdoc','fpag','ferias','afast','adm','dpmov','desl','esoc','dpsol','emprest','rel','psicamp','psr','cand','ppp','lgpdreq','lgpdinc','pmmes','bhlanc','fofi','foimp','tterc','acid','proc','procp','riscoia','func','epi','cap','vaga','rsreq','integ','trein','tdoc']);
+const J3_SST_ANX=new Set(['tterc','rhdoc','acid','ppp','rel','psicamp','epi','integ','trein']);
+function j3ApagaArea(col){if(me.owner)return true;const p=PERFIS[me.perfil]||{};if(p.w==='*')return true;
+  if(me.perfil==='rh')return J3_RH_ANX.has(col);if(me.perfil==='sst')return J3_SST_ANX.has(col);return false;}
+async function j3ApagarArquivo(x){const as=await getAssets();if(!as)return false;
+  try{await as.delete(x.id);toast('Arquivo “'+(x.nome||'anexo')+'” apagado (fica na lixeira de anexos do servidor pelo prazo configurado).','pos');return true;}
+  catch(e){toast('O arquivo “'+(x.nome||'anexo')+'” não foi apagado do servidor: '+j3Msg(e)+'. Peça ao RH ou ao dono.','neg');return false;}}
+/* contas e notas: apaga o arquivo antes de tirar do registro; se o servidor recusar, mostra e mantém o anexo */
+A.anxDel=d=>{
+  if(!anxCur)return;
+  if(!anxMayW()){toast('Seu perfil não permite remover documentos.','neg');return;}
+  const r=get(anxCur.col,anxCur.id);if(!r)return;
+  const a=(r.anexos||[])[+d.i];if(!a)return;
+  const cur=anxCur;
+  confirmBox('Remover o documento “'+esc(a.nome)+'”? O arquivo é apagado da página.',async()=>{
+    const as=await getAssets();
+    if(as&&!String(a.id||'').startsWith('adb_')){try{await as.delete(a.id);}catch(e){toast('O documento não foi removido: o servidor recusou apagar o arquivo ('+j3Msg(e)+'). Ele continua anexado.','neg');anxModal(cur.col,cur.id);return;}}
+    const r2=get(cur.col,cur.id)||r;put(cur.col,Object.assign(cl(r2),{anexos:(r2.anexos||[]).filter(x=>x.id!==a.id)}));
+    toast('Documento removido.');anxModal(cur.col,cur.id);
+  },'Remover',true);
+};
+/* formulários de RH e SST (epi, integ, ppp, tterc...): o arquivo tirado do cadastro é apagado quando o cadastro é salvo */
+{const t0=A.anxfTira;A.anxfTira=d=>{const a=ANXF.arqs[+d.i],md=MODS2[ANXF.tab],col=md&&md.col;
+  if(a&&a.id&&col&&J3_SRV()&&j3ApagaArea(col)&&!String(a.id).startsWith('adb_'))J3.anxPend.push({col,rid:ANXF.rid,id:a.id,nome:a.nome||''});return t0(d);};ACT_GROUP.anxfTira=null;}
+{const p0=put;put=function(col,rec){const r=p0.apply(this,arguments);
+  if(J3.anxPend.length&&rec&&rec.id){const fz=J3.anxPend.filter(x=>x.col===col&&x.rid===rec.id);
+    if(fz.length){J3.anxPend=J3.anxPend.filter(x=>!fz.includes(x));const txt=JSON.stringify(rec);fz.filter(x=>txt.indexOf(x.id)<0).forEach(x=>{j3ApagarArquivo(x);});}}
+  return r;};}
+/* candidatos: o currículo é apagado no servidor (RH e Administrador podem, mesmo sem ter enviado); se falhar, o candidato não é anonimizado */
+async function j3CandAnonimizar(ls){const as=await getAssets(),falhas=[];
+  for(const c of ls){
+    if(c.cv&&c.cv.id&&as){try{await as.delete(c.cv.id);}catch(e){falhas.push(c.nome+': '+j3Msg(e));continue;}}
+    put('cand',{id:c.id,nome:'Candidato anonimizado',funcao:c.funcao||'',fonte:c.fonte||'',expAnos:c.expAnos||'',anon:true,em:c.em,anonEm:Date.now()});}
+  if(falhas.length)toast(falhas.length+' candidato(s) não anonimizado(s) porque o currículo não foi apagado do servidor: '+falhas.slice(0,3).join('; ')+'. Peça ao RH ou ao administrador.','neg');
+  else toast('Dados anonimizados.','pos');
+  return falhas;}
+A.candAnon=()=>{const ls=S.cand.filter(rsRetVencida);if(!ls.length){toast('Nenhum candidato com retenção vencida.');return;}
+  confirmBox('Anonimizar '+ls.length+' candidato(s) com prazo de guarda vencido e sem processo em andamento? Nome, contatos, CPF e currículo são apagados; ficam só a função, a fonte e o resultado, para os indicadores.',()=>{j3CandAnonimizar(ls);},'Anonimizar',true);};
+/* trabalhador terceiro: apaga os anexos (ASO, certificados) e os dados pessoais; ficam empreiteiro, obra e função */
+async function j3TercAnonimizar(t){const as=await getAssets(),falhas=[];
+  for(const a of (t.anexos||[])){if(!a||!a.id||String(a.id).startsWith('adb_')||!as)continue;try{await as.delete(a.id);}catch(e){falhas.push((a.nome||'arquivo')+': '+j3Msg(e));}}
+  if(falhas.length){toast('Não anonimizado: '+falhas.length+' arquivo(s) não foram apagados do servidor ('+falhas.slice(0,2).join('; ')+').','neg');return falhas;}
+  put('tterc',{id:t.id,parcId:t.parcId||'',projId:t.projId||'',funcao:t.funcao||'',ativo:false,nome:'Terceiro anonimizado',anon:true,anonEm:todayStr()});
+  toast('Trabalhador terceiro anonimizado.','pos');return falhas;}
+
+/* =====================================================================
+   3. TEMPORALIDADE E DESCARTE
+   ===================================================================== */
+/* [chave, tipo de dado, prazo em meses (null = do servidor), base, fundamento de referência, ação, coleção] */
+const J3_TEMP=[
+  ['ponto','Marcações de ponto',60,'reg2desl','CF, art. 7º, XXIX; CLT, art. 11','excluir','ponto'],
+  ['pontoGeo','Localização exata das marcações de ponto',3,'reg','LGPD, art. 6º, III (minimização)','geo','ponto'],
+  ['fofi','Holerite oficial e registro de ciência',60,'reg2desl','CF, art. 7º, XXIX; CLT, art. 11','excluir','fofi'],
+  ['fpag','Prévia da folha, férias e rescisões',60,'reg2desl','CF, art. 7º, XXIX; CLT, art. 11','excluir','fpag'],
+  ['rhdoc','ASO, PCMSO e documentos de saúde ocupacional',240,'desl','NR-7 (20 anos após o desligamento)','excluir','rhdoc'],
+  ['epi','Fichas e assinaturas de EPI',240,'reg','NR-6; IN PRES/INSS 128/2022','excluir','epi'],
+  ['acid','Acidentes, CAT e PPP',240,'reg','IN PRES/INSS 128/2022','excluir','acid'],
+  ['tterc','Trabalhadores terceiros (ASO, treinamentos, integração)',60,'inativo','CLT, art. 455; CC, art. 206 (fim do contrato + 5 anos)','anonimizar','tterc'],
+  ['tdoc','Documentos mensais dos empreiteiros',72,'reg','Lei 8.212/1991, art. 31; CTN, art. 173','excluir','tdoc'],
+  ['cand','Candidatos sem autorização de banco de talentos',null,'ret','LGPD, arts. 6º, III, e 16 (prazo do processo seletivo)','anonimizar','cand'],
+  ['adtoit','Comprovantes de adiantamento',72,'reg','CC, art. 1.194 (prazo fiscal e contábil)','excluir','adtoit'],
+  ['pesq','Pesquisa de satisfação',24,'reg','LGPD, art. 6º, III','excluir','pesq'],
+  ['lgpdinc','Registro de incidentes de segurança',60,'reg','Res. CD/ANPD 15/2024 (mínimo de 5 anos)','excluir','lgpdinc'],
+  ['chat','Mensagens do chat',24,'reg','Política interna da empresa','manual',''],
+  ['auditoria','Trilha de auditoria (com IP)',null,'srv','LGPD, arts. 6º, X, 16, II, e 46','servidor',''],
+  ['backup','Cópias de segurança',null,'srv','Prazo curto e documentado; o dado apagado sai das cópias quando elas vencem','servidor',''],
+  ['lixo','Lixeira de registros',1,'srv','30 dias, automático','servidor',''],
+  ['lixoanx','Lixeira de anexos',null,'srv','LIXO_ANEXOS_DIAS (padrão 30 dias), automático','servidor','']
+];
+const J3_TEMP_K=Object.fromEntries(J3_TEMP.map(t=>[t[0],t]));
+const j3TempMeses=k=>{const t=J3_TEMP_K[k];if(!t)return null;const c=(cfg().lgpdTemp||{})[k];return c!=null&&c!==''&&!isNaN(+c)&&+c>0?+c:t[2];};
+const j3Iso=v=>{if(v==null||v==='')return '';if(typeof v==='number')return new Date(v).toISOString().slice(0,10);const s=String(v);if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);if(/^\d{4}-\d{2}$/.test(s))return s+'-28';return '';};
+const J3_DATAS={ponto:['data'],fofi:['comp','mes'],fpag:['mes','comp','data'],rhdoc:['emissao','validade','data'],epi:['entrega','data'],acid:['data'],tdoc:['mes'],adtoit:['data','em'],pesq:['data','respEm','em'],lgpdinc:['data','abertura','em'],tterc:['anonEm','ed','ts','cr']};
+function j3DataReg(col,r){for(const k of (J3_DATAS[col]||[]).concat(['data','em','cr','ts'])){const d=j3Iso(r[k]);if(d)return d;}return '';}
+const j3Desl=fid=>{const f=get('func',fid);return f&&f.status==='desligado'?(j3Iso(f.demissao)||j3Iso((S.desl.find(x=>x.funcId===fid)||{}).saida)||''):'';};
+const j3MaisMeses=(iso,m)=>{if(!iso)return '';const d=new Date(iso+'T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+m);return d.toISOString().slice(0,10);};
+/* lista do que venceu (para aprovação): [{k,col,id,desc,data}] */
+function j3Vencidos(k){const t=J3_TEMP_K[k];if(!t||!t[6]||!S[t[6]])return [];const col=t[6],m=j3TempMeses(k),h=todayStr(),out=[];
+  S[col].forEach(r=>{let ok=false;const d=j3DataReg(col,r);
+    if(t[3]==='ret'){ok=typeof rsRetVencida==='function'&&rsRetVencida(r);}
+    else if(k==='pontoGeo'){ok=r.lat!=null&&d&&j3MaisMeses(d,m)<h;}
+    else if(t[3]==='desl'){const dd=j3Desl(r.funcId);ok=!!dd&&j3MaisMeses(dd,m)<h;}
+    else if(t[3]==='inativo'){ok=r.ativo===false&&!r.anon&&d&&j3MaisMeses(d,m)<h;}
+    else if(t[3]==='reg2desl'){if(d&&j3MaisMeses(d,m)<h){const dd=r.funcId?j3Desl(r.funcId):'';const f=r.funcId?get('func',r.funcId):null;ok=!f||f.status!=='desligado'||(dd&&j3MaisMeses(dd,24)<h);}}
+    else ok=!!d&&j3MaisMeses(d,m)<h;
+    if(ok&&!(k==='cand'&&r.anon))out.push({k,col,id:r.id,data:d,desc:r.nome||(r.funcId&&get('func',r.funcId)||{}).nome||r.desc||r.titulo||r.id});});
+  return out;}
+const J3_TEMP_LISTA=()=>J3_TEMP.filter(t=>t[6]&&!['servidor','manual'].includes(t[5]));
+function j3TempResumo(){return J3_TEMP_LISTA().map(t=>({k:t[0],nome:t[1],itens:j3Vencidos(t[0])}));}
+if(!COLS.includes('lgpddesc')){COLS.push('lgpddesc');S.lgpddesc=S.lgpddesc||[];IDX.lgpddesc=new Map();}
+COL_NOME.lgpddesc='Descarte aprovado (temporalidade)';
+novaTab('lgpdtemp','Temporalidade e descarte','Sistema','lgpd','sis','lgpdtit');
+TAB_COLS.lgpdtemp=['lgpddesc','cfg'];
+if(typeof DBW_TABCOLS!=='undefined')DBW_TABCOLS.lgpdtemp=['lgpddesc','ponto','fofi','fpag','rhdoc','epi','acid','tterc','tdoc','cand','cap','adtoit','pesq','lgpdinc','func','desl'];
+const j3Prazo=t=>{const P=J3.prazos||{};if(t[0]==='auditoria')return P.auditoriaDias?P.auditoriaDias+' dias (AUDITORIA_DIAS)':'400 dias (padrão; AUDITORIA_DIAS no servidor)';
+  if(t[0]==='backup')return P.backupDias?P.backupDias+' dias (BACKUP_DIAS)'+(P.backupS3?' + cópia externa (S3)':''):'30 dias (padrão; BACKUP_DIAS no servidor)';
+  if(t[0]==='lixoanx')return P.lixoAnexosDias?P.lixoAnexosDias+' dias':'30 dias (padrão)';if(t[0]==='lixo')return '30 dias';
+  if(t[3]==='ret')return 'prazo do cadastro (Indicadores e cotas)';const m=j3TempMeses(t[0]);return m>=12&&m%12===0?(m/12)+' ano(s)':m+' mês(es)';};
+const J3_BASE={reg:'da data do registro',reg2desl:'da data do registro e pelo menos 2 anos após o desligamento',desl:'após o desligamento',inativo:'depois de inativo',ret:'',srv:''};
+V.lgpdtemp=()=>{const c=cfg(),w=mayW('lgpd'),rs=j3TempResumo(),tot=rs.reduce((s,x)=>s+x.itens.length,0),rev=c.lgpdTempRev||'';
+  if(J3_SRV()&&!J3.prazos&&!J3.prazosPedido){J3.prazosPedido=1;segaPost('/api/lgpd/prazos',null,'GET').then(j=>{J3.prazos=j;render();},()=>{});}
+  return pageHead('Temporalidade e descarte','Por quanto tempo cada tipo de dado pessoal fica guardado e a rotina anual que lista o que venceu. Nada é apagado sozinho: o descarte só acontece depois da aprovação aqui.',w?'<button class="btn" data-act="j3TempCfg">Alterar prazos</button>':'')+'<div class="stack">'+
+  '<div class="kpis">'+kpi('Vencidos para aprovar',String(tot),'registros','neg')+kpi('Última revisão anual',rev?fmtDate(rev):'nunca',rev&&rev>=addDays(todayStr(),-365)?'em dia':'pendente',rev&&rev>=addDays(todayStr(),-365)?'pos':'warn')+'</div>'+
+  '<div class="card"><h2>Tabela de temporalidade</h2><p class="sub" style="margin:0 0 8px">Prazos de referência para validação. Confirme com o advogado e o contador da empresa: alguns dependem da convenção coletiva e de processos em andamento (dados de quem tem processo não devem ser descartados).</p><div class="tw" style="border:0"><table style="min-width:760px"><thead><tr><th>Tipo de dado</th><th>Prazo</th><th>Contado</th><th>Referência</th><th>Ao vencer</th></tr></thead><tbody>'+
+   J3_TEMP.map(t=>'<tr><td>'+esc(t[1])+'</td><td>'+esc(j3Prazo(t))+((cfg().lgpdTemp||{})[t[0]]&&t[2]&&+cfg().lgpdTemp[t[0]]<t[2]?'<div class="sub neg">abaixo da referência</div>':'')+'</td><td class="sub">'+esc(J3_BASE[t[3]]||'')+'</td><td class="sub">'+esc(t[4])+'</td><td class="sub">'+esc({excluir:'Excluir (lixeira por 30 dias)',anonimizar:'Anonimizar',geo:'Apagar a localização',manual:'Revisar manualmente',servidor:'Apagado pelo servidor'}[t[5]]||'')+'</td></tr>').join('')+'</tbody></table></div></div>'+
+  '<div class="card"><h2>Rotina anual de descarte</h2><p class="sub" style="margin:0 0 8px">Registros que passaram do prazo. Confira, aprove por tipo (com justificativa) e o sistema faz o descarte. Ao terminar, registre a revisão do ano.</p><div class="tw" style="border:0"><table style="min-width:560px"><thead><tr><th>Tipo</th><th>Vencidos</th><th>Exemplos</th><th></th></tr></thead><tbody>'+
+   rs.map(x=>'<tr><td>'+esc(x.nome)+'</td><td class="num">'+x.itens.length+'</td><td class="sub">'+esc(x.itens.slice(0,3).map(i=>i.desc+(i.data?' ('+fmtDate(i.data)+')':'')).join('; '))+'</td><td class="act">'+(w&&x.itens.length?'<button class="btn sm dng" data-act="j3Descartar" data-k="'+x.k+'">Aprovar descarte</button>':'')+'</td></tr>').join('')+'</tbody></table></div>'+
+   (w?'<div class="acts" style="margin-top:10px"><button class="btn pri" data-act="j3TempRev">Registrar revisão anual</button></div>':'')+'</div>'+
+  (S.lgpddesc.length?'<div class="card"><h2>Descartes aprovados</h2><div class="tw" style="border:0"><table style="min-width:560px"><thead><tr><th>Quando</th><th>Por</th><th>Tipo</th><th>Registros</th><th>Justificativa</th></tr></thead><tbody>'+S.lgpddesc.slice().sort((a,b)=>b.em-a.em).slice(0,50).map(x=>'<tr><td class="mono">'+fmtDT(x.em)+'</td><td>'+nm(x.por)+'</td><td>'+esc((J3_TEMP_K[x.k]||[0,x.k])[1])+'</td><td class="num">'+(x.n||0)+'</td><td class="sub">'+esc(x.just||'')+'</td></tr>').join('')+'</tbody></table></div></div>':'')+
+  '<div class="note">A auditoria, as cópias de segurança e as lixeiras são apagadas pelo próprio servidor nos prazos acima. Um dado excluído some das cópias de segurança quando a última cópia que o contém vence. Prazo legal de resposta a pedidos do titular: LGPD, art. 19.</div></div>';};
+A.j3TempCfg=()=>{if(!mayW('lgpd')){toast('Só um administrador altera os prazos.','neg');return;}const ls=J3_TEMP.filter(t=>t[2]&&t[3]!=='srv');
+  modal({title:'Prazos de guarda (meses)',body:'<p class="sub" style="margin:0 0 8px">Deixe em branco para usar a referência. Prazos menores que a referência só com orientação do advogado da empresa.</p><div class="fg">'+ls.map(t=>field(t[1]+' (referência: '+t[2]+')','t_'+t[0],'number',(cfg().lgpdTemp||{})[t[0]]||'')).join('')+'</div>',
+    saveLabel:'Salvar',save:root=>{const v=readForm(root),o={};ls.forEach(t=>{const x=v['t_'+t[0]];if(x!==''&&x!=null&&!isNaN(+x)&&+x>0)o[t[0]]=Math.round(+x);});put('cfg',Object.assign(cl(cfg()),{lgpdTemp:o}));toast('Prazos salvos.','pos');render();}});};
+function j3DescartarExec(k,just){const t=J3_TEMP_K[k],its=j3Vencidos(k);if(!t||!its.length)return 0;
+  if(t[5]==='geo')its.forEach(i=>{const p=get('ponto',i.id);if(!p)return;const n=cl(p);delete n.lat;delete n.lng;n.geoMin=true;put('ponto',n);});
+  else if(k==='cand')j3CandAnonimizar(its.map(i=>get('cand',i.id)).filter(Boolean));
+  else if(k==='tterc')its.forEach(i=>{const r=get('tterc',i.id);if(r)j3TercAnonimizar(r);});
+  else its.forEach(i=>del(t[6],i.id));
+  put('lgpddesc',{id:uid(),k,n:its.length,ids:its.slice(0,300).map(i=>i.id),just,em:Date.now(),por:actorId()});return its.length;}
+A.j3Descartar=d=>{if(!mayW('lgpd')){toast('Só um administrador aprova o descarte.','neg');return;}const t=J3_TEMP_K[d.k],its=j3Vencidos(d.k);if(!t||!its.length){toast('Nada vencido neste tipo.');return;}
+  modal({title:'Aprovar descarte · '+t[1],body:'<p style="margin:0 0 8px"><b>'+its.length+'</b> registro(s) passaram do prazo ('+esc(j3Prazo(t))+'). Confira se nenhum é necessário para processo, fiscalização ou defesa da empresa.</p><ul style="margin:0 0 8px;padding-left:18px">'+its.slice(0,15).map(i=>'<li>'+esc(i.desc)+(i.data?' · '+fmtDate(i.data):'')+'</li>').join('')+(its.length>15?'<li>… e mais '+(its.length-15)+'</li>':'')+'</ul>'+field('Justificativa / quem orientou','just','textarea','',{full:true,rows:2}),
+    saveLabel:'Aprovar e descartar',save:root=>{const j=String(readForm(root).just||'').trim();if(j.length<10){toast('Escreva a justificativa (ao menos 10 caracteres).','neg');return false;}const n=j3DescartarExec(d.k,j);toast(n+' registro(s) descartado(s).','pos');render();}});};
+A.j3TempRev=()=>{if(!mayW('lgpd'))return;put('cfg',Object.assign(cl(cfg()),{lgpdTempRev:todayStr(),lgpdTempRevPor:actorId()}));toast('Revisão anual registrada.','pos');render();};
+Object.assign(ACT_GROUP,{j3TempCfg:'lgpd',j3Descartar:'lgpd',j3TempRev:'lgpd'});
+{const c0=lgpdChecks;lgpdChecks=function(){const out=c0.apply(this,arguments),c=cfg(),h=todayStr();
+  out.push(!c.lgpdTempRev||c.lgpdTempRev<addDays(h,-365)?['warn','Rotina anual de descarte pendente (Sistema › Temporalidade e descarte)']:['ok','Rotina anual de descarte feita em '+fmtDate(c.lgpdTempRev)]);
+  if(c.lgpdAviso&&c.lgpdAviso!==J3_AVISO&&+c.lgpdAvisoModelo!==J3_AVISO_VER)out.push(['warn','Há um novo modelo de aviso aos colaboradores (auditoria, duas etapas, frota, chat, IA e operadores). Revise o texto em Privacidade (LGPD).']);
+  return out;};}
+{const al=alertasLgpd;alertasLgpd=function(){const it=al.apply(this,arguments)||[];const c=cfg();if(mayW('lgpd')&&(!c.lgpdTempRev||c.lgpdTempRev<addDays(todayStr(),-365))){const n=j3TempResumo().reduce((s,x)=>s+x.itens.length,0);if(n)it.push(['lgpdtemp','Rotina anual de descarte: '+n+' registro(s) vencido(s) para aprovar',String(n)]);}return it;};}
+
+/* =====================================================================
+   4. DIREITOS DO TITULAR: relatório completo no servidor, candidato e terceiro
+   ===================================================================== */
+const J3_TIT_TIPOS=[['func','Colaborador ou ex-colaborador'],['parc','Cliente ou fornecedor pessoa física'],['cand','Candidato'],['tterc','Trabalhador terceiro (empregado de empreiteiro)']];
+const j3Kv=r=>{const skip=new Set(['id','ts','criadoEm','criadoPor','editEm','editPor','hist','ex','foto','anexos','cv']);return Object.keys(r||{}).filter(k=>!skip.has(k)&&r[k]!==''&&r[k]!=null&&typeof r[k]!=='object').map(k=>[flab(k),String(r[k])]);};
+{const t0=titDados;titDados=function(tipo,id){
+  if(tipo==='cand'){const c=get('cand',id);if(!c)return null;const T=[],caps=(S.cap||[]).filter(x=>x.candId===id);
+    T.push({title:'Cadastro',head:['Campo','Valor'],rows:j3Kv(c).concat(c.cv?[['Currículo',c.cv.nome||'arquivo anexado']]:[])});
+    if(caps.length)T.push({title:'Candidaturas',head:['Vaga','Situação','Etapa'],rows:caps.map(x=>[(get('vaga',x.vagaId)||{}).titulo||x.vagaId||'',x.status||'',x.etapa||''])});
+    return {nome:c.nome,T,raw:{candidato:c,candidaturas:caps}};}
+  if(tipo==='tterc'){const t=get('tterc',id);if(!t)return null;const T=[],ig=(S.integ||[]).filter(x=>x.tercId===id||(x.tercIds||[]).includes(id));
+    T.push({title:'Cadastro',head:['Campo','Valor'],rows:j3Kv(t).concat([['Empreiteiro',fornNome(t.parcId)]]).concat((t.anexos||[]).map(a=>['Arquivo',a.nome||'anexo']))});
+    if(ig.length)T.push({title:'Integrações',head:['Data','Validade'],rows:ig.map(x=>[fmtDate(x.data),fmtDate(x.validade)])});
+    return {nome:t.nome,T,raw:{terceiro:t,integracoes:ig}};}
+  return t0.apply(this,arguments);};}
+{const b0=anonBloqueio;anonBloqueio=function(tipo,id){
+  if(tipo==='cand'){const c=get('cand',id);if(!c)return 'Cadastro não encontrado.';if(c.anon)return 'Este cadastro já foi anonimizado.';
+    if((S.cap||[]).some(p=>p.candId===id&&['andamento','aprovado'].includes(p.status))||S.func.some(f=>f.candId===id))return 'O candidato está em processo seletivo ou foi contratado.';return '';}
+  if(tipo==='tterc'){const t=get('tterc',id);if(!t)return 'Cadastro não encontrado.';if(t.anon)return 'Este cadastro já foi anonimizado.';
+    if(t.ativo!==false)return 'Desative o trabalhador antes (ele ainda está ativo na obra). Guarde os documentos pelo prazo de defesa (fim do contrato com o empreiteiro + 5 anos).';return '';}
+  return b0.apply(this,arguments);};}
+{const a0=A.lgpdAnon;A.lgpdAnon=d=>{const f=ui.lgpdtit;if(f.tipo!=='cand'&&f.tipo!=='tterc')return a0(d);const dd=titDados(f.tipo,f.id);if(!dd)return;const b=anonBloqueio(f.tipo,f.id);if(b){toast(b,'neg');return;}
+  modal({title:'Anonimizar '+dd.nome,nofocus:true,body:'<p style="margin:0 0 8px">Nome, contatos, CPF e '+(f.tipo==='cand'?'o currículo':'os arquivos (ASO, certificados)')+' serão apagados de vez, inclusive do servidor. Se um arquivo não puder ser apagado, nada é anonimizado e o motivo aparece na tela.</p><label class="f"><span>Digite ANONIMIZAR para confirmar</span><input id="anonOk" autocomplete="off"></label>',
+    save:()=>{if((($('#anonOk')||{}).value||'').trim().toUpperCase()!=='ANONIMIZAR'){toast('Digite ANONIMIZAR para confirmar.','neg');return false;}
+      if(f.tipo==='cand')j3CandAnonimizar([get('cand',f.id)]);else j3TercAnonimizar(get('tterc',f.id));},saveLabel:'Anonimizar'});};}
+function j3Resumo(o,n){n=n||0;if(o==null)return '';if(typeof o!=='object')return String(o);if(n>2)return '…';
+  if(Array.isArray(o))return o.slice(0,5).map(x=>j3Resumo(x,n+1)).join(' | ')+(o.length>5?' (+'+(o.length-5)+')':'');
+  const s=Object.keys(o).filter(k=>o[k]!==''&&o[k]!=null).map(k=>flab(k)+': '+j3Resumo(o[k],n+1)).join('; ');return s.length>600?s.slice(0,600)+'…':s;}
+A.j3TitSrv=()=>{const f=ui.lgpdtit;if(!f.id)return;if(!J3_SRV()){toast('O relatório completo é gerado pelo servidor próprio.','neg');return;}
+  J3.relCarregando=true;J3.relErro='';render();
+  segaPost('/api/lgpd/titular',{tipo:f.tipo,id:f.id}).then(j=>{J3.rel=j;J3.relCarregando=false;render();},e=>{J3.relErro=e.message;J3.relCarregando=false;render();toast('Relatório não gerado: '+e.message,'neg');});};
+function j3RelTabelas(r){const T=[];T.push({title:'Situação',head:['Item','Valor'],rows:[['Relatório',r.completo?'Relatório completo':'Relatório parcial'],['Gerado em',fmtDT(r.geradoEm)],['Titular',r.titular.nome+' ('+r.titular.tipoNome+')']].concat((r.avisos||[]).map(a=>['Aviso',a]))});
+  r.secoes.forEach(s=>T.push({title:(COL_NOME[s.col]||s.col)+' ('+s.n+')',head:['Registro','Dados'],rows:s.registros.map(x=>[x.id,j3Resumo(x.dados)])}));
+  if(r.chat)T.push({title:'Chat (só metadados)',head:['Item','Valor'],rows:[['Mensagens enviadas',String(r.chat.mensagensEnviadas)],['Conversas',String(r.chat.conversas)],['Primeira',r.chat.primeira?fmtDT(r.chat.primeira):'—'],['Última',r.chat.ultima?fmtDT(r.chat.ultima):'—'],['Observação',r.chat.obs]]});
+  T.push({title:'Auditoria do titular ('+r.auditoria.length+')',head:['Quando','Ação','Registro','Pelo titular','Endereço'],rows:r.auditoria.map(a=>[fmtDT(a.quando),a.acao,a.caminho,a.feitoPeloTitular?'sim':'não',a.ip||''])});
+  return T;}
+A.j3TitSrvPdf=()=>{const r=J3.rel;if(!r)return;showDoc({tipo:'Relatório de dados pessoais',numero:'',meta:[['Titular',r.titular.nome],['Gerado em',fmtDT(r.geradoEm)],['Situação',r.completo?'Relatório completo':'Relatório parcial']],tables:j3RelTabelas(r),obs:r.nota+' Entregue somente ao próprio titular, após confirmar a identidade.'},slug('dados-pessoais-completo-'+r.titular.nome));};
+A.j3TitSrvJson=()=>{const r=J3.rel;if(!r)return;saveFile(slug('dados-pessoais-completo-'+r.titular.nome)+'.json',JSON.stringify(r,null,2));};
+Object.assign(ACT_GROUP,{j3TitSrv:'lgpd',j3TitSrvPdf:'lgpd',j3TitSrvJson:'lgpd'});
+/* o RH lê a tela (r: lgpd); gerar o relatório também é dele */
+['j3TitSrv','j3TitSrvPdf','j3TitSrvJson','lgpdTitPdf','lgpdTitJson'].forEach(k=>{ACT_GROUP[k]=null;});
+{const v0=V.lgpdtit;V.lgpdtit=function(){const f=ui.lgpdtit;let h=v0.apply(this,arguments);
+  h=h.replace(/(<select id="s_lt_tipo" data-filter="lgpdtit\.tipo">)[\s\S]*?(<\/select>)/,(m0,a,b)=>a+opt(J3_TIT_TIPOS,f.tipo)+b);
+  if(f.tipo==='cand'||f.tipo==='tterc'){const L=f.tipo==='cand'?S.cand.filter(x=>!x.anon||x.id===f.id):S.tterc;
+    h=h.replace(/(<select id="s_lt_id" data-filter="lgpdtit\.id">)[\s\S]*?(<\/select>)/,(m0,a,b)=>a+opt(L.slice().sort(byNome).map(x=>[x.id,x.nome+(f.tipo==='tterc'?' · '+fornNome(x.parcId):'')]),f.id,'Selecione…')+b);}
+  const r=J3.rel&&J3.rel.titular&&J3.rel.titular.tipo===f.tipo&&J3.rel.titular.id===f.id?J3.rel:null;
+  const card=!f.id?'':J3_SRV()?'<div class="card"><h2>Relatório completo (servidor)</h2><p class="sub" style="margin:0 0 8px">Gerado pelo servidor com todas as coleções que citam a pessoa (folha oficial, férias, afastamentos, empréstimos, desligamento, horas extras, adiantamentos, extravios, multas, treinamentos, terceiros, chat só em metadados e a auditoria do titular), independentemente do seu perfil. Use este para responder ao titular (LGPD, art. 19).</p>'+
+     (J3.relCarregando?'<p class="sub">Gerando…</p>':'')+(r?'<p style="margin:0 0 8px">'+pill(r.completo?'Relatório completo':'Relatório parcial',r.completo?'pos':'warn')+' gerado em '+fmtDT(r.geradoEm)+' · '+r.secoes.reduce((s,x)=>s+x.n,0)+' registro(s) em '+r.secoes.length+' tipo(s) · '+r.auditoria.length+' registro(s) de auditoria'+(r.chat?' · '+r.chat.mensagensEnviadas+' mensagem(ns) no chat':'')+'</p>'+((r.avisos||[]).length?'<div class="note">'+esc(r.avisos.join(' '))+'</div>':''):'')+
+     '<div class="acts"><button class="btn pri" data-act="j3TitSrv">'+(r?'Gerar de novo':'Gerar relatório completo')+'</button>'+(r?'<button class="btn" data-act="j3TitSrvPdf">Relatório completo (PDF)</button><button class="btn" data-act="j3TitSrvJson">Exportar completo (JSON)</button>':'')+'</div></div>'
+    :'<div class="note">O relatório abaixo mostra só o que o seu perfil consegue ler neste aparelho. O relatório completo (com folha oficial, auditoria e demais coleções) é gerado pelo servidor próprio.</div>';
+  const i=h.indexOf('<div class="card">');return i>=0?h.slice(0,i)+card+h.slice(i):h.replace('<div class="note">Pedidos de titulares',card+'<div class="note">Pedidos de titulares');};}
+
+/* =====================================================================
+   5. AVISOS DE PRIVACIDADE
+   ===================================================================== */
+const J3_AVISO_VER=2;
+const J3_AVISO='A empresa trata os seus dados pessoais para cumprir o contrato de trabalho e as obrigações trabalhistas, previdenciárias, fiscais e de segurança e saúde do trabalho:\n'+
+'- identificação, contato, endereço, documentos, dados bancários e de dependentes; salário, holerite e folha;\n'+
+'- saúde ocupacional (ASO, afastamentos, acidentes), EPI e treinamentos;\n'+
+'- jornada e localização no momento do registro de ponto; o ponto oficial é feito pela Sólides (fornecedora do sistema de ponto);\n'+
+'- frota: saídas, rotas, quilometragem, checklist dos veículos e o local de cada veículo; multas e indicação do condutor;\n'+
+'- Minha área: holerite, EPI e documentos ficam disponíveis para você, com registro da ciência e da assinatura;\n'+
+'- chat interno: as mensagens ficam guardadas pelo prazo da política interna;\n'+
+'- segurança: o acesso ao sistema usa senha e verificação em duas etapas (código no celular) para quem tem perfil de equipe; o sistema registra numa trilha de auditoria quem acessou, o endereço de rede (IP), o que foi alterado e a consulta a dados de saúde;\n'+
+'- inteligência artificial: algumas telas usam um serviço de IA (Anthropic, no exterior) para resumos e sugestões; não enviamos documentos de saúde nem holerites, e decisões sobre pessoas são revisadas por alguém da empresa.\n'+
+'Os dados são compartilhados só com quem precisa: contabilidade (folha e eSocial), banco (pagamentos), Sólides (ponto), medicina do trabalho e órgãos públicos quando a lei exige. O sistema fica num servidor contratado pela empresa, com cópias de segurança cifradas, guardadas pelos prazos da tabela de temporalidade. O acesso é restrito às pessoas que precisam dos dados.\n'+
+'Você pode pedir acesso, correção ou informações sobre os seus dados ao encarregado pelo tratamento de dados pessoais, no canal abaixo.';
+const J3_AVISO_TERC='Aviso de privacidade aos trabalhadores de empresas contratadas: para a sua segurança na obra e para cumprir as normas de segurança do trabalho (NR-1, NR-18) e a responsabilidade da contratante, guardamos seu nome, CPF, função, validade do ASO (só "apto" e a data, sem exames), treinamentos, integração e entrega de EPI, e a documentação mensal da sua empregadora. Os dados ficam no sistema da empresa, com acesso restrito, pelo prazo de defesa (fim do contrato + 5 anos). Pedidos sobre os seus dados: canal abaixo.';
+const J3_AVISO_CAND='Aviso de privacidade ao candidato: usamos seus dados (contato, currículo, experiência e o resultado das etapas) só para este processo seletivo. Se você autorizar, ficam no banco de talentos para outras vagas. Sem a autorização, são anonimizados ao fim do prazo de guarda. Não pedimos informação sobre gravidez, saúde, religião ou vida pessoal. Pedidos sobre os seus dados: canal abaixo.';
+if(typeof CFG_DEF==='object'&&CFG_DEF){if(CFG_DEF.lgpdAviso===undefined)CFG_DEF.lgpdAviso=J3_AVISO;if(CFG_DEF.lgpdVer===undefined)CFG_DEF.lgpdVer=J3_AVISO_VER;}
+const j3AvisoTerc=()=>cfg().lgpdAvisoTerc||J3_AVISO_TERC,j3AvisoCand=()=>cfg().lgpdAvisoCand||J3_AVISO_CAND;
+const j3Canal=()=>{const c=cfg();return c.lgpdCanal?'Encarregado / canal de dados pessoais: '+c.lgpdCanal:'Canal de dados pessoais: informe em Sistema › Privacidade (LGPD).';};
+{const v0=V.lgpd;V.lgpd=function(){let h=v0.apply(this,arguments);const c=cfg(),w=mayW('lgpd');
+  const novo=c.lgpdAviso&&c.lgpdAviso!==J3_AVISO&&+c.lgpdAvisoModelo!==J3_AVISO_VER;
+  const card='<div class="card"><h2>Avisos a terceiros e candidatos</h2><p class="sub" style="margin:0 0 10px">Avisos curtos entregues na integração do trabalhador terceiro e no cadastro do candidato (botões nessas telas). O canal do encarregado acima é impresso no fim.</p><div class="fg">'+
+    '<label class="f full"><span>Aviso aos trabalhadores terceiros (integração)</span><textarea id="lg_avterc" rows="4"'+(w?'':' disabled')+'>'+esc(j3AvisoTerc())+'</textarea></label>'+
+    '<label class="f full"><span>Aviso aos candidatos</span><textarea id="lg_avcand" rows="4"'+(w?'':' disabled')+'>'+esc(j3AvisoCand())+'</textarea></label></div>'+
+    (w?'<div class="acts" style="margin-top:10px"><button class="btn" data-act="j3AvisosSalvar">Salvar avisos</button></div>':'')+'</div>'+
+    (novo&&w?'<div class="note"><b>Novo modelo de aviso aos colaboradores.</b> O texto atual foi personalizado pela empresa. O novo modelo cita auditoria e IP, duas etapas, frota, chat, holerite e EPI na Minha área, IA, Sólides, contabilidade, banco e as cópias de segurança. <button class="btn sm" data-act="j3AvisoModelo">Usar o novo modelo</button> <button class="btn sm" data-act="j3AvisoManter">Manter o meu</button></div>':'');
+  return h.replace('<div class="card"><h2>Minimização</h2>',card+'<div class="card"><h2>Minimização</h2>').replace('Canal de contato (nome e e-mail do encarregado ou responsável)','Encarregado e canal de contato (nome e e-mail do encarregado pelo tratamento de dados pessoais)');};}
+A.j3AvisosSalvar=()=>{const t=(($('#lg_avterc')||{}).value||'').trim(),c2=(($('#lg_avcand')||{}).value||'').trim();put('cfg',Object.assign(cl(cfg()),{lgpdAvisoTerc:t&&t!==J3_AVISO_TERC?t:'',lgpdAvisoCand:c2&&c2!==J3_AVISO_CAND?c2:''}));toast('Avisos salvos.','pos');};
+A.j3AvisoModelo=()=>confirmBox('Trocar o aviso pelo novo modelo? Todos os colaboradores precisarão dar ciência de novo.',()=>{put('cfg',Object.assign(cl(cfg()),{lgpdAviso:J3_AVISO,lgpdVer:(+cfg().lgpdVer||1)+1,lgpdAvisoModelo:J3_AVISO_VER}));toast('Novo aviso publicado.','pos');render();},'Trocar');
+A.j3AvisoManter=()=>{put('cfg',Object.assign(cl(cfg()),{lgpdAvisoModelo:J3_AVISO_VER}));render();};
+A.j3AvisoDoc=d=>{const terc=d.k==='terc',c=cfg();showDoc({tipo:terc?'Aviso de privacidade · trabalhadores terceiros':'Aviso de privacidade · candidatos',numero:'',meta:[['Empresa',c.razao||c.fantasia||''],['Data',fmtDate(todayStr())]],tables:[{title:'Aviso',head:['Texto'],rows:[[terc?j3AvisoTerc():j3AvisoCand()],[j3Canal()]].concat(terc?[['Nome e assinatura do trabalhador: ____________________________   Data: ___/___/______']]:[])}],obs:'Entregue junto com a integração (terceiros) ou no cadastro do candidato.'},terc?'aviso-privacidade-terceiros':'aviso-privacidade-candidatos');};
+Object.assign(ACT_GROUP,{j3AvisosSalvar:'lgpd',j3AvisoModelo:'lgpd',j3AvisoManter:'lgpd',j3AvisoDoc:null});
+{const v0=V.tterc;if(v0)V.tterc=function(){const h=v0.apply(this,arguments);return h.replace('<div class="stack">','<div class="stack"><div class="note">Na integração, entregue o aviso de privacidade aos terceiros. <button class="btn sm" data-act="j3AvisoDoc" data-k="terc">Aviso aos terceiros</button></div>');};}
+{const d=MODS2.cand;if(d){d.fnote=String(d.fnote||'')+' Aviso ao candidato: '+J3_AVISO_CAND;
+  if(typeof d.headActs==='string'&&d.headActs.indexOf('j3AvisoDoc')<0)d.headActs+='<button class="btn" data-act="j3AvisoDoc" data-k="cand">Aviso ao candidato</button>';}}
+
+/* =====================================================================
+   6. IA: aviso antes de enviar documento e nome da tela no pedido
+   ===================================================================== */
+const J3_IA_LIM=8000;
+function j3IaPrecisaAviso(input,opts){const ims=(opts&&opts.images)||[];if(ims.length)return true;
+  const t=Array.isArray(input)?input.map(m=>String(m&&m.content||'')).join(''):String(input||'');return t.length>J3_IA_LIM;}
+function j3IaConfirmaPadrao(){return new Promise(ok=>{try{const d=document.createElement('div');d.setAttribute&&d.setAttribute('role','dialog');
+  d.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:var(--card,#fff);color:var(--tx,#111);max-width:460px;border-radius:12px;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)"><h2 style="margin:0 0 8px;font-size:17px">Antes de enviar à IA</h2><p style="margin:0 0 8px">Este conteúdo será enviado a um serviço de IA externo (Anthropic, no exterior).</p><p style="margin:0 0 10px"><b>Não envie documentos de saúde (ASO, atestados), holerites, nem documentos de terceiros com dados pessoais.</b> Tire nomes e CPF quando puder. A sugestão da IA precisa ser revisada por uma pessoa antes de qualquer decisão.</p><label style="display:flex;gap:6px;align-items:center;margin:0 0 12px;font-size:13px"><input type="checkbox" data-j3="s"> Não mostrar de novo nesta sessão</label><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-j3="n">Cancelar</button><button class="btn pri" data-j3="y">Enviar</button></div></div>';
+  const fim=v=>{try{const s=d.querySelector('[data-j3="s"]');if(v&&s&&s.checked)J3.iaOk=true;d.remove();}catch(e){}ok(v);};
+  d.addEventListener('click',e=>{const t=e.target&&e.target.dataset&&e.target.dataset.j3;if(t==='y')fim(true);else if(t==='n')fim(false);});
+  document.body.appendChild(d);}catch(e){ok(true);}});}
+function j3EmbrulhaIa(s){if(!s||s.__j3)return s;const f=async function(input,opts){
+    if(!J3.iaOk&&j3IaPrecisaAviso(input,opts)){const ok=await (J3.iaConfirma||j3IaConfirmaPadrao)(input,opts);if(!ok){const e=new Error('Envio à IA cancelado.');e.code='cancelado';throw e;}}
+    J3.iaTela=ui&&ui.tab||'';return s.apply(this,arguments);};
+  Object.keys(s).forEach(k=>{f[k]=s[k];});if(s.json)f.json=async function(input,opts){if(!J3.iaOk&&j3IaPrecisaAviso(input,opts)){const ok=await (J3.iaConfirma||j3IaConfirmaPadrao)(input,opts);if(!ok){const e=new Error('Envio à IA cancelado.');e.code='cancelado';throw e;}}J3.iaTela=ui&&ui.tab||'';return s.json.apply(s,arguments);};
+  f.__j3=true;return f;}
+function j3IaInstala(){const c=window.claude;if(!c||typeof c.use!=='function'||c.use.__j3)return false;const u0=c.use.bind(c);
+  const u=function(nome){const p=u0(nome);return nome==='sample'&&p&&typeof p.then==='function'?p.then(j3EmbrulhaIa):p;};u.__j3=true;c.use=u;return true;}
+if(!j3IaInstala()){let n=0;const tenta=()=>{if(j3IaInstala()||++n>20)return;setTimeout(tenta,500);};setTimeout(tenta,300);}
+/* servidor próprio: o pedido leva o nome da tela (o servidor registra o uso na auditoria, sem o conteúdo) */
+if(window.__SELFHOST&&typeof window.fetch==='function'&&!window.fetch.__j3){const f0=window.fetch;
+  const f=function(url,o){try{if(String(url)==='/api/ia'&&o&&(o.method||'').toUpperCase()==='POST'){o=Object.assign({},o,{headers:Object.assign({},o.headers||{},{'x-ia-funcao':String(J3.iaTela||(ui&&ui.tab)||'').replace(/[^\w\-.: ]/g,'').slice(0,60)})});}}catch(e){}return f0.call(this,url,o);};
+  f.__j3=true;window.fetch=f;}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='111',APP_DATA='2026-10-27';
+const APP_VER='112',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['112','2026-10-27',['Empréstimos sem juros por padrão (juros só simples, com teto); soma de todos os descontos do mês limitada (padrão 30%) e teto de um salário na rescisão.', 'Descontos por dano, extravio e multa só com apuração registrada e cláusula no contrato; termos saem preenchidos.', 'Desligamento: perguntas obrigatórias de estabilidade, gestante até 5 meses após o parto, liberação só com parecer anexado; o pedido de demissão passa a ser de próprio punho anexado.', 'Férias fora da escala ficam a conferir (quitação só com recibo e aviso anexados); alertas de férias vencidas e de pagamento até 2 dias antes.', 'Ponto: app próprio só gerencial; ajuste vira solicitação na Sólides; Pessoal › Arquivo mensal do ponto (AFD, AEJ, espelho).', 'Hora extra: texto de que é devida, teto de 2 h somadas por dia (exceção do art. 61), insalubridade exige licença do art. 60; banco de horas só com acordo anexado.', 'LGPD: auditoria só com campos alterados e dados sensíveis protegidos; registro de quem consulta a auditoria e de leitura de dados de saúde; relatório do titular completo gerado no servidor; Sistema › Temporalidade e descarte; novo aviso de privacidade (nova ciência); registro do uso de IA.', 'Também: alerta do prazo de indicação do condutor; reequilíbrio e exequibilidade em contratos públicos; código de verificação na entrega de EPI; reciclagem complementar no lugar de treinamento por IA; cotas e transparência salarial; documentos dos empreiteiros restritos a Financeiro, RH e SST.']],
   ['111','2026-10-27',['Perfis novos: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Engenheiro volta a lançar medição de empreiteiro e o encarregado a pedir hora extra.', 'Fim dos alertas falsos: resumos "apto para obra" e "situação do empreiteiro" gravados pelo RH/SST e lidos pelo diário de obra e pelo Financeiro, sem expor ASO.', 'Pessoal › Apropriação do mês: mão de obra e frota por obra (sem salário), usada no custo da obra para todos verem o mesmo número.', 'Aprovações: matriz única de aprovadores com substituto por período, herança da aprovação do pedido ou medição, pagamentos obrigatórios com um aprovador, aviso diário ao aprovador. Início › Checklist de configuração.', 'Pagamento: o servidor recusa conta paga acima da alçada sem aprovação; a conciliação marca "pago sem aprovação" (seção própria nos Controles internos); remessa barra nota com divergência e empreiteiro pendente; leitura do retorno CNAB do BB.', 'Fechamento do mês em duas etapas (Financeiro pede com checklist, diretoria confirma); nota atrasada entra pela data de entrada como extemporânea; folha oficial e ponto na trava.', 'Composição do saldo: tratar possíveis duplicados (Não é duplicado / Cancelar este) e explicação da diferença por mês.', 'Suprimentos: um só relatório de exceções, nota sem pedido acima de R$ 1.000 exige motivo, recebimento físico antes da aprovação do pedido.', 'Também: medição ao cliente aprovada por outra pessoa e bloqueio acima do empenho; responsável pela obra; prestação de contas de adiantamento pela Minha área; folha oficial a partir do PDF único do SCI; locais da frota com "vê todos"; aparelho confiável na verificação em duas etapas; link público da pesquisa de satisfação; indicadores atualizados.']],
   ['110','2026-10-26',['Segurança digital: verificação em duas etapas obrigatória para a equipe que grava, senha mínima de 12 caracteres para ela, saída automática após 10 horas sem uso e nova confirmação de senha nas ações sensíveis (contas, cópia de segurança, exportação).','Financeiro: troca de dados bancários, aprovações, remessa e fechamento de competência agora são conferidos também no servidor; alteração de conta bancária fica pendente até outra pessoa confirmar.','Cópia de segurança cifrada e cópia dos anexos (completa semanal e diária incremental); trilha de auditoria em Contas › Auditoria (só o dono).','Bibliotecas de leitura de PDF e ZIP servidas pelo próprio sistema, em versão corrigida.','Conciliação bancária: botão "Composição" ao lado do saldo no sistema mostra de onde vem o saldo (saldo inicial, entradas e saídas por ano), os lançamentos pagos sem linha no extrato, possíveis duplicados e os maiores valores, com CSV.','Locais da frota: nomes dos locais e caixas de seleção alinhados; administradores aparecem com a indicação "vê todos os veículos".']],
   ['109','2026-10-26',['Locais da frota: quem não tem nenhum local marcado (no usuário ou no colaborador) não vê nenhum veículo, e veículo sem local só aparece para o administrador. A regra começa a valer quando houver locais cadastrados.']],
@@ -19665,14 +20579,14 @@ const TUT=[
   {id:'com',t:'Compras',g:'comp',ver:'86',p:['Orçamento em PDF: no mapa de cotação clique em Importar resposta, escolha o fornecedor e Ler PDF ou foto com IA. Confira na tela seguinte o item do mapa e o preço unitário de cada linha (amarelo = conferir; vermelho = não vai para o mapa), ajuste frete, prazo e pagamento e clique em Lançar no mapa.','Avaliação de fornecedores: em Suprimentos › Mais › Avaliação de fornecedores, avalie cada pedido recebido (prazo, qualidade, preço e atendimento). Bloqueie quem não atende: ele não recebe pedido de compra. Nas cotações, use Cobrar para lembrar quem não respondeu.','Cotação com fornecedores: em Cotações, use Nova cotação (ou Cotar numa solicitação), confira itens, prazo e fornecedores e clique em Salvar e enviar. Envie o link, o e-mail, o WhatsApp ou o arquivo para cada fornecedor. As respostas entram no mapa; escolha o vencedor de cada item (ou Escolher menor preço) e clique em Gerar pedidos de compra.','Solicitação de compra confere o estoque e separa o que já existe.','Mapa de cotação compara fornecedores item a item.','Pedido de compra com código, NCM, desconto, IPI e ICMS-ST por item, transportadora, modalidade do frete e endereço completo de entrega (use os botões para copiar o endereço da obra ou da empresa).','NFs recebidas: valide, indique o almoxarifado e gere a conta a pagar.']},
   {id:'est',t:'Estoque',g:'est',ver:'53',p:['Ao entregar uma separação, o sistema já abre o romaneio de envio. Em Almoxarifados, defina o prazo do inventário e quem recebe o aviso no chat.','Almoxarifados › Ver itens: relação por almoxarifado e prateleira, exportação, lista de contagem às cegas e registro do balanço.','Romaneios: gere das separações prontas, acrescente itens, despache (baixa no estoque) e confirme o recebimento.','Saldo por produto com custo médio e alerta de mínimo.','Separação de itens para obras.','Almoxarifados e prateleiras indicam onde cada produto fica.']},
   {id:'proj',t:'Projetos e obras',g:'proj',ver:'77',p:['Empreiteiros: em Obras › Mais › Contratos de empreiteiros cadastre a planilha de serviços, o preço unitário, o item do orçamento e as retenções. Em Nova medição informe as quantidades do período e envie para aprovação; quem aprova gera a conta a pagar, a retenção técnica, o INSS e o ISS retidos.','Controle de custo da obra: monte o orçamento na EAP do contrato e, em cada conta a pagar ou pedido de compra da obra, escolha o Item do orçamento. Em Início › Painel da obra veja orçado x comprometido x realizado por item, os alertas e a margem projetada. Em Obras › Curva S acompanhe o planejado x realizado.','Diário de obra: em Solicitação de material, busque o item pelo código ou nome e veja o saldo. Ao salvar, o pedido vai para o supervisor ou coordenador aprovar em Financeiro › Aprovações.','Diário de obra: escolha cada colaborador do efetivo. A função e o custo do dia vêm do cadastro.','Novo projeto nasce de um contrato. Etapas e execução puxam o cronograma do contrato (botão Puxar do cronograma) e aceitam atividades individuais por usuário; use Só as minhas atividades.','Etapas: use o Quadro Kanban para mover as etapas (arraste ou ◀ ▶), cadastre as restrições e marque os compromissos da semana; veja o Gráfico de Gantt para o cronograma.','Mão de obra por obra: horas e custo pelo ponto; informe a localização da obra no projeto.','Cadastre o projeto com orçamento, prazos e contatos do gestor do contrato, fiscal e TST.','Etapas com peso, prazo e percentual executado formam o cronograma.','Diário de obra: clima, efetivo, equipamentos, atividades, ocorrências e fotos; ao assinar, o avanço vai para as etapas.','Relatório mensal: financeiro, cronograma, curva S e PDF para o cliente.']},
-  {id:'rh',t:'RH e Departamento Pessoal',g:'rh',ver:'111',p:['Pessoal › Apropriação do mês grava a mão de obra e a frota por obra, sem salário, para o custo da obra ser o mesmo para todos.','O RH/SST mantém o resumo "apto para obra" que o diário de obra usa; sem resumo, aparece "situação não informada pelo RH/SST".','Obras › Horas extras (pedidos): o encarregado pede e o coordenador aprova com um toque no celular.','Empréstimos: em Pessoal › Mais › Empréstimos clique em Novo empréstimo, escolha o colaborador, valor, parcelas e forma (desconto em folha ou direto). Imprima o contrato, colha as assinaturas e guarde. As parcelas em folha entram sozinhas no holerite; as diretas são registradas em Registrar pagamento.','FAP e RAT: informe o FAP e o RAT ou leia o PDF da Consulta FAP para ver o RAT ajustado, o custo anual e o plano de ação.','Índices de RH: rotatividade por obra com o custo do turnover, absenteísmo pelo ponto e atestados, e reclamações trabalhistas por motivo.','Recrutamento: aprove a requisição, abra a vaga, divulgue, inclua candidatos, avance as etapas no quadro, avalie, faça a proposta e envie para Admissões.','Painel do DP: quadro, rotatividade, absenteísmo, experiências a vencer e prazos do eSocial.','Admissões: checklist de documentos, ASO admissional, contrato de experiência e Efetivar para criar o colaborador.','Folha e holerites: Calcular prévia, conferir, Fechar, Imprimir e Publicar aos colaboradores; exporte para a contabilidade.','Desligamentos: aviso, cálculo estimado da rescisão e checklist com os prazos.','Colaboradores: dados pessoais, CNH, salário, benefícios, dados bancários, transporte, uniforme e foto.','Férias: veja os saldos a programar, programe pelo botão, entregue o aviso 30 dias antes e imprima o recibo.','Documentos e ASO com alerta de vencimento.','Controle de EPI por entrega, CA e troca, com ficha de entrega para imprimir e assinar.','Jornadas e feriados alimentam o ponto.']},
+  {id:'rh',t:'RH e Departamento Pessoal',g:'rh',ver:'112',p:['Desligamento: responda às perguntas de estabilidade; havendo garantia ou dúvida, anexe o parecer jurídico. O pedido de demissão deve ser de próprio punho e anexado.','Empréstimos e descontos: o sistema soma todos os descontos do mês e bloqueia acima do limite configurado; desconto por dano exige a apuração registrada.','Pessoal › Arquivo mensal do ponto: anexe todo mês o AFD, o AEJ e o espelho oficial da Sólides.','Pessoal › Apropriação do mês grava a mão de obra e a frota por obra, sem salário, para o custo da obra ser o mesmo para todos.','O RH/SST mantém o resumo "apto para obra" que o diário de obra usa; sem resumo, aparece "situação não informada pelo RH/SST".','Obras › Horas extras (pedidos): o encarregado pede e o coordenador aprova com um toque no celular.','Empréstimos: em Pessoal › Mais › Empréstimos clique em Novo empréstimo, escolha o colaborador, valor, parcelas e forma (desconto em folha ou direto). Imprima o contrato, colha as assinaturas e guarde. As parcelas em folha entram sozinhas no holerite; as diretas são registradas em Registrar pagamento.','FAP e RAT: informe o FAP e o RAT ou leia o PDF da Consulta FAP para ver o RAT ajustado, o custo anual e o plano de ação.','Índices de RH: rotatividade por obra com o custo do turnover, absenteísmo pelo ponto e atestados, e reclamações trabalhistas por motivo.','Recrutamento: aprove a requisição, abra a vaga, divulgue, inclua candidatos, avance as etapas no quadro, avalie, faça a proposta e envie para Admissões.','Painel do DP: quadro, rotatividade, absenteísmo, experiências a vencer e prazos do eSocial.','Admissões: checklist de documentos, ASO admissional, contrato de experiência e Efetivar para criar o colaborador.','Folha e holerites: Calcular prévia, conferir, Fechar, Imprimir e Publicar aos colaboradores; exporte para a contabilidade.','Desligamentos: aviso, cálculo estimado da rescisão e checklist com os prazos.','Colaboradores: dados pessoais, CNH, salário, benefícios, dados bancários, transporte, uniforme e foto.','Férias: veja os saldos a programar, programe pelo botão, entregue o aviso 30 dias antes e imprima o recibo.','Documentos e ASO com alerta de vencimento.','Controle de EPI por entrega, CA e troca, com ficha de entrega para imprimir e assinar.','Jornadas e feriados alimentam o ponto.']},
   {id:'pto',t:'Ponto',g:'ponto',ver:'80',p:['Ponto oficial: o colaborador marca no app Sólides Ponto (Sólides DP). No sistema instalado na VPS, as marcações chegam sozinhas a cada 15 minutos em Pessoal › Ponto (Sólides).','Sem a conexão automática, exporte da Sólides o relatório de marcações (Excel ou CSV, com Nome, CPF, Local de trabalho, Data e horários) e importe na mesma tela.','Ligue cada local de trabalho da Sólides a uma obra: as horas vão para a mão de obra da obra. Colaboradores se ligam pelo código externo, ID da Sólides ou CPF.','Enviar para a Sólides: obras viram locais de trabalho, colaboradores são cadastrados com escala e local, e férias e afastamentos vão como ajustes aprovados.','A conferência do mês mostra as horas da Sólides ao lado do cálculo do sistema; para a folha valem os totais fechados na Sólides.','Banco de horas: em Regras do banco escolha o tipo de acordo e o prazo; inclua o colaborador e colha a assinatura do acordo.','Espelho e folha: confira horas, extras, faltas e exporte para a contabilidade.']},
   {id:'sst',t:'CIPA e SST',g:'sst',ver:'56',p:['RDA: cada técnico de segurança registra as atividades do dia, o DDS e os desvios. Desvio marcado vira plano de ação.','Integração: controle a integração interna e a de cada cliente, com validade. Use Integração em grupo para registrar a turma toda.','PGR e PCMSO: um programa por obra ou contrato, com validade. Em Riscos e plano de ação você vê o inventário daquele PGR.','Documentos de SST: LTCAT, laudos de insalubridade e periculosidade, AET, PCA e PPR com aviso de vencimento. Na aba de ASO, informe a emissão do PPP.','Inspeções e auditorias: carregue um checklist pronto, marque conforme ou não conforme e veja o resumo por obra, cliente ou mês.','Ambiental: CADRI, PGRCC por obra, MTR e CDF de cada retirada, documentos de transportadores, indicadores (GEE da frota, água, energia, resíduos) e checklist ISO 14001.','Controle de EPI agora fica aqui, com o estoque de EPI na mesma tela. Na entrega, escolha o item do estoque para dar baixa; na devolução, decida entre descarte e volta ao estoque.','Treinamentos mensais: gere com IA o treinamento do mês. Cada colaborador assiste na Minha área, responde 3 perguntas e recebe o certificado. O ranking aparece aqui.','HHT: horas trabalhadas por obra e por mês vêm do ponto. Informe as horas de terceiros e os meses sem ponto em Informar horas. As taxas de frequência e gravidade usam esse total.','Gestão à vista: responsabilidades e atividades de cada pessoa da segurança com semáforo, pendências do sistema e modo TV. Índices de SST: TF e TG (NBR 14280) e uso e renovação de EPI.','Riscos psicossociais (NR-01): crie a pesquisa, acompanhe as respostas e leve as dimensões de risco ao PGR.','Canal de relatos: registre e apure relatos de assédio com sigilo.','Inventário de riscos (PGR) por obra e atividade.','Permissão de trabalho: só emite se todos os executantes tiverem treinamento e ASO válidos.','Matriz de treinamentos por função e convocação de ASO.','Gestão da CIPA: dimensionamento, eleição, membros e treinamento.','Reuniões e atas com calendário obrigatório.','Plano de trabalho e registro de acidentes com CAT.']},
   {id:'jur',t:'Trabalhista',g:'jur',ver:'15',p:['Processos com número CNJ, pedidos, valores e fase.','Prazos e andamentos com alerta.','Risco e mitigação: indicadores e análise por IA com dados anonimizados.']},
   {id:'vei',t:'Veículos',g:'frota',ver:'56',p:['Rota diária: planeje as viagens de cada dia com veículo, motorista, obra, quem pediu e o material. Na saída, clique em Gerar saída: o km atual já vem preenchido.','Entregas com frete: registre os pedidos da Lalamove e de outras plataformas com o custo, que vai para contas a pagar no projeto.','Na saída do veículo, informe a hora do retorno, marque se houve abastecimento (o sistema abre o lançamento) e anexe as fotos do painel e do veículo.','Adicional de condutor: até 15 dias no mês paga R$ 32 por dia; acima disso, adicional mensal de dupla função (salário × 20%). Veja o resumo por condutor, projeto ou total.','Multas: use Importar multas para trazer as infrações do e-Frotas ou do portal da Senatran; o sistema identifica veículo, condutor e prazos e gera a conta a pagar com o desconto do SNE.','Veículos com documentos, saídas (bloqueia CNH vencida), abastecimentos e manutenção.','Multas com o condutor identificado pela saída do veículo e prazo de indicação.','Análise da frota: consumo, custo por km, custo por obra e abastecimentos fora do padrão.']},
   {id:'eqp',t:'Equipamentos',g:'ferr',ver:'28',p:['Envio e retorno: use Envio para mandar itens à obra ou à oficina e Retorno para trazer de volta, informando o estado de cada item.','Fotos: no cadastro do item use Tirar foto ou Escolher arquivo; a miniatura aparece na lista e abre ampliada ao clicar.','Ferramentas e equipamentos com código, número de série e responsável.','Envios para obras com responsável, previsão de retorno e devolução.','Manutenção de equipamentos com histórico e custo.']},
   {id:'ctb',t:'Contabilidade, tributos e assessorias',g:'ctb',ver:'50',p:['Reforma tributária (IBS/CBS): veja o que o sistema já atende e o que fazer, o cronograma até 2033, a apuração estimada do mês e o simulador de contratos. Em Parâmetros cadastre o NBS, a cClassTrib e a redução da atividade.','Tributos: retenções do mês, CNO das obras e calendário de obrigações.','Assessorias: checklist de fechamento e pacote de dados para contabilidade, medicina do trabalho e jurídico.','Confira as pendências do mês antes de fechar.','Gere o pacote ZIP com os arquivos para a assessoria contábil.','O relatório de fechamento registra quem fechou e quando.']},
-  {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'111',p:['Perfis novos em Usuários: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Confira o perfil de cada pessoa depois da versão 111.','Segurança (versão 110): quem é da equipe e grava precisa ligar a verificação em duas etapas no primeiro acesso (aplicativo autenticador no celular). Guarde os códigos de recuperação.','Ações sensíveis, como mexer em contas de acesso, baixar cópia de segurança ou exportar dados, pedem a senha de novo se a última confirmação tiver mais de 15 minutos.','Troca de dados bancários de fornecedor ou colaborador fica pendente até outra pessoa com permissão confirmar.','Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
+  {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'112',p:['Sistema › Temporalidade e descarte: prazos de guarda e rotina anual que lista o que venceu para você aprovar (nada é apagado sozinho).','Novo aviso de privacidade: preencha o encarregado e o canal de contato; os colaboradores darão ciência de novo.','Perfis novos em Usuários: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Confira o perfil de cada pessoa depois da versão 111.','Segurança (versão 110): quem é da equipe e grava precisa ligar a verificação em duas etapas no primeiro acesso (aplicativo autenticador no celular). Guarde os códigos de recuperação.','Ações sensíveis, como mexer em contas de acesso, baixar cópia de segurança ou exportar dados, pedem a senha de novo se a última confirmação tiver mais de 15 minutos.','Troca de dados bancários de fornecedor ou colaborador fica pendente até outra pessoa com permissão confirmar.','Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
   {id:'ctr2',t:'Comercial e contratos',g:'ctr',ver:'49',p:['EAP e cronograma: monte as etapas com materiais, mão de obra e ferramentas, ou importe do MS Project (Salvar como XML); envie as etapas para o projeto.','Indicadores: conversão por etapa do funil, POC, prazo médio de recebimento e inadimplência.','Oportunidade ganha: marque Resultado = Ganhamos e use Gerar contrato; no contrato, Gerar projeto cria a obra. Habilitação: anexe o PDF de cada certidão e baixe o pacote ZIP.','Oportunidades e licitações: funil com etapa, valor, chance, sessão e motivo de perda.','Habilitação: certidões com alerta de vencimento.','Contratos: planilha orçamentária, BDI, aditivos com limite legal, reajuste, garantia e retenção.','Medições: boletim por item com acumulado; ao faturar, a NFS-e é criada em rascunho.']},
   {id:'srv',t:'Serviços (PMOC e OS)',g:'serv',ver:'15',p:['Cadastre os equipamentos de cada cliente.','Contrato PMOC com responsável técnico, periodicidade e cobrança mensal; gere as preventivas do mês.','Ordem de serviço com checklist, materiais, fotos e assinatura do cliente no celular; ao concluir, baixa o estoque e cria a conta a receber.']},
   {id:'qld',t:'Qualidade',g:'qual',ver:'15',p:['Fichas de verificação de serviço com modelos prontos.','Reprovação vira não conformidade com causa, ação e eficácia.','Termos de recebimento provisório e definitivo e chamados de garantia.']},

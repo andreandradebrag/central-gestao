@@ -189,7 +189,7 @@ function avisarDoc(op, p, data, ts) {
   const parent = p.split('/').slice(0, -1).join('/'), id = p.split('/').pop();
   for (const [cid, c] of CONEX) {
     const ca = q.contaPorId.get(c.conta.id); if (!ca || !ca.ativo) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } continue; }
-    c.conta = ca; if (podeVer(ca, p, data || (op === 'del' ? null : {}), null) || (op === 'del' && pode(ca, p, 'r') && perfilPermite(ca, p, 'r'))) sse(c.res, 'doc', { op, path: p, parent, id, data: redigir(ca, p, data), ts });
+    c.conta = ca; if (podeVer(ca, p, data || (op === 'del' ? null : {}), null) || (op === 'del' && pode(ca, p, 'r') && perfilPermite(ca, p, 'r'))) { sse(c.res, 'doc', { op, path: p, parent, id, data: redigir(ca, p, data), ts }); if (op !== 'del' && parent.indexOf('/') < 0 && REG.ehSaude(parent)) REG.registrarLeitura(ca, null, parent, [id], 'ao vivo'); }
   }
 }
 function pares() {
@@ -661,7 +661,7 @@ async function rotear(req, res) {
   if (p === '/api/busca-pessoas') { const t = String(u.searchParams.get('q') || '').toLowerCase(); return json(res, 200, q.contas.all().filter(c => c.ativo && (!t || (c.nome + ' ' + c.email).toLowerCase().includes(t))).slice(0, 30).map(c => Object.assign(perfilPub(c), { isMe: c.id === conta.id }))); }
   if (p === '/api/db/doc') {
     const dp = String(u.searchParams.get('path') || ''); if (!validPath(dp, true)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
-    if (m === 'GET') { if (!pode(conta, dp, 'r')) return json(res, 403, { code: 'not_granted' }); const r = q.docGet.get(dp), dd = r ? JSON.parse(r.data) : null; return json(res, 200, r && podeVer(conta, dp, dd, new Map()) ? { exists: true, data: redigir(conta, dp, dd), ts: r.ts } : { exists: false }); }
+    if (m === 'GET') { if (!pode(conta, dp, 'r')) return json(res, 403, { code: 'not_granted' }); const r = q.docGet.get(dp), dd = r ? JSON.parse(r.data) : null, vis = r && podeVer(conta, dp, dd, new Map()); if (vis && REG.ehSaude(dp.split('/')[0]) && dp.split('/').length === 2) REG.registrarLeitura(conta, req, dp.split('/')[0], [dp.split('/')[1]], 'registro'); return json(res, 200, vis ? { exists: true, data: redigir(conta, dp, dd), ts: r.ts } : { exists: false }); }
     if (!pode(conta, dp, 'w') || !perfilPermite(conta, dp, 'w')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite alterar estes dados.' });
     const seg = dp.split('/'), parent = seg.slice(0, -1).join('/'), id = seg[seg.length - 1], ts = Date.now();
     const r0 = q.docGet.get(dp), velho = r0 ? JSON.parse(r0.data) : null;
@@ -689,6 +689,7 @@ async function rotear(req, res) {
   if (p === '/api/db/col' && m === 'GET') {
     const cp = String(u.searchParams.get('path') || ''); if (!validPath(cp, false)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
     const memo = new Map(), rows = q.colGet.all(cp).map(r => ({ id: r.id, data: JSON.parse(r.data), ts: r.ts })).filter(r => podeVer(conta, cp + '/' + r.id, r.data, memo)).map(r => Object.assign(r, { data: redigir(conta, cp + '/' + r.id, r.data) }));
+    if (rows.length && REG.ehSaude(cp)) REG.registrarLeitura(conta, req, cp, rows.map(r => r.id), 'lista'); /* v112: leitura de dados de saúde (uma linha por pessoa, coleção e dia) */
     return json(res, 200, { docs: rows });
   }
   if (p === '/api/stream' && m === 'GET') {
@@ -727,7 +728,9 @@ async function rotear(req, res) {
     const ui0 = usoIa.get(conta.id) || { n: 0, ini: Date.now() }; if (Date.now() - ui0.ini > 3600e3) { ui0.n = 0; ui0.ini = Date.now(); } ui0.n++; usoIa.set(conta.id, ui0);
     if (ui0.n > (NIV[conta.nivel] >= NIV.admin ? 120 : 30)) return json(res, 429, { code: 'rate_limited', erro: 'Limite de uso da IA nesta hora atingido.' });
   }
-  if (p === '/api/ia' && m === 'POST') { try { return json(res, 200, await ia(Object.assign(await lerJson(req), { nivel: NIV[conta.nivel] }))); } catch (e) { return json(res, e.st || 500, { code: e.code || (e.st === 503 ? 'capability_disabled' : 'upstream_error'), erro: e.msg || 'Falha na IA.' }); } }
+  if (p === '/api/ia' && m === 'POST') { /* v112 (B9): o uso fica na auditoria (quem, quando, função, tamanho), sem o conteúdo */
+    let corpo = {}; try { corpo = await lerJson(req); const r = await ia(Object.assign({}, corpo, { nivel: NIV[conta.nivel] })); REG.auditarIa(conta, req, corpo, true); return json(res, 200, r); }
+    catch (e) { REG.auditarIa(conta, req, corpo, false, e.msg || e.message); return json(res, e.st || 500, { code: e.code || (e.st === 503 ? 'capability_disabled' : 'upstream_error'), erro: e.msg || 'Falha na IA.' }); } }
   if (p.startsWith('/api/solides/') && !perfilEm(conta, ['admin', 'rh'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar a integração de ponto.' });
   if (p.startsWith('/api/bancos/') && !perfilEm(conta, ['admin', 'financeiro'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar o extrato automático.' });
   if (p.startsWith('/api/fiscal/') && !perfilEm(conta, ['admin', 'financeiro', 'fiscal', 'projetos', 'leitura', 'leituratotal'])) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite acessar as notas fiscais.' });
@@ -783,7 +786,7 @@ async function rotear(req, res) {
 
 /* regras de negócio aplicadas pelo servidor (aprovações, bancos, competência, anexos, auditoria...) */
 const REG = require('./regras.js')({ db, q, json, html, lerJson, lerCorpo, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH,
-  pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa });
+  pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa, BACKUP });
 /* v111: a sincronização da Sólides não grava ponto (pmmes) de mês travado (Fontes do ponto) nem de competência fechada; o que foi ignorado vai para a auditoria */
 const solIgnorados = new Set();
 const solQ = Object.assign({}, q, { docPut: { run: (dp, parent, id, txt, ts) => { if (/^pmmes\//.test(dp) && REG.pontoTravado(dp, txt)) { solIgnorados.add(dp); return { changes: 0 }; } return q.docPut.run(dp, parent, id, txt, ts); } } });

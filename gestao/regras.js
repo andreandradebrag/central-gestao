@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS blobcit(blob TEXT NOT NULL, path TEXT NOT NULL, por T
 CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   for (const s of ['ALTER TABLE arquivos ADD COLUMN origem TEXT', 'ALTER TABLE arquivos ADD COLUMN lixo INTEGER', 'ALTER TABLE arquivos ADD COLUMN lixoPor TEXT', 'ALTER TABLE arquivos ADD COLUMN restrito INTEGER']) { try { db.exec(s); } catch (e) { } }
   fs.mkdirSync(path.join(DATA, 'blobs', 'lixo'), { recursive: true });
+  /* v112: privacidade (auditoria só com campos alterados e dados protegidos, leitura de saúde, relatório do titular, IA) */
+  const PRIV = require('./privacidade.js')({ db, q, perfilDe, NIV, ipDe });
   const st = {
     aud: db.prepare('INSERT INTO auditoria(ts,conta,ip,metodo,caminho,antes,depois) VALUES(?,?,?,?,?,?,?)'),
     arq: db.prepare('SELECT * FROM arquivos WHERE id=?'),
@@ -79,12 +81,15 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const r = {}; for (const k of Object.keys(o)) r[k] = SEGREDOS.test(k) ? (o[k] ? '(oculto)' : o[k]) : limpar(o[k], (n || 0) + 1); return r;
   }
   const txtAud = o => { if (o == null) return null; let t = JSON.stringify(limpar(o)); if (t.length > 65536) t = t.slice(0, 65536) + '…(cortado)'; return t; };
+  /* v112: só os campos alterados; CPF, dados bancários, salário e valores de folha e campos de saúde protegidos (hash) */
   function auditar(conta, req, metodo, caminho, antes, depois) {
     try {
       const priv = /^cm\/[^/]+\/(m|v)\//.test(String(caminho || '')); /* conteúdo do chat não vai para a auditoria */
-      st.aud.run(Date.now(), conta ? (conta.id || conta) : null, req ? ipDe(req) : null, String(metodo || ''), String(caminho || '').slice(0, 400), priv ? (antes ? '"(mensagem)"' : null) : txtAud(antes), priv ? (depois ? '"(mensagem)"' : null) : txtAud(depois));
+      const [a, b] = priv ? [null, null] : PRIV.paraAuditoria(caminho, metodo, antes, depois);
+      st.aud.run(Date.now(), conta ? (conta.id || conta) : null, req ? ipDe(req) : null, String(metodo || ''), String(caminho || '').slice(0, 400), priv ? (antes ? '"(mensagem)"' : null) : PRIV.corta(a), priv ? (depois ? '"(mensagem)"' : null) : PRIV.corta(b));
     } catch (e) { console.error('[auditoria]', e.message); }
   }
+  PRIV.migrarAuditoria(); /* v112: registros antigos (documento inteiro) passam a ter só os campos alterados, protegidos */
   /* rotas que não gravam documentos: login, duas etapas, contas, backup e anexos (o servidor registra ao terminar a resposta) */
   const ROTAS_AUD = [[/^\/setup$/, 'POST'], [/^\/login$/, 'POST'], [/^\/login\/codigo$/, 'POST'], [/^\/sair$/, '*'], [/^\/esqueci$/, 'POST'], [/^\/senha\//, 'POST'],
     [/^\/conta\/seguranca\//, 'POST'], [/^\/contas\/backups\//, 'GET'], [/^\/contas\//, 'POST'], [/^\/api\/contas/, 'POST'], [/^\/api\/admin\//, '*'], [/^\/api\/assets$/, 'POST']];
@@ -689,11 +694,16 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     return null;
   }
+  /* v112 (J2, relatorios/feito_v112_J2.md): conteúdo canônico v1 da entrega de EPI, igual ao do navegador (epiHashBase) */
+  const epiHashBase = e => JSON.stringify({ v: 1, epi: String(e.id || ''), colab: String(e.funcId || ''), entrega: String(e.entrega || ''), itens: [{ item: String(e.item || ''), ca: String(e.ca || ''), qtd: +e.qtd || 1, tam: String(e.tam || '') }] });
+  const epiHash = e => crypto.createHash('sha256').update(epiHashBase(e), 'utf8').digest('hex');
   function rotaEpiAssinar(conta, req, b) {
     const p = 'epi/' + String(b.id || ''); if (!pode(conta, p, 'w') || !perfilPermite(conta, p, 'w') || !gravacaoPermitida(conta, p)) return erro('Seu perfil não registra entrega de EPI.');
     const e = doc(p); if (!e) return erro('Entrega não encontrada.', 404); if (e.assin) return erro('Esta entrega já está assinada.', 409);
     const anx = gravarImagemAssinatura(conta, b.img, p); if (!anx) return erro('Assinatura inválida.', 400);
-    const n = Object.assign(JSON.parse(JSON.stringify(e)), { assinado: true, assin: { modo: 'tela', nome: String(b.nome || '').slice(0, 120), em: Date.now(), por: conta.id, ip: ipDe(req), anx, srv: 1 } });
+    const hs = epiHash(e); if (b.hash && /^[0-9a-f]{64}$/.test(String(b.hash)) && b.hash !== hs) return erro('A entrega mudou depois de aberta para assinatura. Abra de novo e assine.', 409);
+    const n = Object.assign(JSON.parse(JSON.stringify(e)), { assinado: true, assin: { modo: 'tela', nome: String(b.nome || '').slice(0, 120), em: Date.now(), por: conta.id, ip: ipDe(req), anx, srv: 1,
+      hash: hs, hashAlg: 'SHA-256', hashV: 1, imgHash: crypto.createHash('sha256').update(String(b.img || ''), 'utf8').digest('hex'), disp: String(b.disp || '').slice(0, 120) } }); /* v112 (J2): hash do conteúdo, da imagem e o aparelho */
     salvar(p, n, conta, req, 'EPI_ASSINAR', e); return { ok: true, data: n, msg: 'Assinatura registrada.' };
   }
   function rotaMinhaArea(conta, req, b) {
@@ -705,7 +715,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (x.tipo === 'epiok') {
       const p = 'epi/' + String(x.epiId || ''), e = doc(p); const f = e && funcDe(e.funcId); if (!e || !f) { apaga(); return erro('A entrega não é deste colaborador.', 409); }
       if (e.assin) { apaga(); return { ok: true, data: e, msg: 'Já estava assinada.' }; }
-      const n = Object.assign(JSON.parse(JSON.stringify(e)), { assinado: true, assin: { modo: 'minha_area', em: quando, uid: uidc, nome: f.nome || '', regEm: Date.now(), regPor: conta.id, srv: 1 } });
+      const n = Object.assign(JSON.parse(JSON.stringify(e)), { assinado: true, assin: { modo: 'minha_area', em: quando, uid: uidc, nome: f.nome || '', regEm: Date.now(), regPor: conta.id, srv: 1,
+        hash: epiHash(e), hashAlg: 'SHA-256', hashV: 1, hashColab: /^[0-9a-f]{64}$/.test(String(x.hash || '')) ? x.hash : '', disp: String(x.disp || '').slice(0, 120) } });
       salvar(p, n, conta, req, 'EPI_CONFIRMADO_MINHA_AREA', e); apaga(); return { ok: true, data: n };
     }
     if (x.tipo === 'holok') {
@@ -754,11 +765,12 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     return false;
   }
-  const SENS_ANX = c0 => SENS_RH.has(c0) || ['fofi', 'epi', 'pt', 'func', 'acid', 'adtoit', 'adto'].includes(c0);
+  const SENS_ANX = c0 => SENS_RH.has(c0) || ['fofi', 'epi', 'pt', 'func', 'acid', 'adtoit', 'adto', 'tdoc'].includes(c0);
   function servirBlob(conta, req, res, id) {
     const a = st.arq.get(id); const f = a && path.join(DATA, 'blobs', a.lixo ? 'lixo' : '', id);
     if (!a || !fs.existsSync(f) || !blobPermitido(conta, a)) { res.writeHead(404); res.end(); return; }
     if (a.por !== conta.id && a.origem && SENS_ANX(a.origem.split('/')[0])) auditar(conta, req, 'ANEXO_DOWNLOAD', '/_blob/' + id, null, { origem: a.origem, tipo: a.ct });
+    if (a.origem && PRIV.ehSaude(a.origem.split('/')[0])) PRIV.registrarLeitura(conta, req, 'anexo:' + a.origem.split('/')[0], [a.origem.split('/').slice(1).join('/') + '#' + id], 'anexo'); /* v112 */
     const ct = String(a.ct || 'application/octet-stream').toLowerCase(), ok = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|video\/(mp4|webm)|audio\/[a-z0-9.+-]+)$/.test(ct);
     res.writeHead(200, { 'content-type': ok ? ct : 'application/octet-stream', 'content-length': a.tam, 'cache-control': 'private, no-store', 'content-disposition': ok ? 'inline' : 'attachment', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox" });
     fs.createReadStream(f).pipe(res);
@@ -768,12 +780,25 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const l = db.prepare('SELECT * FROM arquivos WHERE lixo IS NULL ORDER BY criado DESC').all();
     return json(res, 200, { assets: l.map(a => ({ id: a.id, url: '/_blob/' + a.id, contentType: a.ct, sizeBytes: a.tam, createdAt: new Date(a.criado).toISOString(), origem: a.origem || null })), usage: { files: l.length, bytes: l.reduce((s, a) => s + a.tam, 0), maxFiles: 100000, maxBytes: 50 * 1024 ** 3 } });
   }
+  /* v112 (B4): o RH (e o Administrador) também apaga anexos de coleções de RH; o SST, os das coleções de SST.
+     A coleção vem do registro de origem; sem origem, de todas as citações (todas precisam ser da área). */
+  const RH_ANX = new Set([...SENS_RH, 'func', 'epi', 'fofi', 'foimp', 'cap', 'vaga', 'rsreq', 'integ', 'trein', 'tterc', 'tdoc']);
+  const SST_ANX = new Set(['tterc', 'rhdoc', 'acid', 'ppp', 'rel', 'psicamp', 'epi', 'integ', 'trein']);
+  function colsDoAnexo(a) { if (a.origem) return [a.origem.split('/')[0]]; return [...new Set(st.citDoBlob.all(a.id).map(c => c.path.split('/')[0]))]; }
+  function areaApaga(conta, a) {
+    if (!conta || NIV[conta.nivel] < NIV.admin) return '';
+    const pf = perfilDe(conta), cs = colsDoAnexo(a); if (!cs.length) return '';
+    if (['admin', 'rh'].includes(pf) && cs.every(c => RH_ANX.has(c))) return pf;
+    if (pf === 'sst' && cs.every(c => SST_ANX.has(c))) return pf;
+    return '';
+  }
   function excluirAnexo(conta, req, res, id) {
     const a = st.arq.get(id); if (!a || a.lixo) return json(res, 200, { deleted: true });
-    if (conta.nivel !== 'owner' && a.por !== conta.id) { auditar(conta, req, 'ANEXO_EXCLUIR_NEGADO', '/api/assets/' + id, null, { origem: a.origem }); return json(res, 403, { code: 'not_granted', erro: 'Só quem enviou o arquivo ou o dono pode excluí-lo.' }); }
+    const area = conta.nivel !== 'owner' && a.por !== conta.id ? areaApaga(conta, a) : '';
+    if (conta.nivel !== 'owner' && a.por !== conta.id && !area) { auditar(conta, req, 'ANEXO_EXCLUIR_NEGADO', '/api/assets/' + id, null, { origem: a.origem }); return json(res, 403, { code: 'not_granted', erro: 'Só quem enviou o arquivo, o RH (nos documentos de pessoal) ou o dono pode excluí-lo.' }); }
     try { fs.renameSync(path.join(DATA, 'blobs', id), path.join(DATA, 'blobs', 'lixo', id)); } catch (e) { }
     db.prepare('UPDATE arquivos SET lixo=?, lixoPor=? WHERE id=?').run(Date.now(), conta.id, id);
-    auditar(conta, req, 'ANEXO_EXCLUIR', '/api/assets/' + id, { id, ct: a.ct, tam: a.tam, origem: a.origem, por: a.por }, { lixeira: true, apagaEm: new Date(Date.now() + LIXO_DIAS * 864e5).toISOString().slice(0, 10) });
+    auditar(conta, req, 'ANEXO_EXCLUIR', '/api/assets/' + id, { id, ct: a.ct, tam: a.tam, origem: a.origem, por: a.por }, { lixeira: true, apagaEm: new Date(Date.now() + LIXO_DIAS * 864e5).toISOString().slice(0, 10), pelaArea: area || undefined });
     return json(res, 200, { deleted: true, lixeira: true });
   }
   function restaurarAnexo(conta, req, id) {
@@ -841,11 +866,18 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const k = 'veic:' + data.veicId; let v; if (memo && memo.has(k)) v = memo.get(k); else { v = doc('veic/' + data.veicId); if (memo) memo.set(k, v); }
     return !!(v && v.local && perm.has(v.local));
   }
+  /* v112 (B3/B10): checklist mensal dos empreiteiros (tdoc: CND, folha e guias dos empregados do empreiteiro) e os anexos
+     dele só para Financeiro, RH, SST, Administrador e Diretoria (e Leitura completa, que já lê os dados de RH).
+     O resumo tercsit continua na leitura livre. */
+  const TDOC_LE = new Set(['admin', 'financeiro', 'rh', 'sst', 'diretoria', 'leituratotal']), TDOC_GRAVA = new Set(['admin', 'financeiro', 'rh', 'sst']);
+  const tdocLe = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin ? !!conta && conta.nivel === 'owner' : TDOC_LE.has(perfilDe(conta));
+  const tdocGrava = conta => !!conta && (conta.nivel === 'owner' || (NIV[conta.nivel] >= NIV.admin && TDOC_GRAVA.has(perfilDe(conta))));
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
     if (c0 === 'lixo') { if (!data || !data.col) return true; if (data.col === 'func' && !veFuncCompleto(conta)) return false; const pp = data.col + '/' + (data.rid || 'x'); return perfilPermite(conta, pp, 'r') && podeLer(conta, pp, data.rec || null, memo); }
     if (VEIC_COLS.has(c0) && !veicOk(conta, c0, data, memo)) return false;
+    if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
     const k = 'plog:' + c0; if (!memo || !memo.has(k)) { if (memo) memo.set(k, 1); try { permLog.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), 'leitura:' + c0, Date.now()); } catch (e) { } }
     return MODO_LEIT !== 'bloquear';
@@ -1036,6 +1068,62 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (velho) { const LIVRE = new Set(['valor', 'venc', 'desc', 'status', 'obs', 'ts', 'ed', 'edBy', 'hist', 'sens', 'obrig']); for (const k of new Set(Object.keys(velho).concat(Object.keys(novo)))) if (!LIVRE.has(k) && !igual(velho[k], novo[k])) return false; if (novo.status && !['aberto', 'cancelado'].includes(novo.status)) return false; }
     return true;
   }
+  /* v112 (J1, relatorios/feito_v112_J1.md): travas de baixo risco repetidas no servidor
+     - emprest: juros só se a empresa ligou a opção (cfg.jur1.emJuros) e até a taxa máxima (cfg.jur1.emJurosMax, padrão 1% a.m.);
+       vale na criação e quando os juros mudam (empréstimos antigos continuam editáveis);
+     - desl: dispensa sem justa causa, acordo, rescisão antecipada e pedido de demissão exigem as 7 respostas de garantia de
+       emprego; "sim"/"não sei" ou parto há menos de 5 meses exigem o parecer anexado; pedido de demissão exige o pedido de
+       próprio punho anexado. Vale na criação e nos registros que já têm as perguntas (os antigos, sem elas, não travam);
+     - func.ferQuit: período de férias só é quitado com recibo e aviso anexados (ou lote com arquivo); o servidor carimba. */
+  const J1_DISP = ['sem_justa', 'acordo', 'antec_emp'], J1_Q = ['qGrav', 'qCipa', 'qSind', 'qDoenca', 'qAcid', 'qPreap', 'qPai'];
+  const anxN = (o, k) => Array.isArray(o && o[k]) ? o[k].filter(a => a && a.id).length : 0;
+  const mais5m = d => { const x = new Date(String(d).slice(0, 10) + 'T12:00:00Z'); if (isNaN(x)) return ''; x.setUTCMonth(x.getUTCMonth() + 5); return x.toISOString().slice(0, 10); };
+  /* v112 (J2): hora extra até 2 h somadas por colaborador e dia (necessidade imperiosa do art. 61, com fato e comunicação,
+     até cfg.j2.heImpMax, padrão 4, máximo 6); com adicional de insalubridade, hora extra e banco de horas só com a licença
+     do art. 60 (no colaborador ou em cfg.j2) ou cláusula da convenção; banco de horas novo só com o acordo anexado. */
+  function art60Ok(f) { if (!f || !(+f.insal > 0)) return true; const J = cfgEmp().j2 || {}, h = hojeSP(); return (f.art60Val && String(f.art60Val) >= h) || (J.art60Val && String(J.art60Val) >= h) || !!String(J.art60Cct || '').trim(); }
+  function regrasJur2(c0, conta, velho, novo) {
+    if (c0 === 'heaut' && !velho) {
+      const f = doc('func/' + String(novo.funcId || ''));
+      if (f && !art60Ok(f)) return erro((f.nome || 'O colaborador') + ' recebe adicional de insalubridade e não há licença do art. 60 da CLT registrada.', 409);
+      const imp = !!novo.imperiosa && !!String(novo.impMotivo || '').trim() && !!String(novo.impComunic || '').trim(), J = cfgEmp().j2 || {};
+      const teto = imp ? Math.min(6, Math.max(2, +J.heImpMax || 4)) : 2;
+      const ja = col('heaut').filter(x => x.id !== novo.id && x.funcId === novo.funcId && x.data === novo.data && !['cancelada', 'recusada'].includes(x.status)).reduce((s, x) => s + (+x.horas || 0), 0);
+      if (ja + (+novo.horas || 0) > teto + 1e-9) return erro('Hora extra: o total do dia passaria de ' + teto + ' h para este colaborador (CLT, art. 59' + (imp ? ', art. 61' : '; acima disso, só necessidade imperiosa com fato e comunicação') + ').', 409);
+    }
+    if (c0 === 'func' && novo.bh && !(velho && velho.bh)) {
+      if (!novo.bhAcordoEm || !anxN(novo, 'bhAcordoAnx')) return erro('Banco de horas: anexe o acordo assinado e informe a data.', 409);
+      if (!art60Ok(novo)) return erro('Banco de horas com insalubridade: registre a licença do art. 60 da CLT.', 409);
+    }
+    return null;
+  }
+  function regrasJur1(c0, conta, velho, novo) {
+    if (c0 === 'emprest') {
+      const j = +novo.juros || 0; if (velho && Math.abs((+velho.juros || 0) - j) < 1e-9) return null;
+      const c = cfgEmp().jur1 || {}, max = c.emJurosMax === undefined || c.emJurosMax === '' ? 1 : Math.max(0, +c.emJurosMax || 0);
+      if (j > 0 && !c.emJuros) return erro('A empresa está configurada para empréstimos sem juros. Deixe os juros em 0%.', 409);
+      if (j > max + 1e-9) return erro('Juros acima da taxa máxima configurada (' + max + '% ao mês, juros simples).', 409);
+      return null;
+    }
+    if (c0 === 'desl') {
+      if (!(J1_DISP.includes(novo.tipo) || novo.tipo === 'pedido')) return null;
+      if (velho && !J1_Q.some(k => velho[k] !== undefined)) return null; /* registro antigo, de antes das perguntas */
+      if (novo.tipo === 'pedido' && !anxN(novo, 'pedidoAnx')) return erro('Pedido de demissão: anexe o pedido escrito de próprio punho e assinado.', 409);
+      const falta = J1_Q.filter(k => !novo[k]); if (falta.length) return erro('Responda às perguntas de garantia de emprego antes de gravar o desligamento.', 409);
+      const est = J1_Q.some(k => novo[k] === 'sim' || novo[k] === 'nao_sei') || (novo.dataParto && String(novo.saida || hojeSP()) <= mais5m(novo.dataParto));
+      if (est && !anxN(novo, 'parecerAnx')) return erro('Possível garantia de emprego: anexe o parecer do advogado da empresa para seguir.', 409);
+      return null;
+    }
+    if (c0 === 'func' && novo.ferQuit && typeof novo.ferQuit === 'object') {
+      const vq = (velho && velho.ferQuit) || {};
+      for (const aq of Object.keys(novo.ferQuit)) {
+        const z = novo.ferQuit[aq]; if (igual(z, vq[aq])) continue;
+        if (!z || !((anxN(z, 'recibo') && anxN(z, 'aviso')) || (z.lote && anxN(z, 'anx')))) return erro('Férias: para quitar o período ' + aq + ' anexe o recibo e o aviso assinados.', 409);
+        novo.ferQuit[aq] = Object.assign({}, z, { srvPor: conta.id, srvEm: Date.now() });
+      }
+    }
+    return null;
+  }
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'ctbfech') return erro('Fechar e reabrir competência só pelos botões de Fiscal › Fechamento (o servidor registra quem fez e o motivo).');
@@ -1048,6 +1136,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin', 'rh'])) && !igual((velho || {}).pfonte, novo.pfonte)) return erro('As fontes e a trava do ponto só o RH ou um administrador alteram.');
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual(((velho || {}).fz || {}).fech2, (novo.fz || {}).fech2)) return erro('O modo de fechamento (duas etapas) só um administrador altera.');
     if (c0 === 'pesqlink') return erro('O link da pesquisa só é criado pelo botão "Enviar link ao cliente".');
+    if (c0 === 'tdoc' && !tdocGrava(conta)) return erro('Os documentos mensais dos empreiteiros (folha e guias) ficam com o Financeiro, o RH e a Segurança do trabalho.');
     if (c0 === 'pesq' && s.length === 2) ['viaLink', 'respLinkEm', 'linkEm', 'linkExpira'].forEach(k => { if (velho && velho[k] !== undefined) novo[k] = velho[k]; else delete novo[k]; });
     if (c0 === 'pt' && s.length === 4 && (s[2] === 'fa' || s[2] === 'pc')) { const e = regraMinhaAreaAdto(conta, req, s, velho, novo); if (e) return e; }
     if (c0 === 'adtoit' && s.length === 2 && !velho && novo.pc) { const e = regraAdtoitPc(novo); if (e) return e; }
@@ -1065,6 +1154,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'nfse') { e = regraNfseCanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'notas') { e = regraNotaConf(conta, req, velho, novo); if (e) return e; }
       e = travaPonto(c0, velho, novo); if (e) return e;
+      e = regrasJur1(c0, conta, velho, novo) || regrasJur2(c0, conta, velho, novo); if (e) return e;
     }
     if (c0 === 'remessa' && s.length === 2) { e = regraRemessa(conta, velho, novo, req); if (e) return e; }
     e = regraAssinaturas(c0, conta, velho, novo, p); if (e) return e;
@@ -1078,6 +1168,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (!velho) return null;
     if (s.length === 2) { const e = travaCompetencia(c0, velho, null) || travaPonto(c0, velho, null); if (e) return e; }
     if (c0 === 'pesqlink') return erro('Link de pesquisa não se exclui por aqui.');
+    if (c0 === 'tdoc' && !tdocGrava(conta)) return erro('Os documentos mensais dos empreiteiros ficam com o Financeiro, o RH e a Segurança do trabalho.');
     if (c0 === 'pt' && s.length === 4 && s[2] === 'pc' && velho.st) return erro('Comprovante já tratado pelo Financeiro não pode ser excluído.');
     if (c0 === 'pt' && s.length === 4 && s[2] === 'fa' && !(ehDono(conta) || gravaGrupo(conta, 'fin'))) return erro('Só o Financeiro altera o resumo de adiantamentos.');
     if (c0 === 'remessa' && velho.status !== 'cancelada' && !(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Cancele a remessa em vez de excluir.');
@@ -1086,6 +1177,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   function depois(conta, req, metodo, p, antes, depois_, v) {
     auditar(conta, req, metodo, p, antes, depois_);
+    PRIV.aposGravar(auditar, conta, req, p, antes, depois_); /* v112: anonimização do titular alcança a auditoria */
     atualizarCitacoes(conta, p, depois_);
     if (v && v.ctx) for (const a of v.ctx.alertas) alertar(a[0], a[1], req, a[2]);
   }
@@ -1108,7 +1200,27 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (!(ehDono(conta) || perfilEm(conta, ['admin']))) { json(res, 403, { code: 'not_granted', erro: 'Só administrador.' }); return true; }
       json(res, 200, { itens: pendenciasAprovacao().map(i => Object.assign({}, i, { quem: i.quem.map(nomeConta) })) }); return true; }
     const mr = p.match(/^\/api\/remessa\/([\w\-.|~@+=]{1,200})\/arquivo$/); if (mr && m === 'GET') { rotaRemessaArquivo(conta, req, res, mr[1]); return true; }
-    if (p === '/contas/auditoria' && m === 'GET') { if (conta.nivel !== 'owner') { res.writeHead(303, { location: '/' }); res.end(); return true; } X.html(res, 200, pagAuditoria(conta, u)); return true; }
+    if (p === '/contas/auditoria' && m === 'GET') {
+      if (conta.nivel !== 'owner') { auditar(conta, req, 'AUDITORIA_NEGADA', p, null, null); res.writeHead(303, { location: '/' }); res.end(); return true; }
+      /* v112 (B2): quem consulta a auditoria e o que filtrou fica registrado */
+      const fl = {}; ['conta', 'cam', 'met', 'de', 'ate', 'pg'].forEach(k => { const v = u.searchParams.get(k); if (v) fl[k] = String(v).slice(0, 100); });
+      auditar(conta, req, 'AUDITORIA_CONSULTA', p, null, { filtros: fl });
+      X.html(res, 200, pagAuditoria(conta, u)); return true;
+    }
+    /* v112 (B5): relatório do titular completo, gerado pelo servidor (RH, Administrador ou dono) */
+    if (p === '/api/lgpd/titular' && m === 'POST') {
+      if (!PRIV.podeTitular(conta)) { auditar(conta, req, 'LGPD_RELATORIO_NEGADO', p, null, null); json(res, 403, { code: 'not_granted', erro: 'Só o RH, um administrador ou o dono geram o relatório do titular.' }); return true; }
+      const b = await lerJson(req), r = PRIV.relatorioTitular(conta, b);
+      if (r.erro) { json(res, r.st || 400, { code: r.st === 404 ? 'not_found' : 'invalid_argument', erro: r.erro }); return true; }
+      auditar(conta, req, 'LGPD_RELATORIO_TITULAR', String(b.tipo) + '/' + String(b.id), null, { secoes: r.secoes.map(s => s.col + ':' + s.n), auditoria: r.auditoria.length, completo: r.completo });
+      json(res, 200, r); return true;
+    }
+    /* v112 (B4): prazos que o próprio servidor aplica, para a tabela de temporalidade */
+    if (p === '/api/lgpd/prazos' && m === 'GET') {
+      if (NIV[conta.nivel] < NIV.admin) { json(res, 403, { code: 'not_granted' }); return true; }
+      const bk = X.BACKUP && X.BACKUP.estado ? X.BACKUP.estado() : {};
+      json(res, 200, { auditoriaDias: AUD_DIAS, lixoAnexosDias: LIXO_DIAS, backupDias: bk.dias || null, backupS3: !!bk.s3Configurado, backupCifrado: !!bk.cifrado, leituraSaude: [...PRIV.SAUDE_LEIT] }); return true;
+    }
     if (p === '/contas/auditoria/anexo' && m === 'POST') {
       if (conta.nivel !== 'owner') { res.writeHead(303, { location: '/' }); res.end(); return true; }
       const f = Object.fromEntries(new URLSearchParams((await X.lerCorpo(req, 10000)).toString('utf8'))); const ok = restaurarAnexo(conta, req, String(f.id || '').replace(/[^A-Za-z0-9_-]/g, ''));
@@ -1132,7 +1244,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const qs = o => Object.entries(Object.assign({}, f, o)).filter(([k, v]) => v !== '' && v != null && !(k === 'pg' && !v)).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
     const lixo = db.prepare('SELECT * FROM arquivos WHERE lixo IS NOT NULL ORDER BY lixo DESC LIMIT 50').all();
     const msg = u.searchParams.get('m');
-    return pag('Auditoria', '<nav><a class="btn" href="/">← Voltar ao sistema</a><a class="btn" href="/contas">Contas de acesso</a><a class="btn" href="/sair">Sair</a></nav><h1>Auditoria</h1><p class="sub">Tudo o que foi gravado ou excluído, entradas e falhas de login, ações de conta, duas etapas, downloads de anexos sensíveis, backups, aprovações e alertas. Gravado pelo servidor; guardado por ' + AUD_DIAS + ' dias. Só o dono vê esta página.</p>' + (msg ? '<div class="msg">' + esc(msg) + '</div>' : '') +
+    return pag('Auditoria', '<nav><a class="btn" href="/">← Voltar ao sistema</a><a class="btn" href="/contas">Contas de acesso</a><a class="btn" href="/sair">Sair</a></nav><h1>Auditoria</h1><p class="sub">Tudo o que foi gravado ou excluído, entradas e falhas de login, ações de conta, duas etapas, downloads de anexos sensíveis, backups, aprovações e alertas. Gravado pelo servidor; guardado por ' + AUD_DIAS + ' dias (AUDITORIA_DIAS). Só o dono vê esta página, e cada consulta fica registrada aqui (AUDITORIA_CONSULTA).</p><p class="sub">Nas alterações aparecem só os campos que mudaram. CPF, dados bancários e PIX, salário e valores de folha e os campos de saúde (ASO, afastamentos, acidentes, psicossocial) aparecem como "(protegido · h:…)": o código muda quando o valor muda, mas não mostra o valor. A leitura de dados de saúde aparece como LEITURA_SAUDE (uma linha por pessoa, coleção e dia) e o uso da IA como IA_USO, sem o conteúdo.</p>' + (msg ? '<div class="msg">' + esc(msg) + '</div>' : '') +
       '<div class="card"><form method="get" action="/contas/auditoria"><div class="row"><label>Pessoa<select name="conta"><option value="">Todas</option>' + cs.map(c => '<option value="' + esc(c.id) + '"' + (c.id === f.conta ? ' selected' : '') + '>' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Caminho contém<input name="cam" value="' + esc(f.cam) + '" placeholder="ex.: parc/, lanc/, /login"></label><label>Ação começa com<input name="met" value="' + esc(f.met) + '" placeholder="ex.: PUT, DELETE, LOGIN, APROVAR"></label></div><div class="row"><label>De<input type="date" name="de" value="' + esc(f.de) + '"></label><label>Até<input type="date" name="ate" value="' + esc(f.ate) + '"></label><div><button class="pri" type="submit">Filtrar</button> <a class="btn" href="/contas/auditoria">Limpar</a></div></div></form></div>' +
       '<div class="card"><h2>' + tot + ' registro(s)' + (tot > N ? ' · página ' + (f.pg + 1) + ' de ' + Math.ceil(tot / N) : '') + '</h2><div style="overflow-x:auto"><table><thead><tr><th>Quando</th><th>Pessoa</th><th>Endereço</th><th>Ação</th><th>Caminho</th><th>Detalhes</th></tr></thead><tbody>' +
       ls.map(r => '<tr><td style="white-space:nowrap">' + quando(r.ts) + '</td><td>' + esc(r.conta ? nomeConta(r.conta) : '—') + '</td><td>' + esc(r.ip || '') + '</td><td>' + esc(r.metodo) + '</td><td style="word-break:break-all">' + esc(r.caminho) + '</td><td>' + (r.antes || r.depois ? '<details><summary>ver</summary>' + (r.antes ? '<div class="sub">Antes</div><pre style="white-space:pre-wrap;max-width:520px;font-size:12px">' + fmt(r.antes) + '</pre>' : '') + (r.depois ? '<div class="sub">Depois</div><pre style="white-space:pre-wrap;max-width:520px;font-size:12px">' + fmt(r.depois) + '</pre>' : '') + '</details>' : '') + '</td></tr>').join('') +
@@ -1140,6 +1252,9 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       '<div class="card"><h2>Lixeira de anexos</h2><p class="sub" style="margin:0 0 10px">Anexos excluídos ficam aqui por ' + LIXO_DIAS + ' dias e depois são apagados de vez.</p>' + (lixo.length ? '<table><thead><tr><th>Arquivo</th><th>Origem</th><th>Enviado por</th><th>Excluído</th><th></th></tr></thead><tbody>' + lixo.map(x => '<tr><td>' + esc(x.id) + '<div class="sub">' + esc(x.ct || '') + ' · ' + Math.round((x.tam || 0) / 1024) + ' KB</div></td><td>' + esc(x.origem || '—') + '</td><td>' + esc(nomeConta(x.por)) + '</td><td>' + quando(x.lixo) + '<div class="sub">por ' + esc(nomeConta(x.lixoPor)) + '</div></td><td><form method="post" action="/contas/auditoria/anexo"><input type="hidden" name="id" value="' + esc(x.id) + '"><button type="submit">Restaurar</button></form></td></tr>').join('') + '</tbody></table>' : '<p class="sub" style="margin:0">Vazia.</p>') + '</div>');
   }
 
+  /* v112: leitura das coleções de saúde (server.js chama nas rotas de leitura e no envio ao vivo) e uso da IA */
+  const registrarLeitura = (conta, req, col, ids, via) => PRIV.registrarLeitura(conta, req, col, ids, via);
+  const auditarIa = (conta, req, corpo, ok, erroIa) => auditar(conta, req, 'IA_USO', '/api/ia', null, PRIV.resumoIa(req, corpo || {}, ok, erroIa));
   return { podeLer, redigir, antesGravar, antesExcluir, depois, excecaoGravacao, auditar, auditarHttp, rota, servirBlob, listarAnexos, excluirAnexo, MODO_LEIT,
-    pontoTravado, rotaPublica, aprovadoresDe, avisarAprovadores, enviarResumo };
+    pontoTravado, rotaPublica, aprovadoresDe, avisarAprovadores, enviarResumo, registrarLeitura, ehSaude: PRIV.ehSaude, auditarIa, PRIV };
 };
