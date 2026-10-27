@@ -20749,8 +20749,18 @@ function rfpEhRelatorio(linhas){let fp=false,dc=false,dm=false;
     if(/folha de ponto/.test(t))fp=true;if(/dados do colaborador/.test(t))dc=true;if(/dia mes/.test(t))dm=true;}
   return fp&&dc&&dm;}
 /* devolve {linhas:[cabeçalho, ...linhas], pessoas, dias, ini, fim} ou null */
+/* datas que chegam como número de série do Excel ou como texto (o relatório usa mês/dia) viram Date */
+function rfpNormalizar(linhas){
+  const RE=/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;let mdFirst=null;
+  linhas.forEach(r=>(r||[]).forEach(c=>{if(typeof c!=='string')return;const m=c.trim().match(RE);if(!m)return;if(+m[1]>12)mdFirst=false;else if(+m[2]>12&&mdFirst===null)mdFirst=true;}));
+  if(mdFirst===null)mdFirst=true;
+  return linhas.map(r=>(r||[]).map(c=>{
+    if(typeof c==='number'&&c>36000&&c<73000){const t=new Date(Math.round((c-25569)*864e5));return new Date(t.getUTCFullYear(),t.getUTCMonth(),t.getUTCDate(),t.getUTCHours(),t.getUTCMinutes(),t.getUTCSeconds());}
+    if(typeof c==='string'){const m=c.trim().match(RE);if(m){const mo=mdFirst?+m[1]:+m[2],d=mdFirst?+m[2]:+m[1];return new Date(+m[3],mo-1,d,+(m[4]||0),+(m[5]||0),+(m[6]||0));}}
+    return c;}));}
 function rfpConverter(linhas){
   if(!rfpEhRelatorio(linhas))return null;
+  linhas=rfpNormalizar(linhas);
   const out=[['Nome','Data','Marcações','Local de trabalho','Horas trabalhadas','Ocorrência']];
   let secao='',nome='',dia=null,colObs=-1,colLocal=-1;const pessoas=new Set(),datas=[];
   const fecha=()=>{if(dia&&nome){out.push([nome,dia.data.split('-').reverse().join('/'),dia.m.slice().sort((x,y)=>x-y).map(rfpHora).join(' '),dia.local,dia.tot,[...new Set(dia.oc)].join('; ')]);datas.push(dia.data);}dia=null;};
@@ -20803,6 +20813,7 @@ function rfpConverter(linhas){
         else linhas=pmCsv(decodeOfx(buf));
         const t=pmLerTabela(linhas);
         if(!t){PMI.err='Não encontrei a linha de títulos com a coluna de data. Confira se é o relatório de marcações ou a Folha de Ponto (RFP detalhado) exportada da Sólides em Excel.';}
+        else if(rfp&&!rfp.linhas.slice(1).some(l=>l[2])){PMI.err='Reconheci a Folha de Ponto da Sólides ('+rfp.pessoas+' colaborador(es), '+rfp.dias+' dia(s)), mas não achei nenhuma marcação de entrada e saída. Exporte de novo em Excel (.xls) sem alterar o arquivo e, se continuar, envie o arquivo ao suporte.';}
         else{PMI.tab=t;PMI.arq=f.name;PMI.rfp=rfp?{pessoas:rfp.pessoas,dias:rfp.dias,ini:rfp.ini,fim:rfp.fim}:null;PMI.fase='rev';PM_CACHE={k:'',v:null};Object.keys(ui.pmimp).forEach(k=>{if(/^(c_|f\d|d\d)/.test(k))delete ui.pmimp[k];});}
       }catch(e){PMI.err='Não consegui ler o arquivo ('+(e&&e.message||e)+').';}
       PMI.bus=false;render();});};
@@ -20812,10 +20823,31 @@ function rfpConverter(linhas){
   if(PMI.fase==='rev'&&PMI.rfp){const r=PMI.rfp;h=h.replace('<div class="stack">','<div class="stack"><div class="note pos"><b>Folha de Ponto da Sólides (RFP detalhado) reconhecida.</b> '+r.pessoas+' colaborador(es), '+r.dias+' dia(s), de '+fmtDate(r.ini)+' a '+fmtDate(r.fim)+'. As colunas já foram ligadas: as marcações vêm dos períodos (entrada e saída), o local de trabalho é a obra de cada período, e férias, atestados, afastamentos, feriados e folgas de banco de horas entram como ocorrência (não viram falta). O relatório não traz CPF: a ligação com o cadastro é pelo nome; confira a lista de colaboradores abaixo.</div>');}
   if(PMI.fase==='arquivo'||PMI.fase==='feito')h=h.replace('<h2>Como exportar da Sólides</h2>','<h2>Como exportar da Sólides</h2><p style="margin:0 0 8px"><b>Mais simples:</b> no Sólides DP, gere o relatório <b>Folha de Ponto (RFP detalhado)</b> do período, com todos os colaboradores, e exporte em <b>Excel (.xls)</b>. O sistema reconhece esse relatório sozinho.</p><p class="sub" style="margin:0 0 8px">Ou, se preferir uma planilha de marcações:</p>');
   return h;};}
+/* Locais de trabalho e obras: o vínculo é gravado assim que a obra é escolhida (antes só no botão "Salvar vínculos",
+   lá embaixo; qualquer atualização da tela antes do clique desfazia a escolha) */
+function pmDepGravar(k,v){if(!mayW('rh')){toast('Só o RH altera os vínculos.','neg');return false;}
+  const c=cfg(),pmDep=Object.assign({},c.pmDep||{});if((pmDep[k]||'')===(v||''))return false;
+  if(v)pmDep[k]=v;else delete pmDep[k];put('cfg',Object.assign(cl(c),{pmDep}));return true;}
+try{document.addEventListener('change',e=>{const s=e.target&&e.target.closest?e.target.closest('[data-pmdep]'):null;if(!s)return;
+  if(pmDepGravar(s.dataset.pmdep,s.value))toast('Vínculo salvo: '+(s.value?'as horas desse local vão para '+projNome(s.value):'o local volta a usar o projeto do cadastro')+'.','pos');});}catch(e){}
+{const v0=V.pmimp;V.pmimp=function(){let h=v0.apply(this,arguments);
+  return h.replace('<div class="acts" style="margin-top:10px"><button class="btn pri" data-act="pmDepSalvar">Salvar vínculos</button></div>','').replace('Ao trocar a obra de um local de trabalho, as horas já importadas são reapropriadas na hora.','A obra escolhida é gravada na hora, e as horas já importadas daquele local são reapropriadas.');};}
+/* Conferência do mês: dias sem marcação mas justificados na Sólides (feriado, atestado, férias, folga, afastamento,
+   declaração...) entram como horas abonadas, como a Sólides faz; assim a etiqueta "diferença" só aparece onde há
+   divergência de verdade. Falta continua contando como falta. */
+const pmEhAbono=o=>!!(o&&o.oc&&!(o.m||[]).length&&!(/\bfalta\b/i.test(o.oc)&&!/justific|abonad/i.test(o.oc)));
+{const pc0=pmConferencia;pmConferencia=function(m){const out=pc0(m),[a,b]=monthRange(m);
+  out.forEach(x=>{const doc=S.pmmes.find(d=>d.ym===m&&d.funcId===x.f.id);if(!doc)return;let ab=0,nd=0;
+    Object.keys(doc.dias||{}).forEach(k=>{if(k<a||k>b)return;const o=doc.dias[k]||{};if(pmEhAbono(o)&&o.t&&o.t.trab>0){ab+=o.t.trab;nd++;}});
+    x.nos.marcadas=x.nos.trab;x.nos.abon=ab;x.nos.diasAbon=nd;x.nos.trab=x.nos.trab+ab;});
+  return out;};}
+{const v0=V.pmimp;V.pmimp=function(){let h=v0.apply(this,arguments);
+  return h.replace('<small>horas da Sólides × cálculo deste sistema</small></h2>','<small>horas da Sólides × cálculo deste sistema</small></h2><p class="sub" style="margin:0 0 8px">"Trabalhadas (sistema)" soma as horas marcadas e as horas abonadas pela Sólides (feriado, atestado, férias, folga de banco de horas, afastamento), como a Sólides faz. A etiqueta <b>diferença</b> aparece quando sobra mais de 30 minutos: costuma ser marcação que não chegou, colaborador ligado ao cadastro errado ou tolerância configurada só na Sólides. Para a folha valem os totais da Sólides.</p>');};}
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='113',APP_DATA='2026-10-27';
+const APP_VER='113.1',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['113.1','2026-10-27',['Importação da Folha de Ponto da Sólides: datas lidas também quando o Excel as entrega como número ou como texto mês/dia; se o relatório for reconhecido sem nenhuma marcação, a tela explica em vez de mostrar 0 marcações.','Ponto (Sólides) › Locais de trabalho e obras: a obra escolhida é gravada na hora (antes dependia do botão Salvar vínculos e a escolha se perdia se a tela atualizasse).','Conferência do mês: feriados, atestados, férias, folgas e afastamentos abonados pela Sólides entram nas horas do sistema; a etiqueta diferença só aparece em divergência real.']],
   ['113','2026-10-27',['Diário de obra: colaborador com ASO, NR ou integração vencidos não entra no efetivo; liberação só pelo SST, com justificativa e validade (CIPA e SST › Liberações de aptidão).', 'Empreiteiros: com FGTS ou folha pendentes, a medição só é aprovada com retenção (padrão: o maior entre o valor informado e 10%); conta do líquido e conta de retenção a liberar pela diretoria. Financeiro › Retenções de empreiteiros.', 'Desligamento: o servidor confere CIPA, retorno de acidente, gestante (5 meses após o parto) e garantias cadastradas e exige o parecer jurídico anexado.', 'Ponto (Sólides): o relatório padrão Folha de Ponto (RFP detalhado) em Excel é reconhecido sozinho — marcações em ordem, local de trabalho, férias, atestados, afastamentos e feriados como ocorrência.']],
   ['112','2026-10-27',['Empréstimos sem juros por padrão (juros só simples, com teto); soma de todos os descontos do mês limitada (padrão 30%) e teto de um salário na rescisão.', 'Descontos por dano, extravio e multa só com apuração registrada e cláusula no contrato; termos saem preenchidos.', 'Desligamento: perguntas obrigatórias de estabilidade, gestante até 5 meses após o parto, liberação só com parecer anexado; o pedido de demissão passa a ser de próprio punho anexado.', 'Férias fora da escala ficam a conferir (quitação só com recibo e aviso anexados); alertas de férias vencidas e de pagamento até 2 dias antes.', 'Ponto: app próprio só gerencial; ajuste vira solicitação na Sólides; Pessoal › Arquivo mensal do ponto (AFD, AEJ, espelho).', 'Hora extra: texto de que é devida, teto de 2 h somadas por dia (exceção do art. 61), insalubridade exige licença do art. 60; banco de horas só com acordo anexado.', 'LGPD: auditoria só com campos alterados e dados sensíveis protegidos; registro de quem consulta a auditoria e de leitura de dados de saúde; relatório do titular completo gerado no servidor; Sistema › Temporalidade e descarte; novo aviso de privacidade (nova ciência); registro do uso de IA.', 'Também: alerta do prazo de indicação do condutor; reequilíbrio e exequibilidade em contratos públicos; código de verificação na entrega de EPI; reciclagem complementar no lugar de treinamento por IA; cotas e transparência salarial; documentos dos empreiteiros restritos a Financeiro, RH e SST.']],
   ['111','2026-10-27',['Perfis novos: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Engenheiro volta a lançar medição de empreiteiro e o encarregado a pedir hora extra.', 'Fim dos alertas falsos: resumos "apto para obra" e "situação do empreiteiro" gravados pelo RH/SST e lidos pelo diário de obra e pelo Financeiro, sem expor ASO.', 'Pessoal › Apropriação do mês: mão de obra e frota por obra (sem salário), usada no custo da obra para todos verem o mesmo número.', 'Aprovações: matriz única de aprovadores com substituto por período, herança da aprovação do pedido ou medição, pagamentos obrigatórios com um aprovador, aviso diário ao aprovador. Início › Checklist de configuração.', 'Pagamento: o servidor recusa conta paga acima da alçada sem aprovação; a conciliação marca "pago sem aprovação" (seção própria nos Controles internos); remessa barra nota com divergência e empreiteiro pendente; leitura do retorno CNAB do BB.', 'Fechamento do mês em duas etapas (Financeiro pede com checklist, diretoria confirma); nota atrasada entra pela data de entrada como extemporânea; folha oficial e ponto na trava.', 'Composição do saldo: tratar possíveis duplicados (Não é duplicado / Cancelar este) e explicação da diferença por mês.', 'Suprimentos: um só relatório de exceções, nota sem pedido acima de R$ 1.000 exige motivo, recebimento físico antes da aprovação do pedido.', 'Também: medição ao cliente aprovada por outra pessoa e bloqueio acima do empenho; responsável pela obra; prestação de contas de adiantamento pela Minha área; folha oficial a partir do PDF único do SCI; locais da frota com "vê todos"; aparelho confiável na verificação em duas etapas; link público da pesquisa de satisfação; indicadores atualizados.']],
