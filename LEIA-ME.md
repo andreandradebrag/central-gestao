@@ -58,13 +58,14 @@ Crie um projeto, por exemplo `central`.
 - **Source**: GitHub › seu repositório › branch `main` › **Build path** `/fiscal` › Build: **Dockerfile**.
 - **Environment**:
   ```
-  CNPJ=00000000000000          (só números)
+  CNPJ=00000000000000          (números; o CNPJ novo com letras também é aceito)
   UF=SP
   AMBIENTE=2                   (2 = homologação para testar; depois 1 = produção)
   CERT_SENHA=senha-do-pfx
   FISCAL_TOKEN=o-segredo-gerado
   INTERVALO_MIN=60
-  AUTO_CIENCIA=1
+  NFE_DIST=0                   (0 = o Omie busca as NF-e; 1 = a Central busca. Leia abaixo)
+  AUTO_CIENCIA=0               (se não preencher, segue o NFE_DIST)
   NFSE_ADN=1
   ```
 - **Mounts**:
@@ -73,6 +74,22 @@ Crie um projeto, por exemplo `central`.
 - **Domains**: não adicione nenhum. **Deploy**.
 
 Nos logs deve aparecer `Conector fiscal iniciado (homologação)` sem aviso de certificado.
+
+#### Só um sistema pode buscar as NF-e do CNPJ (NFE_DIST)
+
+A SEFAZ tem uma regra (NT 2014.002, em vigor desde 10/03/2022): as NF-e emitidas contra um CNPJ são entregues numa **fila numerada** (o NSU). Se dois sistemas buscam essa fila para o mesmo CNPJ, cada um guarda o seu número e os dois ficam "fora de sequência". A SEFAZ entende isso como **consumo indevido** (erro 656) e **bloqueia o CNPJ por 1 hora**. Cada nova tentativa durante o bloqueio **começa a hora de novo**. Além disso, cada nota vai só para quem buscar primeiro.
+
+Por isso, **só um sistema por CNPJ** pode fazer essa busca: **o Omie ou a Central, nunca os dois**. Não adianta aumentar o intervalo; a regra é de fila única, não de frequência.
+
+- **Hoje (Omie é o dono):** `NFE_DIST=0` e `AUTO_CIENCIA=0`. A Central não busca NF-e pela fila. As NF-e entram por **Importar XML ou ZIP** (com os XMLs exportados do Omie) ou, de uma nota específica, pelo botão **Baixar XML** (no máximo 3 vezes por hora para a mesma nota). As NFS-e do Ambiente Nacional continuam normalmente. No Registro aparece "Busca de NF-e por NSU desligada".
+- **Para a Central virar a dona** (quando o Omie deixar de ser usado para compras):
+  1. **Primeiro** desligue o **Agente da NF-e** no Omie.
+  2. Depois mude aqui para `NFE_DIST=1` (e `AUTO_CIENCIA=1`, se quiser a ciência automática) e reinicie o serviço `fiscal`.
+  3. A primeira busca pode receber um 656 "fora de sequência". Tudo bem: o conector anota o número que a SEFAZ devolveu, espera a hora e continua dali.
+  4. As notas que o Omie já tinha capturado não vêm de novo: importe-as pelo XML.
+- **Para voltar ao Omie:** faça o contrário. Mude para `NFE_DIST=0`, reinicie e só depois ligue o Agente da NF-e no Omie.
+
+Se o cartão fiscal mostrar o alerta vermelho **"Outro sistema está consultando as NF-e deste CNPJ"**, há dois sistemas buscando ao mesmo tempo. Desligue um deles como explicado acima.
 
 ### 3.2 Serviço `gestao`
 
@@ -116,10 +133,10 @@ Nos logs deve aparecer `Conector fiscal iniciado (homologação)` sem aviso de c
 
 O cartão **SEFAZ e Ambiente Nacional** mostra:
 
-- **NF-e** emitidas contra o CNPJ (Distribuição DF-e). Com `AUTO_CIENCIA=1` o conector dá ciência sozinho nas que chegam só como resumo, e o XML completo vem na busca seguinte. Botões: **Importar** (vai para a lista de validação), **Baixar XML**, **Manifestar** (ciência, confirmação, desconhecimento, operação não realizada).
+- **NF-e** emitidas contra o CNPJ (Distribuição DF-e), **só se `NFE_DIST=1`** (veja a seção 3.1: um só sistema por CNPJ). Com `NFE_DIST=0` o cartão avisa que as NF-e são capturadas pelo Agente da NF-e do Omie. Com `AUTO_CIENCIA=1` o conector dá ciência sozinho nas que chegam só como resumo, e o XML completo vem na busca seguinte. A ciência só é dada até **10 dias** da emissão; confirmação, desconhecimento e operação não realizada valem até **90 dias** (o sistema avisa quando a nota passou do prazo). Botões: **Importar** (vai para a lista de validação), **Baixar XML**, **Manifestar** (ciência, confirmação, desconhecimento, operação não realizada).
 - **NFS-e** do Ambiente de Dados Nacional (ADN) em que a empresa aparece. **Lançar em contas a pagar** cria o título e cadastra o prestador pelo CNPJ.
 
-Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando não há documento novo (erro 656 = "consumo indevido", ele espera 1 hora sozinho). O botão **Buscar agora** mostra quando a próxima consulta está liberada.
+Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando não há documento novo, e depois de um erro 656 ("consumo indevido") ou de uma falha da SEFAZ ele **espera a hora inteira** (mais 5 minutos de folga, no caso do 656). **Mesmo clicando em "Buscar agora" ou em "Baixar XML", ele não consulta antes disso**, porque cada tentativa durante o bloqueio faz a SEFAZ começar a hora de novo. O cartão mostra até que horas está a espera.
 
 **Teste em homologação primeiro** (`AMBIENTE=2`): a SEFAZ de homologação normalmente não tem notas reais, então "nenhum documento" é o esperado. Confirme que não há erro de certificado nos logs e troque para `AMBIENTE=1`.
 

@@ -12793,7 +12793,7 @@ async function fisCarregar(forca){if(!SELFHOST||FIS.carregando)return;if(!forca&
   catch(e){FIS.erro=e.message||'Falha ao falar com o conector fiscal.';}
   finally{FIS.carregando=false;schedule();}}
 const fisManNome={ciencia:'Ciência',confirmacao:'Confirmada',desconhecimento:'Desconhecida',nao_realizada:'Não realizada'};
-const fisNotaDe=ch=>S.notas.find(n=>digits(n.chave||'')===ch);
+const fisNotaDe=ch=>{const k=String(ch||'').toUpperCase().replace(/[^0-9A-Z]/g,'');return S.notas.find(n=>String(n.chave||'').toUpperCase().replace(/[^0-9A-Z]/g,'')===k);};
 const fisLancDe=ch=>S.lanc.find(l=>l.nfseChave===ch);
 function fisCard(){
   if(!SELFHOST)return '<div class="note"><b>Busca automática na SEFAZ.</b> Quando o sistema roda no seu servidor próprio (VPS), o conector fiscal busca sozinho as NF-e emitidas contra o CNPJ da empresa e as NFS-e do Ambiente Nacional, com o certificado A1 guardado só no servidor, e permite dar ciência, confirmar ou desconhecer a operação. Aqui na página do Claude, baixe os XMLs no portal ou com o contador e use “Importar XML ou ZIP”. Para migrar, veja Sistema › Configurações › Migrar para servidor próprio.</div>';
@@ -21970,9 +21970,36 @@ P3_PAINEIS.forEach(id=>{const v0=V[id];if(typeof v0!=='function')return;V[id]=fu
 };}
 try{const st=document.createElement('style');st.textContent='.tools .verchip{display:inline-flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:center;gap:5px;font:600 11.5px var(--font-ui,inherit);white-space:nowrap;opacity:.85;letter-spacing:.2px}.tools .verchip:hover{opacity:1}.tools .verchip .vd,.tools .verchip .vs{display:inline!important;font-weight:500}@media (max-width:1100px){.tools .verchip{flex-direction:column!important;gap:0;line-height:1.05;padding:3px 6px}.tools .verchip .vd{display:block!important;font-size:9.5px}.tools .verchip .vs{display:none!important}}';document.head.appendChild(st);}catch(e){}
 
+/* ===== v119: conector fiscal x Agente da NF-e do Omie (sequência única de NSU, NT 2014.002), bloqueio da SEFAZ e chave alfanumérica ===== */
+const fisChave2=s=>String(s||'').toUpperCase().replace(/[^0-9A-Z]/g,'');
+const fisBloqAte2=()=>{const st=FIS.st,a=st&&st.nfeBloqueioAte?new Date(st.nfeBloqueioAte):null;return a&&!isNaN(a)&&a.getTime()>Date.now()?a:null;};
+const fisHora2=d=>d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+if(typeof fisCard==='function'){const f0=fisCard;fisCard=function(){
+  let h=f0.apply(this,arguments);const st=FIS.st;
+  if(!st||typeof h!=='string'||h.indexOf('data-act="fisSync"')<0)return h;
+  let avisos='';
+  if(st.conflito){const c=st.conflito;
+    avisos+='<div class="note" style="border-color:var(--neg,#c62828);background:rgba(198,40,40,.08);margin:10px 0 0"><b class="neg">Outro sistema está consultando as NF-e deste CNPJ na SEFAZ.</b> Em '+esc(fisDT(c.em))+' a SEFAZ recusou por consumo indevido (656)'+(c.motivo?': '+esc(c.motivo):'')+'. Provavelmente é o Agente da NF-e do Omie. Só um sistema pode fazer essa busca: deixe ligado o Omie ou a Central (variável NFE_DIST do serviço fiscal; veja o LEIA-ME).</div>';}
+  if(st.nfeDist===false)avisos+='<div class="note" style="margin:10px 0 0"><b>NF-e: capturadas pelo Agente da NF-e do Omie</b> (a Central não consulta a SEFAZ por NSU para não conflitar). Importe os XMLs exportados do Omie ou use “Baixar XML” para uma nota específica.</div>';
+  const bq=fisBloqAte2();
+  if(bq){avisos+='<p class="sub warn" style="margin:10px 0 0"><b>SEFAZ em espera até '+esc(fisHora2(bq))+'.</b> Até lá a Central não consulta NF-e (nem por “Buscar agora” nem por “Baixar XML”), porque cada tentativa faz a SEFAZ começar a hora de novo.</p>';
+    h=h.split('<button class="btn sm" data-act="fisBaixar"').join('<button class="btn sm" disabled title="SEFAZ em espera até '+esc(fisHora2(bq))+'" data-act="fisBaixar"');
+    h=h.replace(/(data-act="fisBaixar"[^>]*>)Baixar XML</g,'$1Baixar XML (após '+esc(fisHora2(bq))+')<');}
+  const kOld='Ciência é dada sozinha para baixar o XML';
+  const kNew=st.autoCiencia?'Ciência automática nas notas com até 10 dias da emissão':(st.nfeDist===false?'Ciência automática desligada (o Omie busca as NF-e). Manifeste pelo menu':'Ciência automática desligada. Manifeste pelo menu');
+  h=h.split(kOld+' (desligada)').join(kNew).split(kOld).join(kNew);
+  if(avisos){const i=h.indexOf('<div class="kpis"');h=i>=0?h.slice(0,i)+avisos+h.slice(i):h;}
+  return h;};}
+if(typeof A!=='undefined'&&typeof A.fisBaixar==='function'){const a0=A.fisBaixar;A.fisBaixar=function(d){
+  if(FIS.busy)return;
+  const bq=fisBloqAte2();if(bq){toast('A SEFAZ está em espera até '+fisHora2(bq)+'. Não tente antes, ou o prazo recomeça.','neg');return;}
+  const d2=Object.assign({},d||{},{ch:fisChave2(d&&d.ch)});
+  return a0.call(this,d2,...Array.prototype.slice.call(arguments,1));};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='118',APP_DATA='2026-10-27';
+const APP_VER='119',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['119','2026-10-27',['Conector fiscal: fim do conflito com o Agente da NF-e do Omie. Só um sistema por CNPJ pode consultar a SEFAZ por NSU (regra da NT 2014.002); por padrão (NFE_DIST=0) quem consulta é o Omie e a Central continua buscando as NFS-e. O cartão de Fiscal › NFs recebidas mostra quem consulta, avisa se outro sistema estiver na fila e bloqueia Baixar XML durante a espera de 1 hora da SEFAZ.', 'Conector fiscal: chaves e CNPJ com letras (CNPJ alfanumérico) aceitos; ciência automática só até 10 dias da emissão e aviso dos prazos de manifestação (10 e 90 dias); NFS-e recebidas guardam os valores de IBS/CBS.']],
   ['118','2026-10-27',['Número da versão e data da atualização agora aparecem no menu superior, abaixo do nome do sistema, para todos os usuários (antes só no Painel do Início). Clique nele para ver as novidades e os tutoriais.']],
   ['117','2026-10-27',['Contratos de experiência (Pessoal › Painel): botões Prorrogar (só no 1º período, uma vez e até 90 dias), Efetivar (prazo indeterminado no dia seguinte ao fim da experiência) e Encerrar (abre o desligamento com o motivo certo).', 'Painéis de setor revisados no computador e no celular: botões dentro das caixas, indicadores com número curto e texto na legenda, plurais corretos e sem rolagem lateral.']],
   ['116','2026-10-27',['Chat: chamada de vídeo individual volta a funcionar (o servidor escondia da outra pessoa os dados que combinam a chamada); se a ligação direta não conectar, aparece a opção de chamada por link.', 'Chat: mensagens e anexos chegam ao vivo para quem recebe (antes esperavam a consulta periódica).', 'Chat: anexos baixam com o nome original, sem abrir aba; fotos ganharam o botão Baixar. Anexo continua visível só para quem participa da conversa.']],

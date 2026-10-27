@@ -12,6 +12,12 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 CNPJ = '11222333000181'
 CH1 = '35261099888777000166550010000012341000012345'
 CH2 = '35261099888777000166550010000012351000012346'
+CH_ALFA = '3526109AB8C7D7000166550010000012361000012347'  # chave com CNPJ alfanumérico (44 posições)
+# datas relativas a hoje: a ciência automática só vale até 10 dias da emissão (NT 2020.001 v1.60)
+_BR = datetime.timezone(datetime.timedelta(hours=-3))
+D_RES = (datetime.datetime.now(_BR) - datetime.timedelta(days=2)).strftime('%Y-%m-%dT10:00:00-03:00')
+D_PROC = (datetime.datetime.now(_BR) - datetime.timedelta(days=1)).strftime('%Y-%m-%dT09:00:00-03:00')
+D_VELHA = (datetime.datetime.now(_BR) - datetime.timedelta(days=15)).strftime('%Y-%m-%dT10:00:00-03:00')
 
 
 def gerar_pfx(pasta, senha='1234'):
@@ -29,16 +35,16 @@ def z(xml):
     return base64.b64encode(gzip.compress(xml.encode())).decode()
 
 
-RES = f'<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><chNFe>{CH1}</chNFe><CNPJ>99888777000166</CNPJ><xNome>FORNECEDOR XPTO LTDA</xNome><IE>1</IE><dhEmi>2026-10-15T10:00:00-03:00</dhEmi><tpNF>1</tpNF><vNF>1500.50</vNF><digVal>x</digVal><dhRecbto>2026-10-15T10:01:00-03:00</dhRecbto><nProt>1</nProt><cSitNFe>1</cSitNFe></resNFe>'
-PROC = f'<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe Id="NFe{CH2}" versao="4.00"><ide><nNF>1235</nNF><serie>1</serie><dhEmi>2026-10-16T09:00:00-03:00</dhEmi></ide><emit><CNPJ>99888777000166</CNPJ><xNome>FORNECEDOR XPTO LTDA</xNome></emit><dest><CNPJ>{CNPJ}</CNPJ></dest><det nItem="1"><prod><cProd>A1</cProd><xProd>Cabo flexivel 2,5mm</xProd><NCM>85444900</NCM><CFOP>5102</CFOP><uCom>RL</uCom><qCom>4</qCom><vUnCom>205</vUnCom><vProd>820.00</vProd></prod><imposto></imposto></det><total><ICMSTot><vNF>820.00</vNF></ICMSTot></total></infNFe></NFe></nfeProc>'
+RES = f'<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><chNFe>{CH1}</chNFe><CNPJ>99888777000166</CNPJ><xNome>FORNECEDOR XPTO LTDA</xNome><IE>1</IE><dhEmi>{D_RES}</dhEmi><tpNF>1</tpNF><vNF>1500.50</vNF><digVal>x</digVal><dhRecbto>2026-10-15T10:01:00-03:00</dhRecbto><nProt>1</nProt><cSitNFe>1</cSitNFe></resNFe>'
+PROC = f'<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe Id="NFe{CH2}" versao="4.00"><ide><nNF>1235</nNF><serie>1</serie><dhEmi>{D_PROC}</dhEmi></ide><emit><CNPJ>99888777000166</CNPJ><xNome>FORNECEDOR XPTO LTDA</xNome></emit><dest><CNPJ>{CNPJ}</CNPJ></dest><det nItem="1"><prod><cProd>A1</cProd><xProd>Cabo flexivel 2,5mm</xProd><NCM>85444900</NCM><CFOP>5102</CFOP><uCom>RL</uCom><qCom>4</qCom><vUnCom>205</vUnCom><vProd>820.00</vProd></prod><imposto></imposto></det><total><ICMSTot><vNF>820.00</vNF></ICMSTot></total></infNFe></NFe></nfeProc>'
 EVT = f'<resEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><cOrgao>91</cOrgao><CNPJ>{CNPJ}</CNPJ><chNFe>{CH2}</chNFe><dhEvento>2026-10-16T12:00:00-03:00</dhEvento><tpEvento>210210</tpEvento><nSeqEvento>1</nSeqEvento><xEvento>Ciencia da Operacao</xEvento><dhRecbto>x</dhRecbto><nProt>9</nProt></resEvento>'
 
 
-def ret_dist(cstat, ult, mx, docs=()):
+def ret_dist(cstat, ult, mx, docs=(), motivo='ok'):
     lote = ''.join(f'<docZip NSU="{n}" schema="{s}">{z(x)}</docZip>' for n, s, x in docs)
     lote = f'<loteDistDFeInt>{lote}</loteDistDFeInt>' if docs else ''
     return (f'<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><nfeDistDFeInteresseResponse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe"><nfeDistDFeInteresseResult>'
-            f'<retDistDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><tpAmb>2</tpAmb><verAplic>1</verAplic><cStat>{cstat}</cStat><xMotivo>ok</xMotivo><dhResp>x</dhResp><ultNSU>{ult}</ultNSU><maxNSU>{mx}</maxNSU>{lote}</retDistDFeInt>'
+            f'<retDistDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><tpAmb>2</tpAmb><verAplic>1</verAplic><cStat>{cstat}</cStat><xMotivo>{motivo}</xMotivo><dhResp>x</dhResp><ultNSU>{ult}</ultNSU><maxNSU>{mx}</maxNSU>{lote}</retDistDFeInt>'
             f'</nfeDistDFeInteresseResult></nfeDistDFeInteresseResponse></soap:Body></soap:Envelope>').encode()
 
 
@@ -109,7 +115,7 @@ def verificar_assinatura(env_el, cert_pem_path):
 class T(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
-        os.environ.update(CNPJ=CNPJ, UF='SP', AMBIENTE='2', CERT_PATH=gerar_pfx(self.dir), CERT_SENHA='1234', FISCAL_TOKEN='tok', DATA_DIR=self.dir, AUTO_CIENCIA='1', NFSE_ADN='1')
+        os.environ.update(CNPJ=CNPJ, UF='SP', AMBIENTE='2', CERT_PATH=gerar_pfx(self.dir), CERT_SENHA='1234', FISCAL_TOKEN='tok', DATA_DIR=self.dir, AUTO_CIENCIA='1', NFSE_ADN='1', NFE_DIST='1')
         self.cfg = app.Config()
         self.db = app.Banco(self.dir)
         self.http = HttpFalso()
@@ -160,6 +166,8 @@ class T(unittest.TestCase):
         self.assertEqual(self.db.get('nfe_ult_nsu'), '000000000000003')
         # resumo depois do completo não apaga o XML
         self.http.fila_dist = [ret_dist('138', '000000000000004', '000000000000004', [('000000000000004', 'resNFe_v1.01.xsd', RES.replace(CH1, CH2))])]
+        self.db.set('nfe_espera_ate', 0)   # forcar não fura mais a espera
+        self.db.set('nfe_bloqueio_ate', 0)
         self.con.sincronizar(forcar=True)
         self.assertIn('<nfeProc', self.con.xml(CH2))
 
@@ -236,12 +244,132 @@ class T(unittest.TestCase):
             def post(self, *a, **k):
                 raise RuntimeError('detalhe interno 10.0.0.5 senha=xyz')
         con = app.Conector(self.cfg, self.db, http=Quebra())
+        self.db.set('nfe_espera_ate', 0)
+        self.db.set('nfe_bloqueio_ate', 0)
         out = con.sincronizar(forcar=True)
         self.assertFalse(out['nfe']['ok'])
         self.assertNotIn('10.0.0.5', out['nfe']['msg'])
         self.assertNotIn('RuntimeError', out['nfe']['msg'])
         self.assertIn('ref.', out['nfe']['msg'])
         self.assertNotIn('10.0.0.5', json.dumps(con.status()))
+        # erro genérico/5xx marca espera de 1 hora: a próxima chamada não vai à SEFAZ
+        self.assertTrue(app.bloqueado(self.db))
+        out = con.sincronizar(forcar=True)
+        self.assertTrue(out['nfe'].get('aguardando'), out)
+
+    # ------------------------------------------------ v119: sequência única (NT 2014.002), prazos e CNPJ alfanumérico
+    def dist_posts(self):
+        return [p for p in self.http.posts if 'Distribuicao' in p[0]]
+
+    def test_nfe_dist_desligado_nao_chama_sefaz(self):
+        os.environ['NFE_DIST'] = '0'
+        os.environ.pop('AUTO_CIENCIA')
+        cfg = app.Config()
+        self.assertFalse(cfg.nfe_dist)
+        self.assertFalse(cfg.auto_ciencia)  # segue NFE_DIST
+        con = app.Conector(cfg, self.db, http=self.http)
+        r = con.sincronizar(forcar=True)
+        self.assertTrue(r['nfe'].get('desligado'), r)
+        self.assertIn('Omie', r['nfe']['msg'])
+        self.assertEqual(self.dist_posts(), [])
+        self.assertEqual(r['nfse']['novos'], 1)  # NFS-e do ADN continua
+        st = con.status()
+        self.assertIs(st['nfeDist'], False)
+        self.assertFalse(st['autoCiencia'])
+
+    def test_656_bloqueia_forcar_e_baixar(self):
+        self.http.fila_dist = [ret_dist('656', '000000000000000', '', motivo='Rejeicao: Consumo Indevido')]
+        self.con.sincronizar()
+        self.assertEqual(len(self.dist_posts()), 1)
+        ate = self.db.get('nfe_bloqueio_ate')
+        self.assertGreater(ate, app.time.time() + app.UMA_HORA)  # 1 h + margem de 5 min
+        r = self.con.sincronizar(forcar=True)
+        self.assertTrue(r['nfe'].get('aguardando'), r)
+        r = self.con.baixar(CH1)
+        self.assertFalse(r['ok'])
+        self.assertIn('espera de consumo indevido', r['msg'])
+        self.assertEqual(len(self.dist_posts()), 1)
+        st = self.con.status()
+        self.assertTrue(st['nfeBloqueioAte'])
+        self.assertIsNone(st['conflito'])  # ultNSU não andou e o motivo não fala de ultNSU
+
+    def test_656_ultnsu_maior_grava_conflito(self):
+        self.db.set('nfe_ult_nsu', '000000000000010')
+        self.http.fila_dist = [ret_dist('656', '000000000000050', '000000000000080', motivo='Rejeicao: Consumo Indevido (Deve ser utilizado o ultNSU nas solicitacoes subsequentes)')]
+        self.con.sincronizar()
+        c = self.db.get('nfe_conflito')
+        self.assertEqual((c['nosso'], c['sefaz']), ('000000000000010', '000000000000050'))
+        self.assertEqual(self.db.get('nfe_ult_nsu'), '000000000000050')  # adota o ultNSU devolvido
+        self.assertEqual(self.con.status()['conflito']['sefaz'], '000000000000050')
+        self.assertTrue(any('Outro sistema' in l['msg'] for l in self.con.status()['log']))
+
+    def test_baixar_limite_por_chave(self):
+        self.http.fila_dist = [ret_dist('138', '1', '1', [('1', 'resNFe_v1.01.xsd', RES)]) for _ in range(3)]
+        for _ in range(3):
+            r = self.con.baixar(CH1)
+            self.assertNotIn('limite', r)
+        r = self.con.baixar(CH1)
+        self.assertTrue(r.get('limite'), r)
+        self.assertEqual(len(self.dist_posts()), 3)
+        # outra chave não é afetada
+        self.http.fila_dist = [ret_dist('138', '1', '1', [('1', 'procNFe_v4.00.xsd', PROC)])]
+        self.assertTrue(self.con.baixar(CH2)['ok'])
+
+    def test_baixar_656_registra_bloqueio(self):
+        self.http.fila_dist = [ret_dist('656', '', '', motivo='Rejeicao: Consumo Indevido')]
+        r = self.con.baixar(CH1)
+        self.assertEqual(r['cStat'], '656')
+        self.assertTrue(app.bloqueado(self.db))
+        self.assertEqual(self.con.sincronizar()['nfe'].get('aguardando'), True)
+        self.assertEqual(len(self.dist_posts()), 1)
+
+    def test_chave_alfanumerica(self):
+        self.assertEqual(len(CH_ALFA), 44)
+        r = self.con.ferramenta('baixar', {'chave': CH_ALFA.lower()})
+        self.assertNotEqual(r.get('msg'), 'Chave de acesso inválida.')
+        x = etree.fromstring(self.dist_posts()[-1][1])
+        self.assertEqual(app.txt(x, 'chNFe'), CH_ALFA)
+        r = self.con.manifestar(CH_ALFA, 'ciencia')
+        self.assertTrue(r['ok'], r)
+        self.assertEqual(app.txt(so_evento(self.http.posts[-1][1]), 'chNFe'), CH_ALFA)
+        os.environ['CNPJ'] = '12.ABC.345/01DE-35'
+        self.assertEqual(app.Config().cnpj, '12ABC34501DE35')
+
+    def test_ciencia_automatica_so_ate_10_dias(self):
+        self.http.fila_dist = [ret_dist('138', '000000000000001', '000000000000001', [('000000000000001', 'resNFe_v1.01.xsd', RES.replace(D_RES, D_VELHA))])]
+        r = self.con.sincronizar()
+        self.assertEqual(r['nfe']['ciencias'], 0)
+        self.assertFalse([p for p in self.http.posts if 'Evento' in p[0]])
+        # manifestação manual fora do prazo: avisa, mas envia
+        r = self.con.manifestar(CH1, 'ciencia')
+        self.assertTrue(r['ok'])
+        self.assertIn('10 dias', r['aviso'])
+        r = self.con.manifestar(CH1, 'confirmacao')
+        self.assertNotIn('aviso', r)  # 15 dias < 90
+
+    def test_http_rota_chave_alfanumerica(self):
+        self.con.db.salvar({'chave': CH_ALFA, 'tipo': 'nfe', 'situacao': 'completa', 'xml': '<nfeProc/>'})
+        cfg = self.cfg
+        cfg.port = 0
+        srv = app.servidor(self.con, cfg)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            r = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/documentos/{CH_ALFA}/xml', headers={'x-fiscal-token': 'tok'})
+            with urllib.request.urlopen(r) as f:
+                self.assertEqual(f.read(), b'<nfeProc/>')
+        finally:
+            srv.shutdown()
+
+    def test_nfse_ibscbs(self):
+        x = NFSE.replace('</infDPS>', '<IBSCBS><finNFSe>0</finNFSe><cIndOp>100301</cIndOp><valores><trib><gIBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib></gIBSCBS></trib></valores></IBSCBS></infDPS>') \
+                .replace('<valores><vLiq>', '<IBSCBS><valores><vBC>1000.00</vBC><uf><vIBSUF>1.00</vIBSUF></uf><totCIBS><gIBS><vIBSTot>1.00</vIBSTot></gIBS><gCBS><vCBS>9.00</vCBS></gCBS></totCIBS></valores></IBSCBS><valores><vLiq>')
+        tipo, d = app.ler_nfse(x.encode())
+        e = json.loads(d['extra'])
+        self.assertEqual((e['CST'], e['cClassTrib'], e['finNFSe'], e['cIndOp']), ('000', '000001', '0', '100301'))
+        self.assertEqual((e['vBC'], e['vIBS'], e['vCBS']), (1000.0, 1.0, 9.0))
+        # sem o grupo: nada muda
+        tipo, d = app.ler_nfse(NFSE.encode())
+        self.assertNotIn('CST', json.loads(d['extra']))
 
 
 if __name__ == '__main__':

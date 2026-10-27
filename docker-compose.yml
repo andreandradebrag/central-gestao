@@ -80,7 +80,8 @@ services:
       CERT_SENHA: ${CERT_SENHA}
       FISCAL_TOKEN: ${FISCAL_TOKEN}
       INTERVALO_MIN: ${INTERVALO_MIN:-60}
-      AUTO_CIENCIA: ${AUTO_CIENCIA:-1}
+      NFE_DIST: ${NFE_DIST:-0}
+      AUTO_CIENCIA: ${AUTO_CIENCIA:-0}
       NFSE_ADN: ${NFSE_ADN:-1}
     volumes:
       - fiscal-dados:/data
