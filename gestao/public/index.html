@@ -21772,9 +21772,27 @@ V.pnFis=()=>{const d=pn2Def('pnFis');if(!mayR(d.group))return pn2Sem(d);
   return pn2Head(d,'Escrituração, NFS-e, conferência de faturamento, retenções, fechamento do mês e obrigações.',filtros)+'<div class="stack">'+kp+'<div class="g2">'+cNotas+cFat+'</div><div class="g2">'+cFech+cOb+'</div>'+pn2Pend('pnFis')+'</div>';
 };
 
+/* ===== v115.1: tipo de contrato "Sócio" =====
+   Sócio não é empregado: não tem controle de ASO, férias, ponto nem treinamentos. O cadastro continua (obra, contato,
+   frota, acesso ao sistema), mas ele sai das cobranças e alertas desses controles. */
+if(!DP_CONTRATO.some(x=>x[0]==='socio'))DP_CONTRATO.push(['socio','Sócio (sem ASO, férias, ponto e treinamentos)']);
+const ehSocio=f=>!!(f&&f.tipoContrato==='socio');
+{const a0=asoValido;asoValido=function(fid){if(ehSocio(get('func',fid)))return true;return a0.apply(this,arguments);};}
+{const t0=treinStatus;treinStatus=function(f){if(ehSocio(f))return [];return t0.apply(this,arguments);};}
+{const f0=ferPeriodos;ferPeriodos=function(f){if(ehSocio(f))return [];return f0.apply(this,arguments);};}
+{const a0=alocPend;alocPend=function(f){if(ehSocio(f))return [];return a0.apply(this,arguments);};}
+{const a0=aptidCalc;aptidCalc=function(f){if(ehSocio(f))return {apto:true,motivos:[],valAte:'',cli:{},socio:true};return a0.apply(this,arguments);};}
+{const p0=pontoCalc;pontoCalc=function(f){const r=p0.apply(this,arguments);if(!ehSocio(f)||!r)return r;
+  (r.days||[]).forEach(d=>{d.falta=false;});if(typeof pontoTot==='function')r.tot=pontoTot(r.days||[]);return r;};}
+{const p0=pdDados;pdDados=function(){const r=p0.apply(this,arguments);return Array.isArray(r)?r.filter(x=>!ehSocio(x&&(x.f||get('func',x.funcId||x.id)))):r;};}
+{const c0=pmConferencia;pmConferencia=function(){const r=c0.apply(this,arguments);return Array.isArray(r)?r.filter(x=>!ehSocio(x.f)):r;};}
+/* aviso no cadastro */
+{const d=MODS2.func,f0=d.fields;d.fields=r=>{const fs=f0(r);if(ehSocio(r)){const i=fs.findIndex(x=>x.k==='tipoContrato');if(i>=0)fs.splice(i+1,0,{t:'sect',l:'Sócio: sem controle de ASO, férias, ponto e treinamentos. Pró-labore e retiradas são tratados pela contabilidade, fora da folha de empregados.'});}return fs;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='115',APP_DATA='2026-10-27';
+const APP_VER='115.1',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['115.1','2026-10-27',['Cadastro de colaboradores: novo tipo de contrato Sócio, sem controle de ASO, férias, ponto e treinamentos (sai das cobranças, alertas, ponto do dia e conferência do ponto; conta como apto para obra).']],
   ['115','2026-10-27',['Painel do Início e Painel da diretoria só para o Administrador e o dono (a diretoria pode ser liberada em Sistema › Configurações). Ao entrar, cada pessoa vai para o painel do seu setor.', 'Painéis por setor, como primeiro item de cada módulo: Pessoal, Segurança do Trabalho, Qualidade, Frota, Equipamentos, Comercial, Obras, Suprimentos, Financeiro e Fiscal — cada um só com os indicadores e pendências da atividade.', 'Dados financeiros (lançamentos, contas, extrato, remessa, orçamento, fluxo e DRE) só para Financeiro, Fiscal, Administrador e Diretoria, também no servidor; alertas e e-mails sem valores para os demais.', 'Integração Sólides: credenciais nunca aparecem em mensagens ou no log, e links de arquivo são seguidos sem enviar a credencial a outro endereço.']],
   ['114','2026-10-27',['Sistema › Perfis de acesso: crie, duplique e edite perfis escolhendo para cada módulo Sem acesso, Consulta ou Grava, com opções de ver salários, dados bancários, todos os locais da frota e aprovar como diretoria. O servidor aplica os perfis criados; só o Administrador e o dono alteram, com registro na auditoria.', 'Perfis prontos novos: Comprador, Almoxarife, Gestor de segurança do trabalho e Técnico de segurança do trabalho. Os perfis antigos Comprador / almoxarife e Segurança do trabalho continuam para quem já usa, marcados como antigos.']],
   ['113.1','2026-10-27',['Importação da Folha de Ponto da Sólides: datas lidas também quando o Excel as entrega como número ou como texto mês/dia; se o relatório for reconhecido sem nenhuma marcação, a tela explica em vez de mostrar 0 marcações.','Ponto (Sólides) › Locais de trabalho e obras: a obra escolhida é gravada na hora (antes dependia do botão Salvar vínculos e a escolha se perdia se a tela atualizasse).','Conferência do mês: feriados, atestados, férias, folgas e afastamentos abonados pela Sólides entram nas horas do sistema; a etiqueta diferença só aparece em divergência real.']],
