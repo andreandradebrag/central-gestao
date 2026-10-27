@@ -20457,9 +20457,366 @@ if(window.__SELFHOST&&typeof window.fetch==='function'&&!window.fetch.__j3){cons
   const f=function(url,o){try{if(String(url)==='/api/ia'&&o&&(o.method||'').toUpperCase()==='POST'){o=Object.assign({},o,{headers:Object.assign({},o.headers||{},{'x-ia-funcao':String(J3.iaTela||(ui&&ui.tab)||'').replace(/[^\w\-.: ]/g,'').slice(0,60)})});}}catch(e){}return f0.call(this,url,o);};
   f.__j3=true;window.fetch=f;}
 
+/* ===== v113 (J4): parecer jurídico A1, A9 e A8 =====
+   1. Aptidão para a frente de trabalho (A1): no diário de obra (efetivo) e na alocação do colaborador na obra, quem está
+      com ASO, NR ou integração vencidos (aptidDe/aptidTercDe) não entra sem liberação do SST. A liberação (coleção aptlib)
+      é feita só pelo perfil SST ou por um administrador, com justificativa técnica e validade curta (padrão: só o dia), e
+      fica registrada (quem, quando, motivo, pendências). Sem resumo do RH/SST: aviso (padrão) ou bloqueio (configurável).
+      Regra ligada por padrão, com data de início configurável. O servidor repete a conferência (regras.js).
+   2. Retenção do empreiteiro (A9): com FGTS ou folha pendente (ou outra pendência marcada como "retém"), a medição só é
+      aprovada com retenção (o maior entre o valor informado das guias/folha e um percentual da medição, padrão 10%); a conta
+      a pagar sai só do líquido e a conta "retenção a liberar" só é paga ou compensada com a pendência resolvida e a
+      liberação da diretoria. A liberação da diretoria (tercLiberar) não aceita mais FGTS ou folha sem retenção.
+   3. Desligamento (A8): a checagem automática passa a cobrir CIPA até 1 ano após o mandato, afastamento por acidente em
+      curso, gravidez comunicada e garantia de emprego cadastrada no colaborador (o servidor repete as mesmas checagens). */
+
+/* ---------- configuração ---------- */
+const J4_DEF={aptBloq:true,aptIni:'',aptNi:'aviso',libMaxDias:1,retPct:10,retem:{folha:true,gfgts:true,gdctf:false,crf:false,cnd:false,cndt:false}};
+function j4Cfg(){const c=cfg().j4||{},r=Object.assign({},J4_DEF,c,{retem:Object.assign({},J4_DEF.retem,c.retem||{})});
+  r.retem.folha=true;r.retem.gfgts=true;r.aptBloq=r.aptBloq!==false;r.aptNi=r.aptNi==='bloquear'?'bloquear':'aviso';
+  r.retPct=Math.min(100,Math.max(1,+r.retPct||10));r.libMaxDias=Math.min(30,Math.max(1,Math.round(+r.libMaxDias||1)));return r;}
+function j4Grava(p){put('cfg',Object.assign(cl(cfg()),{j4:Object.assign({},cfg().j4||{},p)}));}
+const j4Sst=()=>!!me.owner||['admin','sst'].includes(me.perfil);
+const j4Adm=()=>!!me.owner||me.perfil==='admin';
+const J4F={semDoc:false,rdo:false};
+
+/* ---------- coleção e telas ---------- */
+if(!COLS.includes('aptlib')){COLS.push('aptlib');S.aptlib=S.aptlib||[];IDX.aptlib=new Map();}
+if(typeof LIVE_COLS!=='undefined'&&!LIVE_COLS.includes('aptlib'))LIVE_COLS.push('aptlib');
+COL_NOME.aptlib='Liberação de aptidão (SST)';
+novaTab('aptlib','Liberações de aptidão','CIPA e SST','sst','sstq','tterc');
+TAB_COLS.aptlib=['aptlib'];
+novaTab('retemp','Retenções de empreiteiros','Finanças','fin','finan','pag');
+TAB_COLS.retemp=['lanc'];
+if(typeof DBW_TABCOLS!=='undefined'){const ad=(t,cs)=>{DBW_TABCOLS[t]=[...new Set((DBW_TABCOLS[t]||[]).concat(cs))];};
+  ad('aptlib',['aptlib','aptid','func','proj','tterc']);ad('rdo',['aptlib','aptid']);ad('func',['aptlib','aptid']);ad('retemp',['lanc','medemp','ctremp','tdoc','tercsit']);ad('medemp',['tercsit','tdoc']);ad('desl',['cipa','cipam','afast']);}
+
+/* =====================================================================
+   1. APTIDÃO: bloqueio no diário e na alocação, liberação pelo SST
+   ===================================================================== */
+function j4LibValida(fid,tid,pid,data){data=data||todayStr();
+  return (S.aptlib||[]).find(l=>l&&!l.revogadaEm&&(tid?l.tercId===tid:(!l.tercId&&l.funcId===fid))&&(!l.projId||l.projId===pid)&&String(l.de||'')<=data&&data<=String(l.ate||''))||null;}
+/* pessoas do efetivo; "novo" = acrescentada em relação ao diário gravado (o servidor confere só essas) */
+function j4AptPessoas(r){const out=[],vis=new Set(),ant=get('rdo',r.id),mudou=!ant||ant.data!==r.data||String(ant.projId||'')!==String(r.projId||''),ja=new Set();
+  if(!mudou)(ant.efetivo||[]).forEach(x=>{if(x.tercId)ja.add('t:'+x.tercId);else if(x.funcId)ja.add(x.funcId);});
+  (r.efetivo||[]).forEach(x=>{const tid=x.tercId||'',fid=tid?'':(x.funcId||'');if(!tid&&!fid)return;const k=tid?'t:'+tid:fid;if(vis.has(k))return;vis.add(k);
+    const a=tid?aptidTercDe(tid,r.projId):aptidDe(fid,r.projId);if(!a)return;const f=fid?get('func',fid):null;
+    const nome=tid?((a.nome||x.tercNome||'Terceiro')+' (terceiro)'):(f?f.nome:(x.nome||'Colaborador'));
+    out.push({k,funcId:fid,tercId:tid,nome,novo:!ja.has(k),ni:!!a.semResumo,pend:a.semResumo?[]:(a.motivos||[]).slice(),apto:a.semResumo?null:!(a.motivos||[]).length});});
+  return out;}
+function j4AptAvalia(r){const J=j4Cfg(),data=r.data||todayStr(),ps=j4AptPessoas(r),bloq=[],libs=[];
+  if(!J.aptBloq||(J.aptIni&&data<J.aptIni))return {ativo:false,bloq,libs,ps};
+  ps.forEach(p=>{if(p.ni?J.aptNi!=='bloquear':p.apto!==false)return;const lib=j4LibValida(p.funcId,p.tercId,r.projId,data);
+    if(lib){libs.push(Object.assign({},p,{lib}));return;}if(p.novo)bloq.push(p);});
+  return {ativo:true,bloq,libs,ps};}
+function j4BoxHtml(av,r){if(!av||!av.ativo)return '';let h='';
+  if(av.bloq.length)h+='<div class="note" style="margin-top:8px;border-color:#b91c1c"><b>Não pode entrar no efetivo sem liberação do SST.</b> Com ASO, NR ou integração vencidos, o colaborador não pode trabalhar na obra (NR-1, NR-7, NR-18, NR-35). Só a Segurança do trabalho libera, com justificativa técnica e validade curta.<ul style="margin:6px 0;padding-left:18px">'+
+    av.bloq.map(p=>'<li><b>'+esc(p.nome)+'</b>: '+esc(p.ni?'situação não informada pelo RH/SST':p.pend.join(', '))+(j4Sst()?' <button type="button" class="btn sm" data-act="j4LibNova" data-id="'+esc(p.funcId||p.tercId)+'" data-k="'+(p.tercId?'t':'f')+'" data-proj="'+esc(r.projId||'')+'" data-data="'+esc(r.data||'')+'" data-rdo="1">Liberar (SST)</button>':'')+'</li>').join('')+'</ul><p class="sub" style="margin:0">Tire a pessoa do efetivo para salvar, ou peça a liberação ao SST.</p></div>';
+  if(av.libs.length)h+='<div class="note" style="margin-top:8px"><b>Liberados pelo SST:</b><ul style="margin:6px 0 0;padding-left:18px">'+av.libs.map(p=>'<li><b>'+esc(p.nome)+'</b> até '+fmtDate(p.lib.ate)+' por '+esc(p.lib.nomePor||nameOf(p.lib.por))+': '+esc(String(p.lib.motivo||'').slice(0,160))+'</li>').join('')+'</ul></div>';
+  return h;}
+/* liberados pelo SST não pedem a ciência do encarregado */
+{const a0=alocPendRdo;alocPendRdo=function(r){const L=a0.apply(this,arguments);if(!r)return L;const d=r.data||todayStr();return L.filter(p=>!j4LibValida(p.funcId||'',p.tercId||'',r.projId,d));};}
+{const b0=alocBoxHtml;alocBoxHtml=function(){const h=b0.apply(this,arguments);const r=rdoCur;if(!r)return h;let av=null;try{av=j4AptAvalia(r);}catch(e){av=null;}return j4BoxHtml(av,r)+h;};}
+{const s0=A.rdoSalvar;A.rdoSalvar=function(){rdoLer();const r=rdoCur;if(!r)return s0.apply(this,arguments);
+  (r.efetivo||[]).forEach(x=>{if(x.tercId){x.tipo='terceiro';x.funcId='';}});
+  const av=j4AptAvalia(r);
+  if(av.bloq.length){toast('Diário não salvo: '+av.bloq.map(p=>p.nome+(p.ni?' (situação não informada pelo RH/SST)':' ('+p.pend.join(', ')+')')).join('; ')+'. Só o SST libera, com justificativa técnica.','neg');
+    const b=document.getElementById('rdoAlocBox');if(b)b.innerHTML=alocBoxHtml();return false;}
+  if(av.libs.length)r.aptLibs=av.libs.map(p=>({funcId:p.funcId||undefined,tercId:p.tercId||undefined,nome:p.nome,libId:p.lib.id,ate:p.lib.ate,pend:p.pend}));else delete r.aptLibs;
+  return s0.apply(this,arguments);};}
+/* alocação do colaborador numa obra (Colaboradores › Editar › obra) */
+function j4FuncAlocErro(r,isNew){const J=j4Cfg(),h=todayStr();if(!J.aptBloq||isNew||!r||!r.projId||r.status==='desligado')return '';
+  const ant=get('func',r.id);if(!ant||String(ant.projId||'')===String(r.projId))return '';if(J.aptIni&&h<J.aptIni)return '';
+  const a=aptidDe(r.id,r.projId);if(!a)return '';const ni=!!a.semResumo;if(ni?J.aptNi!=='bloquear':!(a.motivos||[]).length)return '';
+  if(j4LibValida(r.id,'',r.projId,h))return '';
+  return (r.nome||'O colaborador')+' está com '+(ni?'a situação não informada pelo RH/SST':(a.motivos||[]).join(', '))+' e não pode ser alocado na obra '+projNome(r.projId)+' sem liberação do SST (CIPA e SST › Liberações de aptidão).';}
+{const d=MODS2.func;if(d){const v0=d.validate;d.validate=(r,n)=>{const e=v0?v0(r,n):'';if(e)return e;return j4FuncAlocErro(r,n);};}}
+
+/* liberação pelo SST */
+function j4PessoasOpts(pid){const fs=S.func.filter(f=>f.status!=='desligado').slice().sort(byNome).map(f=>['f:'+f.id,f.nome]);
+  const ts=(typeof tercLista==='function'?tercLista(pid||''):[]).map(t=>['t:'+t.id,t.nome+' (terceiro'+(t.parcId&&typeof fornNome==='function'?' · '+fornNome(t.parcId):'')+')']);return fs.concat(ts);}
+function j4PendDe(k,id,pid){const a=k==='t'?aptidTercDe(id,pid):aptidDe(id,pid);if(!a)return null;return a.semResumo?['situação não informada pelo RH/SST']:(a.motivos||[]).slice();}
+A.j4LibNova=d=>{d=d||{};if(!j4Sst()){toast('Só a Segurança do trabalho (perfil SST) ou um administrador libera colaborador com ASO, NR ou integração vencidos.','neg');return;}
+  const J=j4Cfg(),deRdo=!!d.rdo&&!!rdoCur;if(deRdo)rdoLer();J4F.rdo=deRdo;
+  const de=d.data||todayStr(),sel=d.id?(d.k==='t'?'t:':'f:')+d.id:'',pid=d.proj||'';
+  const pend=sel?j4PendDe(d.k==='t'?'t':'f',d.id,pid):null;
+  modal({title:'Liberação de aptidão (SST)',wide:true,nofocus:true,body:
+    '<div class="note" style="margin:0 0 10px"><b>Liberação excepcional.</b> Com ASO vencido ou NR exigida para a função vencida, o trabalhador não deveria estar na frente de trabalho (NR-1, item 1.4.1; NR-7; NR-18; NR-35). Libere só quando houver justificativa técnica (por exemplo, exame já realizado e ASO em emissão, ou atividade sem a exposição que exige a NR). A liberação vale só para o período informado e fica registrada com seu nome, data e hora.</div>'+
+    '<div class="fg">'+field('Colaborador ou trabalhador terceiro','pessoa','select',sel,{opts:j4PessoasOpts(pid),blank:'Selecione…',full:true})+
+    field('Obra (vazio = qualquer obra)','projId','select',pid,{opts:projOpts(),blank:'Qualquer obra'})+field('Dia','de','date',de)+field('Válida até (máximo '+J.libMaxDias+' dia'+(J.libMaxDias>1?'s':'')+')','ate','date',de)+
+    field('Justificativa técnica do SST (obrigatória)','motivo','textarea','',{full:true,rows:3,ph:'Ex.: exame periódico feito em 10/11, ASO em emissão; atividade sem trabalho em altura até a reciclagem da NR-35.'})+'</div>'+
+    (pend?'<p class="sub" style="margin:8px 0 0">Pendências agora: '+esc(pend.length?pend.join(', '):'nenhuma')+'.</p>':''),
+    foot:'<button class="btn" data-act="'+(deRdo?'j4VoltaRdo':'closeModal')+'">'+(deRdo?'Voltar ao diário':'Cancelar')+'</button><button class="btn pri" data-act="modalSave">Registrar liberação</button>',
+    save:root=>{const v=readForm(root),e=j4LibGravar(v);if(e){toast(e,'neg');return false;}toast('Liberação registrada.','pos');if(J4F.rdo){J4F.rdo=false;setTimeout(()=>{if(rdoCur)rdoForm();},0);}}});};
+A.j4VoltaRdo=()=>{J4F.rdo=false;if(rdoCur)rdoForm();else closeModal();};
+function j4LibGravar(v){const J=j4Cfg();if(!j4Sst())return 'Só a Segurança do trabalho (perfil SST) ou um administrador libera.';
+  const m=String(v.pessoa||'').match(/^([ft]):(.+)$/);if(!m)return 'Escolha o colaborador ou o trabalhador terceiro.';const k=m[1],id=m[2],pid=v.projId||'';
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v.de||'')||!/^\d{4}-\d{2}-\d{2}$/.test(v.ate||'')||v.ate<v.de)return 'Informe o dia e a validade da liberação.';
+  if(dpDias(v.de,v.ate)+1>J.libMaxDias)return 'A liberação vale no máximo '+J.libMaxDias+' dia(s). Ajuste em Configurações, se a empresa decidir outro prazo.';
+  const mot=String(v.motivo||'').trim();if(mot.length<20)return 'Escreva a justificativa técnica (ao menos 20 caracteres).';
+  const pend=j4PendDe(k,id,pid);if(!pend)return 'Pessoa não encontrada.';if(!pend.length)return 'Esta pessoa não tem pendência de aptidão: não é preciso liberar.';
+  const f=k==='f'?get('func',id):null,nome=f?f.nome:((typeof tercLista==='function'?tercLista('').find(t=>t.id===id):null)||{}).nome||'';
+  put('aptlib',{id:uid(),funcId:k==='f'?id:'',tercId:k==='t'?id:'',nome,projId:pid,de:v.de,ate:v.ate,motivo:mot,pend,por:actorId(),nomePor:nameOf(actorId()),em:Date.now()});return '';}
+A.j4LibRevogar=d=>{const l=get('aptlib',d.id);if(!l||l.revogadaEm)return;if(!j4Sst()){toast('Só o SST ou um administrador revoga.','neg');return;}
+  modal({title:'Revogar liberação',body:field('Motivo da revogação','rm','text','',{full:true}),saveLabel:'Revogar',save:root=>{const v=readForm(root);put('aptlib',Object.assign(cl(l),{revogadaEm:Date.now(),revogadaPor:actorId(),revogMotivo:String(v.rm||'').slice(0,300)}));toast('Liberação revogada.','pos');}});};
+Object.assign(ACT_GROUP,{j4LibNova:null,j4LibRevogar:null,j4VoltaRdo:null,j4CfgAbrir:null});
+function j4Inaptos(){const out=[],h=todayStr();
+  S.func.filter(f=>f.status!=='desligado').forEach(f=>{const a=aptidDe(f.id,'');if(a&&!a.semResumo&&(a.motivos||[]).length)out.push({k:'f',id:f.id,nome:f.nome,pend:a.motivos,lib:j4LibValida(f.id,'','',h)||(S.aptlib||[]).find(l=>!l.revogadaEm&&l.funcId===f.id&&!l.tercId&&l.de<=h&&h<=l.ate)});});
+  (typeof tercLista==='function'?tercLista(''):[]).forEach(t=>{const a=aptidTercDe(t.id,'');if(a&&!a.semResumo&&(a.motivos||[]).length)out.push({k:'t',id:t.id,nome:t.nome+' (terceiro)',pend:a.motivos,lib:(S.aptlib||[]).find(l=>!l.revogadaEm&&l.tercId===t.id&&l.de<=h&&h<=l.ate)});});
+  return out.sort((a,b)=>String(a.nome).localeCompare(String(b.nome)));}
+ui.aptlib={q:'',st:'vig'};
+V.aptlib=()=>{const J=j4Cfg(),h=todayStr(),u=ui.aptlib,q=gsNorm(u.q||''),w=j4Sst();
+  const all=(S.aptlib||[]).slice().sort((a,b)=>(b.em||0)-(a.em||0)),vig=all.filter(l=>!l.revogadaEm&&l.de<=h&&h<=l.ate);
+  const L=all.filter(l=>(u.st==='vig'?(!l.revogadaEm&&l.ate>=h):u.st==='rev'?!!l.revogadaEm:true)&&(!q||gsNorm([l.nome,projNome(l.projId),l.motivo].join(' ')).includes(q)));
+  const ina=j4Inaptos(),sem=ina.filter(x=>!x.lib);
+  const st=l=>l.revogadaEm?pill('Revogada','neg'):l.ate<h?pill('Vencida'):l.de>h?pill('Agendada','acc'):pill('Vigente','warn');
+  return pageHead('Liberações de aptidão','Colaborador ou terceiro com ASO, NR ou integração vencidos só entra no diário de obra (e só é alocado na obra) com a liberação do SST, com justificativa técnica e validade curta.',(w?'<button class="btn pri" data-act="j4LibNova">Nova liberação</button>':'')+'<button class="btn" data-act="j4CfgAbrir">Regras</button>')+'<div class="stack">'+
+    '<div class="kpis">'+kpi('Bloqueio no diário',J.aptBloq?'Ligado':'Desligado',J.aptBloq?(J.aptIni?'desde '+fmtDate(J.aptIni):'para todas as datas'):'só aviso e ciência do encarregado',J.aptBloq?'pos':'neg')+kpi('Liberações vigentes hoje',String(vig.length),'')+kpi('Inaptos sem liberação',String(sem.length),'pelo cálculo que o seu perfil enxerga',sem.length?'neg':'')+kpi('Sem resumo do RH/SST',J.aptNi==='bloquear'?'Bloqueia':'Só aviso','')+'</div>'+
+    (ina.length&&aptidFonteOk()?'<div class="card"><h2>Pendências de aptidão agora</h2><div class="tw" style="border:0"><table style="min-width:640px"><thead><tr><th>Pessoa</th><th>Pendências</th><th>Liberação</th><th></th></tr></thead><tbody>'+ina.slice(0,80).map(x=>'<tr><td><b>'+esc(x.nome)+'</b></td><td class="sub">'+esc(x.pend.join(', '))+'</td><td>'+(x.lib?pill('Liberado até '+fmtDate(x.lib.ate),'warn'):pill('Bloqueado','neg'))+'</td><td class="act">'+(w&&!x.lib?'<button class="btn sm" data-act="j4LibNova" data-id="'+esc(x.id)+'" data-k="'+x.k+'">Liberar</button>':'')+'</td></tr>').join('')+'</tbody></table></div></div>':'')+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input data-filter="aptlib.q" id="q_aptlib" value="'+esc(u.q||'')+'" placeholder="Nome, obra ou motivo"></label><label class="f"><span>Situação</span><select data-filter="aptlib.st">'+opt([['vig','Vigentes e agendadas'],['rev','Revogadas'],['todas','Todas']],u.st||'vig')+'</select></label></div>'+
+    '<div class="tw"><table style="min-width:900px"><thead><tr><th>Pessoa</th><th>Obra</th><th>Validade</th><th>Pendências</th><th>Justificativa técnica</th><th>Registrada por</th><th>Situação</th><th></th></tr></thead><tbody>'+
+    (L.length?L.map(l=>'<tr><td><b>'+esc(l.nome||'—')+'</b>'+(l.tercId?'<div class="sub">terceiro</div>':'')+'</td><td>'+esc(l.projId?projNome(l.projId):'Qualquer obra')+'</td><td class="mono">'+fmtDate(l.de)+(l.ate!==l.de?' a '+fmtDate(l.ate):'')+'</td><td class="sub">'+esc((l.pendSrv||l.pend||[]).join(', '))+'</td><td class="sub">'+esc(l.motivo||'')+'</td><td>'+esc(l.nomePor||nameOf(l.por))+'<div class="sub">'+fmtDT(l.em)+'</div></td><td>'+st(l)+(l.revogadaEm?'<div class="sub">'+esc(l.revogMotivo||'')+'</div>':'')+'</td><td class="act">'+(w&&!l.revogadaEm&&l.ate>=h?'<button class="btn sm dng" data-act="j4LibRevogar" data-id="'+esc(l.id)+'">Revogar</button>':'')+'</td></tr>').join(''):emptyRow(8,'Nenhuma liberação.'))+'</tbody></table></div>'+
+    '<div class="note">A liberação não substitui o ASO nem o treinamento: é uma decisão técnica registrada do SST para um período curto. Liberações frequentes para a mesma pessoa indicam que o documento precisa ser regularizado. Confirme com o advogado da empresa a política de liberação.</div></div>';};
+
+/* =====================================================================
+   2. RETENÇÃO DO EMPREITEIRO (FGTS, folha e o que estiver marcado como "retém")
+   ===================================================================== */
+function j4PendChave(t){const s=String(t||'');if(/\bCRF\b/i.test(s))return 'crf';if(/guia do fgts|\bfgts\b/i.test(s))return 'gfgts';if(/folha/i.test(s))return 'folha';if(/dctf|guia do inss/i.test(s))return 'gdctf';if(/\bCNDT\b/i.test(s))return 'cndt';if(/\bCND\b/i.test(s))return 'cnd';return '';}
+const j4TdNome=k=>(TD_DOCS.find(d=>d[0]===k)||[k,k])[1];
+function j4PendEmpK(parcId,mesRef){const R=RHX(),out=[],t=tdDe(parcId,mesRef);
+  TD_DOCS.forEach(([k,l,tp])=>{if(R.tdExig[k]===false)return;if(tp==='cert'){if(!tdCertOk(parcId,k))out.push(k);}else if(!(t&&t.itens&&t.itens[k]&&t.itens[k].ok))out.push(k);});return out;}
+/* o resumo do empreiteiro (tercsit) passa a levar as chaves das pendências da empresa: o servidor sabe o que retém */
+{const t0=tercSitCalc;tercSitCalc=function(parcId,projId){const r=t0.apply(this,arguments);try{r.pendK=j4PendEmpK(parcId,r.mesRef);}catch(e){}return r;};}
+/* pendências que retêm: a lista ao vivo do mês da medição mais o resumo gravado (o mesmo que o servidor confere) */
+function j4RetPend(c,m){const J=j4Cfg(),ref=tdMesRef(ym((m&&m.fim)||todayStr()));let ks=[];
+  if(mayR('empdoc')||v111Todos()||S.tdoc.length)try{ks=j4PendEmpK(c.parcId,ref);}catch(e){ks=[];}
+  const s=typeof tercSitDe==='function'?tercSitDe(c.parcId,c.projId||''):null;
+  if(s&&s.sit==='pend'){(s.pendK||[]).forEach(k=>ks.push(k));(s.pend||[]).forEach(p=>ks.push(j4PendChave(p)));}
+  const keys=[...new Set(ks)].filter(k=>k&&J.retem[k]);return {keys,mesRef:ref,labels:keys.map(j4TdNome)};}
+const j4TemRet=m=>!!(m&&m.retJ4&&+m.retJ4.valor>0);
+/* o líquido da medição desconta a retenção (antes da aprovação; depois vale o fixo gravado) */
+{const mc0=meCalc;meCalc=function(m,c){const k=mc0.apply(this,arguments);if(j4TemRet(m)&&!(m.fixo&&m.status==='aprovada')){k.retPend=r2(+m.retJ4.valor);k.liq=r2(k.liq-k.retPend);}return k;};}
+/* pendências cobertas pela retenção saem da lista que a diretoria libera */
+{const cd0=ceDocPend;ceDocPend=function(c,m){if(J4F.semDoc)return [];const L=cd0.apply(this,arguments);if(!j4TemRet(m))return L;const J=j4Cfg();return L.filter(p=>{const k=j4PendChave(p);return !(k&&J.retem[k]);});};}
+/* a diretoria não libera FGTS ou folha sem retenção; pendências formais continuam liberáveis com justificativa */
+{const tl0=tercLiberar;tercLiberar=function(pend,titulo,fn){const J=j4Cfg(),ret=(pend||[]).filter(p=>{const k=j4PendChave(p);return k&&J.retem[k];});if(!ret.length)return tl0.apply(this,arguments);
+  modal({title:titulo,body:'<div class="note" style="border-color:#b91c1c"><b>FGTS ou folha do empreiteiro não comprovados.</b> Esta pendência não pode ser liberada pela diretoria (CLT art. 455; Súmula 331, IV, do TST; Lei 8.036/1990). A medição só é aprovada com a retenção do valor, que fica numa conta "retenção a liberar" até a pendência ser resolvida.</div><ul style="margin:8px 0 0;padding-left:18px">'+ret.slice(0,20).map(p=>'<li>'+esc(p)+'</li>').join('')+'</ul>'+
+    (pend.length>ret.length?'<p class="sub" style="margin:8px 0 0">Outras pendências (liberáveis pela diretoria com justificativa): '+esc(pend.filter(p=>!ret.includes(p)).slice(0,6).join('; '))+'.</p>':''),
+    foot:'<button class="btn" data-act="nav" data-mod="obras" data-tab="tercd">Documentos dos empreiteiros</button><button class="btn pri" data-act="closeModal">Entendi</button>'});};}
+function j4RetCalc(m,c,inf){const J=j4Cfg(),base=meCalc(Object.assign({},m,{retJ4:null}),c),bruto=r2(base.bruto),liq=r2(base.liq),i=Math.max(0,r2(+inf||0)),pc=r2(bruto*J.retPct/100);
+  const valor=r2(Math.min(liq,Math.max(i,pc)));return {bruto,liqAntes:liq,informado:i,pct:J.retPct,porPct:pc,valor,liqApos:r2(liq-valor)};}
+function j4RetModal(m,c,rp,cont){const J=j4Cfg();
+  const corpo=inf=>{const k=j4RetCalc(m,c,inf);return kpi('Valor bruto',money(k.bruto),'')+kpi(J.retPct+'% da medição',money(k.porPct),'')+kpi('Valor retido',money(k.valor),k.informado>k.porPct?'pelo valor informado':'pelo percentual','warn')+kpi('Líquido a pagar agora',money(k.liqApos),'antes: '+money(k.liqAntes),'pos');};
+  modal({title:'Aprovar com retenção · medição nº '+m.numero,wide:true,nofocus:true,body:
+    '<div class="note" style="margin:0 0 10px;border-color:#b91c1c"><b>'+esc(parcNome(c.parcId))+' está com FGTS ou folha sem comprovação ('+fmtYm(rp.mesRef)+').</b> A empresa responde por essas dívidas (CLT art. 455; Súmula 331, IV, do TST). A medição só é aprovada com a retenção: o sistema gera a conta a pagar só do líquido e uma conta "retenção a liberar", que só é paga (ou usada para quitar a guia) quando a pendência for resolvida, com aprovação da diretoria.</div>'+
+    '<ul style="margin:0 0 10px;padding-left:18px">'+rp.labels.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>'+
+    '<div class="fg">'+field('Valor das guias/folha pendentes informado pelo empreiteiro ou pela contabilidade (R$, opcional)','inf','number','',{full:true})+'</div>'+
+    '<p class="sub" style="margin:6px 0">Retém o maior valor entre o informado e '+J.retPct+'% do valor bruto da medição, limitado ao líquido. O percentual é ajustável em Configurações.</p><div class="kpis" id="j4RetTot">'+corpo(0)+'</div>',
+    saveLabel:'Reter e seguir para a aprovação',
+    save:root=>{const v=readForm(root),k=j4RetCalc(m,c,v.inf);if(!(k.valor>0)){toast('Medição sem líquido para reter.','neg');return false;}
+      const m2=get('medemp',m.id);if(!m2||m2.status!=='aguardando'){toast('Esta medição já foi tratada por outra pessoa.','neg');return false;}
+      put('medemp',Object.assign(cl(m2),{retJ4:{valor:k.valor,informado:k.informado,pct:k.pct,bruto:k.bruto,liqAntes:k.liqAntes,liqApos:k.liqApos,keys:rp.keys.slice(),pend:rp.labels.slice(),mesRef:rp.mesRef,por:actorId(),em:Date.now()}}));
+      setTimeout(cont,0);}});
+  J4F.retTot=inf=>{const b=document.getElementById('j4RetTot');if(b)b.innerHTML=corpo(inf);};}
+document.addEventListener('input',e=>{const t=e.target;if(t&&t.id==='f_inf'&&J4F.retTot)J4F.retTot(+t.value||0);});
+{const a0=A.meAprovar;A.meAprovar=d=>{const m=get('medemp',d&&d.id),c=m&&get('ctremp',m.ctrId);if(!m||!c||m.status!=='aguardando')return a0(d);
+  const rp=j4RetPend(c,m);
+  if(!rp.keys.length){if(m.retJ4){const n=cl(m);delete n.retJ4;put('medemp',n);}return a0(d);}
+  if(j4TemRet(m)&&rp.keys.every(k=>(m.retJ4.keys||[]).includes(k)))return a0(d); /* retenção já registrada (ex.: voltou da inspeção) */
+  if(m.enviadoPor&&m.enviadoPor===actorId()&&!me.owner){toast('Outra pessoa precisa aprovar a medição que você enviou.','neg');return;}
+  j4RetModal(m,c,rp,()=>a0(d));};}
+/* ao gravar as contas da medição aprovada com retenção, cria a conta "retenção a liberar" vinculada */
+function j4RetLanc(m,c){const h=todayStr(),cat=typeof rgCatGarante==='function'?rgCatGarante('Empreiteiros e mão de obra terceirizada'):'Empreiteiros e mão de obra terceirizada';
+  return {id:uid(),tipo:'pagar',desc:'Retenção a liberar (FGTS/folha pendente) · Medição nº '+m.numero+' · contrato '+c.numero+' · '+parcNome(c.parcId),valor:r2(+m.retJ4.valor),venc:addDays(h,90),parcId:c.parcId,projId:c.projId,comp:ym(m.fim||h),status:'aberto',estoqueValor:0,categoria:cat,eapItem:c.eapItem||'',
+    medempId:m.id,ctrempId:c.id,retPendDe:m.id,retPend:{parcId:c.parcId,projId:c.projId||'',mesRef:m.retJ4.mesRef||'',keys:(m.retJ4.keys||[]).slice()},
+    obs:'Valor retido por '+(m.retJ4.pend||[]).join(', ')+' ('+fmtYm(m.retJ4.mesRef||ym(h))+'). Só é pago ou compensado depois que a pendência for resolvida, com a liberação da diretoria (Financeiro › Retenções de empreiteiros).'};}
+{const p0=put;put=function(col,rec){if(col==='medemp'&&rec&&rec.status==='aprovada'&&j4TemRet(rec)&&Array.isArray(rec.lancIds)&&!S.lanc.some(l=>l.retPendDe===rec.id)){const c=get('ctremp',rec.ctrId);
+    if(c){const L=j4RetLanc(rec,c);p0.call(this,'lanc',L);rec=Object.assign({},rec,{lancIds:rec.lancIds.concat([L.id])});}}
+  return p0.apply(this,[col,rec].concat([].slice.call(arguments,2)));};}
+/* pagamento: retenção só com a liberação da diretoria; conta líquida sem retenção com FGTS/folha pendente fica bloqueada */
+{const ft0=finTercPend;finTercPend=function(l){if(!l)return false;if(l.retPendDe)return !l.retLib;
+  const m=l.medempId&&get('medemp',l.medempId),c=m&&get('ctremp',m.ctrId);
+  if(c){let rp={keys:[]};try{rp=j4RetPend(c,m);}catch(e){}if(rp.keys.length&&!j4TemRet(m))return true;if(j4TemRet(m)){if(l.docLib||m.docLib)return false;try{return ceDocPend(c,m).length>0;}catch(e){return false;}}}
+  return ft0.apply(this,arguments);};}
+{const rm0=remMotivo;remMotivo=function(l){const r=rm0.apply(this,arguments);if(!r||!/empreiteiro com documentação pendente/.test(r))return r;
+  if(l.retPendDe)return 'retenção a liberar: aguarda a pendência resolvida e a liberação da diretoria';
+  const m=l.medempId&&get('medemp',l.medempId),c=m&&get('ctremp',m.ctrId);if(c&&!j4TemRet(m)){let rp={keys:[]};try{rp=j4RetPend(c,m);}catch(e){}if(rp.keys.length)return 'empreiteiro com FGTS ou folha pendente sem retenção na medição';}return r;};}
+{const b0=A.baixar;A.baixar=d=>{const l=get('lanc',d&&d.id);
+  if(l&&l.retPendDe&&!l.pago){if(!l.retLib){if(rhDiretor())return A.j4RetLiberar({id:l.id});toast('Retenção a liberar: só é paga depois que a pendência do empreiteiro for resolvida e a diretoria liberar (Financeiro › Retenções de empreiteiros).','neg');return;}
+    J4F.semDoc=true;try{return b0(d);}finally{J4F.semDoc=false;}}
+  if(l&&l.medempId&&!l.retPendDe&&!l.pago&&l.tipo==='pagar'){const m=get('medemp',l.medempId),c=m&&get('ctremp',m.ctrId);if(c&&!j4TemRet(m)){let rp={keys:[]};try{rp=j4RetPend(c,m);}catch(e){}
+    if(rp.keys.length){toast('Pagamento bloqueado: '+parcNome(c.parcId)+' está com '+rp.labels.join(', ')+' sem comprovação e a medição foi aprovada sem retenção. Peça a regularização ao empreiteiro (a diretoria não libera FGTS ou folha).','neg');return;}}}
+  return b0(d);};}
+/* situação da pendência que motivou a retenção (checklist mensal do empreiteiro) */
+function j4RetSit(l){const rp=l.retPend||{},R=RHX(),t=rp.mesRef?tdDe(rp.parcId,rp.mesRef):null;
+  const falta=(rp.keys||[]).filter(k=>R.tdExig[k]!==false&&!(t&&t.itens&&t.itens[k]&&t.itens[k].ok));return {falta,ok:!!rp.mesRef&&!falta.length};}
+A.j4RetLiberar=d=>{const l=get('lanc',d&&d.id);if(!l||!l.retPendDe)return;if(l.pago){toast('Esta retenção já foi paga.','neg');return;}
+  if(!rhDiretor()){toast('Só a diretoria libera o valor retido do empreiteiro.','neg');return;}
+  const rp=l.retPend||{},st=j4RetSit(l);
+  modal({title:'Liberar retenção · '+parcNome(l.parcId),wide:true,nofocus:true,body:
+    '<p class="sub" style="margin:0 0 8px">'+esc(l.desc||'')+' · '+money(l.valor)+'</p>'+
+    '<div class="sect">Pendência que motivou a retenção ('+fmtYm(rp.mesRef||'')+')</div><ul style="margin:0 0 10px;padding-left:18px">'+(rp.keys||[]).map(k=>'<li>'+esc(j4TdNome(k))+': '+(st.falta.includes(k)?pill('Ainda pendente','neg'):pill('Comprovado no checklist','pos'))+'</li>').join('')+'</ul>'+
+    '<div class="fg">'+field('Como liberar','modo','select',st.ok?'pagar':'compensar',{opts:[['pagar','Pagar ao empreiteiro (pendência resolvida e comprovada)'],['compensar','Compensar: o valor retido quita a guia ou a folha em nome do empreiteiro']],full:true})+
+    field('Justificativa da diretoria (obrigatória)','just','textarea','',{full:true,rows:3})+'</div>'+
+    (st.ok?'':'<div class="note" style="margin-top:8px">A pendência ainda não está comprovada no checklist (Obras › Documentos dos empreiteiros). Para pagar ao empreiteiro, registre antes o comprovante. A compensação exige justificativa com o que foi quitado (ao menos 20 caracteres) e o comprovante deve ficar com o Financeiro.</div>'),
+    saveLabel:'Liberar',save:root=>{const v=readForm(root),modo=v.modo==='compensar'?'compensar':'pagar',j=String(v.just||'').trim();
+      if(modo==='pagar'&&!j4RetSit(get('lanc',l.id)||l).ok){toast('A pendência ainda não foi resolvida no checklist do empreiteiro. Para usar o valor na quitação da guia ou da folha, escolha "Compensar".','neg');return false;}
+      if(j.length<(modo==='compensar'?20:10)){toast('Escreva a justificativa (ao menos '+(modo==='compensar'?20:10)+' caracteres).','neg');return false;}
+      put('lanc',Object.assign(cl(get('lanc',l.id)||l),{retLib:{modo,just:j,por:actorId(),em:Date.now()}}));toast(modo==='compensar'?'Retenção liberada para compensação. Dê a baixa com o comprovante da guia ou da folha quitada.':'Retenção liberada. O Financeiro já pode pagar.','pos');}});};
+ACT_GROUP.j4RetLiberar=null;
+/* saldo retido por empreiteiro e obra */
+ui.retemp={proj:'',st:'aberto',q:''};
+function j4RetLancs(){return S.lanc.filter(l=>l.retPendDe&&l.tipo==='pagar'&&l.status!=='cancelado');}
+V.retemp=()=>{const u=ui.retemp,q=gsNorm(u.q||''),all=j4RetLancs(),dir=rhDiretor(),wf=mayW('fin');
+  const L=all.filter(l=>(!u.proj||l.projId===u.proj)&&(u.st==='aberto'?!l.pago:u.st==='pago'?!!l.pago:true)&&(!q||gsNorm([parcNome(l.parcId),projNome(l.projId),l.desc].join(' ')).includes(q))).sort((a,b)=>String(a.venc||'').localeCompare(String(b.venc||'')));
+  const ab=all.filter(l=>!l.pago),lib=ab.filter(l=>l.retLib),grp=new Map();
+  ab.forEach(l=>{const k=l.parcId+'|'+(l.projId||'');const g=grp.get(k)||{parcId:l.parcId,projId:l.projId,v:0,n:0,lib:0,pend:new Set()};g.v+=+l.valor||0;g.n++;if(l.retLib)g.lib+=+l.valor||0;else j4RetSit(l).falta.forEach(k=>g.pend.add(j4TdNome(k)));grp.set(k,g);});
+  const G=[...grp.values()].sort((a,b)=>b.v-a.v);
+  const sit=l=>l.pago?pill(l.retLib&&l.retLib.modo==='compensar'?'Compensada':'Paga','pos'):l.retLib?pill(l.retLib.modo==='compensar'?'Liberada para compensar':'Liberada para pagar','acc'):j4RetSit(l).ok?pill('Pendência resolvida: falta a diretoria','warn'):pill('Retida: pendência em aberto','neg');
+  return pageHead('Retenções de empreiteiros','Valores retidos das medições de empreiteiros com FGTS ou folha sem comprovação. Só são pagos (ou usados para quitar a guia) depois que a pendência for resolvida, com a liberação da diretoria.','<button class="btn" data-act="j4CfgAbrir">Regras</button><button class="btn" data-act="nav" data-mod="obras" data-tab="tercd">Documentos dos empreiteiros</button>')+'<div class="stack">'+
+    '<div class="kpis">'+kpi('Saldo retido',money(sum(ab,l=>+l.valor||0)),ab.length+' conta(s) em aberto',ab.length?'warn':'')+kpi('Liberado, aguardando pagamento',money(sum(lib,l=>+l.valor||0)),lib.length+' conta(s)')+kpi('Pago ou compensado',money(sum(all.filter(l=>l.pago),l=>+l.valor||0)),'')+kpi('Empreiteiros com saldo retido',String(new Set(ab.map(l=>l.parcId)).size),'')+'</div>'+
+    '<div class="card"><h2>Saldo retido por empreiteiro e obra</h2><div class="tw" style="border:0"><table style="min-width:640px"><thead><tr><th>Empreiteiro</th><th>Obra</th><th class="num">Retido em aberto</th><th class="num">Já liberado</th><th>Pendências que seguram</th></tr></thead><tbody>'+
+    (G.length?G.map(g=>'<tr><td><b>'+esc(parcNome(g.parcId))+'</b></td><td>'+esc(projNome(g.projId))+'</td><td class="num">'+money(g.v)+'<div class="sub">'+g.n+' conta(s)</div></td><td class="num">'+money(g.lib)+'</td><td class="sub">'+esc([...g.pend].join(', ')||'—')+'</td></tr>').join(''):emptyRow(5,'Nenhum valor retido.'))+'</tbody></table></div></div>'+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input data-filter="retemp.q" id="q_retemp" value="'+esc(u.q||'')+'" placeholder="Empreiteiro, obra ou medição"></label><label class="f"><span>Obra</span><select data-filter="retemp.proj">'+opt(projOpts(),u.proj,'Todas')+'</select></label><label class="f"><span>Situação</span><select data-filter="retemp.st">'+opt([['aberto','Em aberto'],['pago','Pagas ou compensadas'],['todas','Todas']],u.st||'aberto')+'</select></label></div>'+
+    '<div class="tw"><table style="min-width:980px"><thead><tr><th>Conta</th><th>Empreiteiro e obra</th><th class="num">Valor</th><th>Pendência</th><th>Liberação</th><th>Situação</th><th></th></tr></thead><tbody>'+
+    (L.length?L.map(l=>{const rp=l.retPend||{};return '<tr><td>'+esc(l.desc||'')+'<div class="sub">criada '+fmtDate(l.cr?new Date(l.cr).toISOString().slice(0,10):'')+'</div></td><td>'+esc(parcNome(l.parcId))+'<div class="sub">'+esc(projNome(l.projId))+'</div></td><td class="num">'+money(l.valor)+'</td><td class="sub">'+esc((rp.keys||[]).map(j4TdNome).join(', '))+' · '+fmtYm(rp.mesRef||'')+'</td><td class="sub">'+(l.retLib?esc((l.retLib.modo==='compensar'?'Compensar · ':'Pagar · ')+nameOf(l.retLib.por)+' · '+String(l.retLib.just||'').slice(0,80)):'—')+'</td><td>'+sit(l)+'</td><td class="act">'+
+      (!l.pago&&!l.retLib&&dir?'<button class="btn sm pri" data-act="j4RetLiberar" data-id="'+esc(l.id)+'">Liberar (diretoria)</button>':'')+(!l.pago&&l.retLib&&wf?'<button class="btn sm pri" data-act="baixar" data-id="'+esc(l.id)+'">'+(l.retLib.modo==='compensar'?'Dar baixa (compensação)':'Pagar')+'</button>':'')+'</td></tr>';}).join(''):emptyRow(7,'Nenhuma conta de retenção nesta seleção.'))+'</tbody></table></div>'+
+    '<div class="note">A retenção protege a empresa da responsabilidade pelas dívidas trabalhistas do empreiteiro (CLT art. 455; Súmula 331, IV, do TST). O percentual e as pendências que retêm ficam em Configurações; confirme a política com o advogado da empresa e preveja a retenção nos contratos de empreitada.</div></div>';};
+{const v0=V.ctremp;V.ctremp=function(){const h=v0.apply(this,arguments);const ab=j4RetLancs().filter(l=>!l.pago);if(!ab.length)return h;
+  const card='<div class="note"><b>Retido por FGTS ou folha pendentes:</b> '+money(sum(ab,l=>+l.valor||0))+' em '+ab.length+' conta(s). <button class="btn sm" data-act="nav" data-mod="finan" data-tab="retemp">Retenções de empreiteiros</button></div>';
+  const i=h.indexOf('<div class="stack">');return i>=0?h.slice(0,i+19)+card+h.slice(i+19):card+h;};}
+
+/* =====================================================================
+   3. DESLIGAMENTO: garantias automáticas iguais às do servidor
+   ===================================================================== */
+{const d=MODS2.func;if(d){const f0=d.fields;d.fields=r=>f0(r).concat([{t:'sect',l:'Garantia de emprego (só RH)'},
+  F('estabAte','Garantia de emprego cadastrada até (convenção, acordo, decisão judicial ou outra)','date'),F('estabMotivo','Motivo da garantia','text',{full:true}),
+  F('gestEm','Gravidez comunicada à empresa em (vazio se não houver)','date')]);}}
+{const d0=jurDeslEst;jurDeslEst=function(r,f){const est=d0.apply(this,arguments),said=r.saida||todayStr(),add=t=>{if(!est.includes(t))est.push(t);};
+  (S.cipam||[]).forEach(m=>{if(m.funcId!==f.id||m.lado!=='empregados'||m.status==='substituido'||m.status==='ativo')return;const g=get('cipa',m.cipaId);if(g&&g.fim&&said<=addDays(g.fim,365))add('membro eleito da CIPA (garantia até '+fmtDate(addDays(g.fim,365))+', 1 ano após o mandato)');});
+  (S.afast||[]).forEach(a=>{if(a.funcId===f.id&&a.tipo==='acidente'&&a.status!=='cancelado'&&a.ini&&a.ini<=said&&afastFim(a)>=said)add('afastamento por acidente de trabalho em curso');});
+  if(f.gestEm&&dpDias(f.gestEm,said)<=300&&!(r.dataParto&&r.dataParto>=f.gestEm))add('gravidez comunicada à empresa em '+fmtDate(f.gestEm));
+  if(f.estabAte&&said<=f.estabAte)add('garantia de emprego cadastrada até '+fmtDate(f.estabAte)+(f.estabMotivo?' ('+f.estabMotivo+')':''));
+  return est;};}
+{const e0=jurDeslErro;jurDeslErro=function(r){const e=e0.apply(this,arguments);if(e)return e;const f=get('func',r&&r.funcId);if(!f||!(JUR_DISP.includes(r.tipo)||r.tipo==='pedido'))return '';
+  const said=r.saida||todayStr();if(f.gestEm&&!r.dataParto&&dpDias(f.gestEm,said)>300&&dpDias(f.gestEm,said)<=500)return 'Há gravidez comunicada em '+fmtDate(f.gestEm)+': informe a data do parto (a garantia vai até 5 meses após o parto).';return '';};}
+
+/* =====================================================================
+   CONFIGURAÇÕES
+   ===================================================================== */
+function j4CfgAplicar(v){const p={};
+  if(v.aptBloq!==undefined)p.aptBloq=v.aptBloq==='sim'||v.aptBloq===true;
+  if(v.aptIni!==undefined){if(v.aptIni&&!/^\d{4}-\d{2}-\d{2}$/.test(v.aptIni))return 'Data de início inválida.';p.aptIni=v.aptIni||'';}
+  if(v.aptNi!==undefined)p.aptNi=v.aptNi==='bloquear'?'bloquear':'aviso';
+  if(v.libMaxDias!==undefined&&v.libMaxDias!==null&&v.libMaxDias!==''){const n=Math.round(+v.libMaxDias);if(!(n>=1&&n<=30))return 'Validade máxima da liberação entre 1 e 30 dias.';p.libMaxDias=n;}
+  if(v.retPct!==undefined&&v.retPct!==null&&v.retPct!==''){const n=+v.retPct;if(!(n>=1&&n<=100))return 'Percentual de retenção entre 1% e 100%.';p.retPct=n;}
+  const re={};['gdctf','crf','cnd','cndt'].forEach(k=>{if(v['ret_'+k]!==undefined)re[k]=!!v['ret_'+k];});if(Object.keys(re).length)p.retem=Object.assign({},j4Cfg().retem,re,{folha:true,gfgts:true});
+  j4Grava(p);return '';}
+A.j4CfgAbrir=()=>{const c=j4Cfg(),w=j4Adm()&&mayW('cfg');
+  modal({title:'Aptidão para obra e retenção dos empreiteiros: regras',wide:true,body:'<div class="sect">Aptidão (ASO, NR e integração)</div><div class="fg">'+
+    field('Bloquear no diário de obra e na alocação quem está com ASO, NR ou integração vencidos','aptBloq','select',c.aptBloq?'sim':'nao',{opts:[['sim','Sim (padrão): só entra com liberação do SST'],['nao','Não: só aviso e ciência do encarregado']],full:true})+
+    field('Vale para diários a partir de (vazio = todas as datas)','aptIni','date',c.aptIni)+
+    field('Sem resumo do RH/SST ("situação não informada")','aptNi','select',c.aptNi,{opts:[['aviso','Só aviso (padrão)'],['bloquear','Bloquear até o RH/SST informar']]})+
+    field('Validade máxima da liberação do SST (dias)','libMaxDias','number',c.libMaxDias)+'</div>'+
+    '<div class="sect">Retenção dos empreiteiros</div><div class="fg">'+field('Percentual mínimo retido da medição (%)','retPct','number',c.retPct)+'</div>'+
+    '<p class="sub" style="margin:6px 0">Sempre retêm: folha de pagamento do mês e guia do FGTS do mês. Marque também:</p><div class="fg">'+
+    [['gdctf','DCTFWeb e guia do INSS do mês'],['crf','CRF do FGTS'],['cndt','CNDT'],['cnd','CND federal']].map(x=>field('Retém: '+x[1],'ret_'+x[0],'checkbox',!!c.retem[x[0]])).join('')+'</div>'+
+    '<div class="note" style="margin-top:10px">O bloqueio protege o trabalhador e a empresa (NR-1, item 1.4.1; NR-7; NR-18; NR-35). Com "só aviso", sem resumo do RH/SST a obra não para por falta de cadastro. A retenção do empreiteiro é o que protege a empresa da responsabilidade pelas dívidas trabalhistas dele (CLT art. 455; Súmula 331, IV, do TST): confirme o percentual com o advogado da empresa e preveja a retenção nos contratos. Só um administrador altera estas regras.</div>',
+    saveLabel:'Salvar',save:w?root=>{const e=j4CfgAplicar(readForm(root));if(e){toast(e,'neg');return false;}toast('Regras salvas.','pos');render();}:null});};
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!mayR('cfg'))return h;const c=j4Cfg();
+  const card='<div class="card" id="j4CfgBox"><h2>Aptidão para obra e retenção dos empreiteiros</h2><p style="margin:0 0 6px">Bloqueio no diário e na alocação: <b>'+(c.aptBloq?'ligado'+(c.aptIni?' desde '+fmtDate(c.aptIni):''):'desligado')+'</b> · sem resumo do RH/SST: <b>'+(c.aptNi==='bloquear'?'bloqueia':'só aviso')+'</b> · liberação do SST vale até <b>'+c.libMaxDias+' dia(s)</b> · retenção mínima: <b>'+String(c.retPct).replace('.',',')+'% da medição</b> (retêm: '+esc(Object.keys(c.retem).filter(k=>c.retem[k]).map(j4TdNome).join(', '))+').</p><div class="acts" style="justify-content:flex-start"><button class="btn" data-act="j4CfgAbrir">'+(j4Adm()?'Alterar regras':'Ver regras')+'</button></div></div>';
+  const j=h.lastIndexOf('</div>');return j>0?h.slice(0,j)+card+h.slice(j):h+card;};}
+
+/* ===== v113: importação da "Folha de Ponto" da Sólides (relatório RFP detalhado, .xls do JasperReports) =====
+   O relatório padrão da Sólides não é uma tabela: tem um bloco por colaborador (DADOS DO COLABORADOR › Nome),
+   uma linha por dia (data + dia da semana + total do dia ou FERIADO/FALTA) e, embaixo, uma linha por período
+   (entrada, saída, tempo, observações, local de trabalho). Afastamentos, férias, atestados etc. vêm em linhas
+   próprias ("ATESTADO MÉDICO", "FÉRIAS"...). Aqui o relatório é convertido para a tabela que o importador já
+   entende (Nome, Data, Marcações, Local de trabalho, Horas trabalhadas, Ocorrência). As datas são lidas como
+   datas do Excel (não como texto), porque o texto vem no formato mês/dia. */
+const RFP_SEMANA=/^(segunda|terca|quarta|quinta|sexta)( feira)?$|^(sabado|domingo)$/;
+const RFP_EVENTOS={'ferias':'Férias','afastamento inss':'Afastamento INSS','atestado medico':'Atestado médico','banco de horas':'Folga (banco de horas)',
+  'atraso descontado':'Atraso descontado','home office':'Home office','licenca maternidade':'Licença-maternidade','falta nao justificada':'Falta',
+  'declaracao':'Declaração (abonado)','treinamento nr':'Treinamento NR','dispensa tecnica':'Dispensa técnica','feriado':'Feriado','falta':'Falta'};
+/* eventos em que a pessoa não marca o ponto mas não é falta */
+const rfpEhData=v=>v instanceof Date&&!isNaN(v.getTime());
+function rfpMin(d){return new Date(Math.round(d.getTime()/60000)*60000);}
+const rfpIso=d=>{d=rfpMin(d);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
+const rfpHora=d=>{d=rfpMin(d);return pad(d.getHours())+':'+pad(d.getMinutes());};
+const rfpTxt=v=>v==null?'':String(v).trim();
+function rfpEhRelatorio(linhas){let fp=false,dc=false,dm=false;
+  for(let i=0;i<Math.min(linhas.length,60);i++){const t=(linhas[i]||[]).map(c=>pmNorm(rfpTxt(rfpEhData(c)?'':c))).join('|');
+    if(/folha de ponto/.test(t))fp=true;if(/dados do colaborador/.test(t))dc=true;if(/dia mes/.test(t))dm=true;}
+  return fp&&dc&&dm;}
+/* devolve {linhas:[cabeçalho, ...linhas], pessoas, dias, ini, fim} ou null */
+function rfpConverter(linhas){
+  if(!rfpEhRelatorio(linhas))return null;
+  const out=[['Nome','Data','Marcações','Local de trabalho','Horas trabalhadas','Ocorrência']];
+  let secao='',nome='',dia=null,colObs=-1,colLocal=-1;const pessoas=new Set(),datas=[];
+  const fecha=()=>{if(dia&&nome){out.push([nome,dia.data.split('-').reverse().join('/'),dia.m.slice().sort((x,y)=>x-y).map(rfpHora).join(' '),dia.local,dia.tot,[...new Set(dia.oc)].join('; ')]);datas.push(dia.data);}dia=null;};
+  linhas.forEach(r=>{r=r||[];
+    const txts=r.map(c=>rfpEhData(c)?'':rfpTxt(c)),norm=txts.map(pmNorm),juntos=norm.filter(Boolean).join('|');
+    if(!juntos&&!r.some(rfpEhData))return;
+    if(norm.some(x=>/^pagina \d+ de \d+$/.test(x)))return;      /* rodapé de página */
+    if(/^folha de ponto$/.test(norm[0]||'')){secao='titulo';return;}
+    if(/dados do empregador/.test(juntos)){secao='emp';return;}
+    if(/dados do colaborador/.test(juntos)){secao='col';return;}
+    if(/^quadro de horarios$/.test(juntos)){secao='quadro';return;}
+    if(/^dia mes\|/.test(juntos)||norm[0]==='dia mes'){secao='dias';colObs=norm.findIndex(x=>x==='observacoes');colLocal=norm.findIndex(x=>x==='local de trabalho');return;}
+    if(/^tempo total/.test(norm[0]||'')){fecha();return;}
+    if(/reconheco a exatidao/.test(juntos))return;
+    const iNome=norm.findIndex(x=>x==='nome');
+    if(iNome>=0){const v=txts.slice(iNome+1).find(Boolean)||'';if(secao==='col'&&v){if(pmNorm(v)!==pmNorm(nome))fecha();nome=v;pessoas.add(pmNorm(v));}return;}
+    if(secao==='emp'||secao==='quadro'||(secao==='col'&&!r.some(rfpEhData)))return;
+    if(secao!=='dias')return;
+    const datasLinha=r.filter(rfpEhData);
+    /* linha do dia: data sem hora + dia da semana */
+    if(rfpEhData(r[0])&&norm.some(x=>RFP_SEMANA.test(x))){
+      fecha();dia={data:rfpIso(r[0]),m:[],local:'',tot:'',oc:[]};
+      norm.forEach((x,i)=>{if(!x||RFP_SEMANA.test(x))return;const t=txts[i];
+        if(/^\d{1,3}:\d{2}$/.test(t))dia.tot=t;else if(RFP_EVENTOS[x])dia.oc.push(RFP_EVENTOS[x]);});
+      return;}
+    if(!dia)return;
+    /* evento (férias, atestado, afastamento...): não é marcação */
+    const ev=norm[0]&&RFP_EVENTOS[norm[0]];
+    if(ev){dia.oc.push(ev);return;}
+    /* linha de período: entrada e (às vezes) saída */
+    if(datasLinha.length){datasLinha.slice(0,2).forEach(d=>dia.m.push(rfpMin(d)));   /* em ordem de horário real (o relatório às vezes lista fora de ordem) */
+      const loc=colLocal>=0?txts.slice(colLocal).find(Boolean)||'':'';if(loc&&!dia.local)dia.local=loc;
+      const obs=colObs>=0?txts.slice(colObs,colLocal>colObs?colLocal:undefined).filter(Boolean).join(' '):'';
+      if(/esquecimento/i.test(obs))dia.oc.push('Marcação ajustada (esquecimento)');
+      return;}
+  });
+  fecha();
+  const ds=datas.slice().sort();
+  return {linhas:out,pessoas:pessoas.size,dias:out.length-1,ini:ds[0]||'',fim:ds[ds.length-1]||''};
+}
+/* a leitura do arquivo passa a reconhecer o relatório */
+{const esc0=A.pmEscolher;
+  A.pmEscolher=()=>{if(!mayW('rh')){toast('Só o RH importa o ponto.','neg');return;}
+    arqEscolher('.csv,.txt,.xlsx,.xls,text/csv',async fs=>{const f=fs&&fs[0];if(!f)return;PMI.err='';PMI.bus=true;render();
+      try{const buf=await f.arrayBuffer();let linhas,rfp=null;
+        if(/\.xlsx?$/i.test(f.name)){await loadScript(XLSX_URL,()=>!!window.XLSX);const wb=window.XLSX.read(buf,{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];
+          const brutas=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+          rfp=rfpConverter(brutas);
+          linhas=rfp?rfp.linhas:window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:'',dateNF:'dd"/"mm"/"yyyy'});}
+        else linhas=pmCsv(decodeOfx(buf));
+        const t=pmLerTabela(linhas);
+        if(!t){PMI.err='Não encontrei a linha de títulos com a coluna de data. Confira se é o relatório de marcações ou a Folha de Ponto (RFP detalhado) exportada da Sólides em Excel.';}
+        else{PMI.tab=t;PMI.arq=f.name;PMI.rfp=rfp?{pessoas:rfp.pessoas,dias:rfp.dias,ini:rfp.ini,fim:rfp.fim}:null;PMI.fase='rev';PM_CACHE={k:'',v:null};Object.keys(ui.pmimp).forEach(k=>{if(/^(c_|f\d|d\d)/.test(k))delete ui.pmimp[k];});}
+      }catch(e){PMI.err='Não consegui ler o arquivo ('+(e&&e.message||e)+').';}
+      PMI.bus=false;render();});};
+  void esc0;}
+/* aviso na conferência e instruções de exportação */
+{const v0=V.pmimp;V.pmimp=function(){let h=v0.apply(this,arguments);
+  if(PMI.fase==='rev'&&PMI.rfp){const r=PMI.rfp;h=h.replace('<div class="stack">','<div class="stack"><div class="note pos"><b>Folha de Ponto da Sólides (RFP detalhado) reconhecida.</b> '+r.pessoas+' colaborador(es), '+r.dias+' dia(s), de '+fmtDate(r.ini)+' a '+fmtDate(r.fim)+'. As colunas já foram ligadas: as marcações vêm dos períodos (entrada e saída), o local de trabalho é a obra de cada período, e férias, atestados, afastamentos, feriados e folgas de banco de horas entram como ocorrência (não viram falta). O relatório não traz CPF: a ligação com o cadastro é pelo nome; confira a lista de colaboradores abaixo.</div>');}
+  if(PMI.fase==='arquivo'||PMI.fase==='feito')h=h.replace('<h2>Como exportar da Sólides</h2>','<h2>Como exportar da Sólides</h2><p style="margin:0 0 8px"><b>Mais simples:</b> no Sólides DP, gere o relatório <b>Folha de Ponto (RFP detalhado)</b> do período, com todos os colaboradores, e exporte em <b>Excel (.xls)</b>. O sistema reconhece esse relatório sozinho.</p><p class="sub" style="margin:0 0 8px">Ou, se preferir uma planilha de marcações:</p>');
+  return h;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='112',APP_DATA='2026-10-27';
+const APP_VER='113',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['113','2026-10-27',['Diário de obra: colaborador com ASO, NR ou integração vencidos não entra no efetivo; liberação só pelo SST, com justificativa e validade (CIPA e SST › Liberações de aptidão).', 'Empreiteiros: com FGTS ou folha pendentes, a medição só é aprovada com retenção (padrão: o maior entre o valor informado e 10%); conta do líquido e conta de retenção a liberar pela diretoria. Financeiro › Retenções de empreiteiros.', 'Desligamento: o servidor confere CIPA, retorno de acidente, gestante (5 meses após o parto) e garantias cadastradas e exige o parecer jurídico anexado.', 'Ponto (Sólides): o relatório padrão Folha de Ponto (RFP detalhado) em Excel é reconhecido sozinho — marcações em ordem, local de trabalho, férias, atestados, afastamentos e feriados como ocorrência.']],
   ['112','2026-10-27',['Empréstimos sem juros por padrão (juros só simples, com teto); soma de todos os descontos do mês limitada (padrão 30%) e teto de um salário na rescisão.', 'Descontos por dano, extravio e multa só com apuração registrada e cláusula no contrato; termos saem preenchidos.', 'Desligamento: perguntas obrigatórias de estabilidade, gestante até 5 meses após o parto, liberação só com parecer anexado; o pedido de demissão passa a ser de próprio punho anexado.', 'Férias fora da escala ficam a conferir (quitação só com recibo e aviso anexados); alertas de férias vencidas e de pagamento até 2 dias antes.', 'Ponto: app próprio só gerencial; ajuste vira solicitação na Sólides; Pessoal › Arquivo mensal do ponto (AFD, AEJ, espelho).', 'Hora extra: texto de que é devida, teto de 2 h somadas por dia (exceção do art. 61), insalubridade exige licença do art. 60; banco de horas só com acordo anexado.', 'LGPD: auditoria só com campos alterados e dados sensíveis protegidos; registro de quem consulta a auditoria e de leitura de dados de saúde; relatório do titular completo gerado no servidor; Sistema › Temporalidade e descarte; novo aviso de privacidade (nova ciência); registro do uso de IA.', 'Também: alerta do prazo de indicação do condutor; reequilíbrio e exequibilidade em contratos públicos; código de verificação na entrega de EPI; reciclagem complementar no lugar de treinamento por IA; cotas e transparência salarial; documentos dos empreiteiros restritos a Financeiro, RH e SST.']],
   ['111','2026-10-27',['Perfis novos: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Engenheiro volta a lançar medição de empreiteiro e o encarregado a pedir hora extra.', 'Fim dos alertas falsos: resumos "apto para obra" e "situação do empreiteiro" gravados pelo RH/SST e lidos pelo diário de obra e pelo Financeiro, sem expor ASO.', 'Pessoal › Apropriação do mês: mão de obra e frota por obra (sem salário), usada no custo da obra para todos verem o mesmo número.', 'Aprovações: matriz única de aprovadores com substituto por período, herança da aprovação do pedido ou medição, pagamentos obrigatórios com um aprovador, aviso diário ao aprovador. Início › Checklist de configuração.', 'Pagamento: o servidor recusa conta paga acima da alçada sem aprovação; a conciliação marca "pago sem aprovação" (seção própria nos Controles internos); remessa barra nota com divergência e empreiteiro pendente; leitura do retorno CNAB do BB.', 'Fechamento do mês em duas etapas (Financeiro pede com checklist, diretoria confirma); nota atrasada entra pela data de entrada como extemporânea; folha oficial e ponto na trava.', 'Composição do saldo: tratar possíveis duplicados (Não é duplicado / Cancelar este) e explicação da diferença por mês.', 'Suprimentos: um só relatório de exceções, nota sem pedido acima de R$ 1.000 exige motivo, recebimento físico antes da aprovação do pedido.', 'Também: medição ao cliente aprovada por outra pessoa e bloqueio acima do empenho; responsável pela obra; prestação de contas de adiantamento pela Minha área; folha oficial a partir do PDF único do SCI; locais da frota com "vê todos"; aparelho confiável na verificação em duas etapas; link público da pesquisa de satisfação; indicadores atualizados.']],
   ['110','2026-10-26',['Segurança digital: verificação em duas etapas obrigatória para a equipe que grava, senha mínima de 12 caracteres para ela, saída automática após 10 horas sem uso e nova confirmação de senha nas ações sensíveis (contas, cópia de segurança, exportação).','Financeiro: troca de dados bancários, aprovações, remessa e fechamento de competência agora são conferidos também no servidor; alteração de conta bancária fica pendente até outra pessoa confirmar.','Cópia de segurança cifrada e cópia dos anexos (completa semanal e diária incremental); trilha de auditoria em Contas › Auditoria (só o dono).','Bibliotecas de leitura de PDF e ZIP servidas pelo próprio sistema, em versão corrigida.','Conciliação bancária: botão "Composição" ao lado do saldo no sistema mostra de onde vem o saldo (saldo inicial, entradas e saídas por ano), os lançamentos pagos sem linha no extrato, possíveis duplicados e os maiores valores, com CSV.','Locais da frota: nomes dos locais e caixas de seleção alinhados; administradores aparecem com a indicação "vê todos os veículos".']],
@@ -20579,7 +20936,7 @@ const TUT=[
   {id:'com',t:'Compras',g:'comp',ver:'86',p:['Orçamento em PDF: no mapa de cotação clique em Importar resposta, escolha o fornecedor e Ler PDF ou foto com IA. Confira na tela seguinte o item do mapa e o preço unitário de cada linha (amarelo = conferir; vermelho = não vai para o mapa), ajuste frete, prazo e pagamento e clique em Lançar no mapa.','Avaliação de fornecedores: em Suprimentos › Mais › Avaliação de fornecedores, avalie cada pedido recebido (prazo, qualidade, preço e atendimento). Bloqueie quem não atende: ele não recebe pedido de compra. Nas cotações, use Cobrar para lembrar quem não respondeu.','Cotação com fornecedores: em Cotações, use Nova cotação (ou Cotar numa solicitação), confira itens, prazo e fornecedores e clique em Salvar e enviar. Envie o link, o e-mail, o WhatsApp ou o arquivo para cada fornecedor. As respostas entram no mapa; escolha o vencedor de cada item (ou Escolher menor preço) e clique em Gerar pedidos de compra.','Solicitação de compra confere o estoque e separa o que já existe.','Mapa de cotação compara fornecedores item a item.','Pedido de compra com código, NCM, desconto, IPI e ICMS-ST por item, transportadora, modalidade do frete e endereço completo de entrega (use os botões para copiar o endereço da obra ou da empresa).','NFs recebidas: valide, indique o almoxarifado e gere a conta a pagar.']},
   {id:'est',t:'Estoque',g:'est',ver:'53',p:['Ao entregar uma separação, o sistema já abre o romaneio de envio. Em Almoxarifados, defina o prazo do inventário e quem recebe o aviso no chat.','Almoxarifados › Ver itens: relação por almoxarifado e prateleira, exportação, lista de contagem às cegas e registro do balanço.','Romaneios: gere das separações prontas, acrescente itens, despache (baixa no estoque) e confirme o recebimento.','Saldo por produto com custo médio e alerta de mínimo.','Separação de itens para obras.','Almoxarifados e prateleiras indicam onde cada produto fica.']},
   {id:'proj',t:'Projetos e obras',g:'proj',ver:'77',p:['Empreiteiros: em Obras › Mais › Contratos de empreiteiros cadastre a planilha de serviços, o preço unitário, o item do orçamento e as retenções. Em Nova medição informe as quantidades do período e envie para aprovação; quem aprova gera a conta a pagar, a retenção técnica, o INSS e o ISS retidos.','Controle de custo da obra: monte o orçamento na EAP do contrato e, em cada conta a pagar ou pedido de compra da obra, escolha o Item do orçamento. Em Início › Painel da obra veja orçado x comprometido x realizado por item, os alertas e a margem projetada. Em Obras › Curva S acompanhe o planejado x realizado.','Diário de obra: em Solicitação de material, busque o item pelo código ou nome e veja o saldo. Ao salvar, o pedido vai para o supervisor ou coordenador aprovar em Financeiro › Aprovações.','Diário de obra: escolha cada colaborador do efetivo. A função e o custo do dia vêm do cadastro.','Novo projeto nasce de um contrato. Etapas e execução puxam o cronograma do contrato (botão Puxar do cronograma) e aceitam atividades individuais por usuário; use Só as minhas atividades.','Etapas: use o Quadro Kanban para mover as etapas (arraste ou ◀ ▶), cadastre as restrições e marque os compromissos da semana; veja o Gráfico de Gantt para o cronograma.','Mão de obra por obra: horas e custo pelo ponto; informe a localização da obra no projeto.','Cadastre o projeto com orçamento, prazos e contatos do gestor do contrato, fiscal e TST.','Etapas com peso, prazo e percentual executado formam o cronograma.','Diário de obra: clima, efetivo, equipamentos, atividades, ocorrências e fotos; ao assinar, o avanço vai para as etapas.','Relatório mensal: financeiro, cronograma, curva S e PDF para o cliente.']},
-  {id:'rh',t:'RH e Departamento Pessoal',g:'rh',ver:'112',p:['Desligamento: responda às perguntas de estabilidade; havendo garantia ou dúvida, anexe o parecer jurídico. O pedido de demissão deve ser de próprio punho e anexado.','Empréstimos e descontos: o sistema soma todos os descontos do mês e bloqueia acima do limite configurado; desconto por dano exige a apuração registrada.','Pessoal › Arquivo mensal do ponto: anexe todo mês o AFD, o AEJ e o espelho oficial da Sólides.','Pessoal › Apropriação do mês grava a mão de obra e a frota por obra, sem salário, para o custo da obra ser o mesmo para todos.','O RH/SST mantém o resumo "apto para obra" que o diário de obra usa; sem resumo, aparece "situação não informada pelo RH/SST".','Obras › Horas extras (pedidos): o encarregado pede e o coordenador aprova com um toque no celular.','Empréstimos: em Pessoal › Mais › Empréstimos clique em Novo empréstimo, escolha o colaborador, valor, parcelas e forma (desconto em folha ou direto). Imprima o contrato, colha as assinaturas e guarde. As parcelas em folha entram sozinhas no holerite; as diretas são registradas em Registrar pagamento.','FAP e RAT: informe o FAP e o RAT ou leia o PDF da Consulta FAP para ver o RAT ajustado, o custo anual e o plano de ação.','Índices de RH: rotatividade por obra com o custo do turnover, absenteísmo pelo ponto e atestados, e reclamações trabalhistas por motivo.','Recrutamento: aprove a requisição, abra a vaga, divulgue, inclua candidatos, avance as etapas no quadro, avalie, faça a proposta e envie para Admissões.','Painel do DP: quadro, rotatividade, absenteísmo, experiências a vencer e prazos do eSocial.','Admissões: checklist de documentos, ASO admissional, contrato de experiência e Efetivar para criar o colaborador.','Folha e holerites: Calcular prévia, conferir, Fechar, Imprimir e Publicar aos colaboradores; exporte para a contabilidade.','Desligamentos: aviso, cálculo estimado da rescisão e checklist com os prazos.','Colaboradores: dados pessoais, CNH, salário, benefícios, dados bancários, transporte, uniforme e foto.','Férias: veja os saldos a programar, programe pelo botão, entregue o aviso 30 dias antes e imprima o recibo.','Documentos e ASO com alerta de vencimento.','Controle de EPI por entrega, CA e troca, com ficha de entrega para imprimir e assinar.','Jornadas e feriados alimentam o ponto.']},
+  {id:'rh',t:'RH e Departamento Pessoal',g:'rh',ver:'113',p:['Ponto: no Sólides DP gere a Folha de Ponto (RFP detalhado) do período, exporte em Excel e importe em Pessoal › Ponto (Sólides). Nomes diferentes do cadastro aparecem para ligar uma vez.','Desligamento: responda às perguntas de estabilidade; havendo garantia ou dúvida, anexe o parecer jurídico. O pedido de demissão deve ser de próprio punho e anexado.','Empréstimos e descontos: o sistema soma todos os descontos do mês e bloqueia acima do limite configurado; desconto por dano exige a apuração registrada.','Pessoal › Arquivo mensal do ponto: anexe todo mês o AFD, o AEJ e o espelho oficial da Sólides.','Pessoal › Apropriação do mês grava a mão de obra e a frota por obra, sem salário, para o custo da obra ser o mesmo para todos.','O RH/SST mantém o resumo "apto para obra" que o diário de obra usa; sem resumo, aparece "situação não informada pelo RH/SST".','Obras › Horas extras (pedidos): o encarregado pede e o coordenador aprova com um toque no celular.','Empréstimos: em Pessoal › Mais › Empréstimos clique em Novo empréstimo, escolha o colaborador, valor, parcelas e forma (desconto em folha ou direto). Imprima o contrato, colha as assinaturas e guarde. As parcelas em folha entram sozinhas no holerite; as diretas são registradas em Registrar pagamento.','FAP e RAT: informe o FAP e o RAT ou leia o PDF da Consulta FAP para ver o RAT ajustado, o custo anual e o plano de ação.','Índices de RH: rotatividade por obra com o custo do turnover, absenteísmo pelo ponto e atestados, e reclamações trabalhistas por motivo.','Recrutamento: aprove a requisição, abra a vaga, divulgue, inclua candidatos, avance as etapas no quadro, avalie, faça a proposta e envie para Admissões.','Painel do DP: quadro, rotatividade, absenteísmo, experiências a vencer e prazos do eSocial.','Admissões: checklist de documentos, ASO admissional, contrato de experiência e Efetivar para criar o colaborador.','Folha e holerites: Calcular prévia, conferir, Fechar, Imprimir e Publicar aos colaboradores; exporte para a contabilidade.','Desligamentos: aviso, cálculo estimado da rescisão e checklist com os prazos.','Colaboradores: dados pessoais, CNH, salário, benefícios, dados bancários, transporte, uniforme e foto.','Férias: veja os saldos a programar, programe pelo botão, entregue o aviso 30 dias antes e imprima o recibo.','Documentos e ASO com alerta de vencimento.','Controle de EPI por entrega, CA e troca, com ficha de entrega para imprimir e assinar.','Jornadas e feriados alimentam o ponto.']},
   {id:'pto',t:'Ponto',g:'ponto',ver:'80',p:['Ponto oficial: o colaborador marca no app Sólides Ponto (Sólides DP). No sistema instalado na VPS, as marcações chegam sozinhas a cada 15 minutos em Pessoal › Ponto (Sólides).','Sem a conexão automática, exporte da Sólides o relatório de marcações (Excel ou CSV, com Nome, CPF, Local de trabalho, Data e horários) e importe na mesma tela.','Ligue cada local de trabalho da Sólides a uma obra: as horas vão para a mão de obra da obra. Colaboradores se ligam pelo código externo, ID da Sólides ou CPF.','Enviar para a Sólides: obras viram locais de trabalho, colaboradores são cadastrados com escala e local, e férias e afastamentos vão como ajustes aprovados.','A conferência do mês mostra as horas da Sólides ao lado do cálculo do sistema; para a folha valem os totais fechados na Sólides.','Banco de horas: em Regras do banco escolha o tipo de acordo e o prazo; inclua o colaborador e colha a assinatura do acordo.','Espelho e folha: confira horas, extras, faltas e exporte para a contabilidade.']},
   {id:'sst',t:'CIPA e SST',g:'sst',ver:'56',p:['RDA: cada técnico de segurança registra as atividades do dia, o DDS e os desvios. Desvio marcado vira plano de ação.','Integração: controle a integração interna e a de cada cliente, com validade. Use Integração em grupo para registrar a turma toda.','PGR e PCMSO: um programa por obra ou contrato, com validade. Em Riscos e plano de ação você vê o inventário daquele PGR.','Documentos de SST: LTCAT, laudos de insalubridade e periculosidade, AET, PCA e PPR com aviso de vencimento. Na aba de ASO, informe a emissão do PPP.','Inspeções e auditorias: carregue um checklist pronto, marque conforme ou não conforme e veja o resumo por obra, cliente ou mês.','Ambiental: CADRI, PGRCC por obra, MTR e CDF de cada retirada, documentos de transportadores, indicadores (GEE da frota, água, energia, resíduos) e checklist ISO 14001.','Controle de EPI agora fica aqui, com o estoque de EPI na mesma tela. Na entrega, escolha o item do estoque para dar baixa; na devolução, decida entre descarte e volta ao estoque.','Treinamentos mensais: gere com IA o treinamento do mês. Cada colaborador assiste na Minha área, responde 3 perguntas e recebe o certificado. O ranking aparece aqui.','HHT: horas trabalhadas por obra e por mês vêm do ponto. Informe as horas de terceiros e os meses sem ponto em Informar horas. As taxas de frequência e gravidade usam esse total.','Gestão à vista: responsabilidades e atividades de cada pessoa da segurança com semáforo, pendências do sistema e modo TV. Índices de SST: TF e TG (NBR 14280) e uso e renovação de EPI.','Riscos psicossociais (NR-01): crie a pesquisa, acompanhe as respostas e leve as dimensões de risco ao PGR.','Canal de relatos: registre e apure relatos de assédio com sigilo.','Inventário de riscos (PGR) por obra e atividade.','Permissão de trabalho: só emite se todos os executantes tiverem treinamento e ASO válidos.','Matriz de treinamentos por função e convocação de ASO.','Gestão da CIPA: dimensionamento, eleição, membros e treinamento.','Reuniões e atas com calendário obrigatório.','Plano de trabalho e registro de acidentes com CAT.']},
   {id:'jur',t:'Trabalhista',g:'jur',ver:'15',p:['Processos com número CNJ, pedidos, valores e fase.','Prazos e andamentos com alerta.','Risco e mitigação: indicadores e análise por IA com dados anonimizados.']},

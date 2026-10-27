@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-27T03:56:58.404Z",
+ "gerado": "2026-10-27T14:21:51.237Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -718,6 +718,9 @@
   "lgpddesc": [
    "lgpd"
   ],
+  "aptlib": [
+   "sst"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -1177,6 +1180,7 @@
   "lgpddesc": [
    "lgpd"
   ],
+  "aptlib": [],
   "ctremp": [
    "proj",
    "fin"

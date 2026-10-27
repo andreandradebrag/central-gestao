@@ -628,7 +628,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* v111 (S3/T1): empreiteiro com documentação pendente (tercsit, gravado pelo SST/RH) sem liberação da diretoria (docLib) */
   function empreiteiroPend(l) {
     const m = l.medempId ? doc('medemp/' + l.medempId) : null, ctrId = (m && m.ctrId) || l.ctrempId, c = ctrId ? doc('ctremp/' + ctrId) : null;
+    if (l.retPendDe) return l.retLib && l.retLib.srv ? '' : 'retenção a liberar sem a liberação da diretoria'; /* v113 (A9) */
     if (!c || !c.parcId || (l.parcId && l.parcId !== c.parcId) || !l.parcId) return '';
+    { const ep = empPend(c.parcId, c.projId); /* v113 (A9): FGTS e folha só com retenção; o resto, com a liberação */
+      if (ep.ret.length && !retOk(m)) return 'empreiteiro com FGTS ou folha pendente (' + ep.ret.join(', ') + ') sem retenção na medição';
+      if (retOk(m)) return ep.form.length && !(l.docLib || (m && m.docLib)) ? 'empreiteiro com documentação pendente (' + ep.form.slice(0, 2).join('; ') + ') sem liberação da diretoria' : ''; }
     const ts = [doc('tercsit/' + c.parcId + '_' + (c.projId || '')), doc('tercsit/' + c.parcId + '_')].filter(x => x && x.sit === 'pend');
     if (!ts.length || l.docLib || (m && m.docLib)) return '';
     return 'empreiteiro com documentação pendente' + (Array.isArray(ts[0].pend) && ts[0].pend.length ? ' (' + ts[0].pend.slice(0, 2).map(String).join('; ') + ')' : '') + ' sem liberação da diretoria';
@@ -842,7 +846,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* =====================================================================
      5 e 11. LEITURA POR MÓDULO, FOLHA EM CONTAS A PAGAR E VEÍCULOS POR LOCAL
      ===================================================================== */
-  const LEIT_LIVRE = new Set(['cfg', 'usr', 'cm', 'pt', 'usrreq', 'lgpdc', 'implog', 'ctbfech', 'aptid', 'tercsit', 'moapr']); /* v111: resumos sem dado sensível, para toda a Equipe */
+  const LEIT_LIVRE = new Set(['cfg', 'usr', 'cm', 'pt', 'usrreq', 'lgpdc', 'implog', 'ctbfech', 'aptid', 'tercsit', 'moapr', 'aptlib']); /* v113: liberações do SST (sem dado de saúde: só nome, obra, validade e motivo técnico); v111: resumos sem dado sensível, para toda a Equipe */
   const VEIC_COLS = new Set(['veic', 'vsai', 'vabas', 'vman', 'multa', 'mult', 'vrota', 'ventr']);
   const permLog = db.prepare('INSERT INTO perm_log(dia,conta,perfil,col,n,ult) VALUES(?,?,?,?,1,?) ON CONFLICT(dia,conta,col) DO UPDATE SET n=n+1, ult=excluded.ult, perfil=excluded.perfil');
   function leModulo(conta, c0) {
@@ -1045,11 +1049,236 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
 
   /* =====================================================================
+     v113 (parecer jurídico A1, A8 e A9; relatorios/feito_v113.md)
+     A1. Diário de obra e alocação (func.projId): colaborador ou terceiro inapto no resumo aptid (ASO, NR ou integração
+         vencidos) só entra com liberação do SST (coleção aptlib: perfil SST ou administrador, justificativa técnica,
+         validade curta, carimbada). Sem resumo: aviso (padrão) ou bloqueio, conforme cfg.j4.aptNi. Só as pessoas
+         acrescentadas são conferidas (editar um diário antigo sem mexer no efetivo não trava).
+     A9. Empreiteiro com FGTS ou folha pendente (tercsit): a medição só é aprovada com retenção (medemp.retJ4, carimbada);
+         a conta "retenção a liberar" (lanc.retPendDe) só é paga com a liberação da diretoria (lanc.retLib), e a conta
+         líquida não passa do líquido depois da retenção. A liberação da diretoria (docLib) não cobre FGTS ou folha.
+     A8. Desligamento: CIPA eleita (mandato + 1 ano), retorno de acidente (12 meses após alta de afastamento acidentário
+         > 15 dias), afastamento acidentário em curso, gestante (gravidez comunicada ou até 5 meses após o parto) e
+         garantia cadastrada no colaborador exigem o parecer jurídico anexado.
+     ===================================================================== */
+  const J4_DEF = { aptBloq: true, aptIni: '', aptNi: 'aviso', libMaxDias: 1, retPct: 10, retem: { folha: true, gfgts: true, gdctf: false, crf: false, cnd: false, cndt: false } };
+  const j4 = () => { const c = cfgEmp().j4 || {}; const r = Object.assign({}, J4_DEF, c, { retem: Object.assign({}, J4_DEF.retem, c.retem || {}) }); r.retem.folha = true; r.retem.gfgts = true; r.aptBloq = r.aptBloq !== false; r.retPct = Math.min(100, Math.max(1, +r.retPct || 10)); r.libMaxDias = Math.min(30, Math.max(1, Math.round(+r.libMaxDias || 1))); return r; };
+  const addDias = (d, n) => { const x = new Date(String(d).slice(0, 10) + 'T12:00:00Z'); if (isNaN(x)) return ''; x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const diasEntre = (a, b) => Math.round((Date.parse(String(b).slice(0, 10) + 'T12:00:00Z') - Date.parse(String(a).slice(0, 10) + 'T12:00:00Z')) / 864e5);
+  const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  const ehSstAdm = conta => ehDono(conta) || perfilEm(conta, ['sst', 'admin']);
+  /* ---- A1 ---- */
+  function aptServ(fid, tid, pid) {
+    const r = doc('aptid/' + (tid ? 't_' + tid : fid));
+    if (!r) return { ni: true, motivos: [], nome: '' };
+    const m = (Array.isArray(r.motivos) ? r.motivos : []).concat(pid && r.cli && Array.isArray(r.cli[pid]) ? r.cli[pid] : []).map(String);
+    if (r.valAte && String(r.valAte) < hojeSP()) m.push('documento de SST venceu em ' + String(r.valAte).split('-').reverse().join('/'));
+    return { ni: false, motivos: m, apto: !m.length, nome: r.nome || '' };
+  }
+  function aptLibValida(fid, tid, pid, data) {
+    return col('aptlib').find(l => l && l.srv && !l.revogadaEm && (tid ? String(l.tercId || '') === tid : (!l.tercId && String(l.funcId || '') === fid)) && (!l.projId || l.projId === pid) && String(l.de || '') <= data && data <= String(l.ate || '')) || null;
+  }
+  /* devolve o erro (pessoas sem liberação) ou null; grava as liberações usadas em novo.aptLibsSrv */
+  function aptConfere(lista, pid, data, onde) {
+    const J = j4(), bloq = [], libs = [];
+    for (const x of lista) {
+      const a = aptServ(x.fid, x.tid, pid);
+      if (a.ni ? J.aptNi !== 'bloquear' : a.apto) continue;
+      const l = aptLibValida(x.fid, x.tid, pid, data);
+      const nome = x.nome || a.nome || (x.fid ? ((doc('func/' + x.fid) || {}).nome || x.fid) : 'terceiro ' + x.tid);
+      if (l) { libs.push({ funcId: x.fid || undefined, tercId: x.tid || undefined, libId: l.id, por: l.por, ate: l.ate }); continue; }
+      bloq.push(nome + (a.ni ? ' (situação não informada pelo RH/SST)' : ' (' + a.motivos.slice(0, 3).join(', ') + ')'));
+    }
+    if (bloq.length) return { erro: erro(onde + ': ' + bloq.slice(0, 6).join('; ') + (bloq.length > 6 ? ' e mais ' + (bloq.length - 6) : '') + '. Com ASO, NR ou integração vencidos, só entra com a liberação do SST (CIPA e SST › Liberações de aptidão), com justificativa técnica.', 409) };
+    return { libs };
+  }
+  function regraAptRdo(velho, novo) {
+    const J = j4(); if (!J.aptBloq) return null;
+    const data = dataOk(novo.data) ? novo.data : hojeSP(); if (J.aptIni && data < J.aptIni) return null;
+    const pid = String(novo.projId || ''), mudou = !velho || velho.data !== novo.data || String(velho.projId || '') !== pid, ja = new Set(), vis = new Set(), L = [];
+    if (!mudou) (Array.isArray(velho.efetivo) ? velho.efetivo : []).forEach(x => { if (x && x.tercId) ja.add('t:' + x.tercId); else if (x && x.funcId) ja.add(String(x.funcId)); });
+    (Array.isArray(novo.efetivo) ? novo.efetivo : []).forEach(x => {
+      if (!x) return; const tid = x.tercId ? String(x.tercId) : '', fid = tid ? '' : (x.funcId ? String(x.funcId) : ''); if (!tid && !fid) return;
+      const k = tid ? 't:' + tid : fid; if (vis.has(k) || ja.has(k)) return; vis.add(k); L.push({ fid, tid, nome: tid ? (x.tercNome || '') : '' });
+    });
+    if (!L.length) { if (velho && velho.aptLibsSrv) novo.aptLibsSrv = velho.aptLibsSrv; else delete novo.aptLibsSrv; return null; }
+    const r = aptConfere(L, pid, data, 'Diário recusado pelo servidor'); if (r.erro) return r.erro;
+    novo.aptLibsSrv = ((velho && Array.isArray(velho.aptLibsSrv)) ? velho.aptLibsSrv : []).concat(r.libs).slice(-200); if (!novo.aptLibsSrv.length) delete novo.aptLibsSrv;
+    return null;
+  }
+  function regraAptFunc(velho, novo) {
+    const J = j4(); if (!J.aptBloq || !velho || !novo.projId || String(novo.projId) === String(velho.projId || '') || novo.status === 'desligado') return null;
+    const data = hojeSP(); if (J.aptIni && data < J.aptIni) return null;
+    const r = aptConfere([{ fid: String(novo.id || ''), tid: '', nome: novo.nome || '' }], String(novo.projId), data, 'Alocação na obra recusada pelo servidor');
+    return r.erro || null;
+  }
+  function regraAptLib(conta, req, velho, novo) {
+    if (!ehSstAdm(conta)) return erro('Só a Segurança do trabalho (perfil SST) ou um administrador libera colaborador com ASO, NR ou integração vencidos.');
+    if (velho) { /* registrada não muda: só pode ser revogada */
+      const livre = new Set(['revogadaEm', 'revogadaPor', 'revogMotivo', 'ts', 'ed', 'edBy', 'hist']);
+      for (const k of new Set(Object.keys(velho).concat(Object.keys(novo)))) if (!livre.has(k) && !igual(velho[k], novo[k])) return erro('Liberação registrada não se altera. Revogue e registre outra.', 409);
+      if (velho.revogadaEm) { ['revogadaEm', 'revogadaPor', 'revogMotivo'].forEach(k => { novo[k] = velho[k]; }); return null; }
+      if (novo.revogadaEm) { novo.revogadaEm = Date.now(); novo.revogadaPor = conta.id; novo.revogMotivo = String(novo.revogMotivo || '').slice(0, 300); }
+      return null;
+    }
+    const J = j4(), fid = String(novo.funcId || ''), tid = String(novo.tercId || '');
+    if (!!fid === !!tid) return erro('Informe o colaborador ou o trabalhador terceiro da liberação.', 400);
+    if (!dataOk(novo.de) || !dataOk(novo.ate) || novo.ate < novo.de) return erro('Informe o dia da liberação e a validade.', 400);
+    if (diasEntre(novo.de, novo.ate) + 1 > J.libMaxDias) return erro('Validade acima do permitido (' + J.libMaxDias + ' dia(s); ajuste em Configurações).', 400);
+    const just = String(novo.motivo || '').trim(); if (just.length < 20) return erro('Escreva a justificativa técnica do SST (ao menos 20 caracteres).', 400);
+    const a = aptServ(fid, tid, String(novo.projId || ''));
+    Object.assign(novo, carimbo(conta, req, { motivo: just.slice(0, 1000), pendSrv: a.ni ? ['situação não informada pelo RH/SST'] : a.motivos.slice(0, 20), perfil: perfilDe(conta) }));
+    novo.pend = Array.isArray(novo.pend) ? novo.pend.slice(0, 20).map(x => String(x).slice(0, 200)) : [];
+    delete novo.revogadaEm; delete novo.revogadaPor; delete novo.revogMotivo;
+    return null;
+  }
+  /* ---- A9 ---- */
+  const RET_KEYS = ['folha', 'gfgts', 'gdctf', 'crf', 'cndt', 'cnd'];
+  function pendChave(t) {
+    const s = String(t || '');
+    if (/\bCRF\b/i.test(s)) return 'crf';
+    if (/guia do fgts|\bfgts\b/i.test(s)) return 'gfgts';
+    if (/folha/i.test(s)) return 'folha';
+    if (/dctf|guia do inss/i.test(s)) return 'gdctf';
+    if (/\bCNDT\b/i.test(s)) return 'cndt';
+    if (/\bCND\b/i.test(s)) return 'cnd';
+    return '';
+  }
+  function tercsitDe(parcId, projId) { return [doc('tercsit/' + parcId + '_' + (projId || '')), doc('tercsit/' + parcId + '_')].filter(x => x && x.sit === 'pend'); }
+  /* pendências do empreiteiro: as que retêm (FGTS, folha e as marcadas) e as formais (liberáveis com justificativa) */
+  function empPend(parcId, projId) {
+    const J = j4(), ret = new Set(), form = [];
+    for (const s of tercsitDe(parcId, projId)) {
+      if (Array.isArray(s.pendK)) s.pendK.forEach(k => { if (J.retem[k]) ret.add(String(k)); });
+      (Array.isArray(s.pend) ? s.pend : []).forEach(p => { const k = pendChave(p); if (k && J.retem[k]) ret.add(k); else form.push(String(p)); });
+    }
+    return { ret: [...ret], form: [...new Set(form)] };
+  }
+  function ctrDaMed(m) { const c = m && m.ctrId ? doc('ctremp/' + m.ctrId) : null; return c && c.parcId ? c : null; }
+  const retOk = m => !!(m && m.retJ4 && m.retJ4.srv && +m.retJ4.valor > 0);
+  function regraRetMed(conta, req, velho, novo) {
+    const v = velho || {}, a = v.retJ4 || null, b = novo.retJ4 || null, vs = v.status || '', ns = novo.status || '';
+    if (a && a.srv && (vs === 'aprovada' || vs === 'cancelada')) { /* depois da aprovação: não muda nem sai */
+      if (!b || Math.abs((+b.valor || 0) - (+a.valor || 0)) > 0.005) return erro('A retenção da medição não pode ser alterada nem retirada depois da aprovação. O valor retido só é pago pela conta "retenção a liberar", com a liberação da diretoria.', 409);
+      novo.retJ4 = a;
+    } else if (b && !(a && igual(a, b))) {
+      if (a && a.srv && Math.abs((+b.valor || 0) - (+a.valor || 0)) <= 0.005 && igual(a.keys, b.keys)) novo.retJ4 = a; /* cópia do navegador */
+      else {
+        if (!(ehDiretor(conta) || gravaGrupo(conta, 'fin'))) return erro('Só quem aprova a medição (Financeiro ou diretoria) registra a retenção.');
+        const J = j4(), bruto = r2(b.bruto), liqA = r2(b.liqAntes), inf = Math.max(0, r2(b.informado)), val = r2(b.valor), pct = +b.pct || 0;
+        if (!(bruto > 0) || !(val > 0)) return erro('Retenção sem valor.', 400);
+        const minimo = Math.min(liqA > 0 ? liqA : Infinity, Math.max(inf, r2(bruto * J.retPct / 100)));
+        if (pct + 1e-9 < J.retPct || val + 0.01 < minimo) return erro('Retenção abaixo do mínimo: o maior entre o valor informado das guias/folha pendentes e ' + J.retPct + '% do valor bruto da medição (' + minimo.toFixed(2) + ').', 409);
+        if (liqA > 0 && val > liqA + 0.01) return erro('Retenção maior que o líquido da medição.', 409);
+        const keys = (Array.isArray(b.keys) ? b.keys : []).map(String).filter(k => RET_KEYS.includes(k));
+        novo.retJ4 = carimbo(conta, req, { valor: val, informado: inf, pct, bruto, liqAntes: liqA, liqApos: r2(liqA - val), keys, pend: (Array.isArray(b.pend) ? b.pend : []).slice(0, 20).map(x => String(x).slice(0, 200)), mesRef: /^\d{4}-\d{2}$/.test(String(b.mesRef || '')) ? b.mesRef : '' });
+      }
+    } else if (!b && a && a.srv) { if (!(ehDiretor(conta) || gravaGrupo(conta, 'fin'))) novo.retJ4 = a; }
+    if (ns === 'aprovada' && vs !== 'aprovada') {
+      const c = ctrDaMed(novo), ep = c ? empPend(c.parcId, c.projId) : { ret: [] };
+      if (ep.ret.length && !retOk(novo)) return erro('Empreiteiro com FGTS ou folha pendente (' + ep.ret.join(', ') + '): a medição só é aprovada com a retenção do valor. A liberação da diretoria não cobre essa pendência.', 409);
+      if (retOk(novo) && novo.fixo && novo.fixo.liq !== undefined && Math.abs(r2(novo.fixo.liq) - r2(novo.retJ4.liqApos)) > 0.05) return erro('O líquido da medição não confere com a retenção registrada.', 409);
+    }
+    return null;
+  }
+  /* docLib (diretoria): não cobre FGTS nem folha sem retenção */
+  function docLibRetem(c0, velho, novo) {
+    const a = velho ? velho.docLib : undefined, b = novo.docLib;
+    if (b == null || igual(a, b) || (a && typeof b === 'object' && String(a.just || '') === String(b.just || ''))) return null;
+    const m = c0 === 'medemp' ? novo : (novo.medempId ? doc('medemp/' + novo.medempId) : null);
+    const c = c0 === 'medemp' ? ctrDaMed(novo) : (m ? ctrDaMed(m) : (novo.ctrempId ? doc('ctremp/' + novo.ctrempId) : null));
+    if (!c || novo.retPendDe) return null;
+    const ep = empPend(c.parcId, c.projId);
+    if (ep.ret.length && !retOk(m)) return erro('A liberação da diretoria não vale para FGTS ou folha do empreiteiro não comprovados (' + ep.ret.join(', ') + '). Aprove a medição com a retenção do valor; pendências formais (certidão em renovação) continuam liberáveis com justificativa.', 409);
+    return null;
+  }
+  const ehLiqEmp = l => !!(l && l.tipo === 'pagar' && l.medempId && l.parcId && !l.retencaoDe && !l.retPendDe && l.status !== 'cancelado');
+  function regraRetLanc(conta, req, velho, novo) {
+    const v = velho || {};
+    /* conta "retenção a liberar" */
+    if (v.retPendDe || novo.retPendDe) {
+      if (velho && v.retPendDe) { for (const k of ['retPendDe', 'retPend', 'medempId', 'parcId', 'tipo']) if (!igual(v[k], novo[k])) return erro('A conta "retenção a liberar" não muda de medição, empreiteiro nem pendência.', 409);
+        if (Math.abs((+novo.valor || 0) - (+v.valor || 0)) > 0.005) return erro('O valor da retenção não se altera.', 409); }
+      else {
+        const m = doc('medemp/' + String(novo.retPendDe || '')); if (!m || !retOk(m) || String(novo.medempId || '') !== String(novo.retPendDe)) return erro('Retenção sem medição aprovada com retenção.', 409);
+        const ja = col('lanc').filter(l => l.retPendDe === novo.retPendDe && l.id !== novo.id && l.status !== 'cancelado').reduce((s, l) => s + (+l.valor || 0), 0);
+        if (ja + (+novo.valor || 0) > (+m.retJ4.valor || 0) + 0.01) return erro('Retenção acima do valor retido na medição.', 409);
+        const c = ctrDaMed(m); novo.retPend = { parcId: c ? c.parcId : (novo.parcId || ''), projId: c ? (c.projId || '') : '', mesRef: m.retJ4.mesRef || '', keys: m.retJ4.keys || [] };
+      }
+      const a = v.retLib, b = novo.retLib;
+      if (!igual(a, b) && b != null) {
+        if (a && typeof b === 'object' && String(a.just || '') === String(b.just || '') && a.modo === b.modo) novo.retLib = a;
+        else {
+          if (!ehDiretor(conta)) return erro('Só a diretoria libera o valor retido do empreiteiro.');
+          const just = String(b.just || '').trim(), modo = b.modo === 'compensar' ? 'compensar' : 'pagar';
+          if (just.length < (modo === 'compensar' ? 20 : 10)) return erro('Escreva a justificativa da liberação (ao menos ' + (modo === 'compensar' ? 20 : 10) + ' caracteres).', 400);
+          const rp = novo.retPend || {}, R = cfgEmp().rhx || {}, exig = R.tdExig || {};
+          if (modo === 'pagar') {
+            const t = rp.mesRef ? doc('tdoc/td_' + rp.parcId + '_' + rp.mesRef) : null;
+            const falta = (rp.keys || []).filter(k => exig[k] !== false && !(t && t.itens && t.itens[k] && t.itens[k].ok));
+            if (falta.length || !rp.mesRef) return erro('A pendência que motivou a retenção ainda não foi resolvida no checklist do empreiteiro (' + (falta.join(', ') || 'mês de referência') + '). Para usar o valor retido na quitação da guia ou da folha, escolha "Compensar".', 409);
+          }
+          novo.retLib = carimbo(conta, req, { modo, just: just.slice(0, 500) });
+        }
+      }
+      if (novo.pago && !v.pago && !(novo.retLib && novo.retLib.srv)) return erro('Retenção a liberar: só é paga ou compensada depois da liberação da diretoria, com a pendência resolvida.', 409);
+      return null;
+    }
+    /* conta líquida da medição com retenção: não passa do líquido depois da retenção */
+    const mid = String(novo.medempId || v.medempId || ''); if (!mid) return null;
+    const m = doc('medemp/' + mid); if (!retOk(m)) return null;
+    if (velho && v.medempId && String(novo.medempId || '') !== String(v.medempId)) return erro('Conta de medição com retenção: não troque a medição.', 409);
+    if (!ehLiqEmp(novo) || (velho && ehLiqEmp(v) && (+novo.valor || 0) <= (+v.valor || 0) + 0.005)) return null;
+    const soma = col('lanc').filter(l => l.id !== novo.id && l.medempId === mid && ehLiqEmp(l)).reduce((s, l) => s + (+l.valor || 0), 0) + (+novo.valor || 0);
+    if (soma > (+m.retJ4.liqApos || 0) + 0.05) return erro('O valor retido do empreiteiro (' + (+m.retJ4.valor).toFixed(2) + ') não pode entrar na conta líquida da medição. Ele só é pago pela conta "retenção a liberar", com a liberação da diretoria.', 409);
+    return null;
+  }
+  /* ---- A8 ---- */
+  const J4_DESL = ['sem_justa', 'acordo', 'antec_emp', 'pedido'];
+  function deslGarantias(r, f) {
+    const est = [], said = dataOk(r.saida) ? r.saida : hojeSP();
+    const cipas = new Map(col('cipa').map(c => [c.id, c]));
+    col('cipam').forEach(mb => {
+      if (mb.funcId !== f.id || mb.lado !== 'empregados' || mb.status === 'substituido') return;
+      const g = cipas.get(mb.cipaId), lim = g && dataOk(g.fim) ? addDias(g.fim, 365) : '';
+      if (lim ? said <= lim : mb.status === 'ativo') est.push('membro eleito da CIPA' + (lim ? ' (garantia até ' + lim.split('-').reverse().join('/') + ')' : ''));
+    });
+    const fimAf = a => dataOk(a.ini) && +a.dias > 0 ? addDias(a.ini, +a.dias - 1) : (a.ini || '');
+    col('afast').forEach(a => {
+      if (a.funcId !== f.id || a.status === 'cancelado' || !['acidente', 'doenca_ocup'].includes(a.tipo) || !dataOk(a.ini)) return;
+      const fim = fimAf(a);
+      if (a.ini <= said && said <= fim) est.push('afastamento por acidente ou doença ocupacional em curso');
+      else if (+a.dias > 15 && fim < said && diasEntre(fim, said) <= 365) est.push('retorno de afastamento por acidente ou doença ocupacional há menos de 12 meses (alta em ' + fim.split('-').reverse().join('/') + ')');
+    });
+    if (dataOk(r.dataParto) && said <= mais5m(r.dataParto)) est.push('gestante: garantia até 5 meses após o parto');
+    if (dataOk(f.gestEm) && diasEntre(f.gestEm, said) <= 300 && !(dataOk(r.dataParto) && r.dataParto >= f.gestEm)) est.push('gravidez comunicada à empresa em ' + f.gestEm.split('-').reverse().join('/'));
+    if (dataOk(f.estabAte) && said <= f.estabAte) est.push('garantia de emprego cadastrada até ' + f.estabAte.split('-').reverse().join('/') + (f.estabMotivo ? ' (' + String(f.estabMotivo).slice(0, 80) + ')' : ''));
+    return [...new Set(est)];
+  }
+  function regraDeslAuto(velho, novo) {
+    if (!J4_DESL.includes(novo.tipo)) return null;
+    const concluindo = !!novo.concluidoEm && !(velho && velho.concluidoEm), temQ = J1_Q.some(k => novo[k] !== undefined);
+    if (velho && !temQ && !concluindo) return null; /* registro antigo, sem as perguntas, ainda não concluído */
+    const f = doc('func/' + String(novo.funcId || '')); if (!f) return null; f.id = String(novo.funcId);
+    const said = dataOk(novo.saida) ? novo.saida : hojeSP();
+    const mat = col('afast').some(a => a.funcId === f.id && /maternidade/.test(String(a.tipo || '')) && a.status !== 'cancelado' && dataOk(a.ini) && diasEntre(a.ini, said) <= 400 && diasEntre(a.ini, said) >= -30);
+    if ((mat || (dataOk(f.gestEm) && diasEntre(f.gestEm, said) > 300 && diasEntre(f.gestEm, said) <= 500)) && !dataOk(novo.dataParto)) return erro('Há licença-maternidade ou gravidez registrada: informe a data do parto (a garantia vai até 5 meses após o parto).', 409);
+    const est = deslGarantias(novo, f);
+    if (est.length && !anxN(novo, 'parecerAnx')) return erro('Desligamento recusado pelo servidor: possível garantia de emprego (' + est.join('; ') + '). Anexe o parecer do advogado da empresa.', 409);
+    return null;
+  }
+  function regraDeslFunc(velho, novo) { /* concluir pelo cadastro (status desligado) passa pela mesma conferência */
+    if (novo.status !== 'desligado' || (velho && velho.status === 'desligado') || !novo.deslId) return null;
+    const d = doc('desl/' + String(novo.deslId)); if (!d || d.funcId !== novo.id) return null;
+    return regraDeslAuto(null, Object.assign({}, d, { concluidoEm: d.concluidoEm || Date.now() }));
+  }
+
+  /* =====================================================================
      ENTRADA: regras antes de gravar ou excluir um documento
      ===================================================================== */
   const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco'];
   /* v111: a Diretoria não lança, mas decide: liberação (docLib) e aprovação/recusa de medições, sem mudar outros campos */
-  const DECISAO_DIR = { lanc: ['docLib'], medemp: ['docLib', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
+  const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
     fzpedfech: ['st', 'porConf', 'emConf', 'devObs', 'eventos'], opp: ['goAprov', 'goReq', 'goHist'] };
   const DECISAO_ST = { medemp: ['status', ['aprovada', 'recusada']], med: ['status', ['aprovada']], fzpedfech: ['st', ['confirmado', 'devolvido']] };
   function excecaoDiretoria(conta, p, velho, novo, m) {
@@ -1135,6 +1364,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin']))) { const v = velho || {}; const k = CFG_PROT.find(k => !igual(v[k], novo[k])); if (k) return erro('Alçadas e aprovadores só um administrador altera.'); }
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin', 'rh'])) && !igual((velho || {}).pfonte, novo.pfonte)) return erro('As fontes e a trava do ponto só o RH ou um administrador alteram.');
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual(((velho || {}).fz || {}).fech2, (novo.fz || {}).fech2)) return erro('O modo de fechamento (duas etapas) só um administrador altera.');
+    if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual((velho || {}).j4, novo.j4)) return erro('As regras de aptidão para obra e de retenção dos empreiteiros só um administrador altera.');
+    if (c0 === 'aptlib' && s.length === 2) { const e = regraAptLib(conta, req, velho, novo); if (e) return e; }
     if (c0 === 'pesqlink') return erro('O link da pesquisa só é criado pelo botão "Enviar link ao cliente".');
     if (c0 === 'tdoc' && !tdocGrava(conta)) return erro('Os documentos mensais dos empreiteiros (folha e guias) ficam com o Financeiro, o RH e a Segurança do trabalho.');
     if (c0 === 'pesq' && s.length === 2) ['viaLink', 'respLinkEm', 'linkEm', 'linkExpira'].forEach(k => { if (velho && velho[k] !== undefined) novo[k] = velho[k]; else delete novo[k]; });
@@ -1146,8 +1377,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'parc' && s.length === 2) regraParc(conta, req, velho, novo, ctx);
     let e = regraAprov(c0, conta, req, velho, novo, ctx); if (e) return e;
     if (s.length === 2) {
-      if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo); if (e) return e; }
-      if (c0 === 'medemp') { e = regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'rdo') { e = regraAptRdo(velho, novo); if (e) return e; }
+      if (c0 === 'func') { e = regraAptFunc(velho, novo) || regraDeslFunc(velho, novo); if (e) return e; }
+      if (c0 === 'desl') { e = regraDeslAuto(velho, novo); if (e) return e; }
       if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'fzpedfech') { e = regraPedFech(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
@@ -1168,6 +1402,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (!velho) return null;
     if (s.length === 2) { const e = travaCompetencia(c0, velho, null) || travaPonto(c0, velho, null); if (e) return e; }
     if (c0 === 'pesqlink') return erro('Link de pesquisa não se exclui por aqui.');
+    if (c0 === 'aptlib' && !ehDono(conta)) return erro('Liberação do SST não se exclui: use Revogar (fica registrada).');
+    if (c0 === 'lanc' && velho.retPendDe && !(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('A conta "retenção a liberar" não se exclui. Ela é paga ou compensada com a liberação da diretoria.');
     if (c0 === 'tdoc' && !tdocGrava(conta)) return erro('Os documentos mensais dos empreiteiros ficam com o Financeiro, o RH e a Segurança do trabalho.');
     if (c0 === 'pt' && s.length === 4 && s[2] === 'pc' && velho.st) return erro('Comprovante já tratado pelo Financeiro não pode ser excluído.');
     if (c0 === 'pt' && s.length === 4 && s[2] === 'fa' && !(ehDono(conta) || gravaGrupo(conta, 'fin'))) return erro('Só o Financeiro altera o resumo de adiantamentos.');

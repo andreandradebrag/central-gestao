@@ -135,7 +135,7 @@ const protegida = (conta, c) => c.id !== conta.id && conta.nivel !== 'owner' && 
 /* cadastro de colaboradores: salário, CPF, documentos, endereço, dados bancários, benefícios e dependentes
    só para RH, Administrador e Leitura completa; os outros perfis veem nome, função, obra, contato e CNH.
    Ao gravar, o servidor mantém os campos ocultos como estavam. */
-const FUNC_SENS = /^(cpf|rg|pis|ctps|nasc|salario|ben[A-Z]|tr(Valor|Modo|Linhas|Dist|Tempo|Dias)|banco|agencia|conta[A-Z]?|pix|dep[A-Z]|insal|pericul|end$|numero$|compl$|bairro$|cep$|rec[A-Z]|mae$|pai$|raca|sexo|estadoCivil|escolaridade|defic|sangue|alerg|tituloEleitor|reservista)/;
+const FUNC_SENS = /^(cpf|rg|pis|ctps|nasc|salario|ben[A-Z]|tr(Valor|Modo|Linhas|Dist|Tempo|Dias)|banco|agencia|conta[A-Z]?|pix|dep[A-Z]|insal|pericul|end$|numero$|compl$|bairro$|cep$|rec[A-Z]|mae$|pai$|raca|sexo|estadoCivil|escolaridade|defic|sangue|alerg|tituloEleitor|reservista|gest[A-Z]|estab[A-Z])/; /* v113: gravidez comunicada e garantia de emprego cadastrada só para RH */
 const ehDocFunc = p => /^func\/[^/]+$/.test(p);
 const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin || PERF_RH.has(perfilDe(conta));
 function redigir(conta, p, data) {
