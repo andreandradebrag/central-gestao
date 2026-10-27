@@ -923,6 +923,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* v115: lê o financeiro da empresa (contas a pagar e a receber inteiras): dono, Administrador, Diretoria, Financeiro, Fiscal e
      o personalizado com um módulo financeiro. Usado para tirar valores dos avisos e o resultado do mês fechado. */
   const leFin = conta => !!conta && (conta.nivel === 'owner' || leModulo(conta, 'lanc'));
+  /* v120 (Agente O): tabela de custo-hora por função (chora, só valor por função e quantidade de pessoas, sem salário). Gravação
+     pelo módulo do RH (perfis.json, gerado pela tela Pessoal › Custo-hora por função) e pelo Administrador; leitura também por
+     quem lê Obras (proj), Comercial e contratos (ctr, onde fica o orçamento e a EAP) e Salários e folha. */
+  const CHORA_LE = ['proj', 'ctr', 'rh', 'folha'];
+  const leChora = conta => { const pr = PERM.perfis[perfilDe(conta)]; if (!pr) return false; if (pr.w === '*' || pr.r === '*') return true; return CHORA_LE.some(g => (pr.w || []).includes(g) || (Array.isArray(pr.r) && pr.r.includes(g))); };
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
@@ -931,6 +936,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if ((c0 === 'nfse' || (c0 === 'notas' && data && data.tipo === 'saida')) && !veFaturamento(conta)) return false; /* v115.2 */
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
+    if (c0 === 'chora' && leChora(conta)) return true; /* v120 */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
     if (leParcial(conta, c0, data)) return true; /* v115: RH só as contas da folha; Qualidade só as do custo da não qualidade */
     const k = 'plog:' + c0; if (!memo || !memo.has(k)) { if (memo) memo.set(k, 1); try { permLog.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), 'leitura:' + c0, Date.now()); } catch (e) { } }

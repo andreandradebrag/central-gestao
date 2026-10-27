@@ -21996,9 +21996,376 @@ if(typeof A!=='undefined'&&typeof A.fisBaixar==='function'){const a0=A.fisBaixar
   const d2=Object.assign({},d||{},{ch:fisChave2(d&&d.ch)});
   return a0.call(this,d2,...Array.prototype.slice.call(arguments,1));};}
 
+/* =====================================================================
+   v120 C: Comercial (oportunidades, habilitação) e máscara de dinheiro
+   ===================================================================== */
+
+/* ---------- 3. Dinheiro em todo o sistema: máscara R$ ----------
+   parseMoney(txt) -> número (ou null quando vazio/inválido). Aceita "R$ 2.000.000,00", "2000000", "1234,5", "-R$ 10,00".
+   Regra brasileira: vírgula é decimal e ponto é milhar; sem vírgula, "1.234" é milhar e "1234.5" é decimal.
+   fmtMoney(n) -> "R$ 2.000.000,00" (2 a 4 casas). moneyMask(el) aplica a máscara num <input>: a tela mostra R$ e
+   el.value devolve o NÚMERO em texto ("2000000"), então o código que lê .value continua funcionando. */
+const MONEY_RX=/R\$/;
+function parseMoney(txt){
+  if(typeof txt==='number')return isFinite(txt)?txt:null;
+  let s=String(txt==null?'':txt).replace(/R\$/gi,'').replace(/[\s ]/g,'');
+  if(!s)return null;
+  const neg=/^-|^\(.*\)$/.test(s)||/^R?\$?-/.test(s);s=s.replace(/[-()]/g,'');
+  if(!s||!/^[\d.,]+$/.test(s)||!/\d/.test(s))return null;
+  let n;
+  if(s.includes(',')){const i=s.lastIndexOf(','),ip=s.slice(0,i).replace(/[.,]/g,''),dp=s.slice(i+1).replace(/[.,]/g,'');n=Number((ip||'0')+'.'+(dp||'0'));}
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s))n=Number(s.replace(/\./g,''));
+  else if(/^\d*\.\d+$/.test(s)||/^\d+\.?$/.test(s))n=Number(s.replace(/\.$/,''));
+  else n=Number(s.replace(/\./g,''));
+  if(!isFinite(n))return null;
+  return neg&&n?-n:n;}
+function fmtMoney(n){
+  if(n==null||n===''||!isFinite(+n))return '';
+  let x=Math.round(Math.abs(+n)*1e4)/1e4;const neg=+n<0&&x>0;
+  let [i,d]=x.toFixed(4).split('.');d=d.replace(/0+$/,'');if(d.length<2)d=(d+'00').slice(0,2);
+  return (neg?'-':'')+'R$ '+i.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+d;}
+/* texto enquanto a pessoa digita: milhar com ponto, decimais como digitados */
+function moneyLive(raw,podeNeg){
+  let s=String(raw==null?'':raw);const ng=podeNeg&&s.includes('-');s=s.replace(/R\$/gi,'');
+  const ci=s.indexOf(',');let ip=(ci<0?s:s.slice(0,ci)).replace(/\D/g,''),dp=ci<0?null:s.slice(ci+1).replace(/\D/g,'').slice(0,4);
+  ip=ip.replace(/^0+(?=\d)/,'');
+  if(!ip&&dp==null)return ng?'-':'';
+  return (ng?'-':'')+'R$ '+(ip||'0').replace(/\B(?=(\d{3})+(?!\d))/g,'.')+(dp!=null?','+dp:'');}
+const moneyNumTxt=v=>/^\s*-?\d+(\.\d+)?\s*$/.test(String(v));
+function moneyMask(el,o){
+  if(!el||el.__money)return el;o=o||{};
+  let p=Object.getPrototypeOf(el);while(p&&!Object.getOwnPropertyDescriptor(p,'value'))p=Object.getPrototypeOf(p);
+  const pd=p?Object.getOwnPropertyDescriptor(p,'value'):null;let box=el.value;
+  const nget=pd&&pd.get?()=>pd.get.call(el):()=>box,nset=pd&&pd.set?v=>pd.set.call(el,v):v=>{box=v;};
+  const raw0=nget(),eraNum=el.type==='number';
+  const v0=raw0===''||raw0==null?null:eraNum||moneyNumTxt(raw0)?Number(raw0):parseMoney(raw0);
+  const minAttr=el.getAttribute?el.getAttribute('min'):el.min;
+  const podeNeg=!o.semNeg&&!(minAttr!=null&&minAttr!==''&&+minAttr>=0);
+  const foco=typeof document!=='undefined'&&document.activeElement===el;
+  if(eraNum){try{el.type='text';}catch(e){}}
+  try{if(el.setAttribute){el.setAttribute('inputmode','decimal');el.setAttribute('autocomplete','off');el.setAttribute('data-money','1');}}catch(e){}
+  if(el.dataset)el.dataset.money='1';
+  try{Object.defineProperty(el,'value',{configurable:true,enumerable:true,
+    get(){const n=parseMoney(nget());return n==null?'':String(n);},
+    set(v){const n=v==null||v===''?null:typeof v==='number'?v:moneyNumTxt(v)?Number(v):parseMoney(v);nset(n==null?'':fmtMoney(n));}});}catch(e){}
+  nset(v0==null||!isFinite(v0)?'':fmtMoney(v0));
+  el.__money=true;el.__moneyRaw=nget;el.__moneyNat=nset;
+  const vivo=e=>{const s0=nget();let s=s0;let pos=null;try{pos=el.selectionStart;}catch(x){}
+    if(e&&e.data==='.'&&!String(s).includes(',')&&pos!=null&&s.charAt(pos-1)==='.')s=s.slice(0,pos-1)+','+s.slice(pos);
+    const sig=c=>/[\d,]/.test(c),dir=pos==null?0:String(s).slice(pos).split('').filter(sig).length;
+    const t=moneyLive(s,podeNeg);if(t===s0)return;nset(t);
+    if(pos!=null){let k=t.length,cnt=0;while(k>0&&cnt<dir){k--;if(sig(t.charAt(k)))cnt++;}try{el.setSelectionRange(k,k);}catch(x){}}};
+  el.__moneyLive=vivo;
+  if(el.addEventListener){el.addEventListener('input',vivo,true);el.addEventListener('blur',()=>{const n=parseMoney(nget());nset(n==null?'':fmtMoney(n));});}
+  if(foco){try{const L=nget().length;el.setSelectionRange(L,L);}catch(e){}}
+  return el;}
+function moneyScan(root){
+  try{root=root||document;if(!root||!root.querySelectorAll)return;
+    Array.from(root.querySelectorAll('input[data-money]')).forEach(el=>{if(!el.__money&&el.dataset&&el.dataset.money)moneyMask(el);});
+    Array.from(root.querySelectorAll('input[type=number]')).forEach(el=>{if(el.__money||el.type!=='number'||(el.dataset&&el.dataset.noMoney))return;
+      const lb=el.closest&&el.closest('label'),sp=lb&&lb.querySelector&&lb.querySelector('span');
+      const t=(sp?sp.textContent:'')+' '+(el.getAttribute?[el.getAttribute('aria-label'),el.getAttribute('placeholder'),el.getAttribute('title')].join(' '):'');
+      if(MONEY_RX.test(t))moneyMask(el);});
+  }catch(e){}}
+/* ponto central: o gerador de campos (field) e a leitura dos formulários (readForm) */
+{const f0=field;field=function(label,name,type,val,o){
+  if(type==='number'&&MONEY_RX.test(String(label||''))&&!(o&&o.noMoney)){
+    const n=val===''||val==null?null:typeof val==='number'?val:moneyNumTxt(val)?Number(val):parseMoney(val);
+    const h=f0.call(this,label,name,'text',n==null||!isFinite(n)?'':fmtMoney(n),o);
+    return h.replace('<input type="text" ','<input type="text" inputmode="decimal" autocomplete="off" data-money="1" ');}
+  return f0.apply(this,arguments);};}
+{const r0=readForm;readForm=function(root){const o=r0.apply(this,arguments);
+  try{$$('[data-f][data-money]',root).forEach(el=>{const k=el.dataset&&el.dataset.f;if(!k||!(el.__money||el.dataset.money))return;o[k]=parseMoney(el.__moneyRaw?el.__moneyRaw():el.value);});}catch(e){}
+  return o;};}
+/* tabelas editáveis (gridEd): colunas numéricas com R$ no título */
+{const g0=gridEd;gridEd=function(k){const h=g0.apply(this,arguments);const g=GRIDS[k];if(!g)return h;
+  const mc=g.cols.filter(c=>c[2]==='number'&&MONEY_RX.test(String(c[1]||''))).map(c=>c[0]);if(!mc.length)return h;
+  return h.replace(/<input data-gk="([^"]*)" data-gi="(\d+)" data-gc="([^"]*)"([^>]*?) type="number" step="any" style="max-width:120px;text-align:right" value="([^"]*)">/g,(m,gk,gi,gc,mid,v)=>{
+    if(gk!==k||!mc.includes(gc))return m;const n=v===''?null:moneyNumTxt(v)?Number(v):parseMoney(v);
+    return '<input data-gk="'+gk+'" data-gi="'+gi+'" data-gc="'+gc+'"'+mid+' type="text" inputmode="decimal" autocomplete="off" data-money="1" style="max-width:150px;text-align:right" value="'+esc(n==null?'':fmtMoney(n))+'">';});};}
+{const e0=edRead;edRead=function(){try{moneyScan($('#mb'));}catch(e){}return e0.apply(this,arguments);};}
+/* a máscara entra assim que o modal abre ou a tela é desenhada (antes de qualquer leitura de valor) */
+{const m0=modal;modal=function(o){const r=m0.apply(this,arguments);try{const tinha=mSnap!=null;moneyScan($('#mb'));if(tinha)mSnap=formSnap();}catch(e){}return r;};}
+{const r0=render;render=function(){const x=r0.apply(this,arguments);try{moneyScan($('#view'));}catch(e){}return x;};}
+try{if(typeof MutationObserver!=='undefined'&&document.body&&document.body.nodeType){let pend=false;
+  new MutationObserver(()=>{if(pend)return;pend=true;Promise.resolve().then(()=>{pend=false;moneyScan(document.body);});}).observe(document.body,{childList:true,subtree:true});}}catch(e){}
+try{if(typeof window!=='undefined'){window.moneyMask=moneyMask;window.parseMoney=parseMoney;window.fmtMoney=fmtMoney;}}catch(e){}
+
+/* ---------- 2. Habilitação: tipos em ordem alfabética, "Outro" por último ---------- */
+const habTiposOrd=()=>{const l=HAB_T.filter(x=>x!=='Outro').sort((a,b)=>a.localeCompare(b,'pt-BR',{sensitivity:'base'}));return HAB_T.includes('Outro')?l.concat(['Outro']):l;};
+{const o=habTiposOrd();HAB_T.splice(0,HAB_T.length,...o);}
+{const d=MODS2.hab;
+  const f0=d.fields;d.fields=r=>f0(r).map(f=>f&&f.k==='tipo'&&f.t==='select'?Object.assign({},f,{o:()=>{const l=habTiposOrd();if(r&&r.tipo&&!l.includes(r.tipo))l.push(r.tipo);return l.map(x=>[x,x]);}}):f);
+  d.filters=(d.filters||[]).concat([{k:'tipo',l:'Documento',opts:()=>habTiposOrd().map(x=>[x,x]),match:(r,v)=>r.tipo===v}]);
+  if(ui.hab&&ui.hab.tipo===undefined)ui.hab.tipo='';}
+
+/* ---------- 1. Oportunidades ---------- */
+const OPP_FECH=['ganha','perdida','desistencia'];
+const oppNumN=s=>{const m=String(s||'').trim().match(/^(\d+)\s*P$/i);return m?+m[1]:null;};
+const OPP_PREF_RX=/^\s*(\d+)\s*P\s*[-–—]\s*(\S[\s\S]*)$/i;
+function oppProxNum(){let mx=0;S.opp.forEach(o=>{const a=oppNumN(o.numero);if(a!=null&&a>mx)mx=a;if(!o.numero){const m=String(o.titulo||'').match(OPP_PREF_RX);if(m&&+m[1]>mx)mx=+m[1];}});return (mx+1)+'P';}
+/* oportunidade -> contrato -> projeto, ou projeto criado da oportunidade */
+function oppProjDe(o){if(!o)return null;let p=null;
+  if(o.ctrId){const c=get('ctr',o.ctrId);if(c&&c.projId)p=get('proj',c.projId)||null;}
+  if(!p&&o.projId)p=get('proj',o.projId)||null;
+  if(!p)p=S.proj.find(x=>x.oppId===o.id)||null;
+  if(!p){const c=S.ctr.find(x=>x.oppId===o.id&&x.projId&&get('proj',x.projId));if(c)p=get('proj',c.projId);}
+  return p;}
+/* migração: "1234P - título" -> numero 1234P e título sem o prefixo */
+function oppMigCands(){const usados=new Set(S.opp.filter(o=>o.numero).map(o=>String(o.numero).trim().toUpperCase())),out=[];
+  S.opp.forEach(o=>{if(String(o.numero||'').trim())return;const m=String(o.titulo||'').match(OPP_PREF_RX);if(!m)return;const n=(+m[1])+'P';if(usados.has(n.toUpperCase()))return;usados.add(n.toUpperCase());out.push({id:o.id,numero:n,titulo:m[2].trim(),antes:o.titulo});});
+  return out;}
+function oppMigrar(){const cs=oppMigCands();if(!cs.length)return 0;
+  bulkPut('opp',cs.map(c=>Object.assign(cl(get('opp',c.id)),{numero:c.numero,titulo:c.titulo})));return cs.length;}
+A.oppNumMigrar=()=>{const cs=oppMigCands();if(!cs.length){toast('Nada a separar: as oportunidades já têm número.');return;}
+  confirmBox('Separar o nº da proposta do título em <b>'+cs.length+'</b> oportunidade(s)? Exemplos:<ul style="margin:6px 0;padding-left:18px">'+cs.slice(0,5).map(c=>'<li>'+esc(c.antes)+' → <b>'+esc(c.numero)+'</b> · '+esc(c.titulo)+'</li>').join('')+'</ul><span class="sub">A mudança fica no histórico de alterações de cada oportunidade.</span>',
+    ()=>{const n=oppMigrar();toast(n+' oportunidade(s) com o nº da proposta separado.','pos');render();},'Separar números');};
+/* decisão: participar ou desistir */
+function oppParticipar(id){const o=get('opp',id);if(!o)return false;
+  if(OPP_FECH.includes(o.etapa)){toast('Esta oportunidade já está encerrada.','neg');return false;}
+  const m=MODS2.opp,r=cl(o);r.decisao={tipo:'participar',por:actorId(),em:Date.now()};r.decHist=(o.decHist||[]).concat([r.decisao]).slice(-20);
+  if(r.etapa==='prospeccao')r.etapa='elaboracao';
+  const err=m.validate?m.validate(r,false):'';if(err){toast(err,'neg');return false;}
+  if(m.pre)m.pre(r,false);put('opp',r);return true;}
+function oppDesistir(id,motivo){const o=get('opp',id);if(!o)return false;motivo=String(motivo||'').trim();
+  if(motivo.length<3){toast('Conte o motivo da desistência.','neg');return false;}
+  const m=MODS2.opp,r=cl(o);r.decisao={tipo:'desistir',por:actorId(),em:Date.now(),motivo};r.decHist=(o.decHist||[]).concat([r.decisao]).slice(-20);
+  r.etapa='desistencia';r.resultado='desistencia';r.prob=0;r.motivoDesist=motivo;if(!r.resultadoEm&&!r.historico)r.resultadoEm=todayStr();
+  if(m.pre)m.pre(r,false);put('opp',r);return true;}
+A.oppParticipar=d=>{if(!oppParticipar(d.id))return;const n=get('opp',d.id),custo=fzOppCusto(n);
+  if(!(custo>0)){toast('Decisão registrada: a empresa vai participar. Monte agora o orçamento da proposta.','pos');A.fzOrc({id:d.id});return;}
+  const mg=fzMargem(fzOppPreco(n),custo),min=fzCfg().margemMin/100;
+  if(mg<min-1e-9&&!fzGoOk(n)){toast('Margem abaixo do mínimo: a proposta precisa da aprovação de um diretor.','neg');A.fzGo({id:d.id});return;}
+  toast('Decisão registrada: a empresa vai participar. A margem está dentro do mínimo.','pos');};
+A.oppDesistir=d=>{const o=get('opp',d.id);if(!o)return;
+  modal({title:'Desistir da oportunidade',body:'<p style="margin:0 0 8px"><b>'+esc((o.numero?o.numero+' · ':'')+o.titulo)+'</b></p><p class="sub" style="margin:0 0 8px">A etapa passa para Desistência e a chance para 0%. O motivo ajuda nas próximas decisões.</p><div class="fg">'+field('Motivo da desistência *','motivo','textarea','',{full:true,rows:3})+'</div>',
+    saveLabel:'Desistir',save:root=>{const v=readForm(root);if(!oppDesistir(o.id,v.motivo))return false;toast('Desistência registrada.','pos');}});};
+Object.assign(ACT_GROUP,{oppParticipar:'ctr',oppDesistir:'ctr',oppNumMigrar:'ctr'});
+/* depois de salvar o orçamento de quem decidiu participar: margem baixa abre o pedido ao diretor */
+{const s0=fzOrcSalvar;fzOrcSalvar=function(id){const ok=s0.apply(this,arguments);
+  try{const n=ok&&get('opp',id);if(n&&n.decisao&&n.decisao.tipo==='participar'&&!OPP_FECH.includes(n.etapa)){const c=fzOppCusto(n),mg=c>0?fzMargem(fzOppPreco(n),c):null;
+    if(mg!=null&&mg<fzCfg().margemMin/100-1e-9&&!fzGoOk(n)&&!(n.goReq&&n.goReq.st==='pendente'))setTimeout(()=>{try{A.fzGo({id});}catch(e){}},0);}}catch(e){}
+  return ok;};}
+{const g0=A.fzGo;A.fzGo=d=>{g0(d);try{const t=$('#mt');if(t&&/Go\/no-go/.test(t.textContent||''))t.textContent='Margem da proposta: aprovação do diretor (go/no-go)';}catch(e){}};}
+/* textos de ajuda: "botão Participar" no lugar de "botão Go/no-go" */
+{const v0=fzGoValida;fzGoValida=function(){const e=v0.apply(this,arguments);return e?e.replace('(botão Go/no-go)','(botão Participar)'):e;};}
+const OPPN={sug:false};
+{const d=MODS2.opp;
+  d.fnote=String(d.fnote||'').replace('(botão Go/no-go)','(botão Participar)')+' Use Participar para seguir com a proposta ou Desistir para encerrar com o motivo.';
+  const b0=d.blank;d.blank=()=>{const r=b0();r.numero=OPPN.sug?oppProxNum():(r.numero||'');return r;};
+  const f0=d.fields;d.fields=r=>{const fs=f0(r);const i=fs.findIndex(x=>x&&x.t==='sect');fs.splice(i>=0?i+1:0,0,F('numero','Nº da proposta','text',{ph:'Ex.: 1627P'}));return fs;};
+  const v0=d.validate;d.validate=(r,n)=>{const num=String(r.numero||'').trim();
+    if(num){const u=num.toUpperCase();if(S.opp.some(x=>x.id!==r.id&&String(x.numero||'').trim().toUpperCase()===u))return 'Já existe uma oportunidade com o nº '+num+'. Use outro número.';}
+    return v0?v0(r,n):'';};
+  /* 1e. histórico importado: não recebe a data de hoje como data do resultado */
+  const p0=d.pre;d.pre=(r,isNew)=>{r.numero=String(r.numero||'').trim();const re0=r.resultadoEm;if(p0)p0(r,isNew);if(r.historico&&!re0)r.resultadoEm=re0||'';};
+  const k0=d.kpis;if(k0)d.kpis=rows=>k0(rows.filter(o=>!(o.historico&&!o.resultadoEm)));
+  const s0=d.search;d.search=r=>(r.numero?r.numero+' ':'')+s0(r);
+  /* colunas: Nº primeiro, título em até 3 linhas, Etapa estreita, Projeto */
+  d.cols=d.cols.map(c=>{
+    if(c[0]==='Oportunidade')return [c[0],r=>{const h=c[1](r),t='<b>'+esc(r.titulo)+'</b>';return h.indexOf(t)===0?'<b class="oppTit" title="'+esc(r.titulo)+'">'+esc(r.titulo)+'</b>'+h.slice(t.length):h;}].concat(c.slice(2));
+    if(c[0]==='Etapa')return [c[0],r=>c[1](r)+(r.decisao&&r.decisao.tipo==='participar'&&!OPP_FECH.includes(r.etapa)?'<div class="sub">participando</div>':r.etapa==='desistencia'&&r.motivoDesist?'<div class="sub" title="'+esc(r.motivoDesist)+'">'+esc(String(r.motivoDesist).slice(0,40))+'</div>':'')].concat(c.slice(2));
+    return c;});
+  d.cols.unshift(['Nº',r=>r.numero?'<b class="mono">'+esc(r.numero)+'</b>':'<span class="mut">—</span>']);
+  {const i=d.cols.findIndex(c=>c[0]==='Oportunidade');d.cols.splice(i+1,0,['Projeto',r=>{const p=oppProjDe(r);if(!p)return '';const cod=esc(p.codigo||p.nome||'—');
+    return mayR(GROUP_OF_TAB.proj||'proj')?'<button class="btn sm mono" data-act="detProj" data-id="'+esc(p.id)+'" title="Abrir o projeto '+esc(projNome(p.id))+'">'+cod+'</button>':'<span class="mono">'+cod+'</span>';}]);}
+  /* botões: Participar e Desistir no lugar do Go/no-go */
+  const ra=d.rowActs;d.rowActs=r=>{let h=ra?ra(r):'';const go='<button class="btn sm" data-act="fzGo" data-id="'+r.id+'">Go/no-go</button>';
+    if(h.includes(go)){const pend=r.goReq&&r.goReq.st==='pendente';
+      h=h.replace(go,'<button class="btn sm pri" data-act="oppParticipar" data-id="'+r.id+'" title="Seguir com a proposta (pede aprovação do diretor se a margem ficar abaixo do mínimo)">Participar</button><button class="btn sm" data-act="oppDesistir" data-id="'+r.id+'" title="Não participar: informe o motivo">Desistir</button>'+(pend&&fzDiretor()?'<button class="btn sm" data-act="fzGo" data-id="'+r.id+'">Decidir margem</button>':''));}
+    return h;};
+  d.extraActs=(d.extraActs||[]).concat(['oppParticipar','oppDesistir']);
+  d.minw=1180;}
+{const a0=A.oppNovo;A.oppNovo=x=>{OPPN.sug=true;try{return a0(x);}finally{OPPN.sug=false;}};}
+/* KPIs dos indicadores comerciais: histórico importado sem data fica de fora */
+{const v0=V.cind;if(v0)V.cind=function(){const sv=S.opp;if(!sv.some(o=>o.historico&&!o.resultadoEm))return v0.apply(this,arguments);
+  S.opp=sv.filter(o=>!(o.historico&&!o.resultadoEm));try{return v0.apply(this,arguments);}finally{S.opp=sv;}};}
+/* tela: larguras fixas (sem rolagem lateral em 1366 px) e aviso de migração */
+{const v0=V.opp;V.opp=function(){let h=v0.apply(this,arguments);
+  const ih=h.indexOf('<th>Oportunidade</th>'),it=ih>=0?h.lastIndexOf('<table',ih):-1;
+  if(it>=0){const fim=h.indexOf('>',it)+1,W={'Nº':66,'Oportunidade':360,'Projeto':74,'Área':88,'Etapa':112,'Valor':132,'Exequibilidade':116,'Margem':96,'Data':104};
+    const cg='<colgroup>'+MODS2.opp.cols.map(c=>'<col'+(W[c[0]]?' style="width:'+W[c[0]]+'px"':'')+'>').join('')+'<col></colgroup>';
+    h=h.slice(0,it)+'<table class="oppT">'+cg+h.slice(fim);}
+  const cs=mayW('ctr')?oppMigCands():[];
+  if(cs.length){const i=h.indexOf('<div class="stack">');const nt='<div class="note">'+cs.length+' oportunidade(s) têm o nº da proposta no começo do título (ex.: '+esc(cs[0].antes.slice(0,60))+'). <button class="btn sm pri" data-act="oppNumMigrar">Separar o nº da proposta</button></div>';
+    if(i>=0)h=h.slice(0,i+19)+nt+h.slice(i+19);}
+  return h;};}
+try{const st=document.createElement('style');st.textContent='.oppT{table-layout:fixed;width:100%;min-width:1180px}.oppT th,.oppT td{padding-left:7px;padding-right:7px}.oppT td{overflow-wrap:break-word;font-size:13px}.oppT td .mono{white-space:nowrap}.oppT .pill{white-space:normal;line-height:1.25}.oppT .oppTit{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.oppT td.act{white-space:normal}.oppT td.act .btn{margin:0 3px 3px 0;padding:3px 7px;font-size:12px}';document.head.appendChild(st);}catch(e){}
+
+/* ===== v120 (Agente O): EAP e Curva S com o projeto primeiro, tabela de custo-hora por função e preços das linhas da EAP =====
+   1. Seletor da EAP e da Curva S: "P490 · 4500880141 · objeto", ordenado pelo código do projeto; contrato sem projeto no fim.
+   2. Pessoal › Custo-hora por função (coleção chora): média do custo-hora (salário com encargos e benefícios / horas) das
+      funções com pelo menos 3 colaboradores ativos (sócios fora); as demais recebem um valor de referência do RH.
+      A tabela guarda só o valor por função e a quantidade de pessoas, nunca o salário de alguém.
+   3. Linhas da EAP: função de mão de obra puxa o R$ por hora da tabela; material puxa o custo médio do estoque (ou a última
+      compra). Cada linha guarda a fonte; valor gravado nunca muda sozinho: o botão "Atualizar valores" mostra antes e depois
+      e só aplica se confirmar. */
+if(!COLS.includes('chora')){COLS.push('chora');S.chora=S.chora||[];IDX.chora=new Map();}
+COL_NOME.chora='Custo-hora por função';GROUP_OF_TAB.chora='rh';TAB_COLS.chora=['chora'];
+if(!NAV.some(n=>n[0]==='chora'))NAV.push(['chora','Custo-hora por função','Recursos humanos']);
+{const pe=MENU.find(m=>m[0]==='pess');if(pe&&!pe[2].some(i=>i[0]==='chora'))pe[2].push(['chora','Custo-hora por função',null,'Obrigações e regras']);}
+Object.assign(ACT_GROUP,{choraCalc:'rh',choraRef:'rh',choraDel:'rh',choraMin:'rh',obr3Atu:'ctr'});
+ui.chora=ui.chora||{};
+
+/* ---------- 1. seletor de contrato: projeto primeiro ---------- */
+const obr3PjCod=pj=>pj?String(pj.codigo||pj.nome||'').trim():'';
+const obr3CmpCod=(a,b)=>String(a).localeCompare(String(b),'pt-BR',{numeric:true,sensitivity:'base'});
+function obr3CtrLista(cs){
+  return cs.map(c=>{const pj=c.projId&&get('proj',c.projId);return {c,cod:obr3PjCod(pj)};})
+    .sort((a,b)=>(a.cod?0:1)-(b.cod?0:1)||(a.cod&&b.cod?obr3CmpCod(a.cod,b.cod):0)||obr3CmpCod(a.c.numero||'',b.c.numero||''));
+}
+const obr3CtrRot=(x,n)=>(x.cod||'(sem projeto)')+' · '+(x.c.numero||'s/nº')+' · '+String(x.c.objeto||'').slice(0,n||50);
+const obr3EapOpts=()=>obr3CtrLista(S.ctr).map(x=>[x.c.id,obr3CtrRot(x,50)+(eapDe(x.c.id)?' ✓':'')]);
+const obr3CurvaOpts=()=>obr3CtrLista(S.ctr.filter(c=>{const e=eapDe(c.id);return e&&eapItens(e).length;})).map(x=>[x.c.id,obr3CtrRot(x,40)]);
+{const v0=V.eap;V.eap=function(){
+  if(!(ui.eap.ctr&&get('ctr',ui.eap.ctr))&&!S.eap.some(x=>get('ctr',x.ctrId))){const o=obr3EapOpts()[0];if(o)ui.eap.ctr=o[0];}
+  let h=v0.apply(this,arguments);
+  try{const c=eapCur();
+    h=h.replace(/(<select id="s_eap_ctr" data-filter="eap\.ctr">)[\s\S]*?(<\/select>)/,(m,a,b)=>a+opt(obr3EapOpts(),c?c.id:'','Escolha o contrato…')+b);
+    const e=c&&eapDe(c.id);
+    if(c&&e&&mayW('ctr')&&eapItens(e).some(x=>(x.mat||[]).length||(x.mo||[]).length)){
+      h=h.replace('<button class="btn pri" data-act="eapAdd">Nova etapa</button>','<button class="btn" data-act="obr3Atu" title="Compara os valores das linhas com a tabela de custo-hora, o custo médio do estoque e a última compra">Atualizar valores</button><button class="btn pri" data-act="eapAdd">Nova etapa</button>');
+      const its=eapItens(e);
+      h=h.replace(/<button class="btn sm dng" data-act="eapDel" data-i="(\d+)"/g,(m,i)=>{const j=eapBloco(its,+i);let tem=false;for(let k=+i;k<j;k++)if((its[k].mat||[]).length||(its[k].mo||[]).length)tem=true;
+        return (tem?'<button class="btn sm" data-act="obr3Atu" data-i="'+i+'" title="Atualizar valores desta etapa">R$</button>':'')+m;});
+    }
+  }catch(err){}
+  return h;};}
+{const v0=V.curva;V.curva=function(){
+  const ops=obr3CurvaOpts();if(ops.length&&(!ui.curva.ctr||!ops.some(o=>o[0]===ui.curva.ctr)))ui.curva.ctr=ops[0][0];
+  let h=v0.apply(this,arguments);
+  try{h=h.replace(/(<select data-filter="curva\.ctr">)[\s\S]*?(<\/select>)/,(m,a,b)=>a+opt(ops,ui.curva.ctr)+b);}catch(err){}
+  return h;};}
+
+/* ---------- 2. tabela de custo-hora por função ---------- */
+const choraNorm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const choraId=f=>'ch_'+(choraNorm(f).replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60)||'x');
+const choraMinP=()=>{const v=+(cfg().choraMin);return v>=1?Math.round(v):3;};
+const choraDe=funcao=>{const k=choraNorm(funcao);return k?S.chora.find(r=>choraNorm(r.funcao)===k)||null:null;};
+const choraSocio=f=>typeof ehSocio==='function'?ehSocio(f):!!(f&&f.tipoContrato==='socio');
+/* funções com colaboradores ativos (sócios fora); só contagens e o custo médio, nunca o salário individual */
+function choraGrupos(){const m=new Map();
+  S.func.forEach(f=>{if(f.status==='desligado'||choraSocio(f))return;const k=choraNorm(f.funcao);if(!k)return;
+    const g=m.get(k)||{k,funcao:String(f.funcao).trim(),n:0,ch:[]};g.n++;const c=custoHora(f);if(c&&c.total>0)g.ch.push(c.total);m.set(k,g);});
+  return [...m.values()].sort((a,b)=>a.funcao.localeCompare(b.funcao,'pt-BR'));}
+function choraCalcular(){const min=choraMinP();
+  return choraGrupos().map(g=>{const ok=g.ch.length>=min;return {funcao:g.funcao,k:g.k,ativos:g.n,pessoas:g.ch.length,valor:ok?r2(sum(g.ch,x=>x)/g.ch.length):null,media:ok};});}
+const CHORA_ORIG={media:'Média dos colaboradores',referencia:'Valor de referência (RH)'};
+V.chora=()=>{const ed=mayW('rh'),min=choraMinP(),gs=choraGrupos(),porK=new Map(gs.map(g=>[g.k,g]));
+  const regs=S.chora.slice().sort((a,b)=>String(a.funcao).localeCompare(String(b.funcao),'pt-BR'));
+  const ks=new Set(regs.map(r=>choraNorm(r.funcao)));const semReg=gs.filter(g=>!ks.has(g.k));
+  const acts=ed?'<button class="btn" data-act="choraRef">Informar valor de referência</button><button class="btn pri" data-act="choraCalc">Calcular pelas médias</button>':'';
+  const head=pageHead('Custo-hora por função','Valor da hora de cada função (salário com encargos e benefícios dividido pelas horas do mês), usado no orçamento e na EAP das obras. A tabela guarda só o valor por função e a quantidade de pessoas, nunca o salário de alguém.',acts);
+  const linha=r=>{const g=porK.get(choraNorm(r.funcao));
+    return '<tr><td><b>'+esc(r.funcao)+'</b></td><td class="num mono">'+money(r.valor)+'</td><td>'+pill(CHORA_ORIG[r.origem]||r.origem||'—',r.origem==='media'?'pos':'acc')+'</td><td class="num">'+(r.origem==='media'?(+r.pessoas||0):'—')+'</td><td class="num">'+(g?g.n:0)+'</td><td class="mono">'+(r.em?fmtDate(r.em):'—')+'</td>'+
+      (ed?'<td class="act"><button class="btn sm" data-act="choraRef" data-k="'+esc(r.funcao)+'">Referência</button><button class="btn sm dng" data-act="choraDel" data-id="'+esc(r.id)+'" aria-label="Excluir">×</button></td>':'')+'</tr>';};
+  const tab='<div class="card"><h2>Tabela</h2><div class="tw" style="border:0"><table><thead><tr><th>Função</th><th class="num">R$ por hora</th><th>Origem</th><th class="num">Pessoas na média</th><th class="num">Ativos hoje</th><th>Atualizado em</th>'+(ed?'<th></th>':'')+'</tr></thead><tbody>'+
+    (regs.length?regs.map(linha).join(''):emptyRow(ed?7:6,'Tabela vazia. Clique em "Calcular pelas médias".'))+'</tbody></table></div></div>';
+  const pend=semReg.length?'<div class="card"><h2>Funções sem valor na tabela</h2><div class="tw" style="border:0"><table><thead><tr><th>Função</th><th class="num">Ativos</th><th></th></tr></thead><tbody>'+
+    semReg.map(g=>'<tr><td>'+esc(g.funcao)+'</td><td class="num">'+g.n+'</td><td class="act">'+(g.ch.length>=min?'<span class="sub">entra no próximo cálculo</span>':(ed?'<button class="btn sm" data-act="choraRef" data-k="'+esc(g.funcao)+'">Informar referência</button>':'<span class="sub">menos de '+min+' pessoas</span>'))+'</td></tr>').join('')+'</tbody></table></div></div>':'';
+  const nota='<p class="sub" style="margin:0">Funções com menos de '+min+' colaboradores ativos não usam média (a média revelaria o salário de alguém): o RH informa um valor de referência. Sócios ficam fora. '+
+    (ed?'Mínimo de pessoas para usar a média: <button class="btn sm" data-act="choraMin">'+min+' (alterar)</button>. ':'')+'Mudar a tabela não altera valores já gravados na EAP: lá, use "Atualizar valores".</p>';
+  return head+'<div class="stack">'+tab+pend+nota+'</div>';};
+A.choraCalc=()=>{const r=choraCalcular(),usa=r.filter(x=>x.media),fora=r.filter(x=>!x.media);
+  if(!r.length){toast('Nenhum colaborador ativo com função cadastrada.','neg');return;}
+  const atual=k=>{const x=choraDe(k);return x?money(x.valor)+(x.origem==='referencia'?' (ref.)':''):'—';};
+  modal({title:'Calcular pelas médias',wide:true,saveLabel:'Gravar na tabela',
+    body:'<div class="tw"><table><thead><tr><th>Função</th><th class="num">Pessoas</th><th class="num">Valor atual</th><th class="num">Média calculada</th></tr></thead><tbody>'+
+      r.map(x=>'<tr><td>'+esc(x.funcao)+'</td><td class="num">'+x.pessoas+'</td><td class="num">'+atual(x.funcao)+'</td><td class="num">'+(x.media?'<b>'+money(x.valor)+'</b>':'<span class="sub">menos de '+choraMinP()+' pessoas: informe referência</span>')+'</td></tr>').join('')+'</tbody></table></div>'+
+      '<p class="sub">Só o valor por função e a quantidade de pessoas são gravados. Funções com menos de '+choraMinP()+' pessoas não recebem média'+(fora.some(x=>{const c=choraDe(x.funcao);return c&&c.origem==='media';})?'; as que tinham média antiga saem da tabela e aguardam o valor de referência':'')+'.</p>',
+    save:()=>{let n=0,rem=0;const em=todayStr(),por=actorId();
+      usa.forEach(x=>{const a=choraDe(x.funcao);put('chora',{id:a?a.id:choraId(x.funcao),funcao:a?a.funcao:x.funcao,valor:x.valor,origem:'media',pessoas:x.pessoas,em,por});n++;});
+      fora.forEach(x=>{const a=choraDe(x.funcao);if(a&&a.origem==='media'){del('chora',a.id);rem++;}});
+      toast(n+' função(ões) atualizada(s) pela média'+(rem?'; '+rem+' sem média agora (informe a referência)':'')+'.','pos');}});};
+A.choraRef=d=>{const k=d&&d.k?String(d.k):'',a=k?choraDe(k):null,gs=choraGrupos(),g=k?gs.find(x=>x.k===choraNorm(k)):null;
+  modal({title:'Valor de referência'+(k?': '+k:''),saveLabel:'Gravar',
+    body:'<div class="fg">'+(k?'':field('Função *','funcao','text','',{full:true}))+field('R$ por hora *','valor','number',a?a.valor:'',{full:true})+'</div>'+
+      (g&&g.ch.length>=choraMinP()?'<p class="note">Esta função tem '+g.ch.length+' pessoas: o próximo "Calcular pelas médias" troca a referência pela média.</p>':'')+'<p class="sub">Informe o custo da hora com encargos e benefícios.</p>',
+    save:root=>{const v=readForm(root),fn=String(k||v.funcao||'').trim().slice(0,80),val=+v.valor;
+      if(!fn){toast('Informe a função.','neg');return false;}
+      if(!(val>0)){toast('Informe um valor maior que zero.','neg');return false;}
+      const ex=choraDe(fn),gg=gs.find(x=>x.k===choraNorm(fn));
+      put('chora',{id:ex?ex.id:choraId(fn),funcao:ex?ex.funcao:fn,valor:r2(val),origem:'referencia',pessoas:gg?gg.n:0,em:todayStr(),por:actorId()});toast('Valor gravado.','pos');}});};
+A.choraDel=d=>{const r=get('chora',d.id);if(!r)return;confirmBox('Tirar "'+esc(r.funcao)+'" da tabela? Valores já gravados na EAP não mudam.',()=>del('chora',r.id),'Excluir',true);};
+A.choraMin=()=>{modal({title:'Mínimo de pessoas para usar a média',saveLabel:'Gravar',body:'<div class="fg">'+field('Mínimo de colaboradores','min','number',choraMinP(),{full:true})+'</div><p class="sub">Padrão: 3. Abaixo disso a média mostraria o salário de alguém.</p>',
+  save:root=>{const v=readForm(root),n=Math.round(+v.min||0);if(n<3){toast('Use 3 ou mais.','neg');return false;}put('cfg',Object.assign(cl(cfg()),{choraMin:n}));}});};
+
+/* ---------- 3. preços das linhas da EAP ---------- */
+const obr3Prod=desc=>{const s=String(desc||'').trim();if(!s)return null;return S.prod.find(p=>p.nome===s)||S.prod.find(p=>choraNorm(p.nome)===choraNorm(s))||null;};
+function obr3UltCompra(pid){let best=null;
+  S.notas.forEach(n=>{if(n.tipo!=='entrada'||/cancel/.test(String(n.status||'')))return;(n.itens||[]).forEach(i=>{if(i.prodId!==pid||!(+i.vUnit>0))return;const d=String(n.emissao||'');if(!best||d>best.d)best={d,v:+i.vUnit};});});
+  return best;}
+/* referência atual de uma linha: mão de obra pela tabela do RH; material pelo custo médio, senão pela última compra */
+function obr3Ref(t,x){
+  if(t==='mo'){const r=choraDe(x&&x.funcao);return r&&+r.valor>0?{valor:r2(+r.valor),tipo:'tabela RH'}:null;}
+  if(t==='mat'){const p=obr3Prod(x&&x.desc);if(!p)return null;const st=stockAll().of(p.id);
+    if(st.saldo>0&&st.custo>0)return {valor:r2(st.custo),tipo:'custo médio'};const u=obr3UltCompra(p.id);return u?{valor:r2(u.v),tipo:'última compra'}:null;}
+  return null;}
+const OBR3_CAMPO={mat:'pu',mo:'custo'};
+const obr3FonteTx=f=>f&&f.tipo?'Fonte: '+f.tipo+(f.em?' em '+fmtDate(f.em):''):'';
+/* converte os campos ocultos (_ft/_fe) em fonte {tipo,em} e os valores digitados com máscara em número */
+function obr3Normaliza(e){(e&&Array.isArray(e.itens)?e.itens:[]).forEach(it=>['mat','mo','fer'].forEach(t=>(it[t]||[]).forEach(x=>{
+  if('_ft' in x||'_fe' in x){if(x._ft)x.fonte={tipo:String(x._ft).slice(0,20),em:String(x._fe||todayStr()).slice(0,10)};else delete x.fonte;delete x._ft;delete x._fe;}
+  ['pu','custo','qtd','hh','dias'].forEach(k=>{if(typeof x[k]==='string'&&x[k]!==''){const n=typeof parseMoney==='function'?parseMoney(x[k]):parseFloat(String(x[k]).replace(',','.'));x[k]=n!=null&&isFinite(n)?n:'';}});})));return e;}
+const obr3Mask=()=>typeof moneyMask==='function'&&typeof parseMoney==='function';
+function obr3PrepInput(inp,f){if(!inp)return;const t=obr3FonteTx(f);if(t)inp.title=t;
+  /* máscara de dinheiro do módulo Comercial (new_com3.js): a tela mostra R$ e .value devolve o número em texto */
+  if(obr3Mask()&&!inp.dataset.obr3m){inp.dataset.obr3m='1';try{moneyMask(inp);}catch(e){}}}
+function obr3PrepRows(root,it){if(!root||!root.querySelectorAll)return;
+  ['mat','mo','fer'].forEach(t=>{const trs=Array.from(root.querySelectorAll('tr[data-r="'+t+'"]'));
+    trs.forEach((tr,i)=>{if(tr.querySelector('[data-k="_ft"]'))return;const src=it&&!tr.dataset.obr3n?(it[t]||[])[i]:null,f=src&&src.fonte||null;
+      tr.dataset.obr3n='1';const td=tr.querySelector('td:last-child')||tr;
+      td.insertAdjacentHTML('beforeend','<input type="hidden" data-k="_ft" value="'+esc(f?f.tipo:'')+'"><input type="hidden" data-k="_fe" value="'+esc(f?f.em||'':'')+'">');
+      if(OBR3_CAMPO[t])obr3PrepInput(tr.querySelector('[data-k="'+OBR3_CAMPO[t]+'"]'),f);});});}
+function obr3SetFonte(tr,tipo){const a=tr.querySelector('[data-k="_ft"]'),b=tr.querySelector('[data-k="_fe"]');if(a)a.value=tipo;if(b)b.value=todayStr();
+  const t=tr.dataset.r,inp=OBR3_CAMPO[t]&&tr.querySelector('[data-k="'+OBR3_CAMPO[t]+'"]');if(inp)inp.title=obr3FonteTx({tipo,em:todayStr()});}
+function obr3Ouvir(mb){if(!mb||!mb.addEventListener||mb.__obr3L)return;mb.__obr3L=1;
+  mb.addEventListener('change',ev=>{const t=ev.target;if(!t||!t.dataset||!t.closest)return;const tr=t.closest('tr[data-r]');if(!tr)return;const r=tr.dataset.r;
+    if(!((r==='mat'&&t.dataset.k==='desc')||(r==='mo'&&t.dataset.k==='funcao')))return;
+    if(r==='mat'){const p=obr3Prod(t.value),un=tr.querySelector('[data-k="un"]');if(p&&un&&!un.value)un.value=p.un||'';}
+    const inp=tr.querySelector('[data-k="'+OBR3_CAMPO[r]+'"]');if(!inp||String(inp.value).trim()!=='')return;
+    const ref=obr3Ref(r,r==='mat'?{desc:t.value}:{funcao:t.value});if(!ref)return;
+    inp.value=String(ref.valor);obr3SetFonte(tr,ref.tipo);});
+  mb.addEventListener('input',ev=>{const t=ev.target;if(!t||!t.dataset||!t.closest)return;const tr=t.closest('tr[data-r]');if(!tr)return;
+    if(OBR3_CAMPO[tr.dataset.r]===t.dataset.k)obr3SetFonte(tr,'manual');});}
+{const f0=eapItemForm;eapItemForm=function(c,idx,o){
+  const m0=modal,mb=$('#mb');if(mb&&mb.addEventListener)mb.__eapL=1; /* o preenchimento original (custo médio sem fonte) dá lugar ao deste módulo */
+  const e0=c&&eapDe(c.id),it=idx!=null&&e0?eapItens(e0)[idx]:null;
+  modal=function(op){try{
+    const fs=[...new Set(S.chora.map(r=>String(r.funcao||'').trim()).filter(Boolean))].filter(f=>op.body.indexOf('<option value="'+esc(f)+'">')<0);
+    if(fs.length)op.body=op.body.replace('<datalist id="eapFuncL">','<datalist id="eapFuncL">'+fs.map(f=>'<option value="'+esc(f)+'">').join(''));
+    op.body=op.body.replace('Material escolhido do estoque traz a unidade e o custo médio.','Material escolhido do estoque traz a unidade e o custo médio (sem estoque, o preço da última compra); a função traz o R$ por hora da tabela de custo-hora do RH. Valores gravados não mudam sozinhos: use "Atualizar valores".');
+    const oo=op.onOpen;op.onOpen=r=>{if(oo)oo(r);obr3PrepRows(r,it);};
+    /* ao gravar: campos ocultos da fonte viram fonte {tipo,em} e valores com máscara (texto) viram número */
+    const s0=op.save;if(s0)op.save=function(root){
+      const pp=put;put=function(col,rec){if(col==='eap'&&rec)obr3Normaliza(rec);return pp.apply(this,arguments);};
+      try{return s0.apply(this,arguments);}finally{put=pp;}};
+  }catch(err){}return m0.apply(this,arguments);};
+  try{return f0.apply(this,arguments);}finally{modal=m0;const m2=$('#mb');obr3Ouvir(m2);}};}
+{const a0=A.eapLinha;A.eapLinha=d=>{a0(d);obr3PrepRows($('#mb'),null);};}
+/* "Atualizar valores": linhas cujo valor gravado difere da referência atual (só mostra; aplica depois de confirmar) */
+function obr3Mudancas(e,i){const its=eapItens(e),out=[];if(!its.length)return out;
+  const a=i==null?0:i,b=i==null?its.length:eapBloco(its,i);
+  for(let j=a;j<b;j++)['mat','mo'].forEach(t=>(its[j][t]||[]).forEach((x,k)=>{const ref=obr3Ref(t,x);if(!ref)return;const cp=OBR3_CAMPO[t],at=x[cp]===''||x[cp]==null?null:+x[cp];
+    if(at!=null&&r2(at)===ref.valor)return;out.push({j,t,k,etapa:its[j].nome,desc:t==='mo'?x.funcao:x.desc,antes:at,depois:ref.valor,tipo:ref.tipo,manual:!!(x.fonte&&x.fonte.tipo==='manual')});}));
+  return out;}
+function obr3Aplicar(c,lista){const e=eapGarante(c),em=todayStr();let n=0;
+  lista.forEach(m=>{const it=e.itens[m.j],x=it&&it[m.t]&&it[m.t][m.k];if(!x)return;const nx=Object.assign({},x);nx[OBR3_CAMPO[m.t]]=m.depois;nx.fonte={tipo:m.tipo,em};it[m.t]=it[m.t].slice();it[m.t][m.k]=nx;n++;});
+  if(n)eapSalvar(e);return n;}
+A.obr3Atu=d=>{const c=eapCur(),e=c&&eapDe(c.id);if(!e)return;const i=d&&d.i!=null&&d.i!==''?+d.i:null,its=eapItens(e);if(i!=null&&!its[i])return;
+  const ms=obr3Mudancas(e,i);
+  if(!ms.length){toast('Os valores '+(i!=null?'desta etapa':'da EAP')+' já estão iguais às referências atuais (tabela do RH, custo médio e última compra).','pos');return;}
+  modal({title:'Atualizar valores'+(i!=null?': '+its[i].nome:' da EAP'),wide:true,saveLabel:'Aplicar os marcados',
+    body:'<p style="margin:0 0 8px">Nada muda até você confirmar. Valores digitados à mão vêm desmarcados.</p><div class="tw"><table><thead><tr><th></th><th>Etapa</th><th>Linha</th><th class="num">Antes</th><th class="num">Depois</th><th>Fonte nova</th></tr></thead><tbody>'+
+      ms.map((m,n)=>'<tr><td><input type="checkbox" data-f="m'+n+'"'+(m.manual?'':' checked')+' aria-label="Aplicar"></td><td>'+esc(m.etapa)+'</td><td>'+esc(m.desc)+'<div class="sub">'+(m.t==='mo'?'mão de obra · R$ por hora':'material · R$ unit.')+(m.manual?' · valor manual':'')+'</div></td><td class="num">'+(m.antes==null?'—':money(m.antes))+'</td><td class="num"><b>'+money(m.depois)+'</b></td><td>'+esc(m.tipo)+'</td></tr>').join('')+'</tbody></table></div>',
+    save:root=>{const v=readForm(root),marcou=Object.keys(v).length>0,sel=ms.filter((m,n)=>marcou?!!v['m'+n]:!m.manual);
+      if(!sel.length){toast('Nenhuma linha marcada.','neg');return false;}
+      const n=obr3Aplicar(c,sel);toast(n+' valor(es) atualizado(s).','pos');}});};
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='119',APP_DATA='2026-10-27';
+const APP_VER='120',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['120','2026-10-27',['Comercial › Oportunidades: Nº da proposta na 1ª coluna (próximo número sugerido, editável, sem repetição; botão para separar o número que hoje está no título), coluna Projeto com link, colunas mais largas e títulos em até 3 linhas.', 'Botões Participar e Desistir no lugar do Go/no-go: Participar segue para a proposta e, com margem abaixo do mínimo, continua pedindo a aprovação do diretor; Desistir pede o motivo.', 'Valores em dinheiro em todo o sistema: digite só os números e o campo mostra R$ 2.000.000,00.', 'Habilitação: tipos de documento em ordem alfabética e filtro por documento.', 'EAP e Curva S: obras listadas pelo projeto (P490 · contrato · objeto).', 'Pessoal › Custo-hora por função: o RH calcula a média por função (com encargos e benefícios, só funções com 3 ou mais pessoas, sem expor salários) ou informa um valor de referência. Na EAP, a mão de obra recebe o valor da hora e o material o custo médio; valores gravados só mudam pelo botão Atualizar valores.']],
   ['119','2026-10-27',['Conector fiscal: fim do conflito com o Agente da NF-e do Omie. Só um sistema por CNPJ pode consultar a SEFAZ por NSU (regra da NT 2014.002); por padrão (NFE_DIST=0) quem consulta é o Omie e a Central continua buscando as NFS-e. O cartão de Fiscal › NFs recebidas mostra quem consulta, avisa se outro sistema estiver na fila e bloqueia Baixar XML durante a espera de 1 hora da SEFAZ.', 'Conector fiscal: chaves e CNPJ com letras (CNPJ alfanumérico) aceitos; ciência automática só até 10 dias da emissão e aviso dos prazos de manifestação (10 e 90 dias); NFS-e recebidas guardam os valores de IBS/CBS.']],
   ['118','2026-10-27',['Número da versão e data da atualização agora aparecem no menu superior, abaixo do nome do sistema, para todos os usuários (antes só no Painel do Início). Clique nele para ver as novidades e os tutoriais.']],
   ['117','2026-10-27',['Contratos de experiência (Pessoal › Painel): botões Prorrogar (só no 1º período, uma vez e até 90 dias), Efetivar (prazo indeterminado no dia seguinte ao fim da experiência) e Encerrar (abre o desligamento com o motivo certo).', 'Painéis de setor revisados no computador e no celular: botões dentro das caixas, indicadores com número curto e texto na legenda, plurais corretos e sem rolagem lateral.']],

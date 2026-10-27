@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-27T21:55:40.787Z",
+ "gerado": "2026-10-27T23:02:19.013Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -887,6 +887,9 @@
   "perfc": [
    "usr"
   ],
+  "chora": [
+   "rh"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -1346,6 +1349,9 @@
   ],
   "aptlib": [],
   "perfc": [],
+  "chora": [
+   "rh"
+  ],
   "ctremp": [
    "proj",
    "fin"
