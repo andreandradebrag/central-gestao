@@ -21203,6 +21203,8 @@ if(typeof DBW_TABCOLS!=='undefined')Object.assign(DBW_TABCOLS,{
 /* perfis que podem ver custos da empresa (combustível etc.) */
 function p1Fin(){const p=PERFIS[me.perfil]||{};return !!me.owner||p.w==='*'||mayW('fin')||mayW('fluxo')||['diretoria','financeiro','fiscal'].includes(me.perfil);}
 const p1N=n=>String(n);
+/* corta texto longo na palavra, com reticências */
+const p1Corta=(t,n)=>{t=String(t==null?'':t).trim();if(t.length<=n)return t;const c=t.slice(0,n),i=c.lastIndexOf(' ');return (i>n*0.6?c.slice(0,i):c).replace(/[\s,;.:·-]+$/,'')+'…';};
 const p1Pct=(a,b)=>b>0?String(Math.round(a/b*1000)/10).replace('.',',')+'%':'—';
 function p1Tabs(mod){const m=MENU.find(x=>x[0]===mod);const s=new Set(m?m[2].map(i=>i[0]):[]);if(mod==='pess')s.add('dpp');if(mod==='sstq'){['aso','trm','tterc','aptlib'].forEach(t=>s.add(t));}return s;}
 /* pendências do setor: os mesmos alertas do Painel do Início, só das telas do módulo e sem valores em dinheiro */
@@ -21216,10 +21218,10 @@ function p1Alertas(mod){const tabs=p1Tabs(mod),out=[],vistos=new Set(),fin=p1Fin
   fns.forEach(fn=>{if(!fn)return;let r;try{r=fn();}catch(e){return;}(r||[]).forEach(x=>{if(!x||!tabs.has(x[0]))return;const g=GROUP_OF_TAB[x[0]];if(g&&!mayR(g))return;
     const t=String(x[1]||''),c=String(x[2]==null?'':x[2]);if(!fin&&/R\$/.test(t))return;const k=x[0]+'|'+t;if(vistos.has(k))return;vistos.add(k);out.push([x[0],t,/R\$/.test(c)?'':c]);});});
   return out;}
-function p1PendCard(its,self){return '<div class="card"><h2>Pendências do setor</h2>'+(its.length?'<div class="list">'+its.map(x=>'<div class="li"><div class="t">'+esc(x[1])+'</div><div style="display:flex;gap:10px;align-items:center"><span class="mono">'+esc(x[2]||'')+'</span>'+(self&&self.includes(x[0])?'':'<button class="btn sm" data-act="nav" data-tab="'+esc(x[0])+'">Abrir</button>')+'</div></div>').join('')+'</div>':'<p class="sub" style="margin:8px 0 0">Nenhuma pendência no momento.</p>')+'</div>';}
+function p1PendCard(its,self){return '<div class="card"><h2>Pendências do setor</h2>'+(its.length?'<div class="list">'+its.map(x=>'<div class="li"><div class="t">'+esc(x[1])+'</div><div style="display:flex;gap:10px;align-items:center;flex:0 0 auto">'+(x[2]?'<span class="mono">'+esc(x[2])+'</span>':'')+(self&&self.includes(x[0])?'':'<button class="btn sm" data-act="nav" data-tab="'+esc(x[0])+'">Abrir</button>')+'</div></div>').join('')+'</div>':'<p class="sub" style="margin:8px 0 0">Nenhuma pendência no momento.</p>')+'</div>';}
 /* lista curta: linhas [texto (html já escapado), sub (html), selo (html)] com botão para a tela */
 function p1Lista(t,rows,tab,vazio,max){max=max||8;const ab=tab&&mayR(GROUP_OF_TAB[tab]||'')?'<p style="margin:8px 0 0"><button class="btn sm" data-act="nav" data-tab="'+esc(tab)+'">Abrir '+esc(t.toLowerCase())+'</button></p>':'';
-  return '<div class="card"><h2>'+esc(t)+(rows.length>max?' <span class="sub">('+rows.length+')</span>':'')+'</h2><div class="tw" style="border:0"><table style="min-width:0"><tbody>'+(rows.length?rows.slice(0,max).map(r=>'<tr><td>'+r[0]+(r[1]?'<div class="sub">'+r[1]+'</div>':'')+'</td><td style="text-align:right">'+(r[2]||'')+'</td></tr>').join(''):'<tr><td class="sub">'+esc(vazio||'Nada pendente.')+'</td></tr>')+'</tbody></table></div>'+(rows.length>max?'<p class="sub" style="margin:6px 0 0">Mostrando '+max+' de '+rows.length+'.</p>':'')+ab+'</div>';}
+  return '<div class="card"><h2>'+esc(t)+(rows.length>max?' <span class="sub">('+rows.length+')</span>':'')+'</h2><div class="tw" style="border:0"><table style="min-width:0"><tbody>'+(rows.length?rows.slice(0,max).map(r=>'<tr><td>'+r[0]+(r[1]?'<div class="sub">'+r[1]+'</div>':'')+(r[3]||'')+'</td><td style="text-align:right">'+(r[2]||'')+'</td></tr>').join(''):'<tr><td class="sub">'+esc(vazio||'Nada pendente.')+'</td></tr>')+'</tbody></table></div>'+(rows.length>max?'<p class="sub" style="margin:6px 0 0">Mostrando '+max+' de '+rows.length+'.</p>':'')+ab+'</div>';}
 const p1Grid=cards=>'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">'+cards.filter(Boolean).join('')+'</div>';
 const p1Sec=t=>'<div class="sect" style="margin:6px 0 0">'+esc(t)+'</div>';
 const p1Obras=()=>S.proj.filter(p=>(p.status||'ativo')!=='concluido').map(p=>[p.id,projNome(p.id)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
@@ -21233,7 +21235,8 @@ function p1PesDados(obra){const h=todayStr(),m=ym(h),pm=addMonths(m,-1),fo=f=>!o
   o.ativos=at.length;o.afast=at.filter(f=>f.status==='afastado').length;
   o.adm=S.func.filter(f=>fo(f)&&ym(f.admissao)===m).length;o.admAnd=S.adm.filter(r=>!r.funcId&&!r.desistiu&&(!obra||r.projId===obra)).length;
   o.desl=S.func.filter(f=>fo(f)&&ym(f.demissao)===m).length;o.deslAnd=S.desl.filter(r=>!r.concluidoEm&&(!obra||((get('func',r.funcId)||{}).projId===obra))).length;
-  o.exp=at.filter(f=>f.tipoContrato==='exp'&&[f.expFim1,f.expFim2].some(d=>d&&d>=h&&dTo(d)<=10)).map(f=>{const d=[f.expFim1,f.expFim2].filter(x=>x&&x>=h).sort()[0];return {f,d};}).sort((a,b)=>String(a.d).localeCompare(String(b.d)));
+  o.expTodos=at.filter(f=>f.tipoContrato==='exp').map(f=>({f,x:expInfo(f)})).filter(y=>y.x).map(y=>({f:y.f,x:y.x,d:y.x.fim})).sort((a,b)=>String(a.d).localeCompare(String(b.d)));
+  o.exp=o.expTodos.filter(y=>y.d>=h&&dTo(y.d)<=10);
   o.ferVenc=[];o.ferVcd=[];at.forEach(f=>{let r;try{r=ferResumo(f);}catch(e){return;}r.vencidos.forEach(p=>o.ferVenc.push({f,p}));r.vencendo.forEach(p=>o.ferVcd.push({f,p}));});
   o.ponto=mayR('ponto');
   if(o.ponto){o.pdia=[];try{o.pdia=pdDados(h).filter(x=>(!obra||x.obra===obra)&&['falta','sem'].includes(x.sit));}catch(e){o.pdia=null;}
@@ -21248,24 +21251,34 @@ function p1PesDados(obra){const h=todayStr(),m=ym(h),pm=addMonths(m,-1),fo=f=>!o
 V.pnPes=()=>{const u=ui.pnPes,obra=u.obra||'',d=p1PesDados(obra),h=todayStr();
   let base='';try{base=p1DppBase?p1DppBase():'';}catch(e){base='';}
   const i=base.indexOf('<div class="stack">'),corpo=i>=0?base.slice(i+19).replace(/<\/div>\s*$/,'').replace(/>NaN%</g,'>0,0%<'):'';/* absenteísmo com base vazia */
+  const corpo2=p1CorpoSemRepeticao(corpo);
   const ferV=new Set(d.ferVenc.map(x=>x.f.id)).size;
   let k1=kpi('Colaboradores ativos',p1N(d.ativos),d.afast+' afastado(s)'+(obra?' · '+esc(projNome(obra)):''))+kpi('Admissões no mês',p1N(d.adm),d.admAnd+' em andamento')+kpi('Desligamentos no mês',p1N(d.desl),d.deslAnd+' em andamento')+
-    kpi('Experiência terminando',p1N(d.exp.length),'em até 10 dias',d.exp.length?'warn':'')+kpi('Férias vencidas',p1N(d.ferVenc.length),ferV+' colaborador(es) · pagamento em dobro',d.ferVenc.length?'neg':'')+kpi('Férias vencendo',p1N(d.ferVcd.length),'período(s) em até 90 dias',d.ferVcd.length?'warn':'');
+    kpi('Experiência terminando',p1N(d.exp.length),'em até 10 dias',d.exp.length?'warn':'')+kpi('Férias vencidas',p1N(d.ferVenc.length),ferV+' colaborador(es) · pagamento em dobro',d.ferVenc.length?'neg':'')+kpi('Férias vencendo',p1N(d.ferVcd.length),(d.ferVcd.length===1?'período a conceder':'períodos a conceder')+' em até 90 dias',d.ferVcd.length?'warn':'');
   let k2='';
   if(d.ponto){const pr=d.pdia;k2+=kpi('Ponto de hoje com problema',pr==null?'—':p1N(pr.length),'batida faltando ou sem marcação',pr&&pr.length?'neg':'')+kpi('Horas extras aguardando',p1N(d.hePend),'pedidos para aprovar',d.hePend?'warn':'')+kpi('Ajustes de ponto',p1N(d.ajPend),'pedidos pendentes',d.ajPend?'warn':'');
-    if(d.pfarq)k2+=kpi('Arquivo mensal do ponto',p1N(d.pfarq.length),d.pfarq.length?'mês(es) sem AFD, AEJ e espelho':'tudo arquivado',d.pfarq.length?'neg':'pos');}
-  if(d.bh)k2+=kpi('Banco de horas',p1N(d.bh.n)+' participante(s)',d.bh.vence+' com horas vencendo em 30 dias'+(d.bh.acima?' · '+d.bh.acima+' acima do limite':''),d.bh.vence||d.bh.acima?'warn':'');
-  if(d.folha)k2+=kpi('Folha oficial '+fmtYm(d.foMes),d.foImp?'Importada':'Não importada',d.foImp?(d.foDif==null?'':d.foDif+' diferença(s) com a prévia'):'importe a folha da contabilidade',d.foImp?(d.foDif?'warn':'pos'):'neg');
+    if(d.pfarq)k2+=kpi('Arquivo mensal do ponto',p1N(d.pfarq.length),d.pfarq.length?(d.pfarq.length===1?'mês':'meses')+' sem AFD, AEJ e espelho':'tudo arquivado',d.pfarq.length?'neg':'pos');}
+  if(d.bh)k2+=kpi('Banco de horas',p1N(d.bh.n),(d.bh.n===1?'participante':'participantes')+' · '+d.bh.vence+' com horas vencendo em 30 dias'+(d.bh.acima?' · '+d.bh.acima+' acima do limite':''),d.bh.vence||d.bh.acima?'warn':'');
+  if(d.folha)k2+=kpi('Folha oficial '+fmtYm(d.foMes),d.foImp?'Importada':'Pendente',d.foImp?(d.foDif==null?'':d.foDif+' diferença(s) com a prévia'):'não importada: importe a folha da contabilidade',d.foImp?(d.foDif?'warn':'pos'):'neg');
   k2+=kpi('Solicitações dos colaboradores',p1N(d.dpsol),'aguardando o RH',d.dpsol?'warn':'');
   const its=p1Alertas('pess');
-  const lExp=d.exp.map(x=>['<a href="#" data-act="funcAbrir" data-id="'+esc(x.f.id)+'">'+esc(x.f.nome)+'</a>',esc(x.f.funcao||''),valPill(x.d,10)]);
-  const lFer=d.ferVenc.map(x=>[esc(x.f.nome),'período '+fmtDate(x.p.aqIni)+' a '+fmtDate(x.p.aqFim)+(x.p.concFim?' · concessivo até '+fmtDate(x.p.concFim):''),pill('Vencido','neg')]).concat(d.ferVcd.slice().sort((a,b)=>String(a.p.concFim||'').localeCompare(String(b.p.concFim||''))).map(x=>[esc(x.f.nome),x.p.concFim?'conceder até '+fmtDate(x.p.concFim):'',x.p.concFim?valPill(x.p.concFim,90):'']));
+    const lFer=d.ferVenc.map(x=>[esc(x.f.nome),'período '+fmtDate(x.p.aqIni)+' a '+fmtDate(x.p.aqFim)+(x.p.concFim?' · concessivo até '+fmtDate(x.p.concFim):''),pill('Vencido','neg')]).concat(d.ferVcd.slice().sort((a,b)=>String(a.p.concFim||'').localeCompare(String(b.p.concFim||''))).map(x=>[esc(x.f.nome),x.p.concFim?'conceder até '+fmtDate(x.p.concFim):'',x.p.concFim?valPill(x.p.concFim,90):'']));
   const lPon=d.ponto&&d.pdia?d.pdia.map(x=>[esc(x.f.nome),esc(x.obra?projNome(x.obra):'sem obra')+(x.falta?' · falta: '+esc(x.falta):''),pill(x.sit==='sem'?'Sem marcação':'Batida faltando','neg')]):null;
   return pageHead('Pessoal','Painel do setor: pendências do dia a dia do RH e do Departamento Pessoal, com a visão geral da equipe logo abaixo.','<button class="btn" data-act="nav" data-tab="adm">Nova admissão</button><button class="btn" data-act="nav" data-tab="afast">Registrar atestado</button>')+
     '<div class="stack"><div class="bar"><label class="f"><span>Obra</span><select data-filter="pnPes.obra">'+opt(p1Obras(),obra,'Todas')+'</select></label><p class="sub" style="margin:0;align-self:flex-end">A obra filtra os indicadores de pendência e as listas. A visão geral abaixo é da empresa toda.</p></div>'+
     '<div class="kpis">'+k1+'</div>'+(k2?'<div class="kpis">'+k2+'</div>':'')+
-    p1Grid([p1PendCard(its,['dpp','pnPes']),p1Lista('Contratos de experiência',lExp,'func','Nenhum contrato de experiência terminando em 10 dias.'),p1Lista('Férias',lFer,'ferias','Nenhum período vencido ou vencendo.'),lPon?p1Lista('Ponto de hoje',lPon,'pdia','Ninguém com batida faltando ou sem marcação.'):''])+
-    (corpo?p1Sec('Visão geral da equipe')+corpo:'')+'</div>';};
+    p1Grid([p1PendCard(its,['dpp','pnPes']),p1ExpCard(d.expTodos),p1Lista('Férias',lFer,'ferias','Nenhum período vencido ou vencendo.'),lPon?p1Lista('Ponto de hoje',lPon,'pdia','Ninguém com batida faltando ou sem marcação.'):''])+
+    (corpo2?p1Sec('Visão geral da equipe')+corpo2:'')+'</div>';};
+function p1CorpoSemRepeticao(c){if(!c)return c;
+  const a=c.indexOf('<div class="card"><h2>Contratos de experiência</h2>'),b=a>=0?c.indexOf('<div class="card"><h2>',a+10):-1;if(a>=0&&b>a)c=c.slice(0,a)+c.slice(b);
+  const k0='<div class="kpis"><div class="kpi"><div class="kl">Colaboradores ativos</div>',ia=c.indexOf(k0);
+  if(ia>=0){let p=ia+'<div class="kpis">'.length;['Colaboradores ativos','Admissões no mês','Desligamentos no mês'].forEach(l=>{const t='<div class="kpi"><div class="kl">'+l+'</div>';if(c.startsWith(t,p)){const e=c.indexOf('</div></div>',p);if(e>0)c=c.slice(0,p)+c.slice(e+12);}});}
+  return c;}
+/* quadro de contratos de experiência do painel de Pessoal: nome e prazo na mesma linha, ações logo abaixo */
+function p1ExpCard(L,max){max=max||10;const its=L.slice(0,max).map(y=>'<div class="li" style="display:block"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="min-width:0"><a href="#" data-act="funcAbrir" data-id="'+esc(y.f.id)+'" title="Abrir o cadastro">'+esc(y.f.nome)+'</a>'+
+    '<div class="sub">'+esc(y.f.funcao||'')+(y.f.funcao?' · ':'')+y.x.periodo+' até '+fmtDate(y.x.fim)+(y.x.vencida?' · terminou sem decisão':'')+'</div></div><div style="flex:0 0 auto">'+(y.x.vencida?pill('Terminou','neg'):valPill(y.d,10))+'</div></div>'+expAcoes(y.f)+'</div>');
+  return '<div class="card"><h2>Contratos de experiência'+(L.length>max?' <span class="sub">('+L.length+')</span>':'')+'</h2>'+(its.length?'<div class="list">'+its.join('')+'</div>':'<p class="sub" style="margin:8px 0 0">Ninguém em contrato de experiência.</p>')+
+    (L.length>max?'<p class="sub" style="margin:6px 0 0">Mostrando '+max+' de '+L.length+', pelos que terminam primeiro.</p>':'')+'<p class="sub" style="margin:8px 0 0">Prorrogação: uma vez só e até 90 dias no total (CLT, arts. 445 e 451).</p></div>';}
 /* o antigo Painel do DP abre o mesmo painel (links antigos e alertas continuam funcionando) */
 V.dpp=function(){return V.pnPes();};
 
@@ -21311,7 +21324,7 @@ V.pnSst=()=>{const u=ui.pnSst,obra=u.obra||'',d=p1SstDados(obra),h=todayStr();
     kpi('Inaptos para obra',p1N(d.inapSem.length),(d.inap.length-d.inapSem.length)+' liberado(s) pelo SST',d.inapSem.length?'neg':'pos')+
     kpi('Liberações de aptidão hoje',p1N(d.libHoje.length),'vigentes',d.libHoje.length?'warn':'');
   let k2='';
-  if(d.vivo)k2+=kpi('ASO',p1N(d.asoVenc)+' vencido(s)',(d.aso.length-d.asoVenc)+' vencendo em 30 dias',d.asoVenc?'neg':d.aso.length?'warn':'pos')+kpi('Treinamentos (NR)',p1N(d.treinVenc),'colaborador(es) com NR faltando ou vencida · '+(d.trein.length-d.treinVenc)+' vencendo',d.treinVenc?'neg':d.trein.length?'warn':'pos')+kpi('Integração',p1N(d.integVenc)+' vencida(s)',d.integVcd+' vencendo em 30 dias',d.integVenc?'neg':d.integVcd?'warn':'');
+  if(d.vivo)k2+=kpi('ASO vencido ou sem ASO',p1N(d.asoVenc),(d.aso.length-d.asoVenc)+' vencendo em 30 dias',d.asoVenc?'neg':d.aso.length?'warn':'pos')+kpi('Treinamentos (NR)',p1N(d.treinVenc),(d.treinVenc===1?'colaborador':'colaboradores')+' com NR faltando ou vencida · '+(d.trein.length-d.treinVenc)+' vencendo',d.treinVenc?'neg':d.trein.length?'warn':'pos')+kpi('Integração vencida',p1N(d.integVenc),d.integVcd+' vencendo em 30 dias',d.integVenc?'neg':d.integVcd?'warn':'');
   else k2+=kpi('ASO vencido',p1N(d.asoVencR),'pelo resumo do RH/SST',d.asoVencR?'neg':'')+kpi('NR vencida ou faltando',p1N(d.treinVencR),'pelo resumo do RH/SST',d.treinVencR?'neg':'')+kpi('Integração pendente',p1N(d.integR),'pelo resumo do RH/SST',d.integR?'neg':'');
   k2+=kpi('EPI para trocar',p1N(d.epiVenc.length),d.epi15.length+' em 15 dias · '+d.epiCa.length+' com CA vencido',d.epiVenc.length||d.epiCa.length?'neg':d.epi15.length?'warn':'')+
     kpi('Terceiros com pendência',p1N(d.terc.pend.length),'de '+d.terc.n+' ativo(s)'+(d.terc.fonte==='resumo'?' (resumo)':''),d.terc.pend.length?'neg':'pos');
@@ -21347,11 +21360,11 @@ function p1QuaDados(obra,meses){const h=todayStr(),de=addMonths(ym(h),-(meses-1)
   o.cnq=null;if(typeof cnqReal==='function'){const its=[].concat(nc.map(r=>({col:'nc',r})),gar.map(r=>({col:'gar',r}))).filter(x=>{const dt=typeof cnqData==='function'?cnqData(x.r):(x.r.custoData||x.r.data||'');return (dt||'')>=de;});
     o.cnq={nc:sum(its.filter(x=>x.col==='nc'),x=>+cnqReal(x.r)||0),gar:sum(its.filter(x=>x.col==='gar'),x=>+cnqReal(x.r)||0),est:sum(o.ncAb,r=>+r.custoEst||0)};}
   return o;}
-V.pnQua=()=>{const u=ui.pnQua,obra=u.obra||'',meses=Math.max(1,Math.min(36,+u.meses||12)),d=p1QuaDados(obra,meses),h=todayStr(),per='últimos '+meses+' mes(es)';
+V.pnQua=()=>{const u=ui.pnQua,obra=u.obra||'',meses=Math.max(1,Math.min(36,+u.meses||12)),d=p1QuaDados(obra,meses),h=todayStr(),per=meses===1?'último mês':'últimos '+meses+' meses';
   let k1=kpi('Não conformidades abertas',p1N(d.ncAb.length),d.ncVenc.length+' com prazo vencido · '+d.ncEfic+' para verificar eficácia',d.ncVenc.length?'neg':d.ncAb.length?'warn':'pos')+
     kpi('NCs registradas',p1N(d.ncPer),per)+
     kpi('Ações abertas',p1N(d.paAb.length),d.paAtr.length+' atrasada(s)',d.paAtr.length?'neg':'')+
-    kpi('Chamados de garantia',p1N(d.garAb.length)+' aberto(s)',d.garAtr.length+' atrasado(s) · '+d.garPer+' no período',d.garAtr.length?'neg':'');
+    kpi('Garantia: chamados abertos',p1N(d.garAb.length),d.garAtr.length+' atrasado(s) · '+d.garPer+' no período',d.garAtr.length?'neg':'');
   let k2=kpi('Verificações de serviço (FVS)',p1N(d.fvs),d.fvsRep+' reprovada(s) · '+per,d.fvsRep?'warn':'')+
     (d.insp?kpi('Inspeções e auditorias',p1N(d.insp.n),(d.insp.media==null?'':'conformidade média '+String(Math.round(d.insp.media*10)/10).replace('.',',')+' · ')+d.insp.nc+' item(ns) não conforme(s)'):'')+
     kpi('Satisfação do cliente (NPS)',d.nps&&d.nps.nps!=null?p1N(d.nps.nps):'—',d.nps&&d.nps.n?d.nps.n+' resposta(s) · '+per:'sem respostas no período')+
@@ -21359,9 +21372,9 @@ V.pnQua=()=>{const u=ui.pnQua,obra=u.obra||'',meses=Math.max(1,Math.min(36,+u.me
     (d.trec?kpi('Pendências do recebimento',p1N(d.trec),'termos com prazo de pendência vencido','neg'):'')+
     (d.cnq?kpi('Custo das NCs e garantias',money(d.cnq.nc+d.cnq.gar),'realizado · '+per+' · estimado em aberto '+money(d.cnq.est),d.cnq.nc+d.cnq.gar>0?'warn':''):'');
   const its=p1Alertas('qsgi');
-  const lNc=d.ncAb.slice().sort((a,b)=>String(a.prazo||'9').localeCompare(String(b.prazo||'9'))).map(r=>[esc(String(r.desc||'Não conformidade').slice(0,90)),esc(r.projId?projNome(r.projId):'sem obra')+(r.resp?' · '+esc(r.resp):''),r.prazo?valPill(r.prazo,7):pill((NC_ST[r.status]||['Aberta'])[0],'warn')]);
-  const lPa=d.paAtr.concat(d.paAb.filter(r=>!d.paAtr.includes(r))).map(r=>[esc((r.numero?r.numero+' · ':'')+String(r.titulo||r.descr||'Ação').slice(0,90)),esc(r.projId?projNome(r.projId):''),r.prazo?valPill(r.prazo,7):'']);
-  const lGar=d.garAb.slice().sort((a,b)=>String(a.prazo||'9').localeCompare(String(b.prazo||'9'))).map(r=>[esc(String(r.desc||'Chamado').slice(0,90)),esc(r.projId?projNome(r.projId):'')+(r.solicitante?' · '+esc(r.solicitante):''),r.prazo?valPill(r.prazo,3):'']);
+  const lNc=d.ncAb.slice().sort((a,b)=>String(a.prazo||'9').localeCompare(String(b.prazo||'9'))).map(r=>[esc(p1Corta(r.desc||'Não conformidade',90)),esc(r.projId?projNome(r.projId):'sem obra')+(r.resp?' · '+esc(r.resp):''),r.prazo?valPill(r.prazo,7):pill((NC_ST[r.status]||['Aberta'])[0],'warn')]);
+  const lPa=d.paAtr.concat(d.paAb.filter(r=>!d.paAtr.includes(r))).map(r=>[esc((r.numero?r.numero+' · ':'')+p1Corta(r.titulo||r.descr||'Ação',90)),esc(r.projId?projNome(r.projId):''),r.prazo?valPill(r.prazo,7):'']);
+  const lGar=d.garAb.slice().sort((a,b)=>String(a.prazo||'9').localeCompare(String(b.prazo||'9'))).map(r=>[esc(p1Corta(r.desc||'Chamado',90)),esc(r.projId?projNome(r.projId):'')+(r.solicitante?' · '+esc(r.solicitante):''),r.prazo?valPill(r.prazo,3):'']);
   return pageHead('Qualidade','Painel do setor: não conformidades, planos de ação, garantia, verificações, inspeções e satisfação do cliente.','<button class="btn" data-act="nav" data-tab="nc">Não conformidades</button>')+
     '<div class="stack"><div class="bar"><label class="f"><span>Período</span><select data-filter="pnQua.meses">'+opt([['3','Últimos 3 meses'],['6','Últimos 6 meses'],['12','Últimos 12 meses'],['24','Últimos 24 meses']],String(meses))+'</select></label><label class="f"><span>Obra</span><select data-filter="pnQua.obra">'+opt(p1Obras(),obra,'Todas')+'</select></label></div>'+
     '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div>'+
@@ -21396,11 +21409,11 @@ V.pnFrota=()=>{const u=ui.pnFrota,m=u.mes||ym(todayStr()),perm=typeof frLocaisPe
   const locs=(typeof frLocais==='function'?frLocais():[]).filter(l=>!perm||perm.has(l)),local=u.local&&(u.local==='_sem'?!perm:locs.includes(u.local))?u.local:'';
   const d=p1FrotaDados(local,m),fin=p1Fin(),h=todayStr();
   const k1=kpi('Veículos ativos',p1N(d.vs.length),d.rota.length+' em rota agora')+kpi('Disponíveis',p1N(d.disp.length),'no pátio, sem manutenção aberta',d.disp.length?'pos':'')+kpi('Em manutenção',p1N(d.oficina.length),d.manAtr.length+' agendada(s) em atraso',d.manAtr.length?'neg':d.oficina.length?'warn':'')+
-    kpi('Revisões',p1N(d.rev.filter(x=>x.x.neg).length)+' vencida(s)',d.rev.filter(x=>!x.x.neg).length+' próxima(s)',d.rev.some(x=>x.x.neg)?'neg':d.rev.length?'warn':'')+
-    kpi('Documentos',p1N(d.docs.filter(x=>x.d<h).length)+' vencido(s)',d.docs.filter(x=>x.d>=h).length+' vencendo em 30 dias (licenciamento, seguro, IPVA)',d.docs.some(x=>x.d<h)?'neg':d.docs.length?'warn':'');
-  const k2=kpi('Indicação do condutor',p1N(d.multaIndic.length),'multa(s) com prazo vencendo ou vencido',d.multaIndic.length?'neg':'')+kpi('Multas',p1N(d.multaMes),'no mês · '+d.multaAbertas+' em aberto')+
+    kpi('Revisões vencidas',p1N(d.rev.filter(x=>x.x.neg).length),d.rev.filter(x=>!x.x.neg).length+' próxima(s)',d.rev.some(x=>x.x.neg)?'neg':d.rev.length?'warn':'')+
+    kpi('Documentos vencidos',p1N(d.docs.filter(x=>x.d<h).length),d.docs.filter(x=>x.d>=h).length+' vencendo em 30 dias (licenciamento, seguro, IPVA)',d.docs.some(x=>x.d<h)?'neg':d.docs.length?'warn':'');
+  const k2=kpi('Indicação do condutor',p1N(d.multaIndic.length),(d.multaIndic.length===1?'multa':'multas')+' com prazo vencendo ou vencido',d.multaIndic.length?'neg':'')+kpi('Multas',p1N(d.multaMes),'no mês · '+d.multaAbertas+' em aberto')+
     kpi('Saídas no mês',p1N(d.saidas),km1(d.km)+' km rodados'+(d.foraAnt.length?' · '+d.foraAnt.length+' fora desde antes de hoje':''),d.foraAnt.length?'warn':'')+
-    kpi('Checklists',p1N(d.chkRep)+' reprovado(s)',(d.chkLig?d.chkSem+' saída(s) sem checklist · ':'')+fmtYm(m),d.chkRep?'neg':d.chkLig&&d.chkSem?'warn':'')+
+    kpi('Checklists reprovados',p1N(d.chkRep),(d.chkLig?d.chkSem+' saída(s) sem checklist · ':'')+fmtYm(m),d.chkRep?'neg':d.chkLig&&d.chkSem?'warn':'')+
     kpi('Abastecimentos',p1N(d.abN),String(r2(d.litros)).replace('.',',')+' litros'+(d.kml?' · '+d.kml.toFixed(1).replace('.',',')+' km/l em média':'')+(d.anom.length?' · '+d.anom.length+' fora do padrão (30 dias)':''),d.anom.length?'warn':'')+
     (fin?kpi('Combustível no mês',money(d.custo),fmtYm(m)+' · visível só ao Financeiro'):'');
   const lVei=[];d.oficina.forEach(v=>lVei.push([esc(veicNome(v.id)),'em manutenção'+(v.local?' · '+esc(v.local):''),pill('Parado','warn')]));
@@ -21408,10 +21421,10 @@ V.pnFrota=()=>{const u=ui.pnFrota,m=u.mes||ym(todayStr()),perm=typeof frLocaisPe
   d.docs.forEach(x=>lVei.push([esc(veicNome(x.v.id)),esc(x.t),valPill(x.d,30)]));
   d.foraAnt.forEach(s=>lVei.push([esc(veicNome(s.veicId)),'fora desde '+fmtDate(s.saidaEm)+' com '+esc(funcNome(s.funcId)),pill('Sem retorno','warn')]));
   const lMul=d.multaIndic.map(x=>[esc(veicNome(x.r.veicId))+' · '+fmtDate(x.r.data),esc(x.r.infracao||x.r.auto||'')+(x.r.funcId?' · condutor: '+esc(funcNome(x.r.funcId)):' · condutor não indicado'),valPill(x.prazo,+((typeof J2==='function'?J2():{}).multaAviso)||10)]);
-  const lMan=d.manAb.slice().sort((a,b)=>String(a.data).localeCompare(String(b.data))).map(x=>[esc(veicNome(x.veicId))+' · '+esc(x.tipo||''),esc(String(x.desc||'').slice(0,90)),x.data<h?pill('Atrasada desde '+fmtDate(x.data).slice(0,5),'neg'):pill(fmtDate(x.data),'')]);
+  const lMan=d.manAb.slice().sort((a,b)=>String(a.data).localeCompare(String(b.data))).map(x=>[esc(veicNome(x.veicId))+' · '+esc(x.tipo||''),esc(p1Corta(x.desc||'',90)),x.data<h?pill('Atrasada desde '+fmtDate(x.data).slice(0,5),'neg'):pill(fmtDate(x.data),'')]);
   const lAn=d.anom.map(x=>[esc(veicNome(x.a.veicId))+' · '+fmtDate(x.a.data),esc((x.mot||[]).join('; ')),pill('Conferir','warn')]);
   return pageHead('Frota','Painel do setor: disponibilidade, manutenção, documentos, multas e prazo de indicação do condutor, checklists e consumo.','<button class="btn" data-act="nav" data-tab="vsai">Saídas</button><button class="btn" data-act="nav" data-tab="vman">Manutenção</button>')+
-    '<div class="stack">'+(d.semLocal?FR_AVISO:'')+'<div class="bar">'+(locs.length?'<label class="f"><span>Local</span><select data-filter="pnFrota.local">'+opt(locs.map(l=>[l,l]).concat(perm?[]:[['_sem','Sem local']]),local,'Todos os meus locais')+'</select></label>':'')+'<label class="f"><span>Mês</span><input type="month" data-filter="pnFrota.mes" value="'+esc(m)+'"></label>'+(perm&&perm.size?'<p class="sub" style="margin:0;align-self:flex-end">Mostrando só os veículos dos seus locais: '+esc([...perm].join(', '))+'.</p>':'')+'</div>'+
+    '<div class="stack">'+(d.semLocal?FR_AVISO:'')+'<div class="bar">'+(locs.length?'<label class="f" style="flex-basis:210px"><span>Local</span><select data-filter="pnFrota.local">'+opt(locs.map(l=>[l,l]).concat(perm?[]:[['_sem','Sem local']]),local,'Todos os meus locais')+'</select></label>':'')+'<label class="f"><span>Mês</span><input type="month" data-filter="pnFrota.mes" value="'+esc(m)+'"></label>'+(perm&&perm.size?'<p class="sub" style="margin:0;align-self:flex-end">Mostrando só os veículos dos seus locais: '+esc([...perm].join(', '))+'.</p>':'')+'</div>'+
     '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div>'+
     p1Grid([p1Lista('Veículos com pendência',lVei,'veic','Nenhum veículo com pendência.',10),p1Lista('Indicação do condutor',lMul,'multa','Nenhuma multa com prazo de indicação perto do fim.'),p1Lista('Manutenções em aberto',lMan,'vman','Nenhuma manutenção agendada.'),p1Lista('Abastecimentos fora do padrão',lAn,'vanal','Nenhum abastecimento fora do padrão nos últimos 30 dias.')])+
     '<div class="note">Prazo de indicação do condutor: CTB, art. 257, §§ 7º e 8º (prazo da notificação ou '+((typeof J2==='function'?J2():{}).multaDias||30)+' dias contados do recebimento, como configurado).'+(fin?'':' Os custos de combustível e manutenção ficam com o Financeiro.')+'</div></div>';};
@@ -21435,10 +21448,10 @@ V.pnEqp=()=>{const u=ui.pnEqp,obra=u.obra||'',m=u.mes||ym(todayStr()),h=todayStr
   const alu=p1EqpAluguel(m,obra);
   const k1=kpi('Equipamentos ativos',p1N(at.length),sit.filter(x=>x.s.k==='disp').length+' disponível(is) no almoxarifado')+kpi('Em obra',p1N(naObra.length),naObra.filter(x=>x.s.k==='atrasado').length+' com devolução atrasada'+(obra?' · '+esc(projNome(obra)):''),naObra.some(x=>x.s.k==='atrasado')?'neg':'')+
     kpi('Em manutenção',p1N(sit.filter(x=>x.s.k==='manut').length),'')+
-    kpi('Calibração',p1N(calV.length)+' vencida(s)',calA.length+' vencendo em 30 dias · inclui sem registro',calV.length?'neg':calA.length?'warn':'pos')+
-    kpi('Inspeção periódica',p1N(insp.filter(x=>x.d<h).length)+' vencida(s)',insp.filter(x=>x.d>=h).length+' em 15 dias',insp.some(x=>x.d<h)?'neg':insp.length?'warn':'');
+    kpi('Calibração vencida',p1N(calV.length),calA.length+' vencendo em 30 dias · inclui sem registro',calV.length?'neg':calA.length?'warn':'pos')+
+    kpi('Inspeção periódica vencida',p1N(insp.filter(x=>x.d<h).length),insp.filter(x=>x.d>=h).length+' em 15 dias',insp.some(x=>x.d<h)?'neg':insp.length?'warn':'');
   const k2=kpi('Extravios em apuração',p1N(ext.length),extP.length+' devolução(ões) atrasada(s) ou perdida(s) para abrir',ext.length||extP.length?'warn':'')+
-    kpi('Aluguel interno '+fmtYm(m),p1N(alu.dias)+' dia(s)',alu.itens+' equipamento(s) em '+alu.obras+' obra(s)');
+    kpi('Aluguel interno '+fmtYm(m),p1N(alu.dias),(alu.dias===1?'dia de uso':'dias de uso')+' · '+alu.itens+' equipamento(s) em '+alu.obras+' obra(s)');
   const its=p1Alertas('equip');
   const lCom=naObra.slice().sort((a,b)=>(a.s.k==='atrasado'?0:1)-(b.s.k==='atrasado'?0:1)||String((a.s.mv||{}).saidaEm).localeCompare(String((b.s.mv||{}).saidaEm))).map(x=>{const mv=x.s.mv||{};
     return [esc(ferrNome(x.f.id)),esc(mv.projId?projNome(mv.projId):'')+(mv.funcId?' · com '+esc(funcNome(mv.funcId)):'')+(mv.saidaEm?' · desde '+fmtDate(mv.saidaEm):''),mv.previsto?(x.s.k==='atrasado'?pill('Atrasado desde '+fmtDate(mv.previsto).slice(0,5),'neg'):pill('Volta '+fmtDate(mv.previsto).slice(0,5),'acc')):pill('Sem previsão','')];});
@@ -21449,6 +21462,80 @@ V.pnEqp=()=>{const u=ui.pnEqp,obra=u.obra||'',m=u.mes||ym(todayStr()),h=todayStr
     '<div class="kpis">'+k1+'</div><div class="kpis">'+k2+'</div>'+
     p1Grid([p1PendCard(its),p1Lista('Com quem está',lCom,'fmov','Nenhum equipamento em obra.',12),p1Lista('Calibração e inspeção',lCal,'obrcal','Tudo em dia.'),p1Lista('Extravios',lExt,'obrextr','Nenhum extravio em apuração.')])+
     '<div class="note">O aluguel interno aparece em dias de uso nas obras. O valor apropriado a cada obra está em Equipamentos › Aluguel interno.</div></div>';};
+
+/* =====================================================================
+   v117 · CONTRATO DE EXPERIÊNCIA: Prorrogar, Encerrar e Efetivar no painel de Pessoal
+   - Prorrogar: só no 1º período, uma única vez (CLT, art. 451) e com o total até 90 dias (art. 445, parágrafo único).
+     Grava expFim2 no cadastro e a movimentação "Prorrogação da experiência" na vida funcional (quem e quando).
+   - Efetivar: passa a prazo indeterminado no dia seguinte ao fim da experiência (do 1º período, se ainda não
+     prorrogou; da prorrogação, se já está nela). Grava a movimentação "Efetivação"; se a data ainda não chegou,
+     ela fica agendada e é aplicada sozinha no dia (movAplicar).
+   - Encerrar: abre o desligamento com o tipo "Término do contrato de experiência", último dia = fim do contrato
+     e sem aviso prévio; as conferências de estabilidade do desligamento (v112/v113) valem normalmente.
+   ===================================================================== */
+const EXP_MAX=90;
+const expPl=(n,s,p)=>n+' '+(n===1?s:p);
+function expInfo(f){if(!f||f.tipoContrato!=='exp'||!f.admissao)return null;const h=todayStr();
+  const fim1=f.expFim1||addDays(f.admissao,44),dias1=dpDias(f.admissao,fim1)+1;
+  const movP=(S.dpmov||[]).find(m=>m.funcId===f.id&&m.tipo==='prorrog');
+  const em1=h<=fim1,prorrogada=!!(f.expProrrog||movP||(!em1&&f.expFim2));
+  const fim=!em1&&f.expFim2?f.expFim2:fim1,vencida=h>fim;
+  const efet=(S.dpmov||[]).find(m=>m.funcId===f.id&&m.tipo==='efetivacao'&&!m.aplicadaEm);
+  const desl=(S.desl||[]).find(r=>r.funcId===f.id&&!r.concluidoEm);
+  const max=Math.max(0,EXP_MAX-dias1);
+  const podeP=em1&&!prorrogada&&max>0&&!efet&&!desl;
+  return {fim1,dias1,em1,prorrogada,fim,vencida,efet,desl,max,podeP,podeE:!efet&&!desl,podeT:!vencida&&!efet&&!desl,
+    periodo:em1?'1º período':'prorrogação',sug:f.expFim2&&em1?Math.min(max,dpDias(fim1,f.expFim2)):Math.min(max,dias1)};}
+/* regras (usadas pelos modais e pelo teste); devolvem '' quando deu certo ou a mensagem de erro */
+function expProrrogar(fid,dias,motivo){const f=get('func',fid),x=expInfo(f);if(!x)return 'O colaborador não está em contrato de experiência.';
+  dias=Math.round(+dias);if(x.prorrogada)return 'O contrato de experiência só pode ser prorrogado uma vez (CLT, art. 451).';
+  if(!x.em1)return 'A prorrogação tem de ser feita até o último dia do 1º período ('+fmtDate(x.fim1)+').';
+  if(x.efet)return 'Já existe efetivação agendada para este colaborador.';if(x.desl)return 'Há um desligamento em andamento para este colaborador.';
+  if(!(dias>0))return 'Informe quantos dias de prorrogação.';
+  if(x.dias1+dias>EXP_MAX)return 'O total passaria de '+EXP_MAX+' dias ('+x.dias1+' + '+dias+'). O máximo de prorrogação é '+expPl(x.max,'dia','dias')+' (CLT, art. 445, parágrafo único).';
+  const ate=addDays(x.fim1,dias),por=actorId(),em=Date.now(),n=cl(f);
+  n.expFim2=ate;n.expProrrog={dias,ate,por,em};put('func',n);
+  put('dpmov',{id:uid(),funcId:f.id,tipo:'prorrog',data:addDays(x.fim1,1),dias,motivo:String(motivo||'').trim()||'Prorrogação do contrato de experiência',por,em,aplicadaEm:em});
+  return '';}
+function expEfetivar(fid,motivo){const f=get('func',fid),x=expInfo(f);if(!x)return 'O colaborador não está em contrato de experiência.';
+  if(x.efet)return 'A efetivação já está agendada para '+fmtDate(x.efet.data)+'.';if(x.desl)return 'Há um desligamento em andamento para este colaborador.';
+  const data=addDays(x.fim,1),por=actorId(),em=Date.now(),n=cl(f);
+  n.expDecisao={tipo:'efetivar',data,por,em};if(x.em1&&n.expFim2&&!x.prorrogada){n.expDecisao.expFim2Ant=n.expFim2;n.expFim2='';}
+  put('func',n);
+  const mv={id:uid(),funcId:f.id,tipo:'efetivacao',data,motivo:String(motivo||'').trim()||'Aprovado no contrato de experiência: passa a prazo indeterminado',por,em};put('dpmov',mv);
+  if(data<=todayStr())movAplicar(get('dpmov',mv.id));
+  return '';}
+function expEncerrarForm(fid){const f=get('func',fid),x=expInfo(f);if(!x)return 'O colaborador não está em contrato de experiência.';
+  if(x.desl)return 'Já existe um desligamento em andamento para este colaborador.';if(x.efet)return 'Há efetivação agendada. Cancele a movimentação antes de encerrar.';
+  if(x.vencida)return 'O contrato de experiência terminou em '+fmtDate(x.fim)+' sem encerramento: o contrato já é por prazo indeterminado. Use Desligamentos com o tipo adequado.';
+  const d=MODS2.desl;formMod(d,Object.assign(d.blank(),{funcId:f.id,tipo:'fim_exp',avisoModo:'nao',dataAviso:todayStr(),saida:x.fim,motivo:'Término do contrato de experiência ('+x.periodo+' até '+fmtDate(x.fim)+')'}));return '';}
+/* botões (só para quem grava no RH) ou a situação já decidida */
+function expAcoes(f){const x=expInfo(f);if(!x)return '';
+  if(x.efet)return '<div class="xpAc">'+pill('Efetivação em '+fmtDate(x.efet.data),'pos')+'</div>';
+  if(x.desl)return '<div class="xpAc">'+pill('Desligamento em andamento','warn')+'</div>';
+  if(!mayW('rh'))return '';
+  return '<div class="xpAc">'+(x.podeP?'<button class="btn sm" data-act="expProrrogar" data-id="'+esc(f.id)+'">Prorrogar</button>':'')+
+    '<button class="btn sm pri" data-act="expEfetivar" data-id="'+esc(f.id)+'">Efetivar</button>'+
+    (x.podeT?'<button class="btn sm dng" data-act="expEncerrar" data-id="'+esc(f.id)+'">Encerrar</button>':'')+'</div>';}
+const expResumo=(f,x)=>'Admissão em '+fmtDate(f.admissao)+' · 1º período até '+fmtDate(x.fim1)+' ('+expPl(x.dias1,'dia','dias')+')'+(f.expFim2?' · prorrogação até '+fmtDate(f.expFim2):'')+'.';
+A.expProrrogar=d=>{const f=get('func',d.id),x=expInfo(f);if(!x)return;
+  if(!x.podeP){toast(x.prorrogada?'O contrato de experiência só pode ser prorrogado uma vez (CLT, art. 451).':!x.em1?'O 1º período já terminou: não cabe mais prorrogação.':x.max<=0?'O 1º período já tem 90 dias: não cabe prorrogação.':'Não é possível prorrogar agora.','neg');return;}
+  modal({title:'Prorrogar experiência · '+f.nome,body:'<p style="margin:0 0 10px">'+esc(expResumo(f,x))+'</p><div class="fg">'+field('Dias de prorrogação (máximo '+x.max+')','dias','number',x.sug)+field('Motivo / observação','motivo','text','',{full:true})+'</div>'+
+    '<p class="sub" style="margin:10px 0 0">A prorrogação só pode acontecer uma vez e o total do contrato não pode passar de 90 dias (CLT, arts. 445 e 451). Novo fim = '+fmtDate(x.fim1)+' + dias informados. A alteração fica registrada em Pessoal › Movimentações, com o seu nome e a data.</p>',
+    saveLabel:'Confirmar prorrogação',save:root=>{const v=readForm(root),e=expProrrogar(f.id,v.dias,v.motivo);if(e){toast(e,'neg');return false;}toast('Experiência prorrogada até '+fmtDate(get('func',f.id).expFim2)+'.','pos');render();}});};
+A.expEfetivar=d=>{const f=get('func',d.id),x=expInfo(f);if(!x)return;if(!x.podeE){toast(x.efet?'A efetivação já está agendada.':'Há um desligamento em andamento.','neg');return;}
+  const data=addDays(x.fim,1);
+  modal({title:'Efetivar · '+f.nome,body:'<p style="margin:0 0 10px">'+esc(expResumo(f,x))+'</p><p style="margin:0 0 10px"><b>'+esc(f.nome)+'</b> passa a contrato por <b>prazo indeterminado</b> a partir de <b>'+fmtDate(data)+'</b> (dia seguinte ao fim do '+esc(x.periodo)+').'+(x.em1&&f.expFim2&&!x.prorrogada?' A prorrogação prevista até '+fmtDate(f.expFim2)+' deixa de valer.':'')+'</p>'+
+    '<div class="fg">'+field('Observação','motivo','text','',{full:true})+'</div><p class="sub" style="margin:10px 0 0">A alteração fica registrada em Pessoal › Movimentações (vida funcional), com o seu nome e a data.'+(data>todayStr()?' Ela é aplicada ao cadastro automaticamente em '+fmtDate(data)+'.':'')+'</p>',
+    saveLabel:'Confirmar efetivação',save:root=>{const v=readForm(root),e=expEfetivar(f.id,v.motivo);if(e){toast(e,'neg');return false;}toast(data>todayStr()?'Efetivação agendada para '+fmtDate(data)+'.':'Colaborador efetivado.','pos');render();}});};
+A.expEncerrar=d=>{const f=get('func',d.id),x=expInfo(f);if(!x)return;if(!x.podeT){const e=expEncerrarForm(f.id);if(e)toast(e,'neg');return;}
+  confirmBox('Encerrar o contrato de experiência de <b>'+esc(f.nome)+'</b> no fim do '+esc(x.periodo)+' ('+fmtDate(x.fim)+')? Em seguida abre o desligamento com o tipo "Término do contrato de experiência", que confere estabilidades (gestante, CIPA, acidente) antes de salvar.',
+    ()=>{const e=expEncerrarForm(f.id);if(e){toast(e,'neg');return false;}},'Abrir desligamento',true);};
+/* o antigo botão "Decidir" (Painel do DP e alertas) abre as mesmas ações */
+A.dpExp=d=>{const f=get('func',d.id),x=expInfo(f);if(!x){toast('O colaborador não está em contrato de experiência.','neg');return;}
+  modal({title:'Experiência · '+f.nome,body:'<p style="margin:0 0 8px">'+esc(expResumo(f,x))+'</p><p class="sub" style="margin:0">Sem manifestação até o último dia, o contrato passa a ser por prazo indeterminado. A prorrogação só pode ocorrer uma vez e o total não passa de 90 dias.</p>'+expAcoes(f),
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'});};
+Object.assign(ACT_GROUP,{expProrrogar:'rh',expEfetivar:'rh',expEncerrar:'rh',dpExp:'rh'});
 
 /* ===== v115 (P2): painéis de setor — Comercial, Obras, Suprimentos, Financeiro e Fiscal =====
    Cada setor tem a própria tela "Painel" (primeiro item do submenu do módulo), visível só para quem lê o grupo do módulo:
@@ -21567,7 +21654,7 @@ V.pnCom=()=>{const d=pn2Def('pnCom');if(!mayR(d.group))return pn2Sem(d);
   /* funil por fase */
   const funil=pn2Try('funil',()=>{const fases=OPP_ET.filter(e=>!['ganha','perdida','desistencia'].includes(e[0]));const mx=Math.max(1,...fases.map(e=>ops.filter(o=>o.etapa===e[0]).length));
     return pn2Card('Funil de propostas por fase','em aberto','<div style="margin-top:8px">'+fases.map(e=>{const ls=ops.filter(o=>o.etapa===e[0]),v=sum(ls,oppPreco);
-      return '<div style="display:grid;grid-template-columns:minmax(120px,230px) 1fr 130px;gap:8px;align-items:center;margin:4px 0"><span>'+esc(e[1])+'</span><div style="height:20px;background:var(--line);border-radius:5px;overflow:hidden"><div style="height:100%;width:'+Math.max(2,ls.length/mx*100)+'%;background:var(--accent)"></div></div><span class="num mono">'+ls.length+' · '+money(v)+'</span></div>';}).join('')+'</div>',pn2Btn('opp','Oportunidades e licitações')+pn2Btn('cind','Indicadores comerciais'));});
+      return '<div class="pn2Fu" style="display:grid;grid-template-columns:minmax(120px,230px) minmax(60px,1fr) auto;gap:8px;align-items:center;margin:4px 0"><span>'+esc(e[1])+'</span><div style="height:20px;background:var(--line);border-radius:5px;overflow:hidden"><div style="height:100%;width:'+Math.max(2,ls.length/mx*100)+'%;background:var(--accent)"></div></div><span class="num mono" style="white-space:nowrap;text-align:right">'+ls.length+' · '+money(v)+'</span></div>';}).join('')+'</div>',pn2Btn('opp','Oportunidades e licitações')+pn2Btn('cind','Indicadores comerciais'));});
   /* propostas: go/no-go, margem, exequibilidade e sessões */
   const props=pn2Try('propostas',()=>{const its=[];
     goPend.forEach(o=>its.push(pn2Li('<b>'+esc(o.titulo)+'</b>','Go/no-go pedido · margem '+pctV(o.goReq.margem)+' · preço '+money(o.goReq.preco),pill('aguardando diretoria','warn'),pn2Btn('opp'))));
@@ -21619,7 +21706,7 @@ V.pnObr=()=>{const d=pn2Def('pnObr');if(!mayR(d.group))return pn2Sem(d);
     kpi('Diários de obra pendentes',String(rdoPend),'sem assinatura · '+semDiario+' obra(s) sem diário há mais de '+c.rdoSemDias+' d',rdoPend?'neg':'')+
     kpi('Medições de empreiteiro',String(meAg.length),'aguardando aprovação · '+ceSemMed.length+' contrato(s) sem medição em '+fmtYm(m),meAg.length?'neg':'')+
     kpi('Horas extras pedidas',String(he.length),'aguardando aprovação',he.length?'neg':'')+
-    (dia>=5?kpi('Previsão no término',String(prevFalta),'obra(s) sem a previsão de '+fmtYm(m),prevFalta?'neg':''):'')+'</div>';
+    (dia>=5?kpi('Previsão no término',String(prevFalta),(prevFalta===1?'obra':'obras')+' sem a previsão de '+fmtYm(m),prevFalta?'neg':''):'')+'</div>';
   const th='<th>Obra</th><th>Avanço físico</th><th>Último diário</th><th>Linha de base</th><th>Previsão do mês</th>'+(veC?'<th class="num">Orçado (EAP)</th><th class="num">Gasto até hoje</th><th class="num">Custo final previsto</th><th class="num">Desvio</th>':'')+'<th></th>';
   const tab='<div class="card"><h2>Obras em andamento<small>'+(veC?'avanço, diário, linha de base e custo da obra (custo único)':'avanço, diário e linha de base')+'</small></h2><div class="tw" style="border:0;margin-top:8px"><table style="min-width:'+(veC?1100:760)+'px"><thead><tr>'+th+'</tr></thead><tbody>'+
     (linhas.length?linhas.map(x=>{const av=x.av,dv=av&&av.exp!=null?av.pct-av.exp:null;
@@ -21751,7 +21838,7 @@ V.pnFis=()=>{const d=pn2Def('pnFis');if(!mayR(d.group))return pn2Sem(d);
     kpi('Notas a escriturar',String(ent.length+inbox.filter(n=>n.valid==='validada').length),ent.length+' nota(s) de entrada em rascunho',ent.length?'neg':'')+
     kpi('NFS-e a emitir',String(nfse.length),'em rascunho'+(canc.length?' · '+canc.length+' cancelamento(s) pedido(s)':''),nfse.length?'neg':'')+
     kpi('Medições sem NFS-e',String(sem.n),'há mais de '+sem.dias+' dias · '+money(sem.valor),sem.n?'neg':'')+
-    kpi('Conferência de faturamento',String(conf.length),'medição(ões) com problema em '+fmtYm(m),conf.length?'neg':'')+
+    kpi('Conferência de faturamento',String(conf.length),(conf.length===1?'medição':'medições')+' com problema em '+fmtYm(m),conf.length?'neg':'')+
     kpi('Retenções sem comprovante',String(ret.length),money(sum(ret,e=>e.semComp))+' (12 meses)',ret.length?'neg':'')+
     kpi('Fechamento de '+fmtYm(m),fechSt[0],ext.length+' extemporâneo(s) a revisar',fechSt[1])+'</div>';
   const cNotas=pn2Try('notas',()=>{const its=ent.map(n=>pn2Li('NF '+esc(n.numero||'s/n')+' · '+esc(parcNome(n.parcId)),n.emissao?'emissão '+fmtDate(n.emissao):'',pill('rascunho','warn'),pn2Btn('nf','Abrir',' data-nftipo="entrada"')))
@@ -21841,9 +21928,43 @@ const waBaixarUrl=a=>'/_blob/'+a.id+'?baixar=1&nome='+encodeURIComponent(String(
 {const css='.wa-dl{display:inline-block;margin:4px 2px 0;font-size:12px;color:var(--wa-green,#00a884);text-decoration:none;font-weight:600}.wa-dl:hover{text-decoration:underline}';
   try{const st=document.createElement('style');st.textContent=css;document.head.appendChild(st);}catch(e){}}
 
+/* ===== v117: ajustes de layout dos painéis de setor (transversal) =====
+   - Todos os 10 painéis (pnPes, pnSst, pnQua, pnFrota, pnEqp, pnCom, pnObr, pnSup, pnFin, pnFis) ficam dentro de
+     <div class="pnSetor">, com CSS próprio: o número e o botão "Abrir" das listas não saem mais da caixa (o texto
+     quebra e a coluna da direita não encolhe); em tela estreita a coluna da direita desce para baixo do texto;
+     o grupo de indicadores não mostra fundo cinza nas células vazias; valores dos indicadores quebram se precisar.
+   - Plurais: "1 contrato(s)" vira "1 contrato" e "3 contrato(s)" vira "3 contratos" (só no texto visível, quando
+     há um número logo antes; as palavras seguintes com "(s)" concordam com o mesmo número). */
+const P3_PAINEIS=['pnPes','pnSst','pnQua','pnFrota','pnEqp','pnCom','pnObr','pnSup','pnFin','pnFis'];
+{const css='.pnSetor .li{align-items:center}.pnSetor .li>div:first-child{flex:1 1 180px;min-width:0}'+
+  '.pnSetor .li>div:last-child:not(:first-child){flex:0 0 auto;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px}'+
+  '.pnSetor .li .t{overflow:visible;text-overflow:clip;overflow-wrap:anywhere}'+
+  '.pnSetor .kpis{gap:0;background:var(--surface)}.pnSetor .kpi{border-right:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 -1px -1px 0}'+
+  '.pnSetor .kv{overflow-wrap:break-word}.pnSetor .card h2{overflow-wrap:anywhere}'+
+  '.pnSetor .card svg{max-height:340px}.pnSetor td.mono b,.pnSetor td.mono{white-space:nowrap}'+
+  '.pnSetor .xpAc{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}'+
+  '@media (max-width:640px){.pnSetor .li{flex-wrap:wrap;row-gap:6px}.pnSetor .li>div:last-child:not(:first-child){margin-left:auto;flex:0 1 auto;max-width:100%}.pnSetor .kv{font-size:17px}.pnSetor .tw td,.pnSetor .tw th{padding-left:6px;padding-right:6px}.pnSetor .tw td .pill{white-space:normal;text-align:center}.pnSetor .card h2 small{display:block;margin:3px 0 0}.pnSetor .pn2Fu{grid-template-columns:minmax(0,1fr) auto!important;row-gap:2px!important}.pnSetor .pn2Fu>div{grid-column:1/-1;order:3;height:8px!important}'+
+  '.pnSetor .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pnSetor .bar .f{flex:1 1 150px}.pnSetor .bar>p{flex-basis:100%}}';
+  try{const st=document.createElement('style');st.textContent=css;document.head.appendChild(st);}catch(e){}}
+/* plural de uma palavra marcada com (s), (es), (is), (ns) ou (ões) */
+function p3Pal(w,n){const m=/^(.*?)\((s|es|is|ns|ões)\)$/.exec(w);if(!m)return w;const b=m[1],s=m[2];if(n===1)return b;
+  if(s==='es')return /^m[eê]s$/i.test(b)?b.replace(/[eê]s$/i,'eses'):b+'es';
+  if(s==='is')return b.replace(/l$/,'')+'is';if(s==='ns')return b.replace(/m$/,'')+'ns';if(s==='ões')return b.replace(/ão$/,'')+'ões';return b+'s';}
+/* aplica só no texto (fora das tags): "N palavra(s) [de|com|...] outra(s)" */
+function p3Plural(h){let a=String(h),b='';for(let i=0;i<4&&a!==b;i++){b=a;a=p3Plural1(a);}
+  /* selos de prazo quebram como "Vencido há / 40 d", nunca separando o número da unidade */
+  return a.replace(/(>(?:Vencido há|Vence em|Atrasado desde|Atrasada desde|Liberado até|Emitir até|Volta) )(\S+) (d<|dias<)/g,'$1$2&nbsp;$3');}
+function p3Plural1(h){return String(h).split(/(<[^>]*>)/).map(seg=>{if(!seg||seg[0]==='<'||seg.indexOf('(')<0)return seg;
+  return seg.replace(/(^|[^\d,.])(\d{1,7})((?:\s+(?!\d)[^\s<>()]+(?:\((?:s|es|is|ns|ões)\))?){1,6})/g,(all,pre,num,resto)=>{if(!/\((?:s|es|is|ns|ões)\)/.test(resto))return all;const n=+num;
+    /* concorda até a primeira palavra sem marca depois de uma marcada que não seja de ligação */
+    let parar=false,viu=false;const ws=resto.split(/(\s+)/);
+    return pre+num+ws.map(w=>{if(parar||/^\s*$/.test(w))return w;if(/\((?:s|es|is|ns|ões)\)$/.test(w)){viu=true;return p3Pal(w,n);}if(/^\d/.test(w)){parar=true;return w;}if(viu&&!/^(de|do|da|dos|das|em|com|e|ou|sem|a|o)$/i.test(w))parar=true;return w;}).join('');});}).join('');}
+P3_PAINEIS.forEach(id=>{const v0=V[id];if(typeof v0!=='function')return;V[id]=function(){const h=v0.apply(this,arguments);return '<div class="pnSetor">'+p3Plural(h)+'</div>';};});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='116',APP_DATA='2026-10-27';
+const APP_VER='117',APP_DATA='2026-10-27';
 const CHANGELOG=[
+  ['117','2026-10-27',['Contratos de experiência (Pessoal › Painel): botões Prorrogar (só no 1º período, uma vez e até 90 dias), Efetivar (prazo indeterminado no dia seguinte ao fim da experiência) e Encerrar (abre o desligamento com o motivo certo).', 'Painéis de setor revisados no computador e no celular: botões dentro das caixas, indicadores com número curto e texto na legenda, plurais corretos e sem rolagem lateral.']],
   ['116','2026-10-27',['Chat: chamada de vídeo individual volta a funcionar (o servidor escondia da outra pessoa os dados que combinam a chamada); se a ligação direta não conectar, aparece a opção de chamada por link.', 'Chat: mensagens e anexos chegam ao vivo para quem recebe (antes esperavam a consulta periódica).', 'Chat: anexos baixam com o nome original, sem abrir aba; fotos ganharam o botão Baixar. Anexo continua visível só para quem participa da conversa.']],
   ['115.2','2026-10-27',['Notas fiscais de saída e NFS-e (faturamento) só para Financeiro, Fiscal, Comercial, Administrador e Diretoria, também no servidor. Comprador, Almoxarife, Gestor de projetos e os perfis de leitura continuam vendo só as notas de entrada.']],
   ['115.1','2026-10-27',['Cadastro de colaboradores: novo tipo de contrato Sócio, sem controle de ASO, férias, ponto e treinamentos (sai das cobranças, alertas, ponto do dia e conferência do ponto; conta como apto para obra).']],
