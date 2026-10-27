@@ -858,6 +858,13 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const LEIT_LIVRE = new Set(['cfg', 'usr', 'cm', 'pt', 'usrreq', 'lgpdc', 'implog', 'ctbfech', 'aptid', 'tercsit', 'moapr', 'aptlib', 'perfc']); /* v114: definições dos perfis personalizados (sem dado pessoal; o app de cada pessoa precisa delas); v113: liberações do SST (sem dado de saúde: só nome, obra, validade e motivo técnico); v111: resumos sem dado sensível, para toda a Equipe */
   const VEIC_COLS = new Set(['veic', 'vsai', 'vabas', 'vman', 'multa', 'mult', 'vrota', 'ventr']);
   const permLog = db.prepare('INSERT INTO perm_log(dia,conta,perfil,col,n,ult) VALUES(?,?,?,?,1,?) ON CONFLICT(dia,conta,col) DO UPDATE SET n=n+1, ult=excluded.ult, perfil=excluded.perfil');
+  /* v115.2: faturamento (notas de saída e NFS-e) só para quem lê o financeiro, Fiscal, Comercial, Administrador e Diretoria */
+  function veFaturamento(conta) {
+    if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
+    const pf = perfilDe(conta), pp = papelDe(pf); if (['admin', 'diretoria', 'fiscal', 'comercial', 'financeiro'].includes(pp)) return true;
+    const pr = PERM.perfis[pf]; if (!pr) return false; if (pr.w === '*') return true;
+    const gs = ['fin', 'ctb']; return gs.some(g => (pr.w || []).includes(g) || (Array.isArray(pr.r) && pr.r.includes(g)));
+  }
   function leModulo(conta, c0) {
     const pf = perfilDe(conta), pr = PERM.perfis[pf]; if (!pr || pr.w === '*' || pr.r === '*') return true;
     const gs = (PERM.leitura && PERM.leitura[c0]) || PERM.colecoes[c0]; if (!gs || !gs.length) return true;
@@ -905,6 +912,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const c0 = p.split('/')[0];
     if (c0 === 'lixo') { if (!data || !data.col) return true; if (data.col === 'func' && !veFuncCompleto(conta)) return false; const pp = data.col + '/' + (data.rid || 'x'); return perfilPermite(conta, pp, 'r') && podeLer(conta, pp, data.rec || null, memo); }
     if (VEIC_COLS.has(c0) && !veicOk(conta, c0, data, memo)) return false;
+    if ((c0 === 'nfse' || (c0 === 'notas' && data && data.tipo === 'saida')) && !veFaturamento(conta)) return false; /* v115.2 */
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
