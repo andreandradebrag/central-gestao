@@ -1,9 +1,10 @@
 {
- "gerado": "2026-10-26T22:50:53.107Z",
+ "gerado": "2026-10-27T02:49:19.899Z",
  "perfis": {
   "admin": {
    "w": "*",
-   "r": "*"
+   "r": "*",
+   "frotaTodos": true
   },
   "financeiro": {
    "w": [
@@ -31,7 +32,8 @@
     "qual",
     "meu",
     "ajuda"
-   ]
+   ],
+   "frotaTodos": true
   },
   "fiscal": {
    "w": [
@@ -130,7 +132,8 @@
     "lgpd",
     "meu",
     "ajuda"
-   ]
+   ],
+   "frotaTodos": true
   },
   "pendente": {
    "w": [],
@@ -191,6 +194,91 @@
     "meu",
     "ajuda"
    ]
+  },
+  "encarregado": {
+   "w": [
+    "proj",
+    "comp",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "est",
+    "ferr",
+    "frota",
+    "meu",
+    "ajuda"
+   ],
+   "so": {
+    "proj": [
+     "rdo",
+     "heaut",
+     "obrchk"
+    ],
+    "comp": [
+     "sc"
+    ]
+   }
+  },
+  "compras": {
+   "w": [
+    "comp",
+    "est",
+    "cad",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "nf",
+    "ferr",
+    "frota",
+    "meu",
+    "ajuda"
+   ]
+  },
+  "sst": {
+   "w": [
+    "sst",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "rh",
+    "ferr",
+    "frota",
+    "meu",
+    "ajuda"
+   ]
+  },
+  "comercial": {
+   "w": [
+    "ctr",
+    "cad",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "painel",
+    "proj",
+    "serv",
+    "qual",
+    "dir",
+    "meu",
+    "ajuda"
+   ]
+  },
+  "diretoria": {
+   "w": [
+    "chat",
+    "agenda"
+   ],
+   "r": "*",
+   "frotaTodos": true
   }
  },
  "colecoes": {
@@ -257,7 +345,8 @@
    "ponto"
   ],
   "rhdoc": [
-   "rh"
+   "rh",
+   "sst"
   ],
   "epi": [
    "sst"
@@ -309,6 +398,13 @@
   "ctbfech": [
    "ctb",
    "fin"
+  ],
+  "fzpedfech": [
+   "ctb"
+  ],
+  "fzportal": [
+   "ctb",
+   "nf"
   ],
   "ponto": [
    "ponto"
@@ -588,7 +684,8 @@
    "folha"
   ],
   "heaut": [
-   "ponto"
+   "ponto",
+   "proj"
   ],
   "quadro": [
    "rh"
@@ -604,7 +701,29 @@
    "dir"
   ],
   "medemp": [
+   "fin",
+   "proj"
+  ],
+  "moapr": [
+   "rh"
+  ],
+  "ctremp": [
+   "proj",
    "fin"
+  ],
+  "obrbase": [
+   "proj"
+  ],
+  "obrprev": [
+   "proj"
+  ],
+  "aptid": [
+   "rh",
+   "sst"
+  ],
+  "tercsit": [
+   "rh",
+   "sst"
   ]
  },
  "leitura": {
@@ -633,7 +752,8 @@
   ],
   "prod": [
    "est",
-   "comp"
+   "comp",
+   "fin"
   ],
   "mov": [
    "est",
@@ -647,7 +767,8 @@
   ],
   "parc": [
    "cad",
-   "comp"
+   "comp",
+   "fin"
   ],
   "plano": [
    "plano"
@@ -660,12 +781,14 @@
   ],
   "usr": [
    "usr",
-   "dir"
+   "dir",
+   "fin"
   ],
   "cfg": [
    "cfg",
    "ponto",
-   "dir"
+   "dir",
+   "fin"
   ],
   "func": [
    "rh",
@@ -673,7 +796,8 @@
    "ponto"
   ],
   "rhdoc": [
-   "rh"
+   "rh",
+   "sst"
   ],
   "epi": [
    "sst"
@@ -706,7 +830,8 @@
    "comp"
   ],
   "cot": [
-   "comp"
+   "comp",
+   "fin"
   ],
   "sep": [
    "comp"
@@ -725,6 +850,13 @@
   "ctbfech": [
    "ctb",
    "fin"
+  ],
+  "fzpedfech": [
+   "ctb"
+  ],
+  "fzportal": [
+   "ctb",
+   "nf"
   ],
   "ponto": [
    "ponto"
@@ -982,11 +1114,13 @@
    "fin"
   ],
   "acordo": [
-   "comp"
+   "comp",
+   "fin"
   ],
   "invaj": [
    "comp",
-   "est"
+   "est",
+   "fin"
   ],
   "devobra": [
    "est"
@@ -1004,7 +1138,8 @@
    "folha"
   ],
   "heaut": [
-   "ponto"
+   "ponto",
+   "proj"
   ],
   "quadro": [
    "rh"
@@ -1020,7 +1155,21 @@
    "dir"
   ],
   "medemp": [
+   "fin",
+   "proj"
+  ],
+  "moapr": [],
+  "ctremp": [
+   "proj",
    "fin"
-  ]
+  ],
+  "obrbase": [
+   "proj"
+  ],
+  "obrprev": [
+   "proj"
+  ],
+  "aptid": [],
+  "tercsit": []
  }
 }

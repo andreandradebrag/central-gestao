@@ -8,5 +8,6 @@ baixar(){ mkdir -p "$(dirname "$1")"; curl -fsSL --proto '=https' --tlsv1.2 -o "
 baixar xlsx/xlsx.full.min.js           https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
 baixar html2canvas/html2canvas.min.js  https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
 baixar jspdf/jspdf.umd.min.js          https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
+baixar pdflib/pdf-lib.min.js           https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js
 grep -q "SheetJS" xlsx/xlsx.full.min.js && head -c 300 xlsx/xlsx.full.min.js | grep -o 'version[^,;]*' | head -1 || true
 echo "Pronto. Faça commit de gestao/public/vendor e implante o serviço gestao."

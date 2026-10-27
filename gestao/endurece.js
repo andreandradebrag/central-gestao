@@ -25,7 +25,8 @@ const VENDOR = [
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', local: 'vendor/xlsx/xlsx.full.min.js' },
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', local: 'vendor/html2canvas/html2canvas.min.js' },
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', local: 'vendor/jspdf/jspdf.umd.min.js' },
-  { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', local: 'vendor/jszip/jszip.min.js' }
+  { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', local: 'vendor/jszip/jszip.min.js' },
+  { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js', local: 'vendor/pdflib/pdf-lib.min.js' } /* v111: assinatura/montagem de PDF (new_rh2.js) */
 ];
 /* integridade (SRI) dos arquivos da CDN usados quando a cópia local não existe. Só entra aqui o que foi
    calculado sobre o arquivo da mesma versão: jszip.min.js 3.10.1 do pacote npm (o mesmo que a cdnjs publica).
@@ -132,6 +133,59 @@ module.exports = function criar(o) {
     ['POST', /^\/api\/admin\/importar$/, 'dono'], ['GET', /^\/api\/admin\/exportar$/, 'dono'],
     ['POST', /^\/api\/contas$/, 'gestor'], ['POST', /^\/api\/contas\/[A-Za-z0-9_-]{1,60}$/, 'gestor']
   ];
+
+  /* ---------------- v111: aparelho confiável por 30 dias (verificação em duas etapas) ----------------
+     Só para perfis sem Financeiro e sem Administrador (nem dono, nem Diretoria, que aprova pagamentos). Depois do código
+     certo, a pessoa pode marcar "confiar neste aparelho": o servidor grava um cookie assinado (HMAC) só para /login e
+     guarda o hash dele. No próximo login com a senha certa, o código não é pedido. Revoga em Segurança › Aparelhos
+     confiáveis, ao desligar a verificação, ao trocar a senha ou ao "sair de todos os outros aparelhos".
+     APARELHO_CONFIAVEL=0 desliga; APARELHO_CONFIAVEL_DIAS (padrão 30, máx. 90). */
+  db.exec('CREATE TABLE IF NOT EXISTS aparelhos(id TEXT PRIMARY KEY, conta TEXT NOT NULL, hash TEXT NOT NULL, criado INTEGER, expira INTEGER, ua TEXT, ip TEXT, usado INTEGER, revogado INTEGER)');
+  const APC_LIGADO = () => !/^(0|nao|não|false|desligado)$/i.test(String(env.APARELHO_CONFIAVEL == null ? '1' : env.APARELHO_CONFIAVEL));
+  const APC_DIAS = () => Math.max(1, Math.min(90, +env.APARELHO_CONFIAVEL_DIAS || 30));
+  let APC_CHAVE = null;
+  function apcChave() {
+    if (APC_CHAVE) return APC_CHAVE;
+    const cm = SEG.chaveMestra && SEG.chaveMestra();
+    if (cm) APC_CHAVE = crypto.createHash('sha256').update('aparelho-confiavel|' + (Buffer.isBuffer(cm) ? cm.toString('hex') : String(cm))).digest();
+    else { let r = db.prepare("SELECT v FROM cfg WHERE k='apc_chave'").get(); if (!r) { const v = crypto.randomBytes(32).toString('hex'); db.prepare("INSERT OR REPLACE INTO cfg(k,v) VALUES('apc_chave',?)").run(v); r = { v }; } APC_CHAVE = Buffer.from(r.v, 'hex'); }
+    return APC_CHAVE;
+  }
+  const apcAssina = t => crypto.createHmac('sha256', apcChave()).update(t).digest('base64url');
+  function aparelhoElegivel(c) {
+    if (!APC_LIGADO() || !c || c.nivel === 'owner') return false;
+    const pf = F().perfilDe(c); if (['admin', 'financeiro', 'diretoria'].includes(pf)) return false;
+    const pr = PERM.perfis && PERM.perfis[pf]; if (pr && (pr.w === '*' || pr.r === '*' || (pr.w || []).includes('fin'))) return false;
+    return true;
+  }
+  /* devolve o cabeçalho Set-Cookie do aparelho confiável (para somar ao da sessão) */
+  function aparelhoEmitir(req, c) {
+    const id = crypto.randomBytes(9).toString('base64url'), tok = crypto.randomBytes(32).toString('base64url'), ag = Date.now(), exp = ag + APC_DIAS() * 864e5;
+    db.prepare('INSERT INTO aparelhos(id,conta,hash,criado,expira,ua,ip) VALUES(?,?,?,?,?,?,?)').run(id, c.id, SEG.sha(tok), ag, exp, String(req.headers['user-agent'] || '').slice(0, 300), F().ipDe(req));
+    const v = id + '.' + tok, seguro = String(req.headers['x-forwarded-proto'] || '').includes('https') || !!req.socket.encrypted;
+    return { id, cookie: 'apc=' + v + '.' + apcAssina(v + '.' + c.id) + '; Path=/login; HttpOnly; SameSite=Lax; Max-Age=' + APC_DIAS() * 86400 + (seguro ? '; Secure' : '') };
+  }
+  /* id do aparelho confiável válido para esta conta (ou null) */
+  function aparelhoValido(req, c) {
+    try {
+      if (!aparelhoElegivel(c)) return null;
+      const v = String(F().cookies(req).apc || ''), ps = v.split('.'); if (ps.length !== 3) return null;
+      const a = Buffer.from(ps[2]), b = Buffer.from(apcAssina(ps[0] + '.' + ps[1] + '.' + c.id)); if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+      const r = db.prepare('SELECT * FROM aparelhos WHERE id=?').get(ps[0]); if (!r || r.conta !== c.id || r.revogado || r.expira < Date.now() || r.hash !== SEG.sha(ps[1])) return null;
+      db.prepare('UPDATE aparelhos SET usado=? WHERE id=?').run(Date.now(), r.id); return r.id;
+    } catch (e) { return null; }
+  }
+  const aparelhosDe = contaId => db.prepare('SELECT id, ua, ip, criado, expira, usado FROM aparelhos WHERE conta=? AND revogado IS NULL AND expira>? ORDER BY criado DESC').all(contaId, Date.now());
+  const aparelhoRevogar = (contaId, id) => db.prepare('UPDATE aparelhos SET revogado=? WHERE conta=? AND id=? AND revogado IS NULL').run(Date.now(), contaId, String(id || '')).changes;
+  const aparelhosRevogarTodos = contaId => db.prepare('UPDATE aparelhos SET revogado=? WHERE conta=? AND revogado IS NULL').run(Date.now(), contaId).changes;
+  function cartaoAparelhos(c) {
+    const { esc } = F(), quando = t => t ? new Date(t).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
+    if (!aparelhoElegivel(c)) return '<div class="card"><h2>Aparelhos confiáveis</h2><p class="sub" style="margin:0">' + (APC_LIGADO() ? 'Para o seu perfil (Administrador, Financeiro, Diretoria ou dono) o código do aplicativo é pedido em todo login: não existe "confiar neste aparelho".' : 'Desligado neste servidor (APARELHO_CONFIAVEL=0).') + '</p></div>';
+    const ls = aparelhosDe(c.id);
+    return '<div class="card"><h2>Aparelhos confiáveis</h2><p class="sub" style="margin:0 0 10px">Nestes aparelhos o sistema não pede o código do aplicativo por ' + APC_DIAS() + ' dias (a senha continua sendo pedida). Revogue se perder o celular ou se o aparelho não for mais seu.</p>' +
+      (ls.length ? '<table><thead><tr><th>Aparelho</th><th>Endereço</th><th>Desde</th><th>Último uso</th><th>Vale até</th><th></th></tr></thead><tbody>' + ls.map(a => '<tr><td>' + esc(SEG.aparelho ? SEG.aparelho(a.ua) : a.ua) + '</td><td>' + esc(a.ip || '—') + '</td><td>' + quando(a.criado) + '</td><td>' + quando(a.usado) + '</td><td>' + quando(a.expira) + '</td><td><form method="post" action="/conta/seguranca/aparelho-revogar"><input type="hidden" name="id" value="' + esc(a.id) + '"><button type="submit" class="dng">Revogar</button></form></td></tr>').join('') + '</tbody></table>'
+        : '<p class="sub" style="margin:0">Nenhum. Ao digitar o código no login, marque "Confiar neste aparelho".</p>') + '</div>';
+  }
 
   /* ---------------- mensagens das páginas por código ---------------- */
   const FLASH = new Map();
@@ -363,5 +417,6 @@ module.exports = function criar(o) {
   function lerCorpo(req, max) { return new Promise((ok, err) => { const ch = []; let n = 0; req.on('data', d => { n += d.length; if (n > max) { err({ st: 413, msg: 'Conteúdo grande demais.' }); req.destroy(); } else ch.push(d); }); req.on('end', () => ok(Buffer.concat(ch))); req.on('error', err); }); }
 
   return { antes, redir, msg, pagina, cspApp, sessaoInativa, exigirReauth, reautenticado, situacao2f, exige2f, minSenha, minNivel, setupBarrado,
-    loginAntes, loginFalhou, loginOk, loginEspera, leituraPropria, cartaoServidor, vendor, cifrarTotps };
+    loginAntes, loginFalhou, loginOk, loginEspera, leituraPropria, cartaoServidor, vendor, cifrarTotps,
+    aparelhoElegivel, aparelhoEmitir, aparelhoValido, aparelhosDe, aparelhoRevogar, aparelhosRevogarTodos, cartaoAparelhos };
 };
