@@ -915,6 +915,7 @@ async function rotear(req, res) {
   if (await REG.rota(p, m, req, res, conta, u)) return;
   if (await solidesRota(p, m, req, res, conta, u)) return;
   if (await bancosRota(p, m, req, res, conta, u)) return;
+  if (await ARQF.rota(p, m, req, res, conta, u)) return; /* v129: arquivo fiscal (arquivofiscal.js) */
   /* ---- arquivos do sistema ---- */
   if (m === 'GET') {
     if (p === '/' || p === '/index.html') return estatico(req, res, 'index.html');
@@ -933,6 +934,9 @@ const solQ = Object.assign({}, q, { docPut: { run: (dp, parent, id, txt, ts) => 
 const solAvisar = (op, p, data, ts) => { if (solIgnorados.has(p)) { solIgnorados.delete(p); return; } avisarDoc(op, p, data, ts); };
 const solidesRota = require('./solides.js')({ q: solQ, db, avisarDoc: solAvisar, json, lerJson, NIV });
 const bancosRota = require('./bancos.js')({ q, db, avisarDoc, json, lerJson, NIV });
+/* ===== v129: arquivo fiscal (XML das NF-e guardado no servidor, prazo de guarda, ligação com contas a pagar/receber) ===== */
+const ARQF = require('./arquivofiscal.js')({ db, q, json, lerCorpo, avisarDoc, perfilDe, papelDe, PERM, END, DATA, uid, FISCAL_URL, FISCAL_TOKEN, auditar: (...a) => REG.auditar(...a) });
+/* ===== fim v129 ===== */
 const srv = http.createServer((req, res) => { rotear(req, res).catch(e => { if (!res.headersSent) json(res, e.st || 500, { erro: e.msg || 'Erro interno.' }); else try { res.end(); } catch (x) { } if (!e.st) console.error(e); }); });
 srv.requestTimeout = 600000; srv.headersTimeout = 65000; srv.keepAliveTimeout = 61000;
 srv.listen(PORT, () => console.log('Central de Gestão no ar na porta ' + PORT + ' · dados em ' + DATA + (FISCAL_URL ? ' · conector fiscal ' + FISCAL_URL : '') + (AI_KEY ? ' · IA ligada' : '') + (process.env.SOLIDES_TOKEN ? ' · Sólides ligada' : '')));

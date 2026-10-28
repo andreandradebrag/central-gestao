@@ -1638,8 +1638,29 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'lanc' && !velho && novo.foFunc && /^fo\|/.test(String(novo.foKey || ''))) novo.sens = 'rh';
     return { data: novo, ctx };
   }
+  /* v128: excluir obra só o Gestor de projetos, o Administrador ou o dono; nunca com registros ligados (qualquer documento que
+     cite o id da obra, fora a lixeira, cadastros de acesso e o chat, mais o contrato e a oportunidade da própria obra); pede a
+     senha de novo e fica na auditoria (OBRA_EXCLUIDA ou OBRA_EXCLUSAO_RECUSADA). */
+  const O4_FORA = ['proj', 'lixo', 'cfg', 'usr', 'usrreq', 'perfc', 'implog', 'lgpdc', 'cm', 'chat'];
+  const stVincProj = db.prepare("SELECT path FROM docs WHERE data LIKE ? ESCAPE '\\' AND " + O4_FORA.map(() => "path NOT LIKE ?").join(' AND ') + ' LIMIT 500');
+  function vinculosObra(id, velho) {
+    const m = {}, like = '%"' + String(id).replace(/[\\%_]/g, '\\$&') + '"%';
+    for (const r of stVincProj.all(like, ...O4_FORA.map(c => c + '/%'))) { const c = String(r.path).split('/')[0]; m[c] = (m[c] || 0) + 1; }
+    if (velho && velho.ctrId && doc('ctr/' + velho.ctrId) && !m.ctr) m.ctr = 1;
+    if (velho && velho.oppId && doc('opp/' + velho.oppId) && !m.opp) m.opp = 1;
+    return Object.keys(m).map(c => ({ col: c, n: m[c] }));
+  }
+  function regraExcluirObra(conta, req, p, id, velho) {
+    if (!(ehDono(conta) || perfilEm(conta, ['admin', 'projetos']))) return erro('Só o Gestor de projetos ou o Administrador excluem obras.');
+    const v = vinculosObra(id, velho);
+    if (v.length) { auditar(conta, req, 'OBRA_EXCLUSAO_RECUSADA', p, null, { obra: String(velho.codigo || '') + ' · ' + String(velho.nome || '').slice(0, 120), vinculos: v }); return erro('Esta obra tem registros ligados (' + v.map(x => x.col + ': ' + x.n).join(', ') + '). Use Encerrar ou Cancelar.', 409); }
+    if (req && !END.reautenticado(req)) return { reauth: true };
+    auditar(conta, req, 'OBRA_EXCLUIDA', p, null, { obra: String(velho.codigo || '') + ' · ' + String(velho.nome || '').slice(0, 200) });
+    return null;
+  }
   function antesExcluir(conta, p, velho, req) {
     const s = p.split('/'), c0 = s[0];
+    if (c0 === 'proj' && s.length === 2 && velho) { const e = regraExcluirObra(conta, req, p, s[1], velho); if (e) return e; } /* v128 */
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
     if (!velho) return null;
     if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, /^a_/.test(s[1] || '') ? 'PERFIL_PADRAO_RESTAURADO' : 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome, base: velho.base }); } /* v114; v127: excluir o ajuste = voltar ao padrão */

@@ -1,7 +1,7 @@
 # imagem com versão fixa (troque de propósito, depois de testar; nunca use etiqueta móvel como "22-alpine")
 FROM node:22.22.0-alpine
 WORKDIR /app
-COPY server.js shim.js solides.js bancos.js email.js backup.js restaurar.js seguranca.js endurece.js qr.js regras.js privacidade.js perfis.json ./
+COPY server.js shim.js solides.js bancos.js arquivofiscal.js email.js backup.js restaurar.js seguranca.js endurece.js qr.js regras.js privacidade.js perfis.json ./
 COPY public ./public
 ENV NODE_ENV=production PORT=3000 DATA_DIR=/data
 RUN mkdir -p /data && chown -R node:node /data && chmod -R a-w /app

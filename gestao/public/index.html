@@ -24178,9 +24178,588 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{u3Novo:'Cria o login, env
 /* celular: com um nome longo no topo (ex.: "André (dono)") a barra passava da largura da tela */
 try{if(typeof document!=='undefined'&&document.createElement&&document.head){const st=document.createElement('style');st.textContent='@media (max-width:600px){.who b{max-width:52px}.tools{gap:2px}.who-b{padding:4px 2px}}';document.head.appendChild(st);}}catch(e){}
 
+/* ===== v128: Obras com centenas de projetos (planilha importada na v126) =====
+   1. Obras › Obras e rateio: filtro por Situação (Ativas, Concluídas, Canceladas, Todas; padrão Ativas) e por Período
+      (De … até, pela data de início, término ou conclusão da obra). A escolha fica guardada na sessão do navegador.
+      Indicadores, totais e contadores seguem o filtro. Lista longa mostra 100 por vez ("Mostrar mais").
+   2. Botão "Excluir obra" (lista e detalhe), só para o Gestor de projetos ou o Administrador (e o dono) que gravam Obras.
+      Antes de excluir procura tudo o que está ligado à obra (qualquer registro de qualquer coleção que cite a obra,
+      mais o contrato, a oportunidade e a proposta da própria obra). Com vínculo: não exclui, mostra a lista e oferece
+      Encerrar ou Cancelar. Sem vínculo: pede a senha (servidor próprio) e manda a obra para a Lixeira (restaurável).
+      O servidor repete a verificação (regras.js) e registra OBRA_EXCLUIDA na auditoria.
+   3. Painel de Obras e Painel da obra com muitos registros: nome da obra em até 2 linhas (título completo ao passar o
+      mouse), colunas que cabem em 1366 px, lista das obras limitada às 15 mais críticas ("Ver todas"), EAP grande
+      limitada a 30 itens por contrato ("Ver todos os itens") e seletor do Painel da obra só com obras em andamento
+      (botão para incluir as encerradas). */
+ui.o4p=ui.o4p||{sit:'ativos',ref:'inicio',de:'',ate:'',lim:100};
+ui.o4=ui.o4||{pnTodas:false,eapTodos:false,pobraTodas:false};
+const O4_CHAVE='cg.obrasFiltro.v128',O4_SIT=[['ativos','Ativas (em andamento)'],['concluidos','Concluídas (encerradas)'],['cancelados','Canceladas'],['todos','Todas']],
+  O4_REF=[['inicio','Início'],['fim','Término previsto'],['conclusao','Conclusão']],O4_PASSO=100,O4_PN_LIM=15,O4_EAP_LIM=30;
+function o4Ler(){try{const t=typeof sessionStorage!=='undefined'?sessionStorage.getItem(O4_CHAVE):null;if(!t)return;const o=JSON.parse(t);
+  if(o&&O4_SIT.some(s=>s[0]===o.sit))ui.o4p.sit=o.sit;if(o&&O4_REF.some(s=>s[0]===o.ref))ui.o4p.ref=o.ref;
+  ['de','ate'].forEach(k=>{if(o&&/^\d{4}-\d{2}-\d{2}$/.test(o[k]||''))ui.o4p[k]=o[k];});}catch(e){}}
+function o4Guardar(){try{if(typeof sessionStorage!=='undefined')sessionStorage.setItem(O4_CHAVE,JSON.stringify({sit:ui.o4p.sit,ref:ui.o4p.ref,de:ui.o4p.de,ate:ui.o4p.ate}));}catch(e){}}
+o4Ler();
+{const sf0=setFilter;setFilter=function(path){const r=sf0.apply(this,arguments);if(/^o4p\./.test(String(path||''))){if(path!=='o4p.lim')ui.o4p.lim=O4_PASSO;o4Guardar();}return r;};}
+let o4Css=false;
+function o4Estilo(){if(o4Css||typeof document==='undefined'||!document.createElement||!document.head)return;o4Css=true;try{const st=document.createElement('style');st.textContent=
+  '.o4-cl2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}'+
+  '.o4-pt table{min-width:1040px}.o4-pt td,.o4-pt th{padding-left:8px;padding-right:8px}.o4-pt td.num,.o4-pt th.num{font-size:13px;white-space:nowrap}.o4-pt th{white-space:normal}'+
+  '.o4-pt td:first-child{min-width:220px;max-width:360px}.o4-pt td.act{white-space:normal;width:176px;min-width:176px;text-align:right}.o4-pt td.act .btn{margin:2px 0 2px 4px}.o4-pt td.act .btn+.btn{margin-left:4px}'+
+  '.o4-pnT{min-width:900px!important;table-layout:auto}.o4-pnT td:first-child .btn{margin-top:6px}.o4-pnT th{white-space:normal;vertical-align:bottom}.o4-pnT td{vertical-align:top}.o4-pnT td:first-child{min-width:220px;max-width:320px}.o4-pnT td.num{font-size:13px;white-space:nowrap}.o4-pnT td.act{width:1%}'+
+  '.o4-eap table{min-width:900px!important}.o4-eap td:first-child{min-width:300px;max-width:460px}.o4-eap td.num{font-size:13px;white-space:nowrap}'+
+  '.o4-lim tbody tr:nth-child(n+'+(O4_EAP_LIM+1)+'):not(:last-child){display:none}'+
+  '.o4-vinc{margin:6px 0 0;padding-left:20px}.o4-vinc li{margin:2px 0}.o4-mais{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}'+
+  '.o4-k .kv{white-space:nowrap}@media (max-width:560px){.o4-k .kv{font-size:clamp(14px,4.4vw,20px)}}.o4-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}.o4-bar .f{min-width:150px;flex:1 1 150px}.o4-bar .f.o4-sit{flex:2 1 220px}';
+  document.head.appendChild(st);}catch(e){}}
+
+/* ---------- situação e período ---------- */
+const o4Sit=p=>!p?'':p.cancelado||p.status==='cancelado'?'cancelados':(p.status||'ativo')==='concluido'?'concluidos':'ativos';
+const o4SitTxt=p=>({cancelados:'Cancelada',concluidos:'Concluída',ativos:p&&p.status==='pausado'?'Pausada':'Ativa'})[o4Sit(p)]||'—';
+function o4Faixa(f){let a=f.de||'',b=f.ate||'';if(a&&b&&a>b){const t=a;a=b;b=t;}return [a,b];}
+function o4NoPeriodo(p,f){f=f||ui.o4p;const [a,b]=o4Faixa(f);if(!a&&!b)return true;const d=String((p||{})[f.ref||'inicio']||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return false;return (!a||d>=a)&&(!b||d<=b);}
+function o4Passa(p,f){f=f||ui.o4p;return (f.sit==='todos'||o4Sit(p)===f.sit)&&o4NoPeriodo(p,f);}
+function o4Contagem(f){f=f||ui.o4p;const c={ativos:0,concluidos:0,cancelados:0,todos:0};S.proj.forEach(p=>{if(!o4NoPeriodo(p,f))return;c.todos++;const s=o4Sit(p);if(c[s]!=null)c[s]++;});return c;}
+const o4Cmp=(a,b)=>String(a.codigo||a.nome||'').localeCompare(String(b.codigo||b.nome||''),'pt-BR',{numeric:true,sensitivity:'base'});
+const o4Filtrado=()=>ui.o4p.sit!=='todos'||!!(ui.o4p.de||ui.o4p.ate);
+/* resultado filtrado: indicadores e totais só das obras do filtro (o pool de custos comuns continua o da empresa) */
+function o4Rel(){const rel=relatorio(ui.rel.from,ui.rel.to),todas=rel.rows.slice().sort((a,b)=>o4Cmp(a.p,b.p)),rows=todas.filter(r=>o4Passa(r.p));
+  if(!o4Filtrado())return {rel,rows,t:rel.t,sem:rel.sem,todas};
+  const t={receita:sum(rows,r=>r.receita),diretos:sum(rows,r=>r.diretos+r.mat),pool:rel.pool,rateado:sum(rows,r=>r.rateio)};t.custos=t.diretos+t.rateado;t.res=t.receita-t.custos;
+  return {rel,rows,t,sem:{receita:0,diretos:0,mat:0},todas};}
+
+/* ---------- quem exclui ---------- */
+function o4Papel(){const pf=PERFIS[me.perfil];return pf&&!pf.custom&&pf.papel?pf.papel:me.perfil;}
+const o4PodeExcluir=()=>mayW('proj')&&(!!me.owner||['admin','projetos'].includes(o4Papel()));
+const o4BtnExcluir=(id,cls)=>o4PodeExcluir()?'<button class="btn sm dng'+(cls||'')+'" data-act="o4Excluir" data-id="'+esc(id)+'" title="Excluir a obra (só sem registros ligados)">Excluir</button>':'';
+
+/* ---------- Obras e rateio ---------- */
+V.proj=()=>{o4Estilo();
+  const c=cfg(),f=ui.o4p,R=o4Rel(),rel=R.rel,cnt=o4Contagem(f),tot=R.rows.length,lim=Math.max(O4_PASSO,+f.lim||O4_PASSO),rows=R.rows.slice(0,lim),t=R.t,filt=o4Filtrado();
+  const warn=[];
+  if(rel.crit==='percentual'&&rel.pool>0&&rel.fallback)warn.push('Nenhum projeto tem percentual de rateio definido: o pool foi dividido em partes iguais. Defina os percentuais em cada projeto.');
+  else if(rel.crit==='percentual'&&rel.pool>0&&Math.abs(rel.pctSoma-100)>0.01)warn.push('Os percentuais dos projetos somam '+String(Math.round(rel.pctSoma*100)/100).replace('.',',')+'%. O rateio é feito proporcionalmente a eles, então o total do pool é sempre distribuído.');
+  if(rel.naoRateado>0.004)warn.push(money(rel.naoRateado)+' de custos comuns não foram rateados: nenhum projeto elegível tem peso neste critério.');
+  const sem=R.sem,semShow=sem.receita||sem.diretos||sem.mat,[pa,pb]=o4Faixa(f),refTxt=(O4_REF.find(x=>x[0]===f.ref)||O4_REF[0])[1].toLowerCase();
+  const bar='<div class="bar o4-bar">'+
+    '<label class="f"><span>Competência de</span><input type="month" id="m_rfrom" data-filter="rel.from" value="'+esc(ui.rel.from)+'"></label>'+
+    '<label class="f"><span>até</span><input type="month" id="m_rto" data-filter="rel.to" value="'+esc(ui.rel.to)+'"></label>'+
+    '<label class="f grow"><span>Critério de rateio dos custos comuns</span><select id="s_rcrit" data-filter="rateio">'+opt(Object.keys(RATEIOS).map(k=>[k,RATEIOS[k]]),c.rateio)+'</select></label></div>'+
+    '<div class="bar o4-bar" id="o4Filtros">'+
+    '<label class="f o4-sit"><span>Situação</span><select id="s_o4sit" data-filter="o4p.sit">'+opt(O4_SIT.map(s=>[s[0],s[1]+' · '+cnt[s[0]]]),f.sit)+'</select></label>'+
+    '<label class="f"><span>Período pela data de</span><select id="s_o4ref" data-filter="o4p.ref">'+opt(O4_REF,f.ref)+'</select></label>'+
+    '<label class="f"><span>De</span><input type="date" id="d_o4de" data-filter="o4p.de" value="'+esc(f.de)+'"></label>'+
+    '<label class="f"><span>até</span><input type="date" id="d_o4ate" data-filter="o4p.ate" value="'+esc(f.ate)+'"></label>'+
+    (filt?'<button class="btn" data-act="o4Limpar" style="flex:0 0 auto">Limpar filtros</button>':'')+'</div>';
+  const resumo='<p class="sub" style="margin:0" id="o4Resumo">Mostrando <b>'+tot+'</b> de '+S.proj.length+' obra(s)'+(f.sit!=='todos'?' · '+esc((O4_SIT.find(s=>s[0]===f.sit)||[])[1]||'').toLowerCase():'')+
+    (pa||pb?' · '+esc(refTxt)+(pa?' de '+fmtDate(pa):'')+(pb?' até '+fmtDate(pb):'')+' (obras sem essa data ficam de fora)':'')+'. '+(filt?'Indicadores e totais só das obras filtradas; o pool de custos comuns é o da empresa.':'')+'</p>';
+  const linha=r=>'<tr><td><div class="o4-cl2" title="'+esc(projNome(r.p.id))+'">'+esc(projNome(r.p.id))+'</div><div class="sub">'+esc(o4SitTxt(r.p))+(r.p.parcId?' · '+esc(parcNome(r.p.parcId)):'')+(rel.crit==='percentual'?' · rateio '+String(+r.p.pctRateio||0).replace('.',',')+'%':'')+(r.p[f.ref]?' · '+esc(refTxt)+' '+fmtDate(r.p[f.ref]):'')+'</div></td>'+
+    '<td class="num">'+money(r.receita)+'</td><td class="num">'+money(r.diretos+r.mat)+'</td><td class="num">'+money(r.rateio)+'</td><td class="num '+(r.res<0?'neg':'pos')+'"><b>'+money(r.res)+'</b></td><td class="num">'+pct(r.margem)+'</td>'+
+    '<td class="num">'+(r.uso==null?'—':pill(pct(r.uso),r.uso>1?'neg':r.uso>0.8?'warn':'pos'))+'</td>'+
+    '<td class="act"><button class="btn sm" data-act="detProj" data-id="'+esc(r.p.id)+'">Detalhe</button><button class="btn sm" data-act="editProj" data-id="'+esc(r.p.id)+'">Editar</button>'+o4BtnExcluir(r.p.id)+'</td></tr>';
+  const vazio=S.proj.length?'Nenhuma obra nesta situação e período. Mude o filtro acima.':'Nenhum projeto cadastrado. Crie o primeiro para começar a ratear.';
+  return pageHead('Obras e rateio','Resultado por obra no regime de competência. Custos comuns são divididos pelo critério escolhido.','<button class="btn" data-act="exportRel">Exportar CSV</button><button class="btn pri" data-act="projDoCtr">Novo projeto (de um contrato)</button>')+
+  '<div class="stack">'+bar+resumo+
+  '<div class="kpis o4-k">'+kpi('Receita',money(t.receita),filt?tot+' obra(s) do filtro':'','pos')+kpi('Custos diretos',money(t.diretos),'Despesas do projeto + material consumido','')+kpi('Pool de custos comuns',money(rel.pool),'Rateado'+(filt?' às obras do filtro':'')+': '+money(t.rateado))+kpi('Resultado',money(t.res),'Margem '+pct(t.receita>0?t.res/t.receita:null),t.res<0?'neg':'pos')+'</div>'+
+  warn.map(w=>'<div class="note">'+esc(w)+'</div>').join('')+
+  '<div class="tw o4-pt"><table><thead><tr><th>Projeto</th><th class="num">Receita</th><th class="num">Custos diretos</th><th class="num">Rateio comum</th><th class="num">Resultado</th><th class="num">Margem</th><th class="num">Orçamento usado</th><th></th></tr></thead><tbody>'+
+  (rows.length?rows.map(linha).join(''):emptyRow(8,vazio))+
+  (semShow?'<tr><td><div>Sem projeto</div><div class="sub">Lançamentos sem projeto e fora do pool de custos comuns</div></td><td class="num">'+money(sem.receita)+'</td><td class="num">'+money(sem.diretos+sem.mat)+'</td><td class="num">'+money(0)+'</td><td class="num '+(sem.receita-sem.diretos-sem.mat<0?'neg':'pos')+'">'+money(sem.receita-sem.diretos-sem.mat)+'</td><td></td><td></td><td></td></tr>':'')+
+  '</tbody>'+(rows.length?'<tfoot><tr><td>'+(filt?'Total das obras filtradas':'Total da empresa')+'</td><td class="num">'+money(t.receita)+'</td><td class="num">'+money(t.diretos)+'</td><td class="num">'+money(filt?t.rateado:rel.pool)+'</td><td class="num">'+money(t.res)+'</td><td class="num">'+pct(t.receita>0?t.res/t.receita:null)+'</td><td colspan="2"></td></tr></tfoot>':'')+'</table></div>'+
+  (tot>rows.length?'<div class="o4-mais"><span class="sub">Mostrando '+rows.length+' de '+tot+'.</span><button class="btn" data-act="o4Mais">Mostrar mais '+Math.min(O4_PASSO,tot-rows.length)+'</button><button class="btn" data-act="o4Mais" data-k="todas">Mostrar todas</button></div>':'')+
+  '<p class="sub" style="margin:0">Compras que entram em estoque só viram custo quando o material é consumido por um projeto ou vendido, pelo custo médio da data.</p></div>';
+};
+A.o4Mais=d=>{ui.o4p.lim=d&&d.k==='todas'?1e9:(Math.max(O4_PASSO,+ui.o4p.lim||O4_PASSO)+O4_PASSO);render();};
+A.o4Limpar=()=>{Object.assign(ui.o4p,{sit:'ativos',de:'',ate:'',lim:O4_PASSO});o4Guardar();render();};
+/* exportação segue o filtro da tela */
+{const ex0=A.exportRel;A.exportRel=function(){if(!o4Filtrado())return ex0.apply(this,arguments);const R=o4Rel(),rel=R.rel;
+  const rows=[['Projeto','Situação','Receita','Custos diretos','Material consumido','Rateio comum','Resultado','Margem','Orçamento','Consumo do orçamento (acumulado)','Início','Término previsto','Conclusão']];
+  R.rows.forEach(r=>rows.push([projNome(r.p.id),o4SitTxt(r.p),r.receita,r.diretos,r.mat,r.rateio,r.res,r.margem==null?'':(r.margem*100).toFixed(1)+'%',r.orc,r.uso==null?'':(r.uso*100).toFixed(1)+'%',r.p.inicio||'',r.p.fim||'',r.p.conclusao||'']));
+  rows.push(['Total das obras filtradas','',R.t.receita,'','',R.t.rateado,R.t.res,'','','']);
+  const [a,b]=o4Faixa(ui.o4p);rows.push(['Período',fmtYm(ui.rel.from)+' a '+fmtYm(ui.rel.to),'Critério',RATEIOS[rel.crit],'Situação',(O4_SIT.find(s=>s[0]===ui.o4p.sit)||[])[1]||'',(a||b)?'Datas ('+((O4_REF.find(x=>x[0]===ui.o4p.ref)||[])[1]||'')+')':'',(a?fmtDate(a):'')+(b?' a '+fmtDate(b):'')]);
+  saveFile('resultado-por-obra.csv',csv(rows));};}
+/* detalhe da obra: botão Excluir no rodapé */
+{const d0=A.detProj;A.detProj=function(d){const m0=modal;modal=function(o){if(o&&d&&d.id&&o4PodeExcluir())o=Object.assign({},o,{foot:'<button class="btn dng" data-act="o4Excluir" data-id="'+esc(d.id)+'" style="margin-right:auto">Excluir obra</button>'+(o.foot||'')});return m0.apply(this,[o].concat([].slice.call(arguments,1)));};
+  try{return d0.apply(this,arguments);}finally{modal=m0;}};}
+
+/* ---------- vínculos ---------- */
+const O4_SEM_VINC=new Set(['proj','lixo','cfg','usr','usrreq','perfc','implog','lgpdc','cm','chat']);
+const O4_NOMES={lanc:'Lançamentos e contas a pagar/receber',notas:'Notas fiscais',nfse:'Notas fiscais de serviço',ctr:'Contratos',med:'Medições ao cliente',rdo:'Diário de obra',eap:'Orçamento (EAP)',etapa:'Cronograma (etapas)',
+  osf:'Ordens de fabricação',ponto:'Marcações de ponto',moapr:'Mão de obra apropriada',pdia:'Apontamentos de mão de obra',acv:'Acervo técnico',opp:'Oportunidades',mov:'Movimentos de estoque',ped:'Pedidos de compra',sc:'Solicitações de compra',
+  rateio:'Rateios',func:'Colaboradores alocados',medemp:'Medições de empreiteiros',ctremp:'Contratos de empreiteiros',sep:'Separações de estoque',cot:'Cotações',rom:'Romaneios'};
+const o4NomeCol=c=>O4_NOMES[c]||(typeof COL_NOME!=='undefined'&&COL_NOME[c])||c;
+function o4Vinculos(pid){const p=get('proj',pid),q='"'+pid+'"',m=new Map();
+  const add=(c,n,ex)=>{const x=m.get(c)||{col:c,nome:o4NomeCol(c),n:0,ex:[]};x.n+=n;if(ex&&x.ex.length<3)x.ex.push(ex);m.set(c,x);};
+  COLS.forEach(c=>{if(O4_SEM_VINC.has(c)||!Array.isArray(S[c]))return;for(const r of S[c]){if(!r||r.id===pid)continue;let j='';try{j=JSON.stringify(r);}catch(e){continue;}if(j.indexOf(q)>=0)add(c,1,typeof recLabel==='function'?pn4Rot(c,r):'');}});
+  if(p){if(p.ctrId&&get('ctr',p.ctrId)&&!S.ctr.some(x=>x.id===p.ctrId&&JSON.stringify(x).indexOf(q)>=0))add('ctr',1,pn4Rot('ctr',get('ctr',p.ctrId)));
+    if(p.oppId&&get('opp',p.oppId)&&!S.opp.some(x=>x.id===p.oppId&&JSON.stringify(x).indexOf(q)>=0))add('opp',1,pn4Rot('opp',get('opp',p.oppId)));
+    if(p.numProp&&typeof i3PropK==='function'&&Array.isArray(S.opp)){const k=i3PropK(p.numProp);S.opp.forEach(o=>{if(o.numero&&i3PropK(o.numero)===k&&o.id!==p.oppId&&JSON.stringify(o).indexOf(q)<0)add('opp',1,'Proposta '+o.numero);});}}
+  return [...m.values()].sort((a,b)=>b.n-a.n);}
+function pn4Rot(c,r){let t='';try{t=String(recLabel(c,r)||'');}catch(e){}if(!t||t===r.id)t=[r.numero?'nº '+r.numero:'',r.desc||r.nome||r.titulo||'',r.data?fmtDate(r.data):r.venc?'venc. '+fmtDate(r.venc):''].filter(Boolean).join(' · ');return t.slice(0,80);}
+
+/* ---------- excluir, encerrar, cancelar ---------- */
+function o4FazExcluir(p){const id=p.id;if(!get('proj',id))return false;del('proj',id);if(ui.pobra&&ui.pobra.proj===id)ui.pobra.proj='';if(ui.pnObr&&ui.pnObr.proj===id)ui.pnObr.proj='';
+  toast('Obra '+(p.codigo||p.nome||'')+' excluída. Ela fica na Lixeira (Sistema › Lixeira) por 30 dias e pode ser restaurada.','pos');render();return true;}
+A.o4Excluir=d=>{const p=get('proj',d&&d.id);if(!p)return;
+  if(!o4PodeExcluir()){toast('Só o Gestor de projetos ou o Administrador excluem obras.','neg');return;}
+  const v=o4Vinculos(p.id),nm=esc(projNome(p.id));
+  if(v.length){modal({title:'Esta obra não pode ser excluída',wide:true,nofocus:true,
+    body:'<p style="margin:0 0 6px"><b>'+nm+'</b> tem registros ligados. Excluir deixaria esses registros sem obra, então o sistema não exclui.</p>'+
+      '<ul class="o4-vinc" id="o4Vinc">'+v.map(x=>'<li><b>'+esc(x.nome)+'</b>: '+x.n+' registro(s)'+(x.ex.filter(Boolean).length?'<div class="sub">'+x.ex.filter(Boolean).map(esc).join(' · ')+(x.n>x.ex.length?' …':'')+'</div>':'')+'</li>').join('')+'</ul>'+
+      '<p style="margin:10px 0 0">Se a obra terminou, use <b>Encerrar</b>. Se não vai acontecer, use <b>Cancelar</b>. Nos dois casos ela sai das obras ativas e o histórico continua.</p>',
+    foot:'<button class="btn" data-act="closeModal">Voltar</button>'+(o4Sit(p)==='ativos'?'<button class="btn" data-act="o4Cancelar" data-id="'+esc(p.id)+'">Cancelar a obra</button><button class="btn pri" data-act="o4Encerrar" data-id="'+esc(p.id)+'">Encerrar a obra</button>':'')});return;}
+  modal({title:'Excluir obra',nofocus:true,
+    body:'<p style="margin:0 0 8px">Excluir <b>'+nm+'</b>?</p><p class="sub" style="margin:0">Nenhum registro está ligado a esta obra. Ela vai para a <b>Lixeira</b> (Sistema › Lixeira), onde pode ser restaurada por 30 dias.'+(window.__SELFHOST?' O sistema pede a sua senha para confirmar e registra a exclusão na auditoria.':'')+'</p>',
+    foot:'<button class="btn" data-act="closeModal">Voltar</button><button class="btn dng" data-act="modalSave">Excluir obra</button>',
+    save:()=>{if(window.__SELFHOST&&typeof window.segReautenticar==='function'){window.segReautenticar('Para excluir a obra '+(p.codigo||p.nome||'')+', digite sua senha ou o código do aplicativo autenticador.').then(okR=>{if(okR)o4FazExcluir(p);else toast('Exclusão cancelada.');});return;}
+      o4FazExcluir(p);}});};
+A.o4Encerrar=d=>{const p=get('proj',d&&d.id);if(!p)return;
+  modal({title:'Encerrar obra',body:'<p style="margin:0 0 8px">'+esc(projNome(p.id))+'</p><div class="fg">'+field('Data de conclusão','conclusao','date',p.conclusao||todayStr())+'</div><p class="sub" style="margin:8px 0 0">A obra fica Concluída: sai das obras ativas e dos painéis; os lançamentos e o histórico continuam.</p>',saveLabel:'Encerrar',
+    save:root=>{const v=readForm(root);if(!v.conclusao){toast('Informe a data de conclusão.','neg');return false;}
+      put('proj',Object.assign(cl(p),{status:'concluido',conclusao:v.conclusao,encerradoEm:Date.now(),encerradoPor:actorId()}));toast('Obra encerrada.','pos');render();}});};
+A.o4Cancelar=d=>{const p=get('proj',d&&d.id);if(!p)return;
+  modal({title:'Cancelar obra',body:'<p style="margin:0 0 8px">'+esc(projNome(p.id))+'</p><div class="fg">'+field('Motivo do cancelamento','motivo','text','',{full:true})+'</div><p class="sub" style="margin:8px 0 0">A obra fica Cancelada (concluída e marcada como cancelada): sai das obras ativas; os registros ligados continuam.</p>',saveLabel:'Cancelar a obra',
+    save:root=>{const v=readForm(root),mot=String(v.motivo||'').trim();if(mot.length<3){toast('Informe o motivo do cancelamento.','neg');return false;}
+      put('proj',Object.assign(cl(p),{status:'concluido',cancelado:true,cancelMotivo:mot.slice(0,300),canceladoEm:Date.now(),canceladoPor:actorId()}));toast('Obra cancelada.','pos');render();}});};
+Object.assign(ACT_GROUP,{o4Excluir:'proj',o4Encerrar:'proj',o4Cancelar:'proj'});
+
+/* ---------- Painel de Obras: nome em 2 linhas, colunas que cabem, 15 obras mais críticas ---------- */
+function o4Linhas(h,abre,fecha){const i=h.indexOf(abre);if(i<0)return null;const a=h.indexOf('<tbody>',i),b=h.indexOf('</tbody>',a);if(a<0||b<0)return null;
+  const corpo=h.slice(a+7,b),rows=corpo.split(/(?=<tr[ >])/).filter(x=>x.trim());return {pre:h.slice(0,a+7),rows,pos:h.slice(b)};}
+const o4Peso=r=>(r.match(/class="pill neg"/g)||[]).length*3+(r.match(/class="pill warn"/g)||[]).length+(/sem etapas|nenhum<\/span>/.test(r)?0.5:0);
+{const v0=V.pnObr;if(typeof v0==='function')V.pnObr=function(){let h=v0.apply(this,arguments);try{o4Estilo();
+  h=h.replace(/<div class="kpis">/g,'<div class="kpis o4-k">');const k=h.indexOf('<h2>Obras em andamento');if(k<0)return h;
+  h=h.slice(0,k)+h.slice(k).replace(/<table style="min-width:\d+px">/,'<table class="o4-pnT">');
+  h=h.replace(/<tr><td><b>([^<]*)<\/b>/g,(m,t)=>'<tr><td><div class="o4-cl2" title="'+t+'"><b>'+t+'</b></div>');
+  /* botão "Painel da obra" vai para baixo do nome (a última coluna saía da caixa) */
+  {const a=h.indexOf('class="o4-pnT"'),b=a>=0?h.indexOf('</table>',a):-1;if(b>0){let t=h.slice(a,b);
+    t=t.replace(/<th><\/th><\/tr><\/thead>/,'</tr></thead>').replace(/<tr><td>([\s\S]*?)<\/td>([\s\S]*?)<td class="act">([\s\S]*?)<\/td><\/tr>/g,(m,c1,meio,bt)=>'<tr><td>'+c1+(bt?'<div>'+bt+'</div>':'')+'</td>'+meio+'</tr>');
+    t=t.replace(/emptyRow|colspan="(10|6)"/g,(m,n)=>n?'colspan="'+(n-1)+'"':m);h=h.slice(0,a)+t+h.slice(b);}}
+  const L=o4Linhas(h,'<h2>Obras em andamento');if(!L||L.rows.length<=O4_PN_LIM||/class="empty"/.test(L.rows[0]))return h;
+  const ord=L.rows.map((r,i)=>({r,i,w:o4Peso(r)})).sort((a,b)=>b.w-a.w||a.i-b.i),n=L.rows.length,todas=!!ui.o4.pnTodas;
+  const vis=todas?ord:ord.slice(0,O4_PN_LIM);
+  const fim=L.pos.indexOf('</table></div>')+'</table></div>'.length;
+  const bt='<div class="o4-mais" id="o4PnMais"><span class="sub">'+(todas?'Mostrando as '+n+' obras em andamento.':'Mostrando as '+O4_PN_LIM+' obras com mais pendências de '+n+' em andamento.')+'</span><button class="btn sm" data-act="o4Tog" data-k="pnTodas">'+(todas?'Mostrar só as '+O4_PN_LIM+' mais críticas':'Ver todas as '+n+' obras')+'</button></div>';
+  h=L.pre+vis.map(x=>x.r).join('')+L.pos.slice(0,fim)+bt+L.pos.slice(fim);}catch(e){console.error(e);}return h;};}
+A.o4Tog=d=>{const k=d&&d.k;if(k&&k in ui.o4){ui.o4[k]=!ui.o4[k];render();}};
+
+/* ---------- Painel da obra: seletor só com obras em andamento e EAP limitada ---------- */
+{const v0=V.pobra;if(typeof v0==='function')V.pobra=function(){let h=v0.apply(this,arguments);try{o4Estilo();
+  h=h.replace(/<div class="kpis">/g,'<div class="kpis o4-k">');const p=typeof pobraProj==='function'?pobraProj():null,tod=!!ui.o4.pobraTodas;
+  const ls=S.proj.filter(x=>tod||o4Sit(x)==='ativos'||(p&&x.id===p.id)).sort((a,b)=>(o4Sit(a)!=='ativos')-(o4Sit(b)!=='ativos')||(obraEaps(b.id).length>0)-(obraEaps(a.id).length>0)||o4Cmp(b,a));
+  const nOut=S.proj.filter(x=>o4Sit(x)!=='ativos').length;
+  const sel='<select data-filter="pobra.proj" id="s_o4pobra">'+opt(ls.map(x=>[x.id,projNome(x.id)+(obraEaps(x.id).length?'':' (sem orçamento)')+(o4Sit(x)==='cancelados'?' · cancelada':o4Sit(x)==='concluidos'?' · concluída':'')]),p?p.id:'')+'</select>';
+  h=h.replace(/<select data-filter="pobra\.proj">[\s\S]*?<\/select><\/label>/,()=>sel+'</label>'+(nOut?'<button class="btn" data-act="o4Tog" data-k="pobraTodas" style="flex:0 0 auto;align-self:flex-end">'+(tod?'Só obras em andamento':'Incluir encerradas ('+nOut+')')+'</button>':''));
+  const MK='<div class="tw" style="margin-top:8px"><table style="min-width:980px">';let out='',i=0,j;
+  while((j=h.indexOf(MK,i))>=0){const b=h.indexOf('</table></div>',j),fim=b+'</table></div>'.length,bloco=h.slice(j,fim),n=(bloco.match(/<tr[ >]/g)||[]).length-2;/* cabeçalho e total */
+    const lim=!ui.o4.eapTodos&&n>O4_EAP_LIM;
+    out+=h.slice(i,j)+'<div class="tw o4-eap'+(lim?' o4-lim':'')+'" style="margin-top:8px"><table>'+bloco.slice(MK.length).replace(/<td style="padding-left:(\d+)px"><span class="mono sub">([^<]*)<\/span> ([^<]*)<\/td>/g,(m,pl,cod,nm)=>'<td style="padding-left:'+pl+'px"><div class="o4-cl2" title="'+cod+' '+nm+'"><span class="mono sub">'+cod+'</span> '+nm+'</div></td>')+
+      (n>O4_EAP_LIM?'<div class="o4-mais"><span class="sub">'+(lim?'Mostrando '+O4_EAP_LIM+' de '+n+' itens do orçamento.':'Mostrando os '+n+' itens.')+'</span><button class="btn sm" data-act="o4Tog" data-k="eapTodos">'+(lim?'Ver todos os '+n+' itens':'Mostrar só os '+O4_EAP_LIM+' primeiros')+'</button></div>':'');i=fim;}
+  h=out+h.slice(i);}catch(e){console.error(e);}return h;};}
+/* sem obra escolhida, o Painel da obra abre numa obra em andamento */
+if(typeof pobraProj==='function'){const pp0=pobraProj;pobraProj=function(){const cur=ui.pobra&&ui.pobra.proj&&get('proj',ui.pobra.proj);if(!cur&&ui.pobra){const a=S.proj.filter(x=>o4Sit(x)==='ativos'),e=a.filter(x=>obraEaps(x.id).length);const p=e[0]||a[0];if(p)ui.pobra.proj=p.id;}return pp0.apply(this,arguments);};}
+
+/* ===== v129: Recebimento de notas + Arquivo fiscal + ligação com Contas a pagar/receber =====
+   O XML original de cada NF-e fica no SERVIDOR (deploy/gestao/arquivofiscal.js). Aqui o navegador só recebe uma lista leve,
+   paginada e filtrada (/api/arqfiscal), e baixa o XML quando a pessoa pede o DANFE ou o arquivo. Nada de XML nas coleções.
+   - Fiscal › Recebimento de notas (antes "NFs recebidas"), com abas: Notas para lançar (a tela de sempre) | Pendentes de ligação |
+     Ligadas | Arquivo fiscal | Saídas emitidas. Fiscal › Arquivo fiscal abre a mesma tela na aba do arquivo.
+   - Porta única: "Receber XML do fornecedor" (fluxo de validação/lançamento de sempre + cópia no arquivo fiscal),
+     "Importar histórico (ZIP)" (só guarda e liga: não cria contas, não mexe no estoque) e as notas que o conector fiscal baixou.
+   - Contas a pagar e a receber: botão DANFE em todo título ligado, Anexar sempre visível, filtro "Nota fiscal" (sem nota / com nota /
+     nota cancelada) e marca da nota ligada na descrição; aviso quando a nota ligada foi cancelada. */
+const NFR={lista:null,chave:'',carregando:false,erro:'',acesso:null,cfg:null,timer:0,lote:null,det:{}};
+if(!ui.nfr)ui.nfr={aba:'lancar',q:'',tipo:'',de:'',ate:'',sit:'',vinc:'',origem:'',vmin:'',vmax:'',pg:0};
+const NFR_ABAS=[['lancar','Notas para lançar'],['pend','Pendentes de ligação'],['lig','Ligadas'],['arq','Arquivo fiscal'],['said','Saídas emitidas']];
+const nfrSelf=()=>!!(typeof window!=='undefined'&&window.__SELFHOST);
+/* mesmo critério do servidor: Administrador, Financeiro, Fiscal e Diretoria leem e importam; Comprador lê só as entradas */
+function nfrAcesso(){
+  if(NFR.acesso)return NFR.acesso;
+  if(me.owner)return 'total';
+  const pf=me.perfil,p=PERFIS[pf]||{},pp=(p&&!p.custom&&p.papel)||pf;
+  if(['admin','financeiro','fiscal','diretoria'].includes(pp))return 'total';
+  if(['comprador','compras'].includes(pp))return 'entradas';
+  if(p.custom){const w=p.w||[],r=p.r||[];if(w==='*'||w.includes('nf')||w.includes('fin'))return 'total';if(r==='*'||r.includes('nf'))return 'entradas';}
+  return '';
+}
+const nfrGuarda=em=>{const a=parseInt(String(em||'').slice(0,4),10);return a>1900?(a+5)+'-12-31':'';};
+const nfrDentroPrazo=em=>{const g=nfrGuarda(em);return !g||todayStr()<=g;};
+const nfrDocFmt=d=>{d=String(d||'');return /^\d{14}$|^\d{11}$/.test(d)?fmtDoc(d):d;};
+const nfrSitPill=r=>r.situacao==='cancelada'?pill('Cancelada','neg'):r.situacao==='desconhecida'?pill('Situação desconhecida','warn'):pill('Autorizada','pos');
+const NFR_ORIG={historico:'Histórico (Omie)',upload:'XML enviado',sefaz:'Conector (SEFAZ)'};
+
+/* ---------- conversa com o servidor ---------- */
+async function nfrApi(url,op){
+  const r=await fetch(url,Object.assign({credentials:'same-origin'},op||{}));
+  let j=null;try{j=await r.json();}catch(e){}
+  if(!r.ok)throw new Error((j&&j.erro)||('O servidor respondeu '+r.status+'.'));
+  return j;
+}
+function nfrQuery(){
+  const f=ui.nfr,p=[];
+  const fx={pend:{vinc:f.vinc==='sugestao'||f.vinc==='sem'?f.vinc:'pendente'},lig:{vinc:f.vinc==='cancligada'?'cancligada':'ligada'},said:{tipo:'saida'}}[f.aba]||{};
+  const base=Object.assign({q:f.q,tipo:f.tipo,de:f.de,ate:f.ate,sit:f.sit,vinc:f.vinc,origem:f.origem,vmin:f.vmin,vmax:f.vmax},fx),bk=JSON.stringify(base);
+  if(NFR.base!==undefined&&NFR.base!==bk)f.pg=0;NFR.base=bk; /* filtro mudou: volta à 1ª página */
+  const o=Object.assign(base,{pg:f.pg||0,n:50});
+  Object.keys(o).forEach(k=>{if(o[k]!==''&&o[k]!=null)p.push(k+'='+encodeURIComponent(o[k]));});
+  return p.join('&');
+}
+function nfrCarregar(forcar){
+  if(!nfrSelf()||!nfrAcesso())return;
+  const k=nfrQuery();if(!forcar&&(NFR.chave===k||NFR.carregando===k))return;
+  NFR.carregando=k;clearTimeout(NFR.timer);
+  NFR.timer=setTimeout(async()=>{
+    try{const j=await nfrApi('/api/arqfiscal?'+k);if(NFR.carregando!==k)return;NFR.lista=j;NFR.chave=k;NFR.erro='';if(j.acesso)NFR.acesso=j.acesso;}
+    catch(e){NFR.erro=e.message;NFR.chave=k;}
+    finally{if(NFR.carregando===k)NFR.carregando=false;}
+    if(ui.tab==='nfrec'||ui.tab==='arqf')render();
+  },forcar?0:250);
+}
+
+/* ---------- tela ---------- */
+function nfrAbas(){
+  const acc=nfrAcesso(),abas=NFR_ABAS.filter(a=>a[0]!=='said'||acc==='total');
+  return '<div class="acts" role="tablist" aria-label="Partes do recebimento de notas" style="flex-wrap:wrap;margin:0 0 12px">'+abas.map(a=>'<button class="btn sm'+(ui.nfr.aba===a[0]?' pri':'')+'" role="tab" aria-selected="'+(ui.nfr.aba===a[0])+'" data-act="nfrAba" data-v="'+a[0]+'">'+esc(a[1])+(a[0]==='pend'&&NFR.lista&&NFR.lista.resumo&&NFR.lista.resumo.pendentes?' ('+NFR.lista.resumo.pendentes+')':'')+'</button>').join('')+'</div>';
+}
+function nfrBotoes(){
+  const acc=nfrAcesso();if(!nfrSelf()||!acc)return '';
+  return (acc==='total'?'<button class="btn" data-act="nfrHistorico">Importar histórico (ZIP)</button><button class="btn" data-act="nfrExportar">ZIP para o contador</button>':'')+
+    (acc==='total'?'<button class="btn" data-act="nfrMais" aria-label="Mais ações do arquivo fiscal">Mais…</button>':'');
+}
+function nfrFiltros(){
+  const f=ui.nfr,a=f.aba,lab=(t,h)=>'<label class="f"><span>'+t+'</span>'+h+'</label>';
+  const tipoSel=a==='said'||nfrAcesso()!=='total'?'':lab('Tipo','<select id="s_nfrtipo" data-filter="nfr.tipo">'+opt([['entrada','Entradas (fornecedores)'],['saida','Saídas emitidas pela INA']],f.tipo,'Todas')+'</select>');
+  const vincSel=a==='pend'?lab('Ligação','<select id="s_nfrvinc" data-filter="nfr.vinc">'+opt([['sugestao','Com sugestão para confirmar'],['sem','Sem título encontrado']],f.vinc,'Todas pendentes')+'</select>')
+    :a==='lig'?lab('Ligação','<select id="s_nfrvinc" data-filter="nfr.vinc">'+opt([['cancligada','Só notas canceladas com título']],f.vinc,'Todas ligadas')+'</select>')
+    :a==='arq'||a==='said'?lab('Ligação','<select id="s_nfrvinc" data-filter="nfr.vinc">'+opt([['ligada','Ligadas a título'],['pendente','Sem título ligado'],['sugestao','Com sugestão'],['cancligada','Canceladas com título']],f.vinc,'Todas')+'</select>'):'';
+  return '<div class="bar">'+
+    '<label class="f grow"><span>Buscar</span><input id="q_nfr" data-filter="nfr.q" value="'+esc(f.q)+'" placeholder="Chave, número, fornecedor/cliente ou CNPJ"></label>'+tipoSel+
+    lab('Emissão de','<input type="date" id="d_nfrde" data-filter="nfr.de" value="'+esc(f.de)+'">')+lab('até','<input type="date" id="d_nfrate" data-filter="nfr.ate" value="'+esc(f.ate)+'">')+
+    lab('Situação','<select id="s_nfrsit" data-filter="nfr.sit">'+opt([['autorizada','Autorizada'],['cancelada','Cancelada']],f.sit,'Todas')+'</select>')+vincSel+
+    lab('Valor de','<input type="number" step="0.01" min="0" id="v_nfrmin" data-filter="nfr.vmin" value="'+esc(f.vmin)+'" style="width:110px">')+lab('até','<input type="number" step="0.01" min="0" id="v_nfrmax" data-filter="nfr.vmax" value="'+esc(f.vmax)+'" style="width:110px">')+
+    lab('Origem','<select id="s_nfrorig" data-filter="nfr.origem">'+opt(Object.entries(NFR_ORIG),f.origem,'Todas')+'</select>')+'</div>';
+}
+function nfrVincTxt(r){
+  if(r.vinc&&r.vinc.length){const ls=r.vinc.map(id=>get('lanc',id)).filter(Boolean);
+    return pill(r.vincConf==='manual'?'Ligada (à mão)':'Ligada','pos')+'<div class="sub">'+(ls.length?ls.slice(0,2).map(l=>esc(l.desc||'título')+' · '+money(l.valor)+(l.venc?' · venc. '+fmtDate(l.venc):'')).join('<br>')+(ls.length>2?'<br>+'+(ls.length-2)+' parcela(s)':''):r.vinc.length+' título(s)')+'</div>';}
+  if(r.sug&&r.sug.length)return pill(r.sug.length===1?'1 sugestão':r.sug.length+' sugestões','warn')+'<div class="sub">'+esc(r.sug[0].motivo)+'</div>';
+  return pill('Sem título','')+(r.origem==='historico'?'<div class="sub">histórico: só guardar</div>':'');
+}
+function nfrTabela(){
+  const L=NFR.lista,acc=nfrAcesso(),tot=acc==='total';
+  if(!L)return '<p class="sub">'+(NFR.erro?esc(NFR.erro):'Carregando o arquivo fiscal…')+'</p>';
+  const its=L.itens||[],res=L.resumo||{};
+  const kp='<div class="kpis">'+kpi('Notas no arquivo',String(res.total||0),(res.primeira?fmtDate(res.primeira)+' a '+fmtDate(res.ultima):'nenhuma ainda')+(tot&&res.total?' · '+(res.entradas||0)+' entradas, '+(res.saidas||0)+' saídas':''))+
+    kpi('Ligadas a título',String(res.ligadas||0),'contas a pagar ou a receber',res.ligadas?'pos':'')+
+    kpi('Pendentes de ligação',String(res.pendentes||0),(res.sugestoes||0)+' com sugestão',res.sugestoes?'warn':'')+
+    kpi('Canceladas',String(res.canceladas||0),res.cancLigadas?res.cancLigadas+' com título ligado: confira':'',res.cancLigadas?'neg':'')+'</div>';
+  const alerta=res.cancLigadas?'<div class="note" style="border-color:var(--neg)"><b>Atenção:</b> '+res.cancLigadas+' nota(s) cancelada(s) estão ligadas a contas '+(tot?'a pagar ou a receber':'a pagar')+'. Confira se o título deve ser cancelado ou trocado. <button class="btn sm" data-act="nfrVerCancLig">Ver</button></div>':'';
+  const rows=its.map(r=>{
+    const b=(a,l,c,extra)=>'<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+esc(r.id)+'"'+(extra||'')+'>'+l+'</button>';
+    const pode=!nfrDentroPrazo(r.emissao)&&me.owner;
+    const acts=b('nfrDanfe','DANFE')+b('nfrXml','XML')+(tot?b('nfrLigar',r.vinc&&r.vinc.length?'Ligação':'Ligar',r.sug&&r.sug.length&&!(r.vinc&&r.vinc.length)?'pri':''):'')+(tot?b('nfrSituacao','Situação'):'')+(pode?b('nfrExcluir','Excluir','dng'):'');
+    return '<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td>'+(r.tipo==='saida'?pill('Saída',''):pill('Entrada',''))+'</td><td class="mono" title="Chave '+esc(r.chave)+'">'+esc(r.numero||'s/n')+'/'+esc(r.serie||'1')+'</td>'+
+      '<td>'+esc(r.parcNome||'—')+'<div class="sub mono">'+esc(nfrDocFmt(r.parcDoc))+'</div></td><td class="num">'+money(r.valor)+'</td>'+
+      '<td>'+nfrSitPill(r)+(r.sitMsg?'<div class="sub">'+esc(r.sitMsg)+'</div>':r.fila?'<div class="sub">consulta no conector agendada</div>':'')+(r.situacao==='cancelada'&&r.vinc&&r.vinc.length?'<div class="sub neg"><b>título ligado: confira</b></div>':'')+'</td>'+
+      '<td>'+nfrVincTxt(r)+'</td><td class="mono" title="Prazo de guarda do XML (5 anos a partir de 1º de janeiro do ano seguinte)">'+fmtDate(r.guardaAte)+'</td><td class="act">'+acts+'</td></tr>';
+  }).join('');
+  const pg=L.pg||0,np=Math.max(1,Math.ceil((L.total||0)/(L.n||50)));
+  return kp+alerta+nfrFiltros()+
+    '<div class="tw"><table><thead><tr><th>Emissão</th><th>Tipo</th><th>NF</th><th>'+(ui.nfr.aba==='said'?'Cliente':tot?'Fornecedor / cliente':'Fornecedor')+'</th><th class="num">Valor</th><th>Situação</th><th>Ligação</th><th>Guardar até</th><th></th></tr></thead><tbody>'+
+    (rows||emptyRow(9,NFR.carregando?'Carregando…':'Nenhuma nota neste filtro.'))+'</tbody>'+
+    (L.total?'<tfoot><tr><td colspan="4">'+L.total+' nota(s)'+(np>1?' · página '+(pg+1)+' de '+np:'')+'</td><td class="num">'+money(L.soma)+'</td><td colspan="4" class="act">'+(pg>0?'<button class="btn sm" data-act="nfrPag" data-v="-1">‹ Anterior</button>':'')+(pg+1<np?'<button class="btn sm" data-act="nfrPag" data-v="1">Próxima ›</button>':'')+'</td></tr></tfoot>':'')+'</table></div>';
+}
+function nfrNotaTopo(){
+  return '<div class="note"><b>Arquivo fiscal.</b> O XML original de cada nota fica guardado no servidor da empresa (não no navegador) pelo prazo de guarda: '+
+    '5 anos contados de 1º de janeiro do ano seguinte ao da emissão (CTN arts. 173 e 195; Ajuste SINIEF 07/05, cláusula 10ª). Dentro do prazo o sistema não deixa excluir. '+
+    'O histórico importado só é guardado e ligado aos títulos que já existem: não cria contas, não mexe no estoque e não lança nada.</div>';
+}
+function nfrView(h0){
+  const f=ui.nfr,acc=nfrAcesso();
+  let topo=pageHead('Recebimento de notas','Porta única das notas fiscais: XML do fornecedor, histórico do Omie e notas baixadas pelo conector fiscal. O XML original fica no arquivo fiscal do servidor, ligado às contas a pagar e a receber.',
+    (f.aba==='lancar'?'<button class="btn" data-act="chaves">Conferir chaves</button>':'')+'<button class="btn pri" data-act="importXml">Receber XML do fornecedor</button>'+nfrBotoes());
+  if(f.aba==='said'&&acc!=='total')f.aba='arq';
+  if(f.aba==='lancar'){
+    const i=h0.indexOf('<div class="stack">');
+    const corpo=i>=0?h0.slice(i):h0;
+    return topo+nfrAbas()+corpo;
+  }
+  if(!nfrSelf())return topo+nfrAbas()+'<div class="note">O arquivo fiscal fica no servidor próprio da empresa (VPS). Abra o sistema pelo endereço da empresa para ver, importar e ligar as notas.</div>';
+  if(!acc)return topo+nfrAbas()+'<div class="note">Seu perfil não tem acesso ao arquivo fiscal. Quem consulta: Administrador, Financeiro, Fiscal e Diretoria (o Comprador vê só as notas de entrada).</div>';
+  nfrCarregar(false);
+  const sub={pend:'Notas guardadas que ainda não estão ligadas a uma conta a pagar ou a receber. Confirme as sugestões ou ligue à mão; criar a conta só se você pedir.',
+    lig:'Notas ligadas a títulos. A ligação fica gravada no título (chave da nota) e no arquivo fiscal.',arq:'Todas as notas guardadas, com busca e filtros.',said:'Notas emitidas pela INA (saídas), para ligar às contas a receber.'}[f.aba]||'';
+  return topo+nfrAbas()+'<div class="stack"><p class="sub" style="margin:0">'+esc(sub)+'</p>'+nfrNotaTopo()+nfrTabela()+'</div>';
+}
+{const v0=V.nfrec;V.nfrec=function(){const h=v0.apply(this,arguments);return nfrView(h);};}
+V.arqf=function(){if(ui.nfr.aba==='lancar')ui.nfr.aba='arq';return V.nfrec();};
+Object.assign(GROUP_OF_TAB,{arqf:'comp'});
+if(typeof TAB_COLS!=='undefined')TAB_COLS.arqf=(TAB_COLS.nfrec||['notas','parc','lanc']).slice();
+/* nomes do menu: "NFs recebidas" passa a "Recebimento de notas"; Fiscal ganha "Arquivo fiscal" */
+{const troca=arr=>{(arr||[]).forEach(x=>{if(Array.isArray(x)){if(x[0]==='nfrec'&&x[1]==='NFs recebidas')x[1]='Recebimento de notas';else if(Array.isArray(x[2]))troca(x[2]);}});};
+  troca(NAV);troca(MENU);if(typeof AREAS!=='undefined')troca(AREAS);
+  if(!NAV.some(x=>x[0]==='arqf'))NAV.push(['arqf','Arquivo fiscal','Fiscal']);
+  const fis=MENU.find(m=>m[0]==='fisc');if(fis&&!fis[2].some(i=>i[0]==='arqf')){const k=fis[2].findIndex(i=>i[0]==='nf');fis[2].splice(k>=0?k+1:fis[2].length,0,['arqf','Arquivo fiscal']);}}
+
+/* ---------- ações da tela ---------- */
+A.nfrAba=d=>{ui.nfr.aba=d.v;ui.nfr.pg=0;if(d.v!=='arq'&&d.v!=='said'&&d.v!=='pend'&&d.v!=='lig')ui.nfr.vinc='';if(['pend','lig'].includes(d.v))ui.nfr.vinc='';render();};
+A.nfrPag=d=>{ui.nfr.pg=Math.max(0,(ui.nfr.pg||0)+(+d.v||0));nfrCarregar(true);render();};
+A.nfrVerCancLig=()=>{Object.assign(ui.nfr,{aba:'lig',vinc:'cancligada',pg:0});render();};
+A.nfrRecarregar=()=>{NFR.chave='';nfrCarregar(true);};
+A.nfrMais=()=>{
+  const acc=nfrAcesso();if(acc!=='total')return;
+  modal({title:'Arquivo fiscal: mais ações',nofocus:true,body:'<div class="stack">'+
+    '<div><button class="btn" data-act="nfrReligar">Procurar títulos de novo</button><p class="sub" style="margin:4px 0 0">Para as notas ainda sem ligação: procura de novo a conta pelo CNPJ, número, valor (tolerância de '+esc(String(nfrCfg().tol))+'%) e data. Útil depois de cadastrar ou importar títulos.</p></div>'+
+    '<div><button class="btn" data-act="nfrSefaz">Trazer as notas do conector fiscal</button><p class="sub" style="margin:4px 0 0">As NF-e que o conector já baixou da SEFAZ entram no arquivo (sem nova consulta à SEFAZ).</p></div>'+
+    '<div><button class="btn" data-act="nfrLotes">Importações anteriores</button></div>'+
+    '<div><button class="btn" data-act="nfrConfig">Configurar ligação automática</button></div></div>',foot:'<button class="btn" data-act="closeModal">Fechar</button>'});
+};
+const nfrCfg=()=>{const c=cfg();return {tol:c.arqfTol==null||c.arqfTol===''?1:+c.arqfTol,dias:+c.arqfDias||120,cnpjs:c.arqfCnpjs||''};};
+A.nfrConfig=()=>{
+  const c=nfrCfg();
+  modal({title:'Ligação automática das notas',body:'<p class="sub" style="margin:0 0 10px">A nota liga sozinha quando o CNPJ do fornecedor (ou cliente), o número da nota e o valor conferem, com o vencimento perto da emissão. Parcelas do mesmo documento são somadas. O resto vira sugestão para confirmar.</p>'+
+    '<div class="grid2">'+field('Tolerância do valor (%)','arqfTol','number',c.tol,{})+field('Janela de datas (dias entre emissão e vencimento)','arqfDias','number',c.dias,{})+
+    field('Outros CNPJs da empresa (filiais), separados por vírgula','arqfCnpjs','text',c.cnpjs,{full:true})+'</div>'+
+    '<p class="sub" style="margin:8px 0 0">O CNPJ principal vem de Sistema › Configurações ('+esc(cfg().cnpj?fmtDoc(cfg().cnpj):'não informado')+'). Só entram no arquivo notas em que a empresa é emitente ou destinatária.</p>',
+    saveLabel:'Salvar',save:root=>{const v=readForm(root),t=parseFloat(String(v.arqfTol).replace(',','.')),di=parseInt(v.arqfDias,10);
+      if(!(t>=0&&t<=10)){toast('Tolerância entre 0 e 10%.','neg');return false;}if(!(di>=1&&di<=365)){toast('Janela entre 1 e 365 dias.','neg');return false;}
+      put('cfg',Object.assign({},cfg(),{id:'empresa',arqfTol:t,arqfDias:di,arqfCnpjs:String(v.arqfCnpjs||'').trim()}));toast('Configuração salva.','pos');}});
+};
+A.nfrReligar=async()=>{closeModal();try{const j=await nfrApi('/api/arqfiscal/religar',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});toast(j.vistas+' nota(s) conferidas: '+j.ligadas+' ligada(s), '+j.sugestoes+' com sugestão.','pos');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}};
+A.nfrSefaz=async()=>{closeModal();try{const j=await nfrApi('/api/arqfiscal/sefaz',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({dias:90})});const r=j.rel||{};toast(r.novas+' nota(s) nova(s) do conector, '+r.existentes+' já estavam no arquivo'+(r.canceladas?', '+r.canceladas+' cancelada(s)':'')+'.','pos');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}};
+A.nfrLotes=async()=>{
+  try{const j=await nfrApi('/api/arqfiscal/lotes');const ls=j.lotes||[];
+    modal({title:'Importações anteriores',wide:true,nofocus:true,body:ls.length?'<div class="tw"><table><thead><tr><th>Quando</th><th>Arquivo</th><th>Quem</th><th class="num">Novas</th><th class="num">Já existiam</th><th class="num">Ignoradas</th><th class="num">Ligadas</th><th></th></tr></thead><tbody>'+
+      ls.map(l=>'<tr><td class="mono">'+fmtDT(l.em)+'</td><td>'+esc(l.arquivo||'')+'</td><td>'+nm(l.por)+'</td><td class="num">'+(l.novas||0)+'</td><td class="num">'+(l.existentes||0)+'</td><td class="num">'+(l.ignoradas||0)+'</td><td class="num">'+(l.ligadas||0)+'</td><td class="act"><button class="btn sm" data-act="nfrLoteVer" data-id="'+esc(l.id)+'">Relatório</button></td></tr>').join('')+'</tbody></table></div>':'<p>Nenhuma importação em lote ainda.</p>',foot:'<button class="btn" data-act="closeModal">Fechar</button>'});
+  }catch(e){toast(e.message,'neg');}
+};
+A.nfrLoteVer=async d=>{try{const j=await nfrApi('/api/arqfiscal/lote/'+encodeURIComponent(d.id));nfrRelatorio([{arquivo:j.arquivo,rel:j.rel||{},segundos:j.segundos}]);}catch(e){toast(e.message,'neg');}};
+
+/* ---------- importar histórico: ZIP(s) enviados ao servidor, processados em partes, com progresso ---------- */
+function nfrEscolher(accept,multi,fn){
+  const i=document.createElement('input');i.type='file';i.accept=accept;i.multiple=!!multi;i.style.display='none';
+  i.addEventListener('change',()=>{const fs=Array.from(i.files||[]);i.remove();if(fs.length)fn(fs);});
+  document.body.appendChild(i);i.click();
+}
+A.nfrHistorico=()=>{
+  if(nfrAcesso()!=='total'){toast('Seu perfil não importa o histórico.','neg');return;}
+  modal({title:'Importar histórico de notas (ZIP)',nofocus:true,body:'<p style="margin:0 0 8px">Envie os ZIPs com os XMLs exportados do Omie (um por ano, por exemplo). O servidor confere cada arquivo e guarda só as NF-e <b>autorizadas</b> em que a INA é emitente ou destinatária.</p>'+
+    '<ul class="sub" style="margin:0 0 8px;padding-left:18px"><li>Não cria contas a pagar ou a receber, não mexe no estoque e não lança nada: só guarda e liga aos títulos que já existem.</li><li>Nota já guardada é contada como "já existente" (nada muda). Pode reenviar sem medo.</li><li>Recusados, com o motivo: XML sem protocolo da SEFAZ, nota denegada, CNPJ de outra empresa e os "invertidos" do Omie (nome com "-invertido" ou assinatura que não confere). Não envie a pasta XML_Invertido.</li><li>Eventos de cancelamento no mesmo lote marcam a nota como cancelada.</li></ul>'+
+    '<p class="sub" style="margin:0">Limite por arquivo: '+esc(String((NFR.cfg&&NFR.cfg.maxZipMb)||300))+' MB.</p>',
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button><button class="btn pri" data-act="nfrHistEscolher">Escolher ZIP(s)</button>'});
+};
+A.nfrHistEscolher=()=>nfrEscolher('.zip,.xml',true,fs=>nfrEnviarLotes(fs));
+function nfrProgHtml(L){
+  const pct=L.total?Math.round(L.feitos/L.total*100):0;
+  return '<p style="margin:0 0 6px"><b>'+esc(L.arquivo)+'</b> ('+(L.i+1)+' de '+L.n+')</p><p class="sub" style="margin:0 0 6px">'+esc(L.fase)+'</p>'+
+    '<div class="ab" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct+'" style="height:10px;background:var(--line);border-radius:6px;overflow:hidden"><i style="display:block;height:100%;width:'+pct+'%;background:var(--pri,#2457d6)"></i></div>'+
+    '<p class="sub mono" style="margin:6px 0 0">'+L.feitos+' de '+(L.total||'?')+' arquivo(s) · '+(L.rel.novas||0)+' nova(s) · '+(L.rel.existentes||0)+' já existente(s) · '+(L.rel.ignoradas||0)+' ignorada(s)</p>';
+}
+function nfrProgMostra(){const el=document.getElementById?document.getElementById('nfrProg'):null,L=NFR.lote;if(el&&L)el.innerHTML=nfrProgHtml(L);}
+async function nfrEnviarLotes(files){
+  const tot=files.reduce((s,f)=>s+(f.size||0),0),max=((NFR.cfg&&NFR.cfg.maxZipMb)||300)*1048576;
+  const grande=files.find(f=>f.size>max);if(grande){toast('“'+grande.name+'” passa do limite de '+Math.round(max/1048576)+' MB. Divida em arquivos menores.','neg');return;}
+  const res=[];NFR.lote={i:0,n:files.length,arquivo:'',fase:'',feitos:0,total:0,rel:{}};
+  modal({title:'Importando o histórico',nofocus:true,body:'<div id="nfrProg" aria-live="polite">'+nfrProgHtml(Object.assign(NFR.lote,{arquivo:files[0].name,fase:'Enviando…'}))+'</div>',foot:'<button class="btn" data-act="closeModal">Continuar em segundo plano</button>'});
+  for(let i=0;i<files.length;i++){
+    const f=files[i];Object.assign(NFR.lote,{i,arquivo:f.name,fase:'Enviando o arquivo ao servidor ('+(f.size/1048576).toFixed(1)+' MB)…',feitos:0,total:0,rel:{}});nfrProgMostra();
+    try{
+      const j=await nfrApi('/api/arqfiscal/lote?origem=historico&nome='+encodeURIComponent(f.name),{method:'POST',headers:{'content-type':/\.xml$/i.test(f.name)?'application/xml':'application/zip'},body:f});
+      let s=null;
+      for(let k=0;k<7200;k++){
+        s=await nfrApi('/api/arqfiscal/lote/'+encodeURIComponent(j.id));
+        Object.assign(NFR.lote,{fase:s.estado==='processando'?'Conferindo e guardando no servidor…':s.estado==='concluido'?'Concluído.':s.estado,feitos:s.feitos||0,total:s.total||0,rel:s.rel||{}});nfrProgMostra();
+        if(s.estado!=='processando'&&s.estado!=='recebendo')break;
+        await new Promise(r=>setTimeout(r,800));
+      }
+      res.push({arquivo:f.name,rel:(s&&s.rel)||{},erro:s&&s.estado==='erro'?s.erro:'',segundos:s&&s.segundos});
+    }catch(e){res.push({arquivo:f.name,rel:{},erro:e.message});}
+  }
+  NFR.lote=null;A.nfrRecarregar();nfrRelatorio(res);
+}
+function nfrRelatorio(res){
+  const soma=k=>res.reduce((s,r)=>s+(+((r.rel||{})[k])||0),0),mot={};
+  res.forEach(r=>Object.entries((r.rel||{}).motivos||{}).forEach(([k,v])=>{mot[k]=(mot[k]||0)+v;}));
+  const lista=[].concat(...res.map(r=>((r.rel||{}).lista||[]).map(x=>[r.arquivo,x.arquivo,x.motivo])));
+  NFR.ultRel=lista;
+  modal({title:'Relatório da importação',wide:true,nofocus:true,body:
+    '<div class="kpis">'+kpi('Novas',String(soma('novas')),soma('entradas')+' entradas · '+soma('saidas')+' saídas','pos')+kpi('Já existentes',String(soma('existentes')),'nada mudou')+kpi('Ignoradas',String(soma('ignoradas')),'veja o motivo abaixo',soma('ignoradas')?'warn':'')+
+    kpi('Ligadas a título',String(soma('ligadas')),soma('sugestoes')+' sugestão(ões) · '+soma('semTitulo')+' sem título')+kpi('Cancelamentos',String(soma('canceladas')),soma('eventos')+' evento(s) guardado(s)',soma('canceladas')?'neg':'')+'</div>'+((soma('copiasAlteradas')||soma('restauradas'))?'<div class="note" style="margin-top:8px"><b>Cópias do Omie:</b> '+soma('restauradas')+' XML tinham os acentos codificados duas vezes e foram restaurados (a assinatura confere). '+soma('copiasAlteradas')+' foram guardados como "cópia alterada": servem de consulta, e o original pode ser baixado depois na SEFAZ pela chave (Baixar XML).</div>':'')+
+    res.filter(r=>r.erro).map(r=>'<div class="note" style="border-color:var(--neg)"><b>'+esc(r.arquivo)+':</b> '+esc(r.erro)+'</div>').join('')+
+    (Object.keys(mot).length?'<h3 style="margin:12px 0 6px">Ignoradas, por motivo</h3><ul style="margin:0;padding-left:18px">'+Object.entries(mot).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<li>'+esc(k)+': <b>'+v+'</b></li>').join('')+'</ul>':'')+
+    (lista.length?'<h3 style="margin:12px 0 6px">Arquivos ignorados'+(lista.length>40?' (primeiros 40 de '+lista.length+')':'')+'</h3><div class="tw"><table><thead><tr><th>Arquivo</th><th>Motivo</th></tr></thead><tbody>'+lista.slice(0,40).map(x=>'<tr><td class="mono" style="word-break:break-all">'+esc(x[1])+'</td><td>'+esc(x[2])+'</td></tr>').join('')+'</tbody></table></div>':'')+
+    '<p class="sub" style="margin:10px 0 0">'+res.map(r=>esc(r.arquivo)+(r.segundos!=null?' em '+r.segundos+' s':'')).join(' · ')+'</p>',
+    foot:(lista.length?'<button class="btn" data-act="nfrRelCsv">Baixar lista dos ignorados (CSV)</button>':'')+'<button class="btn pri" data-act="closeModal">Fechar</button>'});
+}
+A.nfrRelCsv=()=>{saveFile('importacao-notas-ignoradas.csv',csv([['ZIP','Arquivo','Motivo']].concat(NFR.ultRel||[])));};
+
+/* ---------- ZIP para o contador ---------- */
+A.nfrExportar=()=>{
+  const h=todayStr(),m=ym(h),a=addMonths(m,-1),f=ui.nfr;
+  modal({title:'ZIP com os XMLs para o contador',body:'<p class="sub" style="margin:0 0 10px">O servidor monta o ZIP com os XMLs originais do período (pastas por ano, entradas e saídas, com os eventos de cancelamento) e um índice em planilha.</p>'+
+    '<div class="grid2">'+field('Emissão de','de','date',f.de||a+'-01',{})+field('até','ate','date',f.ate||addDays(m+'-01',-1),{})+
+    field('Notas','tipo','select',f.tipo||'',{opts:[['','Entradas e saídas'],['entrada','Só entradas'],['saida','Só saídas']]})+field('Situação','sit','select','',{opts:[['','Todas'],['autorizada','Só autorizadas'],['cancelada','Só canceladas']]})+'</div>',
+    saveLabel:'Baixar ZIP',save:root=>{const v=readForm(root);if(!v.de||!v.ate||v.de>v.ate){toast('Confira o período.','neg');return false;}
+      const url='/api/arqfiscal/exportar?de='+encodeURIComponent(v.de)+'&ate='+encodeURIComponent(v.ate)+(v.tipo?'&tipo='+encodeURIComponent(v.tipo):'')+(v.sit?'&sit='+encodeURIComponent(v.sit):'');NFR.ultExport=url;
+      try{const el=document.createElement('a');el.href=url;el.download='';el.rel='noopener';document.body.appendChild(el);el.click();el.remove();}catch(e){}
+      toast('Gerando o ZIP… o download começa em instantes.','pos');}});
+};
+
+/* ---------- DANFE (espelho gerado do XML do servidor) e XML ---------- */
+/* leitura do XML sem depender do DOMParser (mesmo critério do servidor) */
+const nfrDec=s=>String(s).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/&(#[xX][0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g,(m,e)=>e[0]==='#'?String.fromCodePoint(/^#[xX]/.test(e)?parseInt(e.slice(2),16):parseInt(e.slice(1),10)):({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"})[e]);
+const nfrBloco=(x,tag)=>{if(!x)return '';const m=String(x).match(new RegExp('<(?:\\w+:)?'+tag+'(?:\\s[^>]*)?>([\\s\\S]*?)</(?:\\w+:)?'+tag+'>'));return m?m[1]:'';};
+const nfrBlocos=(x,tag)=>{const out=[],re=new RegExp('<(?:\\w+:)?'+tag+'(?:\\s[^>]*)?>([\\s\\S]*?)</(?:\\w+:)?'+tag+'>','g');let m;while((m=re.exec(x||'')))out.push(m[1]);return out;};
+function nfrLerXml(text){
+  const t=String(text||''),tx=(x,tag)=>{const b=nfrBloco(x,tag);return b?nfrDec(b).trim():'';},nv=(x,tag)=>parseFloat(tx(x,tag))||0;
+  const im=t.match(/<(?:\w+:)?infNFe\s[^>]*>/);if(!im)throw new Error('O XML não tem uma NF-e.');
+  const inf=nfrBloco(t,'infNFe'),ide=nfrBloco(inf,'ide'),emit=nfrBloco(inf,'emit'),dest=nfrBloco(inf,'dest'),tot=nfrBloco(inf,'ICMSTot'),prot=nfrBloco(t,'infProt'),transp=nfrBloco(inf,'transp'),infAd=nfrBloco(inf,'infAdic');
+  return {chave:((im[0].match(/\sId\s*=\s*["']([^"']+)/)||[])[1]||'').replace(/^NFe/,''),numero:tx(ide,'nNF'),serie:tx(ide,'serie'),natOp:tx(ide,'natOp'),emissao:(tx(ide,'dhEmi')||tx(ide,'dEmi')).slice(0,10),tpNF:tx(ide,'tpNF'),finNFe:tx(ide,'finNFe'),
+    emit:{doc:tx(emit,'CNPJ')||tx(emit,'CPF'),nome:tx(emit,'xNome'),ie:tx(emit,'IE'),mun:tx(emit,'xMun'),uf:tx(emit,'UF')},
+    dest:{doc:tx(dest,'CNPJ')||tx(dest,'CPF')||tx(dest,'idEstrangeiro'),nome:tx(dest,'xNome'),ie:tx(dest,'IE'),mun:tx(dest,'xMun'),uf:tx(dest,'UF')},
+    itens:nfrBlocos(inf,'det').map(d=>{const p=nfrBloco(d,'prod');return {cod:tx(p,'cProd'),desc:tx(p,'xProd'),ncm:tx(p,'NCM'),cfop:tx(p,'CFOP'),un:tx(p,'uCom'),qtd:nv(p,'qCom'),vUnit:nv(p,'vUnCom'),vProd:nv(p,'vProd')};}),
+    tot:{vProd:nv(tot,'vProd'),vFrete:nv(tot,'vFrete'),vSeg:nv(tot,'vSeg'),vDesc:nv(tot,'vDesc'),vOutro:nv(tot,'vOutro'),vIPI:nv(tot,'vIPI'),vICMS:nv(tot,'vICMS'),vST:nv(tot,'vST'),vPIS:nv(tot,'vPIS'),vCOFINS:nv(tot,'vCOFINS'),vNF:nv(tot,'vNF')},
+    dups:nfrBlocos(nfrBloco(inf,'cobr'),'dup').map(d=>({n:tx(d,'nDup'),venc:tx(d,'dVenc'),v:nv(d,'vDup')})),
+    prot:{n:tx(prot,'nProt'),dh:tx(prot,'dhRecbto'),cStat:tx(prot,'cStat'),motivo:tx(prot,'xMotivo')},modFrete:tx(transp,'modFrete'),infCpl:tx(infAd,'infCpl')};
+}
+function nfrEspelho(x,row){
+  const ch=String(x.chave||'').replace(/(.{4})(?=.)/g,'$1 ');
+  const sit=row&&row.situacao==='cancelada'?'Cancelada':'Autorizada';
+  return {tipo:'DANFE (espelho do XML)',numero:(x.numero||'s/n')+'/'+(x.serie||'1'),situacao:sit,
+    meta:[['Emitente',x.emit.nome],['CNPJ/CPF do emitente',nfrDocFmt(x.emit.doc)+(x.emit.ie?' · IE '+x.emit.ie:'')],['Destinatário',x.dest.nome],['CNPJ/CPF do destinatário',nfrDocFmt(x.dest.doc)],
+      ['Emissão',fmtDate(x.emissao)],['Tipo da nota (para o emitente)',x.tpNF==='0'?'0 - Entrada':'1 - Saída'],['Natureza da operação',x.natOp],['Chave de acesso',ch],
+      ['Protocolo de autorização',x.prot.n?x.prot.n+(x.prot.dh?' · '+fmtDT(Date.parse(x.prot.dh)):''):''],['Situação',sit+(row&&row.sitFonte?' ('+row.sitFonte+')':'')]],
+    tables:[{head:['Item','Código','Descrição','NCM','CFOP','Un.','Qtd','Valor unit.','Total'],num:[0,6,7,8],rows:x.itens.map((i,k)=>[String(k+1),i.cod,i.desc,i.ncm,i.cfop,i.un,fmtQ(i.qtd),money(i.vUnit),money(i.vProd||i.qtd*i.vUnit)])}]
+      .concat(x.dups.length?[{title:'Duplicatas',head:['Parcela','Vencimento','Valor'],num:[2],rows:x.dups.map(d=>[d.n,fmtDate(d.venc),money(d.v)])}]:[]),
+    totals:[['Produtos',money(x.tot.vProd)],['Frete',money(x.tot.vFrete)],['Seguro',money(x.tot.vSeg)],['Outras despesas',money(x.tot.vOutro)],['IPI',money(x.tot.vIPI)],['ICMS',money(x.tot.vICMS)],['ICMS-ST',money(x.tot.vST)],['PIS / COFINS',money(x.tot.vPIS)+' / '+money(x.tot.vCOFINS)],['Desconto',money(x.tot.vDesc)],['Total da nota',money(x.tot.vNF),1]].filter((t,i)=>i===0||i===9||String(t[1])!==money(0)),
+    obs:'Espelho gerado pelo sistema a partir do XML original guardado no arquivo fiscal. Não substitui o DANFE do emitente nem a consulta da chave no portal da NF-e.'+(x.infCpl?' Informações complementares: '+x.infCpl:'')};
+}
+async function nfrXmlTexto(id){const r=await fetch('/api/arqfiscal/'+encodeURIComponent(id)+'/xml',{credentials:'same-origin'});if(!r.ok){let j=null;try{j=await r.json();}catch(e){}throw new Error((j&&j.erro)||'Não foi possível abrir o XML.');}return r.text();}
+const nfrLinha=id=>((NFR.lista&&NFR.lista.itens)||[]).find(r=>r.id===id)||NFR.det[id]||null;
+A.nfrDanfe=async d=>{try{const t=await nfrXmlTexto(d.id),x=nfrLerXml(t),row=nfrLinha(d.id);showDoc(nfrEspelho(x,row),slug('danfe-'+(x.numero||'sn')+'-'+String(x.chave).slice(-6)));}catch(e){toast(e.message,'neg');}};
+A.nfrXml=async d=>{try{const t=await nfrXmlTexto(d.id),row=nfrLinha(d.id);saveFile(((row&&row.chave)||'nota')+'-nfe.xml',t);}catch(e){toast(e.message,'neg');}};
+A.nfrSituacao=async d=>{const row=nfrLinha(d.id);
+  if(row&&row.origem==='historico')toast('Consultando… (para o histórico a consulta é só por este botão; a SEFAZ responde por chave só notas de até 90 dias).');
+  try{const j=await nfrApi('/api/arqfiscal/'+encodeURIComponent(d.id)+'/situacao',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});toast((j.situacao==='cancelada'?'Nota CANCELADA. ':'')+(j.msg||'Situação conferida.'),j.situacao==='cancelada'?'neg':'pos');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}};
+A.nfrExcluir=d=>{const row=nfrLinha(d.id);if(!row)return;
+  if(nfrDentroPrazo(row.emissao)){toast('Este XML está no prazo de guarda até '+fmtDate(nfrGuarda(row.emissao))+'. Não pode ser excluído.','neg');return;}
+  if(!me.owner){toast('Só o dono exclui XML depois do prazo de guarda.','neg');return;}
+  confirmBox('Excluir de vez o XML da NF '+esc(row.numero||'s/n')+' de '+esc(row.parcNome||'')+' (emitida em '+fmtDate(row.emissao)+')? O prazo de guarda acabou em '+fmtDate(row.guardaAte)+'. O servidor vai pedir sua senha.',async()=>{
+    try{await nfrApi('/api/arqfiscal/'+encodeURIComponent(d.id),{method:'DELETE'});toast('XML excluído.','pos');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}},'Excluir',true);};
+
+/* ---------- ligar nota ↔ título (pagar/receber) ---------- */
+function nfrCandidatos(row){
+  const tipoL=row.tipo==='saida'?'receber':'pagar',d=String(row.parcDoc||'');
+  const pids=new Set(S.parc.filter(p=>digits(p.doc||'')===d||String(p.doc||'').toUpperCase().replace(/[^0-9A-Z]/g,'')===d).map(p=>p.id));
+  return S.lanc.filter(l=>l.tipo===tipoL&&l.status!=='cancelado'&&!l.transf&&!l.guia&&(!l.arqf||l.arqf.ch===row.chave)&&(pids.has(l.parcId)||(row.vinc||[]).includes(l.id)))
+    .sort((a,b)=>Math.abs((+a.valor||0)-row.valor)-Math.abs((+b.valor||0)-row.valor)).slice(0,40);
+}
+A.nfrLigar=d=>{
+  const row=nfrLinha(d.id);if(!row)return;NFR.ligRow=row;
+  const cs=nfrCandidatos(row),sel=new Set(row.vinc||[]),sug=row.sug||[];
+  const tipoL=row.tipo==='saida'?'receber':'pagar';
+  const linhaL=l=>'<label style="display:flex;gap:8px;align-items:flex-start;padding:4px 0"><input type="checkbox" name="l_'+esc(l.id)+'"'+(sel.has(l.id)?' checked':'')+'><span>'+esc(l.desc||'título')+'<span class="sub"> · '+money(l.valor)+(l.venc?' · venc. '+fmtDate(l.venc):'')+(l.pago?' · '+(tipoL==='pagar'?'pago':'recebido'):'')+'</span></span></label>';
+  modal({title:'Ligar NF '+(row.numero||'s/n')+' · '+(row.parcNome||''),wide:true,body:
+    '<p class="sub" style="margin:0 0 8px">Nota de '+fmtDate(row.emissao)+', '+money(row.valor)+'. Marque o título (ou as parcelas) desta nota em '+(tipoL==='pagar'?'Contas a pagar':'Contas a receber')+'.</p>'+
+    (sug.length?'<div class="note"><b>Sugestões do sistema:</b><ul style="margin:4px 0 0;padding-left:18px">'+sug.map((s,i)=>'<li>'+esc(s.motivo)+' — '+s.lancs.map(id=>{const l=get('lanc',id);return l?esc(l.desc||'título')+' ('+money(l.valor)+')':'título removido';}).join(', ')+' <button class="btn sm" data-act="nfrSugOk" data-v="'+i+'">Confirmar</button></li>').join('')+'</ul></div>':'')+
+    (cs.length?'<div style="max-height:45vh;overflow:auto">'+cs.map(linhaL).join('')+'</div>':'<p>Nenhum título deste '+(tipoL==='pagar'?'fornecedor':'cliente')+' sem nota ligada. Confira se o CNPJ do cadastro é '+esc(nfrDocFmt(row.parcDoc))+', ou crie a conta.</p>'),
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button>'+(row.vinc&&row.vinc.length?'<button class="btn dng" data-act="nfrDesligar">Desligar</button>':'')+'<button class="btn" data-act="nfrCriarConta">Criar '+(tipoL==='pagar'?'conta a pagar':'conta a receber')+'</button><button class="btn pri" data-act="nfrLigarOk">Ligar marcados</button>'});
+};
+async function nfrLigarIds(row,ids){
+  try{const j=await nfrApi('/api/arqfiscal/'+encodeURIComponent(row.id)+'/ligar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lancIds:ids})});closeModal();toast('Nota ligada a '+ids.length+' título(s).','pos');NFR.det[row.id]=Object.assign({},row,j);A.nfrRecarregar();return true;}
+  catch(e){toast(e.message,'neg');return false;}
+}
+A.nfrLigarOk=()=>{const row=NFR.ligRow;if(!row)return;const root=$('#mb'),ids=[];
+  (root&&root.querySelectorAll?Array.from(root.querySelectorAll('input[type=checkbox]')):[]).forEach(i=>{if(i.checked&&/^l_/.test(i.name))ids.push(i.name.slice(2));});
+  if(!ids.length){toast('Marque ao menos um título, ou use Desligar.','neg');return;}return nfrLigarIds(row,ids);};
+A.nfrSugOk=d=>{const row=NFR.ligRow;if(!row||!row.sug)return;const s=row.sug[+d.v];if(s)return nfrLigarIds(row,s.lancs);};
+A.nfrDesligar=()=>{const row=NFR.ligRow;if(!row)return;confirmBox('Tirar a ligação desta nota com o(s) título(s)?',async()=>{try{await nfrApi('/api/arqfiscal/'+encodeURIComponent(row.id)+'/desligar',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});toast('Ligação desfeita.');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}},'Desligar',true);};
+/* criar a conta só por ação explícita (nunca na importação) */
+A.nfrCriarConta=async()=>{
+  const row=NFR.ligRow;if(!row)return;
+  if(!mayW('fin')){toast('Seu perfil não cria contas a pagar ou a receber.','neg');return;}
+  let det=null;try{det=await nfrApi('/api/arqfiscal/'+encodeURIComponent(row.id));}catch(e){toast(e.message,'neg');return;}
+  const tipoL=row.tipo==='saida'?'receber':'pagar',d=String(row.parcDoc||'');
+  const parc=S.parc.find(p=>digits(p.doc||'')===d||String(p.doc||'').toUpperCase().replace(/[^0-9A-Z]/g,'')===d);
+  const pars=(det.parcelas||[]).filter(p=>+p.v>0),np=pars.length||1;
+  confirmBox('Criar '+np+' '+(tipoL==='pagar'?'conta(s) a pagar':'conta(s) a receber')+' de '+money(row.valor)+' para '+esc(row.parcNome||'')+(parc?'':' (o '+(tipoL==='pagar'?'fornecedor':'cliente')+' será cadastrado)')+', já ligada(s) a esta nota? Confira a categoria e o projeto depois em '+(tipoL==='pagar'?'Contas a pagar':'Contas a receber')+'.',async()=>{
+    const p=parc||put('parc',{id:uid(),nome:row.parcNome||'Parceiro',tipo:tipoL==='pagar'?'fornecedor':'cliente',doc:nfrDocFmt(d)});
+    const ids=[];const lista=pars.length?pars:[{v:row.valor,venc:addDays(row.emissao,30)}];
+    lista.forEach((x,i)=>{const l=put('lanc',{id:uid(),tipo:tipoL,desc:'NF-e '+(row.numero||'s/n')+' — '+(row.parcNome||'')+(np>1?' ('+(i+1)+'/'+np+')':''),nf:String(row.numero||''),valor:r2(+x.v||0),retido:0,venc:x.venc||addDays(row.emissao,30),comp:ym(row.emissao),emissao:row.emissao,parcId:p.id,projId:'',categoria:tipoL==='pagar'?'Compra de mercadorias e insumos':'Venda de produtos',contaId:'',estoqueValor:0,status:'aberto',pago:''});ids.push(l.id);});
+    await nfrLigarIds(row,ids);
+  },'Criar e ligar');
+};
+
+/* ---------- porta única: XML do fornecedor (fluxo de sempre) também vai para o arquivo fiscal ---------- */
+async function nfrArquivar(items,origem){
+  if(!nfrSelf()||!nfrAcesso()||!items||!items.length)return null;
+  const rel={novas:0,existentes:0,ignoradas:0};
+  try{
+    for(let i=0;i<items.length;i+=50){
+      const j=await nfrApi('/api/arqfiscal/xml',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({origem:origem||'upload',arquivos:items.slice(i,i+50).map(it=>({nome:it.name,xml:it.text}))})});
+      ['novas','existentes','ignoradas'].forEach(k=>rel[k]+=(j.rel&&j.rel[k])||0);
+    }
+    if(rel.novas)toast(rel.novas+' XML guardado(s) no arquivo fiscal.','pos');
+    NFR.chave='';return rel;
+  }catch(e){toast('A nota entrou, mas o XML não foi para o arquivo fiscal: '+e.message,'neg');return null;}
+}
+{const i0=importarXmls;importarXmls=function(items){const r=i0.apply(this,arguments);try{nfrArquivar(items,NFR.origemXml||'upload');}catch(e){}return r;};}
+{const f0=A.fisImportar;if(f0)A.fisImportar=async function(d){NFR.origemXml='sefaz';try{return await f0.apply(this,arguments);}finally{NFR.origemXml='';}};}
+/* depois de lançar a nota (cria a conta a pagar com notaId), liga o XML do arquivo à conta */
+{const e0=A.efetivarNota;if(e0)A.efetivarNota=function(d){const r=e0.apply(this,arguments);try{const n=get('notas',d&&d.id);if(n&&n.chave&&nfrSelf()&&nfrAcesso()==='total')setTimeout(()=>{nfrApi('/api/arqfiscal/religar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chaves:[n.chave]})}).catch(()=>{});},1500);}catch(e){}return r;};}
+
+/* ---------- Contas a pagar e a receber: DANFE, Anexar, filtro "Nota fiscal" e marca da nota ---------- */
+const nfrTemNota=l=>!!(l.arqf&&l.arqf.ch)||!!l.notaId||(l.anexos||[]).some(a=>a.tipo==='danfe');
+{const r0=titulosRows;titulosRows=function(tipo){const f=ui[tipo==='receber'?'rec':'pag']||{},v=f.nfs||'';let rs=r0.apply(this,arguments);
+  if(v==='sem')rs=rs.filter(l=>!nfrTemNota(l)&&!l.guia&&!l.transf);else if(v==='com')rs=rs.filter(nfrTemNota);else if(v==='canc')rs=rs.filter(l=>l.arqf&&l.arqf.sit==='cancelada');
+  return rs;};}
+function nfrMarca(l){
+  if(l.arqf&&l.arqf.ch)return l.arqf.sit==='cancelada'?' <span class="pill neg" title="A nota fiscal ligada foi CANCELADA">NF '+esc(l.arqf.n||'')+' cancelada</span>':' <span class="pill pos" title="Nota fiscal ligada (chave '+esc(l.arqf.ch)+')">NF '+esc(l.arqf.n||'')+'</span>';
+  if(l.notaId){const n=get('notas',l.notaId);return ' <span class="pill pos" title="Nota fiscal lançada no sistema">NF '+esc(n?(n.numero||'s/n'):'')+'</span>';}
+  if((l.anexos||[]).some(a=>a.tipo==='danfe'))return ' <span class="pill" title="DANFE anexado">DANFE</span>';
+  return '';
+}
+{const t0=titulosView;titulosView=function(tipo){const rec=tipo==='receber',key=rec?'rec':'pag',f=ui[key];let h=t0.apply(this,arguments);
+  const a='id="s_'+key+'proj"',i=h.indexOf(a);
+  if(i>=0){const j=h.indexOf('</label>',i);if(j>=0)h=h.slice(0,j+8)+'<label class="f"><span>Nota fiscal</span><select id="s_'+key+'nfs" data-filter="'+key+'.nfs">'+opt([['sem','Sem nota fiscal'],['com','Com nota fiscal'],['canc','Nota cancelada']],f.nfs||'','Todas')+'</select></label>'+h.slice(j+8);}
+  /* marca da nota na coluna Descrição (3ª célula) */
+  h=h.replace(/<tr><td class="mono">((?:(?!<\/tr>)[\s\S])*?)<\/tr>/g,tr=>{const m=/data-act="(?:editLanc|baixar|estornar)" data-id="([^"]+)"/.exec(tr);if(!m)return tr;const l=get('lanc',m[1]);if(!l)return tr;const mk=nfrMarca(l);if(!mk)return tr;
+    let k=-1;for(let c=0;c<3;c++){k=tr.indexOf('</td>',k+1);if(k<0)return tr;}return tr.slice(0,k)+mk+tr.slice(k);});
+  const canc=S.lanc.filter(l=>l.tipo===tipo&&l.status!=='cancelado'&&l.arqf&&l.arqf.sit==='cancelada');
+  if(canc.length&&f.nfs!=='canc'){const k='<div class="stack">',p=h.indexOf(k);const av='<div class="note" style="border-color:var(--neg)"><b>Nota fiscal cancelada:</b> '+canc.length+' título(s) estão ligados a nota cancelada na SEFAZ. Confira antes de '+(rec?'receber':'pagar')+'. <button class="btn sm" data-act="nfrFiltroCanc" data-k="'+key+'">Ver</button></div>';if(p>=0)h=h.slice(0,p+k.length)+av+h.slice(p+k.length);}
+  return h;};}
+A.nfrFiltroCanc=d=>{const f=ui[d.k];if(!f)return;f.nfs='canc';f.sit='todos';render();};
+{const b0=addAnexBtns;addAnexBtns=function(html,tab){let h=b0.apply(this,arguments);if(!['pag','rec','fin'].includes(tab)||typeof h!=='string')return h;
+  /* "Anexar" sempre à vista; DANFE em todo título com nota ligada (do arquivo fiscal, da nota lançada ou do anexo) */
+  h=h.replace(/<button class="btn sm" data-act="anexos" data-col="lanc" data-id="([^"]+)">Anexos(?: \((\d+)\))?<\/button>(<button class="btn sm" data-act="verDanfe" data-id="[^"]+">NF-e<\/button>)?/g,(m0,id,n,dan)=>{
+    const l=get('lanc',id);const tem=l&&(dan||(l.arqf&&l.arqf.ch));
+    return '<button class="btn sm" data-act="anexos" data-col="lanc" data-id="'+id+'" title="Anexar ou ver boleto, comprovante, contrato…">'+(n?'Anexos ('+n+')':'Anexar')+'</button>'+(tem?'<button class="btn sm" data-act="verDanfe" data-id="'+id+'" title="Ver o DANFE da nota ligada">DANFE</button>':'');});
+  return h;};}
+{const v0=A.verDanfe;A.verDanfe=d=>{const l=get('lanc',d.id);
+  if(l&&l.arqf&&l.arqf.id&&nfrSelf()){if(!nfrAcesso()){toast('Seu perfil não abre o arquivo fiscal.','neg');return;}
+    if(l.arqf.sit==='cancelada')toast('Atenção: esta nota foi CANCELADA.','neg');
+    NFR.det[l.arqf.id]=NFR.det[l.arqf.id]||{id:l.arqf.id,chave:l.arqf.ch,situacao:l.arqf.sit};return A.nfrDanfe({id:l.arqf.id});}
+  return v0(d);};}
+
+/* ---------- configuração do servidor (limites) uma vez, em segundo plano ---------- */
+if(nfrSelf()&&typeof setTimeout==='function')setTimeout(()=>{if(!nfrAcesso())return;nfrApi('/api/arqfiscal/config').then(j=>{NFR.cfg=j;if(j.acesso)NFR.acesso=j.acesso;}).catch(()=>{});},4000);
+Object.assign(ACT_GROUP,{nfrAba:null,nfrPag:null,nfrVerCancLig:null,nfrRecarregar:null,nfrMais:null,nfrConfig:'cfg',nfrReligar:null,nfrSefaz:null,nfrLotes:null,nfrLoteVer:null,nfrHistorico:null,nfrHistEscolher:null,nfrRelCsv:null,
+  nfrExportar:null,nfrDanfe:null,nfrXml:null,nfrSituacao:null,nfrExcluir:null,nfrLigar:null,nfrLigarOk:null,nfrSugOk:null,nfrDesligar:null,nfrCriarConta:'fin',nfrFiltroCanc:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{nfrHistorico:'Envia ZIPs com os XMLs antigos (Omie) para o arquivo fiscal. Não cria contas nem mexe no estoque.',nfrExportar:'Baixa um ZIP com os XMLs originais do período, para o contador.',
+  nfrDanfe:'Mostra o DANFE gerado a partir do XML original guardado no servidor.',nfrXml:'Baixa o XML original da nota.',nfrLigar:'Liga a nota à conta a pagar ou a receber (ou confirma a sugestão).',
+  nfrSituacao:'Confere no conector fiscal se a nota foi cancelada.',nfrExcluir:'Exclui o XML (só depois do prazo de guarda, só o dono, com senha).',nfrMais:'Procurar títulos de novo, trazer notas do conector, importações anteriores e configuração.'});
+/* correção (achada nas capturas da v129): sem conector fiscal (FISCAL_URL vazio) ou com ele fora do ar, cada desenho da tela
+   chamava fisCarregar de novo, que redesenhava a tela: laço de ~60 desenhos por segundo enquanto a tela estava aberta.
+   Agora, depois de um erro, só tenta de novo após 60 s (ou no botão "Tentar de novo", que força). */
+if(typeof fisCarregar==='function'){const c0=fisCarregar;fisCarregar=async function(forca){
+  if(!forca&&FIS.erro&&FIS.erroEm&&Date.now()-FIS.erroEm<60000)return;
+  const r=await c0.apply(this,arguments);FIS.erroEm=FIS.erro?Date.now():0;return r;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='127',APP_DATA='2026-10-28';
+const APP_VER='129',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['129','2026-10-28',['Recebimento de notas (antes NFs recebidas): abas Notas para lançar, Pendentes de ligação, Ligadas, Arquivo fiscal e Saídas emitidas. O XML original de cada NF-e fica guardado no servidor pelo prazo legal (5 anos a partir do ano seguinte), com busca, DANFE, download do XML e ZIP para o contador; exclusão bloqueada dentro do prazo.', 'Importar histórico (ZIP): guarda as NF-e de entrada e de saída e liga cada uma à conta a pagar ou a receber pelo CNPJ, número, valor e data — sem criar contas, sem estoque e sem lançamentos. XML do Omie com acentos corrompidos são restaurados quando possível; os demais ficam como cópia alterada.', 'Contas a pagar e a receber: botão DANFE em todo título ligado a nota, Anexar sempre visível, filtro Nota fiscal (sem, com, cancelada) e aviso de nota cancelada.']],
+  ['128','2026-10-28',['Obras › Obras e rateio: filtros por situação (ativas, concluídas, canceladas) e por período; botão Excluir obra (com vínculos, oferece Encerrar ou Cancelar; sem vínculos, vai para a Lixeira com senha; protegido também no servidor).', 'Painel de Obras e Painel da obra ajustados para centenas de obras: nomes em até 2 linhas, as 15 obras com mais pendências com Ver todas, seletor só com obras em andamento e sem rolagem lateral.']],
   ['127','2026-10-28',['Safari: importadores de PDF (banco de horas, escala de férias, CRLV, orçamentos) voltam a funcionar; e o sistema volta a abrir em versões mais antigas do Safari.', 'Ordem de fabricação: PDF com o logo da INA cadastrado em Configurações (qualquer formato de imagem).', 'Contas a pagar e a receber: filtro De … até por vencimento, emissão ou pagamento/recebimento.', 'Sistema › Usuários: botão Novo usuário com formulário único que cria o acesso e envia o convite; tabela do que cada perfil pode fazer com todos os perfis, quantas pessoas usam e botão para editar. Contas de acesso fica só para o dono.', 'Perfis de acesso: perfis padrão podem ser ajustados (e voltar ao padrão), valendo também no servidor; na Segregação de funções, cada conflito tem o botão Ajustar perfil.']],
   ['126','2026-10-28',['Importar cadastros › Projetos, Propostas e Acervo técnico (planilhas Índice e Controle da INA): atualizam o que já existe e criam o que falta, com conferência (antes → depois), quadro por ano planilha x importado e Desfazer. Propostas antigas entram como histórico, sem distorcer os indicadores; valores em moeda antiga vão para observações.', 'Comercial › Habilitação › Controle de acervo: projetos encerrados por etapa do acervo (A iniciar, sem ART, ART, atestado pedido, atestado emitido, acervado/CAT), dias parado, indicadores e alerta de atestado pedido há mais de 60 dias. Projeto encerrado entra sozinho no controle.']],
   ['125','2026-10-28',['Obras › Ordens de fabricação (fábrica de Tuiuti): OS ligada ao projeto com numeração geral da fábrica (P412-95, P412-96…), itens com peso, acabamento, lista de materiais que gera a solicitação de compra, aprovação no sistema e anexos em PDF. Gerar PDF monta a OS no padrão atual seguida dos anexos; Enviar por e-mail manda para a fábrica (endereço em Configurações).', 'Etapas: Aguardando aprovação, Aguardando compra de material, Em produção, Galvanização (notas de remessa e retorno, pesos e alerta de atraso), Pintura, Inspeção de qualidade, Separação e embalagem, Enviado e Entregue (com assinatura de quem recebeu).', 'Obras › Painel de produção: quadro por etapa, cronograma previsto x realizado, OS em atraso, entregas da semana, aguardando material e galvanização parada. Novo perfil Encarregado da fábrica: só OS e painel.']],

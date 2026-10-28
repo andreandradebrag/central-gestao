@@ -150,7 +150,7 @@ Se o conector não responder, o cartão mostra **"conector fora do ar"** e os bo
 3. Em **Contas de acesso**, as pessoas importadas aparecem sem e-mail: defina e-mail e senha de cada uma. Na sua conta antiga, use **"Sou eu"** para juntar o histórico (chat, Minha área) com a conta de dono criada no passo 4.
 4. Apague o ZIP do seu computador depois (tem dados pessoais e financeiros, LGPD).
 
-## 6. Notas fiscais (Compras › NFs recebidas)
+## 6. Notas fiscais (Suprimentos › Recebimento de notas, antes "NFs recebidas")
 
 O cartão **SEFAZ e Ambiente Nacional** mostra:
 
@@ -163,6 +163,31 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 **Teste em homologação primeiro** (`AMBIENTE=2`): a SEFAZ de homologação normalmente não tem notas reais, então "nenhum documento" é o esperado. Confirme que não há erro de certificado nos logs e troque para **Produção** em Sistema › Configurações (ou `AMBIENTE=1`, se ninguém escolheu pela tela).
 
 **Tuiuti-SP e NFS-e emitidas por prestadores**: a NFS-e só aparece no ADN se o município do prestador estiver no padrão nacional ou compartilhar as notas com o ADN. Notas de municípios fora do padrão continuam chegando pelo XML/PDF que o prestador envia ("Importar XML ou ZIP").
+
+## 6.1. Arquivo fiscal: XML das NF-e guardado no servidor (v129)
+
+**Onde fica.** O XML original de cada NF-e (entradas e saídas da INA) é guardado **no banco do serviço `gestao`** (`/data/gestao.db`, tabelas `arqf`, `arqf_evento` e `arqf_lote`), comprimido (gzip), com a chave de acesso, o sha256 do arquivo, a origem (histórico, XML enviado ou conector) e a ligação com a conta a pagar ou a receber. O navegador **não** recebe os XMLs: só uma lista leve, paginada, e o XML de uma nota quando alguém pede o DANFE ou o arquivo. O código fica em `gestao/arquivofiscal.js`. Para referência: 3.000 notas ocupam cerca de 11 MB no banco.
+
+**Backup.** Como está no `gestao.db`, o arquivo fiscal entra na **cópia diária do banco** (seção "Cópia de segurança") e na cópia do volume `gestao-dados`. Faça também a cópia fora do servidor (S3): o XML é documento fiscal com guarda obrigatória. Para conferir, restaure uma cópia num servidor de teste e abra Fiscal › Arquivo fiscal.
+
+**Prazo de guarda.** 5 anos contados de **1º de janeiro do ano seguinte** ao da emissão (CTN arts. 173 e 195; Ajuste SINIEF 07/05, cláusula 10ª). Exemplo: nota de 2021 fica até 31/12/2026. Dentro do prazo **o servidor não exclui** (a rota recusa e um gatilho no próprio banco impede o `DELETE`, mesmo por fora do sistema). Depois do prazo, só o **dono** exclui, nota a nota, e o sistema pede a senha de novo. Tudo fica na auditoria (`ARQF_*`).
+
+**Quem acessa.** Administrador, Financeiro, Fiscal e Diretoria consultam, importam, ligam e exportam. O Comprador vê só as **entradas** e envia o XML de entrada que recebe do fornecedor. Os demais perfis não acessam.
+
+**Como importar o histórico (Omie).**
+1. No Omie, exporte os XMLs das NF-e por ano. Use só as pastas `XML/` de cada ano. **Não envie a pasta `XML_Invertido`** (se algum "invertido" for junto, o sistema recusa: pelo nome com `-invertido` ou porque a assinatura não confere).
+2. Confira o **CNPJ da empresa** em Sistema › Configurações (sem ele a importação é recusada). Filiais: Recebimento de notas › Mais… › Configurar ligação automática.
+3. Em **Fiscal › Arquivo fiscal** (a mesma tela de Suprimentos › Recebimento de notas), clique **Importar histórico (ZIP)** e escolha os ZIPs (um por ano, até `ARQF_MAX_ZIP_MB`, padrão 300 MB, e até 40.000 arquivos por ZIP; ZIP64 não é aceito: divida). O servidor confere cada arquivo em partes, mostra a barra de progresso e, no fim, o relatório: **novas**, **já existentes** (nada muda; pode reenviar) e **ignoradas, com o motivo** (sem protocolo da SEFAZ, denegada, CNPJ de outra empresa, invertido, não é XML). O relatório fica em Mais… › Importações anteriores.
+4. O histórico **não cria contas, não mexe no estoque e não lança nada**. Ele só guarda e **liga** a nota à conta que já existe: mesmo CNPJ, número da nota, valor (tolerância padrão 1%) e data próxima; parcelas do mesmo documento são somadas. O que não liga sozinho aparece em **Pendentes de ligação**, com sugestões para confirmar, ou para ligar à mão. Criar a conta a partir da nota só com o botão "Criar conta".
+5. Eventos de cancelamento (`procEventoNFe` 110111) no mesmo lote marcam a nota como **cancelada**; se ela estiver ligada a um título, Contas a pagar/receber mostra o alerta.
+
+**Situação da nota.** Na importação vale o protocolo do próprio XML (autorizada). Para as notas **novas** (XML enviado, até 90 dias) o servidor pergunta ao conector fiscal em segundo plano, **no máximo `ARQF_SIT_HORA` consultas por hora** (padrão 10), sem consultar durante o bloqueio 656 e respeitando o limite por chave do conector (seção 3.1). **O histórico nunca é consultado em massa**: só pelo botão "Situação" de cada nota (e a SEFAZ só responde por chave notas de até 90 dias). O conector não tem hoje a consulta de protocolo na SEFAZ autorizadora (NfeConsultaProtocolo): a situação vem do que o conector já viu na distribuição (eventos) e da consulta por chave.
+
+**Notas do conector.** "Mais… › Trazer as notas do conector fiscal" copia para o arquivo as NF-e que o conector já baixou (sem nova consulta à SEFAZ).
+
+**ZIP para o contador.** Botão "ZIP para o contador": escolha o período; o servidor gera o ZIP em fluxo (pastas `ano/entradas` e `ano/saidas`, eventos e `indice.csv`).
+
+**Variáveis (opcionais, serviço `gestao`)**: `ARQF_CNPJ` (CNPJs da empresa, separados por vírgula, além do de Configurações), `ARQF_MAX_ZIP_MB` (padrão 300), `ARQF_SIT_HORA` (consultas automáticas por hora, padrão 10; 0 desliga), `ARQF_SIT_INTERVALO_S` (padrão 300), `ARQF_CONFERIR_ASSINATURA=0` (desliga a conferência do conteúdo assinado; o resumo do protocolo continua sendo conferido. Use só se notas legítimas forem recusadas por "assinatura não confere").
 
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
