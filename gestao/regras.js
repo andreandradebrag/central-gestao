@@ -1537,6 +1537,34 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       { nome: out.nome, mod, opc, ativo, pede: X.perfcCompilar ? X.perfcCompilar(out) : null });
     return null;
   }
+  /* v127: ajuste de perfil padrão (perfc/a_<perfil>): só o Administrador ou o dono, com a senha de novo e auditoria.
+     O registro guarda só o que difere do padrão (mod: 'w' | 'r' | 'n'; opc.frota). O Administrador não perde Usuários,
+     Configurações nem Lixeira; os outros perfis não ganham esses módulos. */
+  const PERFA_ID = X.PERFA_ID || /^a_([a-z0-9]{2,30})$/;
+  function regraPerfa(conta, req, p, velho, novo) {
+    const s = p.split('/'); if (s.length !== 2) return erro('Caminho inválido.', 400);
+    if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono ajustam perfis de acesso.');
+    const m = PERFA_ID.exec(s[1]), base = m && m[1]; if (!base || !X.perfaBaseOk || !X.perfaBaseOk(base)) return erro('Perfil padrão inexistente.', 400);
+    const mod = {}, rec = [], sist = X.PERFA_SISTEMA || ['usr', 'cfg', 'lixo'];
+    for (const [g, v] of Object.entries(novo.mod && typeof novo.mod === 'object' ? novo.mod : {})) {
+      if (!['w', 'r', 'n'].includes(v)) continue;
+      if (['painel', 'dir', 'meu', 'ajuda'].includes(g)) continue;
+      if (sist.includes(g)) { if (base === 'admin' && v !== 'w') return erro('O Administrador não perde o acesso a Sistema (usuários, perfis de acesso, configurações e lixeira).', 400); if (base !== 'admin' && v !== 'n') rec.push(g); continue; }
+      if (!X.perfaEditavel(base, g)) { rec.push(g); continue; }
+      mod[g] = v;
+    }
+    if (rec.length) return erro('Este perfil não pode ter: ' + rec.slice(0, 5).join(', ') + '. Usuários, configurações e lixeira ficam só com o Administrador.', 400);
+    const o = novo.opc && typeof novo.opc === 'object' ? novo.opc : {}, opc = {}; if (typeof o.frota === 'boolean') opc.frota = o.frota;
+    if (!END.reautenticado(req)) return { reauth: true }; /* ajustar perfil pede a senha de novo */
+    const v = velho || {}, agora = Date.now();
+    const out = { id: s[1], base, ajuste: true, nome: String((PERF_BASE[base] || {}).nome || base).slice(0, 80), mod, opc, ativo: true,
+      criadoPor: v.criadoPor || conta.id, criadoEm: v.criadoEm || agora, alteradoPor: conta.id, alteradoEm: agora, ts: +novo.ts || agora };
+    ['cr', 'crBy', 'ed', 'edBy'].forEach(k => { if (novo[k] !== undefined) out[k] = novo[k]; });
+    Object.keys(novo).forEach(k => delete novo[k]); Object.assign(novo, out);
+    const pede = X.perfaCompilar ? X.perfaCompilar(base, out) : null;
+    auditar(conta, req, 'PERFIL_PADRAO_AJUSTADO', p, null, { base, mod, opc, pede: pede ? { w: pede.w, r: pede.r, frotaTodos: !!pede.frotaTodos } : null });
+    return null;
+  }
   function regraUsrPerfil(velho, novo) {
     if (!Object.keys(PERF_BASE).length || novo.perfil == null || (velho && velho.perfil === novo.perfil)) return null;
     const pf = String(novo.perfil);
@@ -1563,7 +1591,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
-    if (c0 === 'perfc') { const e = regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114 */
+    if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
     if (c0 === 'usr' && s.length === 2) { const e = regraUsrPerfil(velho, novo); if (e) return e; }
     { const e = regraFina(conta, p, velho, novo, 'PUT'); if (e) return e; }
     if (c0 === 'rhdoc' && soNr(conta) && ((velho && !docNr(velho)) || !docNr(novo))) return erro('Seu perfil registra só certificados de NR. ASO, contrato e os outros documentos ficam com o Gestor de segurança do trabalho ou o RH.');
@@ -1614,7 +1642,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const s = p.split('/'), c0 = s[0];
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
     if (!velho) return null;
-    if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome }); } /* v114 */
+    if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, /^a_/.test(s[1] || '') ? 'PERFIL_PADRAO_RESTAURADO' : 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome, base: velho.base }); } /* v114; v127: excluir o ajuste = voltar ao padrão */
     { const e = regraFina(conta, p, velho, null, 'DELETE'); if (e) return e; }
     if (c0 === 'rhdoc' && soNr(conta) && !docNr(velho)) return erro('Seu perfil exclui só certificados de NR.'); /* v114 */
     if (s.length === 2) { const e = travaCompetencia(c0, velho, null) || travaPonto(c0, velho, null); if (e) return e; }

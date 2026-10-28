@@ -204,7 +204,34 @@ function perfcCompilar(d) {
 function perfcRecarregar() {
   if (!PERF_BASE_N) return; const novo = Object.assign({}, PERF_BASE);
   for (const r of q.colGet.all('perfc')) { try { const d = JSON.parse(r.data); if (PERFC_ID.test(r.id) && d && d.ativo !== false && !PERF_BASE[r.id]) novo[r.id] = perfcCompilar(d); } catch (e) { } }
+  /* v127: ajustes dos perfis padrão (perfc/a_<perfil>) valem no lugar do padrão */
+  for (const r of q.colGet.all('perfc')) { try { const m = PERFA_ID.exec(r.id), d = JSON.parse(r.data); if (m && perfaBaseOk(m[1]) && d && d.ajuste === true) novo[m[1]] = perfaCompilar(m[1], d); } catch (e) { } }
   PERM.perfis = novo; perfilMapa = null;
+}
+/* v127: ajuste de um perfil padrão (Sistema › Perfis de acesso › Ajustar), guardado em perfc/a_<perfil>: {base, ajuste:true,
+   mod {grupo: 'w'|'r'|'n'} só com o que difere do padrão, opc {frota}}. Parte do perfil padrão e troca, módulo a módulo, o
+   acesso (sem acesso, consulta ou grava). Mantém o papel, as regras finas ("so", "campos"...) e as opções de dados de RH,
+   bancários e diretoria do padrão. Nunca dá Usuários, Configurações nem Lixeira a quem não é Administrador, e o
+   Administrador nunca perde esses três (trava). Somente leitura e Leitura completa continuam sem gravar. */
+const PERFA_ID = /^a_([a-z0-9]{2,30})$/, PERFA_FORA = new Set(['pendente', 'semnivel', 'semid']), PERFA_SO_LEITURA = new Set(['leitura', 'leituratotal']);
+const PERFA_NAO_EDITA = new Set(['painel', 'dir', 'meu', 'ajuda']), PERFA_SISTEMA = ['usr', 'cfg', 'lixo'];
+const perfaBaseOk = b => !!PERF_BASE[b] && !PERFA_FORA.has(b);
+const perfaGrupos = () => [...new Set((PERM.modulos || []).map(m => m[0]).concat(['meu', 'agenda', 'chat', 'ajuda']))];
+const perfaEditavel = (k, g) => perfaGrupos().includes(g) && !PERFA_NAO_EDITA.has(g) && !PERFA_SISTEMA.includes(g);
+function perfaCompilar(k, d) {
+  const b = PERF_BASE[k], todos = perfaGrupos(), tudoW = b.w === '*', tudoR = b.r === '*';
+  let w = tudoW ? todos.slice() : [...new Set(b.w || [])], r = tudoR ? todos.slice() : [...new Set(b.r || [])];
+  for (const [g, v] of Object.entries((d && d.mod) || {})) {
+    if (!perfaEditavel(k, g) || !['w', 'r', 'n'].includes(v)) continue;
+    w = w.filter(x => x !== g); r = r.filter(x => x !== g);
+    if (v === 'w' && !PERFA_SO_LEITURA.has(k)) w.push(g); else if (v === 'w' || v === 'r') r.push(g);
+  }
+  const out = Object.assign({}, b, { ajustado: true });
+  out.w = tudoW && todos.every(g => w.includes(g)) ? '*' : w;
+  out.r = tudoR && todos.every(g => w.includes(g) || r.includes(g)) ? '*' : r;
+  if (b.so) { const so = {}; Object.keys(b.so).forEach(g => { if (out.w === '*' || out.w.includes(g)) so[g] = b.so[g]; }); out.so = so; }
+  const o = (d && d.opc) || {}; if (typeof o.frota === 'boolean') out.frotaTodos = o.frota;
+  return out;
 }
 perfcRecarregar();
 const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'bloquear').toLowerCase() === 'avisar' ? 'avisar' : 'bloquear';
@@ -358,7 +385,7 @@ function pagSeguranca(eu, req, msg, erro, extra) {
       '<form method="post" action="/conta/seguranca/confirmar"><label>3. Digite o código de 6 dígitos que apareceu no aplicativo<input name="codigo" inputmode="numeric" maxlength="7" required autocomplete="one-time-code" autofocus></label><button class="pri" type="submit">Confirmar e ligar</button></form>'; }
   else dois = '<p><b>Desligada.</b> Com ela ligada, quem descobrir a sua senha ainda precisa do seu celular para entrar. ' + (eu.nivel === 'owner' || NIV[eu.nivel] >= NIV.admin ? '<b>Recomendado para a sua conta.</b>' : '') + '</p><form method="post" action="/conta/seguranca/iniciar"><button class="pri" type="submit">Ligar verificação em duas etapas</button></form>';
   const ss = db.prepare('SELECT token, ua, ip, criado, visto FROM sessoes WHERE conta=? AND expira>? ORDER BY coalesce(visto, criado) DESC').all(c.id, Date.now());
-  return pag('Segurança', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (gestorContas(eu) ? '<a class="btn" href="/contas">Contas de acesso</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Segurança da minha conta</h1><p class="sub">' + esc(c.nome || '') + ' · ' + esc(c.email || '') + '</p>' +
+  return pag('Segurança', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/contas">Contas de acesso</a>' : '') + '<a class="btn" href="/sair">Sair</a></nav><h1>Segurança da minha conta</h1><p class="sub">' + esc(c.nome || '') + ' · ' + esc(c.email || '') + '</p>' +
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') + (extra || '') +
     '<div class="card"><h2>Verificação em duas etapas</h2>' + dois + '</div>' +
     '<div class="card"><h2>Aparelhos conectados</h2><table><thead><tr><th>Aparelho</th><th>Endereço</th><th>Entrou em</th><th>Último uso</th></tr></thead><tbody>' + ss.map(s => '<tr><td>' + esc(SEG.aparelho(s.ua)) + (s.token === meu ? ' <b>(este)</b>' : '') + '</td><td>' + esc(s.ip || '—') + '</td><td>' + quando(s.criado) + '</td><td>' + quando(s.visto) + '</td></tr>').join('') + '</tbody></table>' +
@@ -393,11 +420,12 @@ function pagContas(eu, msg, erro) {
     (c.id !== eu.id && (eu.nivel === 'owner' || c.nivel !== 'owner') ? '<form method="post" action="/contas/editar" style="display:inline"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="' + (c.ativo ? 'desativar' : 'ativar') + '">' + (c.ativo ? 'Desativar' : 'Ativar') + '</button></form> ' +
       '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Excluir a conta de acesso de ' + esc(String(c.nome || c.email || '').replace(/['"\\]/g, '')) + '? A pessoa não consegue mais entrar. O cadastro dela no sistema (colaborador, perfil, histórico) continua.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="excluir" style="color:var(--neg)">Excluir</button></form> ' : '') +
     (eu.nivel === 'owner' && c.importado && c.id !== eu.id ? '<form method="post" action="/contas/editar" style="display:inline" onsubmit="return confirm(\'Usar esta conta importada como a sua? Você passa a ver as conversas e registros dela.\')"><input type="hidden" name="id" value="' + esc(c.id) + '"><button name="acao" value="soueu">Sou eu</button></form>' : '') + '</td></tr>').join('');
-  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a><a class="btn" href="/contas/auditoria">Auditoria</a>' : '') + '<a class="btn" href="/conta/seguranca">Segurança da minha conta</a><a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Quem entra no sistema e com que nível. Para cadastrar uma pessoa nova, prefira <b>Sistema › Usuários › Novo usuário</b>, dentro do sistema: lá você cria o login e o perfil de uma vez.</p>' +
+  return pag('Contas', '<nav><a class="btn" href="/">← Voltar ao sistema</a>' + (eu.nivel === 'owner' ? '<a class="btn" href="/migrar">Migrar dados da página antiga</a><a class="btn" href="/contas/auditoria">Auditoria</a>' : '') + '<a class="btn" href="/conta/seguranca">Segurança da minha conta</a><a class="btn" href="/sair">Sair</a></nav><h1>Contas de acesso</h1><p class="sub">Página do dono: a <b>segurança dos logins</b> (e-mail e senha de entrada, verificação em duas etapas, desativar ou excluir um login, contas importadas), as cópias de segurança e o e-mail do sistema.</p>' +
+    '<div class="msg"><b>Para cadastrar ou mudar o acesso de alguém, use Sistema › Usuários</b> (dentro do sistema). Lá o botão <b>Novo usuário</b> cria o login, envia o convite por e-mail e já define o perfil, o colaborador ligado e os locais da frota; <b>Editar</b> muda perfil, nome, e-mail, senha e suspende. Aqui ficam só as funções de segurança. <a href="/#usr">Abrir Sistema › Usuários</a></div>' +
     (msg ? '<div class="msg' + (erro ? ' err' : '') + '">' + esc(msg) + '</div>' : '') +
     (eu.nivel === 'owner' && !q.contaPorId.get(eu.id).totp ? '<div class="msg err"><b>Recomendado:</b> ligue a verificação em duas etapas na sua conta de dono em <a href="/conta/seguranca">Segurança da minha conta</a>.</div>' : '') +
-    '<div class="card"><table><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th>2 etapas</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
-    '<div class="card"><h2>Criar conta ou definir senha</h2><form method="post" action="/contas/salvar"><div class="row"><label>Conta<select name="id"><option value="">Nova conta</option>' + cs.filter(c => c.nivel !== 'owner' || c.id === eu.id).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Nome<input name="nome"></label></div><div class="row"><label>E-mail<input name="email" type="email"></label><label>Senha (mínimo 8)<input name="senha" type="password" minlength="8" autocomplete="new-password"></label><label>Nível<select name="nivel">' + ['admin', 'interact'].map(n => '<option value="' + n + '">' + NIV_NOME[n] + '</option>').join('') + '</select></label></div><button class="pri" type="submit">Salvar</button><p class="sub" style="margin:10px 0 0">Para uma conta existente, deixe em branco o que não quer mudar. Passe a senha à pessoa por um canal seguro; ela pode trocá-la depois em Minha senha.</p></form></div>' +
+    '<div class="card" style="overflow-x:auto"><table style="min-width:640px"><thead><tr><th>Pessoa</th><th>Nível</th><th>Situação</th><th>2 etapas</th><th></th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
+    '<details class="card"><summary><b>Criar só o login ou definir senha (avançado)</b> <span class="sub">prefira Sistema › Usuários › Novo usuário</span></summary><form method="post" action="/contas/salvar" style="margin-top:12px"><div class="row"><label>Conta<select name="id"><option value="">Nova conta</option>' + cs.filter(c => c.nivel !== 'owner' || c.id === eu.id).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome || c.email || c.id) + '</option>').join('') + '</select></label><label>Nome<input name="nome"></label></div><div class="row"><label>E-mail<input name="email" type="email"></label><label>Senha (mínimo 8)<input name="senha" type="password" minlength="8" autocomplete="new-password"></label><label>Nível<select name="nivel">' + ['admin', 'interact'].map(n => '<option value="' + n + '">' + NIV_NOME[n] + '</option>').join('') + '</select></label></div><button class="pri" type="submit">Salvar</button><p class="sub" style="margin:10px 0 0">Para uma conta existente, deixe em branco o que não quer mudar. Passe a senha à pessoa por um canal seguro; ela pode trocá-la depois em Minha senha. O login criado aqui ainda não tem perfil: defina em Sistema › Usuários.</p></form></details>' +
     pagPermLog(eu) + pagBackup(eu) +
     '<div class="card"><h2>E-mail do sistema</h2><p class="sub" style="margin:0 0 10px">' + (EMAIL.configurado() ? 'Configurado. O sistema envia o convite de novo usuário e o link de "Esqueci minha senha".' : 'Ainda não configurado: preencha SMTP_HOST, SMTP_PORT, SMTP_USUARIO, SMTP_SENHA e SMTP_REMETENTE no serviço gestao do Easypanel e clique em Implantar.') + '</p>' + (EMAIL.configurado() ? '<form method="post" action="/contas/teste-email"><button type="submit">Enviar e-mail de teste para ' + esc(eu.email || '') + '</button></form>' : '') + '</div>' +
     '<div class="card"><h2>Minha senha</h2><form method="post" action="/contas/senha"><div class="row"><label>Senha atual<input name="atual" type="password" required autocomplete="current-password"></label><label>Nova senha<input name="nova" type="password" minlength="8" required autocomplete="new-password"></label></div><button type="submit">Trocar senha</button></form></div>');
@@ -635,7 +663,8 @@ async function rotear(req, res) {
     res.writeHead(200, { 'content-type': 'application/gzip', 'content-length': fs.statSync(f).size, 'content-disposition': 'attachment; filename="' + path.basename(f) + '"', 'cache-control': 'no-store' });
     return fs.createReadStream(f).pipe(res);
   }
-  if (p === '/contas' && m === 'GET') { if (!gestorContas(conta)) return redir(res, '/'); return html(res, 200, pagContas(conta, ...END.msg(u))); }
+  /* v127: Contas de acesso fica só com o dono (segurança dos logins); criar e editar usuários é em Sistema › Usuários */
+  if (p === '/contas' && m === 'GET') { if (conta.nivel !== 'owner') return redir(res, gestorContas(conta) ? '/#usr' : '/'); return html(res, 200, pagContas(conta, ...END.msg(u))); }
   if (p === '/contas/salvar' && m === 'POST') {
     if (!gestorContas(conta)) return redir(res, '/');
     const f = form(await lerCorpo(req, 10000)), niv = ['admin', 'interact'].includes(f.nivel) ? f.nivel : 'interact';
@@ -896,7 +925,7 @@ async function rotear(req, res) {
 
 /* regras de negócio aplicadas pelo servidor (aprovações, bancos, competência, anexos, auditoria...) */
 const REG = require('./regras.js')({ db, q, json, html, lerJson, lerCorpo, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH,
-  papelDe, veRh, perfcCompilar, perfcGrupoValido, PERFC_ID, PERF_BASE, PERFC_PROIBIDOS,
+  papelDe, veRh, perfcCompilar, perfcGrupoValido, PERFC_ID, PERF_BASE, PERFC_PROIBIDOS, perfaCompilar, perfaBaseOk, perfaEditavel, PERFA_ID, PERFA_SISTEMA, /* v127 */
   pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa, BACKUP });
 /* v111: a sincronização da Sólides não grava ponto (pmmes) de mês travado (Fontes do ponto) nem de competência fechada; o que foi ignorado vai para a auditoria */
 const solIgnorados = new Set();

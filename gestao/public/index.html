@@ -23191,6 +23191,13 @@ const OSF_WA='–—‘’‚“”„•…€™ŠšŒœŸŽž†‡ˆ‰‹�
 const osfPdfTxt=s=>String(s==null?'':s).replace(/[\t\r]/g,' ').replace(/[^\n\x20-\x7e\xa0-\xff]/g,ch=>OSF_WA.includes(ch)?ch:ch==='Ø'?'Ø':'?');
 function osfWrap(t,font,size,maxW){const out=[];osfPdfTxt(t).split('\n').forEach(par=>{const ws=par.split(/\s+/).filter(Boolean);let l='';if(!ws.length){out.push('');return;}
   ws.forEach(w=>{const tl=l?l+' '+w:w;if(font.widthOfTextAtSize(tl,size)<=maxW||!l)l=tl;else{out.push(l);l=w;}});if(l)out.push(l);});return out;}
+/* v127: logo para o pdf-lib: PNG e JPG direto; outro formato (ou PNG que não abre) passa por um canvas e vira PNG */
+const osfB64Bytes=u=>Uint8Array.from(atob(String(u).split(',')[1]||''),ch=>ch.charCodeAt(0));
+function osfLogoPng(u){return new Promise((res,rej)=>{try{const im=new Image();im.onload=()=>{try{const cv=document.createElement('canvas');cv.width=Math.max(1,im.naturalWidth||im.width||1);cv.height=Math.max(1,im.naturalHeight||im.height||1);
+  cv.getContext('2d').drawImage(im,0,0);res(cv.toDataURL('image/png'));}catch(e){rej(e);}};im.onerror=()=>rej(new Error('logo'));im.src=u;}catch(e){rej(e);}});}
+async function osfLogoPdf(doc,u){if(!u||!safeImg(u))return null;
+  try{if(/^data:image\/png/.test(u))return await doc.embedPng(osfB64Bytes(u));if(/^data:image\/jpe?g/.test(u))return await doc.embedJpg(osfB64Bytes(u));}catch(e){}
+  const png=await osfLogoPng(u);return await doc.embedPng(osfB64Bytes(png));}
 async function osfPdfMontar(r,o){o=o||{};await loadScript(PDFLIB_URL,()=>!!window.PDFLib);const L=window.PDFLib,doc=await L.PDFDocument.create();
   doc.setTitle('Ordem de serviço '+(r.numero||''));doc.setAuthor(osfPdfTxt(cfg().razao||cfg().fantasia||'INA Serviços Técnicos'));doc.setCreator('Central de Gestão');
   const F=await doc.embedFont(L.StandardFonts.Helvetica),FB=await doc.embedFont(L.StandardFonts.HelveticaBold),FI=await doc.embedFont(L.StandardFonts.HelveticaBoldOblique);
@@ -23203,10 +23210,12 @@ async function osfPdfMontar(r,o){o=o||{};await loadScript(PDFLIB_URL,()=>!!windo
   const para=(rot,t,o2)=>{o2=o2||{};const sz=o2.size||10.5,lh=sz*1.35,rw=rot?FB.widthOfTextAtSize(osfPdfTxt(rot)+' ',8.5):0,ls=osfWrap(t,o2.bold?FB:F,sz,W-2*M-rw);precisa(lh*Math.min(ls.length,3)+4);
     if(rot)txt(rot,M,y,{size:8.5,font:FB});ls.forEach((l,i)=>{precisa(lh);txt(l,M+(i===0?rw:0),y,{size:sz,font:o2.bold?FB:F});y-=lh;});y-=4;};
   const lin=(rot,val,x0,larg)=>{txt(rot,x0,y,{size:10});const rw=F.widthOfTextAtSize(osfPdfTxt(rot),10)+6;const v=osfWrap(val||' ',F,10,larg-rw)[0]||'';txt(v,x0+rw,y+1.5,{size:10});pg.drawLine({start:{x:x0+rw-2,y:y-2},end:{x:x0+larg,y:y-2},thickness:0.6,color:preto});};
-  /* cabeçalho: logo (Configurações › Logo) ou o nome */
+  /* cabeçalho: o logo da empresa guardado no sistema (Sistema › Configurações › Logo da empresa, o mesmo do topo do sistema
+     e do Visualizar/PDF); sem logo cadastrado, o texto "INA". v127: logo em WEBP/GIF (ou PNG que o pdf-lib não lê) é
+     convertido para PNG antes de entrar no PDF. */
   const c=cfg();let logoOk=false;
-  if(c.logo&&safeImg(c.logo)){try{const b64=c.logo.split(',')[1],by=Uint8Array.from(atob(b64),ch=>ch.charCodeAt(0));const im=/^data:image\/png/.test(c.logo)?await doc.embedPng(by):/^data:image\/jpe?g/.test(c.logo)?await doc.embedJpg(by):null;
-    if(im){const s=Math.min(150/im.width,46/im.height);pg.drawImage(im,{x:M,y:y-im.height*s+6,width:im.width*s,height:im.height*s});logoOk=true;}}catch(e){}}
+  if(c.logo&&safeImg(c.logo)){try{const im=await osfLogoPdf(doc,c.logo);
+    if(im){const s=Math.min(170/im.width,52/im.height);pg.drawImage(im,{x:M,y:y-im.height*s+8,width:im.width*s,height:im.height*s});logoOk=true;}}catch(e){}}
   if(!logoOk){txt('INA',M,y-22,{size:30,font:FI,color:L.rgb(0.8,0.05,0.05)});txt(osfPdfTxt(c.fantasia&&!/^ina\b/i.test(c.fantasia)?c.fantasia:'Serviços Técnicos Ltda'),M,y-34,{size:8,font:FB});}
   y-=72;
   const sigla=String(c.fantasia||'INA').trim().split(/[\s\-–]+/)[0].toUpperCase()||'INA',tit='ORDEM DE SERVIÇO – '+sigla,tw=FB.widthOfTextAtSize(osfPdfTxt(tit),17);
@@ -23301,7 +23310,7 @@ function i3Data(v){
   if(m){let y=+m[3];if(m[3].length===2)y=y<=40?2000+y:1900+y;const iso=i3Iso(y,+m[2],+m[1]);if(iso)return {iso,inv:''};}
   return {iso:'',inv:s.slice(0,60)};}
 /* data dentro de um texto (ex.: "solicitado em 19/6/22") */
-const i3DataTxt=s=>{const m=String(s||'').match(/(?<!\d)(\d{1,2})\s*[.\/]\s*(\d{1,2})\s*[.\/]\s*(\d{2}|\d{4})(?!\d)/);if(!m)return '';let y=+m[3];if(m[3].length===2)y=y<=40?2000+y:1900+y;return i3Iso(y,+m[2],+m[1]);};
+const i3DataTxt=s=>{const m=String(s||'').match(/(?:^|\D)(\d{1,2})\s*[.\/]\s*(\d{1,2})\s*[.\/]\s*(\d{2}|\d{4})(?!\d)/);if(!m)return '';let y=+m[3];if(m[3].length===2)y=y<=40?2000+y:1900+y;return i3Iso(y,+m[2],+m[1]);};
 /* nº de proposta: guarda como está (maiúsculas, sem espaços); compara sem zeros à esquerda ("01P" = "1P") */
 const i3NumProp=s=>String(s==null?'':s).toUpperCase().replace(/\s+/g,'');
 const i3PropK=s=>{const t=i3NumProp(s);const m=t.match(/^0*(\d+)(P.*)$/);return m?m[1]+m[2]:t;};
@@ -23907,9 +23916,272 @@ if(typeof indLista==='function')indLista=oppSemHist(indLista);
     ((p.pedidosPlan||[]).length?'<details style="grid-column:1/-1"><summary class="sub">'+p.pedidosPlan.length+' pedido(s) / item(ns) da planilha</summary><ul class="sub" style="margin:4px 0 0;padding-left:18px">'+p.pedidosPlan.slice(0,40).map(x=>'<li>'+esc([x.prop,x.objeto,x.valor!=null?money(x.valor):'',x.ini?fmtDate(x.ini):''].filter(Boolean).join(' · '))+'</li>').join('')+'</ul></details>':'')+
     '<p class="sub" style="grid-column:1/-1;margin:0">Valores só informativos: não entram no financeiro nem no orçamento.</p>');}catch(e){}};}
 
+/* ===== v127: compatibilidade com Safari. O pdf.js local (6.x) lê o texto do PDF com "for await" sobre ReadableStream,
+   que o Safari não suporta ("undefined is not a function (near '...t of e...')") — afetava todos os importadores de PDF. ===== */
+try{if(typeof ReadableStream!=='undefined'&&typeof Symbol!=='undefined'&&Symbol.asyncIterator&&!ReadableStream.prototype[Symbol.asyncIterator]){
+  const it=function(opts){const r=this.getReader(),keep=!!(opts&&opts.preventCancel);
+    return {next(){return r.read().then(x=>x.done?(r.releaseLock(),{done:true,value:undefined}):{done:false,value:x.value});},
+      return(v){const p=keep?Promise.resolve():r.cancel(v).catch(()=>{});return p.then(()=>{try{r.releaseLock();}catch(e){}return {done:true,value:v};});},
+      [Symbol.asyncIterator](){return this;}};};
+  Object.defineProperty(ReadableStream.prototype,Symbol.asyncIterator,{value:it,writable:true,configurable:true});
+  if(!ReadableStream.prototype.values)Object.defineProperty(ReadableStream.prototype,'values',{value:it,writable:true,configurable:true});
+}}catch(e){}
+
+/* ===== v127: usuários, perfis de acesso e período nas contas a pagar e a receber =====
+   1. Financeiro › Contas a pagar e Contas a receber: período específico (de … até), além de data e mês, pela data de
+      vencimento, emissão ou pagamento/recebimento (baixa). A escolha fica guardada na sessão do navegador.
+   2. Sistema › Perfis de acesso: os perfis padrão do sistema também se editam ("Ajustar"). O ajuste fica na coleção perfc
+      com o id a_<perfil> e guarda só o que difere do padrão; "Voltar ao padrão" apaga o ajuste. O servidor aplica o mesmo
+      cálculo (server.js › perfaCompilar) e pede a senha de novo (regras.js › regraPerfa, com auditoria). O Administrador
+      não perde Usuários, Configurações nem Lixeira (trava).
+   3. Sistema › Segregação de funções: cada conflito ganha "Ajustar perfil", que abre o perfil já no módulo em conflito.
+   4. Sistema › Usuários: "Novo usuário" com formulário único (nome, e-mail, perfil, colaborador e locais da frota) que cria
+      o login e manda o convite (ou mostra uma senha provisória uma vez); e-mail que já tem login: oferece ligar ou editar.
+      Explicação no topo do papel de Usuários e de Contas de acesso (que ficou só com o dono, no servidor).
+   5. Sistema › Usuários: tabela "O que cada perfil pode fazer" montada da lista real de perfis (padrão, ajustados e
+      personalizados), módulo a módulo, com as opções especiais, quantas pessoas usam e o botão para editar. */
+const U3={fetch:null,self:null,email:null};
+const u3Self=()=>U3.self!=null?!!U3.self:!!(typeof window!=='undefined'&&window.__SELFHOST);
+const u3Fetch=(url,o)=>(U3.fetch||fetch)(url,Object.assign({credentials:'same-origin'},o||{}));
+let u3Css=false;
+function u3Estilo(){if(u3Css||typeof document==='undefined'||!document.createElement||!document.head)return;u3Css=true;try{const st=document.createElement('style');st.textContent=
+  '.u3-mx{border-collapse:separate;border-spacing:0}.u3-mx th,.u3-mx td{padding:5px 6px;text-align:center;white-space:nowrap}.u3-mx th.u3-p,.u3-mx td.u3-p{text-align:left;white-space:normal;min-width:190px;max-width:240px;position:sticky;left:0;background:var(--surface);z-index:1;box-shadow:1px 0 0 var(--line)}'+
+  '.u3-mx thead th{font-size:11px;vertical-align:bottom;line-height:1.2}.u3-mx thead th.u3-m{writing-mode:vertical-rl;transform:rotate(180deg);height:104px;max-width:30px;text-align:left;padding:4px 2px}'+
+  '.u3-c{display:inline-block;min-width:22px;padding:1px 4px;border-radius:5px;font-size:11.5px;font-weight:600}.u3-c.g{background:color-mix(in srgb,var(--pos,#0e7c66) 18%,transparent);color:var(--pos,#0e7c66)}'+
+  '.u3-c.c{background:color-mix(in srgb,var(--accent,#2457d6) 14%,transparent);color:var(--accent,#2457d6)}.u3-c.n{color:var(--muted,#888);font-weight:400}'+
+  '.u3-aj{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--line)}.u3-ajn{min-width:0;flex:1}.u3-aj select{width:170px;flex:none;max-width:48%}'+
+  '.u3-foco{outline:2px solid var(--warn,#b54708);outline-offset:-2px;background:color-mix(in srgb,var(--warn,#b54708) 10%,transparent)}.u3-leg{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted)}';
+  document.head.appendChild(st);}catch(e){}}
+
+/* ================= 1. Contas a pagar e a receber: período específico ================= */
+['rec','pag'].forEach(k=>{const f=ui[k]=ui[k]||{};['de','ate'].forEach(c=>{if(f[c]===undefined)f[c]='';});if(f.dcampo===undefined)f.dcampo='venc';});
+const U3_PER_K=['per','dia','mes','de','ate','dcampo'],U3_PER_CHAVE='cg.titPer.v127';
+function u3PerLer(){try{const t=sessionStorage.getItem(U3_PER_CHAVE);if(!t)return;const o=JSON.parse(t);
+  ['rec','pag'].forEach(k=>{const x=o&&o[k];if(!x||typeof x!=='object')return;U3_PER_K.forEach(c=>{if(typeof x[c]==='string')ui[k][c]=x[c];});});}catch(e){}}
+function u3PerGuardar(){try{const o={};['rec','pag'].forEach(k=>{o[k]={};U3_PER_K.forEach(c=>{o[k][c]=String(ui[k][c]||'');});});sessionStorage.setItem(U3_PER_CHAVE,JSON.stringify(o));}catch(e){}}
+u3PerLer();
+const u3Dia=t=>{const d=new Date(+t||t);if(isNaN(d))return '';return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+/* data de emissão do título: a do próprio título, a da nota ligada ou, sem nenhuma, o dia em que foi cadastrado */
+function u3Emissao(l){if(!l)return '';if(l.emissao)return String(l.emissao).slice(0,10);
+  if(l.notaId){const n=get('notas',l.notaId);if(n&&n.emissao)return String(n.emissao).slice(0,10);}
+  if(l.nfEm)return u3Dia(l.nfEm);return l.cr?u3Dia(l.cr):'';}
+function u3TitData(l,campo){return campo==='pago'?String(l.pago||''):campo==='emissao'?u3Emissao(l):String(l.venc||'');}
+function u3PerFaixa(f){let a=f.de||'',b=f.ate||'';if(a&&b&&a>b){const t=a;a=b;b=t;}return [a,b];}
+titDataOk=function(l,f){if(!f||!f.per)return true;const d=u3TitData(l,f.dcampo);if(!d)return false;
+  if(f.per==='dia')return d===(f.dia||todayStr());if(f.per==='mes')return d.slice(0,7)===(f.mes||ym(todayStr()));
+  if(f.per==='periodo'){const [a,b]=u3PerFaixa(f);return (!a||d>=a)&&(!b||d<=b);}return true;};
+const u3CampoNome=(c,rec)=>c==='pago'?(rec?'recebimento (baixa)':'pagamento (baixa)'):c==='emissao'?'emissão':'vencimento';
+titPerBar=function(key,rec){const f=ui[key];if(f.per==='dia'&&!f.dia)f.dia=todayStr();if(f.per==='mes'&&!f.mes)f.mes=ym(todayStr());
+  if(f.per==='periodo'&&!f.de&&!f.ate){const m=ym(todayStr());f.de=m+'-01';f.ate=addDays(addMonths(m,1)+'-01',-1);}
+  return '<label class="f"><span>Período</span><select id="s_'+key+'per" data-filter="'+key+'.per">'+opt([['dia','Data específica'],['mes','Mês'],['periodo','De … até (período)']],f.per||'','Todas as datas')+'</select></label>'+
+  (f.per?'<label class="f"><span>Pela data de</span><select id="s_'+key+'dcampo" data-filter="'+key+'.dcampo">'+opt([['venc','Vencimento'],['emissao','Emissão'],['pago',rec?'Recebimento (baixa)':'Pagamento (baixa)']],f.dcampo||'venc')+'</select></label>':'')+
+  (f.per==='dia'?'<label class="f"><span>Data</span><input type="date" id="d_'+key+'dia" data-filter="'+key+'.dia" value="'+esc(f.dia)+'"></label>':'')+
+  (f.per==='mes'?'<label class="f"><span>Mês</span><input type="month" id="m_'+key+'mes" data-filter="'+key+'.mes" value="'+esc(f.mes)+'"></label>':'')+
+  (f.per==='periodo'?'<label class="f"><span>De</span><input type="date" id="d_'+key+'de" data-filter="'+key+'.de" value="'+esc(f.de)+'"></label><label class="f"><span>Até</span><input type="date" id="d_'+key+'ate" data-filter="'+key+'.ate" value="'+esc(f.ate)+'"></label>':'')+
+  (f.per==='dia'||f.per==='mes'?'<div class="acts" style="align-self:flex-end"><button class="btn sm" data-act="titPerNav" data-k="'+key+'" data-n="-1" aria-label="'+(f.per==='dia'?'Dia anterior':'Mês anterior')+'">‹</button><button class="btn sm" data-act="titPerNav" data-k="'+key+'" data-n="1" aria-label="'+(f.per==='dia'?'Próximo dia':'Próximo mês')+'">›</button><button class="btn sm" data-act="titPerNav" data-k="'+key+'" data-n="0">'+(f.per==='dia'?'Hoje':'Mês atual')+'</button></div>':'')+
+  (f.per==='periodo'?'<div class="acts" style="align-self:flex-end"><button class="btn sm" data-act="u3PerAtalho" data-k="'+key+'" data-v="mes">Este mês</button><button class="btn sm" data-act="u3PerAtalho" data-k="'+key+'" data-v="ant">Mês passado</button><button class="btn sm" data-act="u3PerAtalho" data-k="'+key+'" data-v="30">Próximos 30 dias</button></div>':'')+
+  (f.per?'<div class="acts" style="align-self:flex-end"><button class="btn sm" data-act="u3PerLimpar" data-k="'+key+'">Todas as datas</button></div>':'');};
+A.u3PerAtalho=d=>{const f=ui[d.k];if(!f)return;const h=todayStr(),m=ym(h);
+  if(d.v==='mes'){f.de=m+'-01';f.ate=addDays(addMonths(m,1)+'-01',-1);}
+  else if(d.v==='ant'){const a=addMonths(m,-1);f.de=a+'-01';f.ate=addDays(m+'-01',-1);}
+  else if(d.v==='30'){f.de=h;f.ate=addDays(h,30);}
+  render();};
+A.u3PerLimpar=d=>{const f=ui[d.k];if(!f)return;f.per='';render();};
+Object.assign(ACT_GROUP,{u3PerAtalho:null,u3PerLimpar:null});
+{const t0=titulosView;titulosView=function(tipo){const rec=tipo==='receber',key=rec?'rec':'pag',f=ui[key];let h=t0.apply(this,arguments);
+  u3PerGuardar();
+  if(f.per){const rows=titulosRows(tipo),ab=rows.filter(l=>!l.pago),pg=rows.filter(l=>l.pago),[a,b]=u3PerFaixa(f);
+    const qd=f.per==='dia'?fmtDate(f.dia):f.per==='mes'?fmtYm(f.mes):(a&&b?'De '+fmtDate(a)+' até '+fmtDate(b):a?'A partir de '+fmtDate(a):b?'Até '+fmtDate(b):'Todas as datas');
+    const txt=qd+' pela data de '+u3CampoNome(f.dcampo,rec)+': '+rows.length+' título(s) · '+money(sum(rows,l=>+l.valor||0))+(ab.length?' · em aberto '+money(sum(ab,l=>+l.valor||0)):'')+(pg.length?' · '+(rec?'recebido ':'pago ')+money(sum(pg,lancVal)):'')+'.'+
+      (f.dcampo==='emissao'?' Emissão: a do título, a da nota ligada ou, sem nenhuma, o dia do cadastro.':'');
+    h=h.replace(/<p class="sub" style="margin:0" id="titPerRes">[^<]*<\/p>/,'<p class="sub" style="margin:0" id="titPerRes">'+esc(txt)+'</p>');}
+  return h;};}
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{u3PerAtalho:'Preenche as datas do período.',u3PerLimpar:'Volta a mostrar todas as datas.'});
+
+/* ================= 2. perfis padrão ajustáveis ================= */
+if(!P2_MODS.some(m=>m[0]==='fab')){const i=P2_MODS.findIndex(m=>m[0]==='ferr');P2_MODS.splice(i<0?P2_MODS.length:i+1,0,['fab','Fábrica: ordens de fabricação e painel de produção']);}
+const U3_FORA=['pendente','semnivel','semid'],U3_SO_LEITURA=['leitura','leituratotal'],U3_NAO_EDITA=['painel','dir','meu','ajuda'],U3_SISTEMA=['usr','cfg','lixo'];
+const U3_ORIG={};Object.keys(PERFIS).forEach(k=>{const p=PERFIS[k];if(p&&!p.custom&&!U3_FORA.includes(k))U3_ORIG[k]=p;});
+/* cópia do padrão tirada no primeiro uso (depois de todo o sistema carregar: o módulo de tutoriais ainda acrescenta 'ajuda') */
+let U3_BASE_=null;const u3B=()=>U3_BASE_||(U3_BASE_=JSON.parse(JSON.stringify(U3_ORIG)));
+const u3Grupos=()=>[...new Set(MODS.map(m=>m[0]).concat(['meu','agenda','chat','ajuda']))];
+const u3Editavel=(k,g)=>u3Grupos().includes(g)&&!U3_NAO_EDITA.includes(g)&&!U3_SISTEMA.includes(g);
+/* mesmo cálculo do servidor (server.js › perfaCompilar) */
+function u3Compilar(k,d){const b=u3B()[k],todos=u3Grupos(),tudoW=b.w==='*',tudoR=b.r==='*';
+  let w=tudoW?todos.slice():[...new Set(b.w||[])],r=tudoR?todos.slice():[...new Set(b.r||[])];
+  Object.entries((d&&d.mod)||{}).forEach(([g,v])=>{if(!u3Editavel(k,g)||!['w','r','n'].includes(v))return;w=w.filter(x=>x!==g);r=r.filter(x=>x!==g);
+    if(v==='w'&&!U3_SO_LEITURA.includes(k))w.push(g);else if(v==='w'||v==='r')r.push(g);});
+  const out=Object.assign(JSON.parse(JSON.stringify(b)),{ajustado:true});
+  out.w=tudoW&&todos.every(g=>w.includes(g))?'*':w;out.r=tudoR&&todos.every(g=>w.includes(g)||r.includes(g))?'*':r;
+  if(b.so){const so={};Object.keys(b.so).forEach(g=>{if(out.w==='*'||out.w.includes(g))so[g]=b.so[g];});out.so=so;}
+  const o=(d&&d.opc)||{};if(typeof o.frota==='boolean')out.frotaTodos=o.frota;return out;}
+const u3AjId=k=>'a_'+k,u3AjDoc=k=>get('perfc',u3AjId(k));
+function u3Sync(){const docs=new Map();(S.perfc||[]).forEach(d=>{const m=d&&/^a_([a-z0-9]{2,30})$/.exec(d.id||'');if(m&&u3B()[m[1]]&&d.ajuste===true)docs.set(m[1],d);});
+  Object.keys(u3B()).forEach(k=>{const d=docs.get(k);if(!d){if(PERFIS[k]!==U3_ORIG[k])PERFIS[k]=U3_ORIG[k];return;}
+    const sig=JSON.stringify([d.mod||{},d.opc||{}]);if(PERFIS[k]&&PERFIS[k].ajustado&&PERFIS[k].__u3sig===sig)return;
+    const x=u3Compilar(k,d);Object.defineProperty(x,'__u3sig',{value:sig,enumerable:false});PERFIS[k]=x;});}
+{const r0=resolvePerfil;resolvePerfil=function(){try{u3Sync();}catch(e){}return r0.apply(this,arguments);};}
+{const p0=put;put=function(col,rec){const r=p0.apply(this,arguments);if(col==='perfc')try{u3Sync();}catch(e){}return r;};}
+{const d0=del;del=function(col,id){const r=d0.apply(this,arguments);if(col==='perfc')try{u3Sync();}catch(e){}return r;};}
+/* acesso de cada módulo num perfil: 'w', 'r' ou '' */
+function u3ModoDe(p,g){if(!p)return '';const w=p.w==='*'||(Array.isArray(p.w)&&p.w.includes(g)),r=p.r==='*'||(Array.isArray(p.r)&&p.r.includes(g));return w?'w':r?'r':'';}
+const u3ModsForm=()=>P2_MODS.filter(m=>!U3_NAO_EDITA.includes(m[0]));
+const u3Usam=k=>(S.usr||[]).filter(u=>u&&u.perfil===k&&u.ativo!==false).length;
+const u3NomeMod=g=>{const m=P2_MODS.find(x=>x[0]===g);if(m)return m[1];const x=MODS.find(x=>x[0]===g);return x?x[1]:g;};
+function u3ResumoAj(k,d){const p0=PERFIS[k];PERFIS[k]=u3Compilar(k,d);try{return p2Resumo(k);}finally{PERFIS[k]=p0;}}
+function u3LerAj(k,v){const b=u3B()[k],mod={};u3ModsForm().forEach(([g])=>{const x=v['m_'+g];if(x===undefined)return;const nv=x==='w'||x==='r'?x:'n',bv=u3ModoDe(b,g)||'n';
+    if(nv!==bv&&!(nv==='w'&&U3_SO_LEITURA.includes(k)))mod[g]=nv;});
+  const opc={};const fb=!!b.frotaTodos;if(typeof v.o_frota==='boolean'&&v.o_frota!==fb)opc.frota=v.o_frota;return {mod,opc};}
+/* formulário do ajuste; foco = módulo (grupo) para abrir já marcado (Segregação de funções) */
+function u3FormAjuste(k,foco){const p=PERFIS[k],b=u3B()[k];if(!p||!b){toast('Perfil não encontrado.','neg');return;}
+  if(!(me.owner||mayW('usr'))){toast('Só o Administrador ou o dono ajustam perfis de acesso.','neg');return;}
+  u3Estilo();U3.ajK=k;const aj=u3AjDoc(k),soLe=U3_SO_LEITURA.includes(k),o=p2Opcoes(k),n=u3Usam(k);
+  const lin=([g,nm])=>{const at=u3ModoDe(p,g),pd=u3ModoDe(b,g),so=p.so&&Array.isArray(p.so[g])?p.so[g]:null;
+    const ops=[['','Sem acesso'],['r','Consulta']].concat(soLe?[]:[['w','Grava']]);
+    return '<div data-u3g="'+esc(g)+'" class="u3-aj'+(g===foco?' u3-foco':'')+'"><div class="u3-ajn">'+esc(nm)+(so?'<div class="sub">grava só: '+esc(so.map(c=>COL_NOME[c]||c).join(', '))+'</div>':'')+(at!==pd?'<div class="sub">padrão do sistema: '+esc(pd==='w'?'Grava':pd==='r'?'Consulta':'Sem acesso')+'</div>':'')+(g===foco?'<div class="sub"><b>Permissão em conflito na Segregação de funções</b></div>':'')+'</div>'+
+      '<select data-f="m_'+esc(g)+'" aria-label="Acesso a '+esc(nm)+'">'+opt(ops,soLe&&at==='w'?'r':at)+'</select></div>';};
+  const trava=k==='admin'?'<div class="u3-aj"><div class="u3-ajn">Usuários, perfis de acesso, configurações e lixeira<div class="sub">Trava: o Administrador não perde o acesso a Sistema.</div></div><select disabled aria-label="Sistema"><option>Grava</option></select></div>':'';
+  const sn=x=>x?'sim':'não';
+  const body='<div id="u3AjForm">'+
+    '<div class="note" style="margin:0 0 10px">Ajuste do perfil padrão <b>'+esc(b.nome||k)+'</b>: vale para '+(n===1?'a pessoa que usa':n?'as '+n+' pessoas que usam':'quem vier a usar')+' este perfil e é aplicado também pelo servidor. Salvar pede a sua senha de novo e fica na auditoria. "Voltar ao padrão" desfaz o ajuste.'+(soLe?' Este perfil só consulta: não ganha gravação.':'')+(p.so?' As regras finas do padrão (o que grava dentro de cada módulo) continuam.':'')+'</div>'+
+    '<div class="sect">Módulos</div><div style="max-height:360px;overflow:auto" id="u3AjTab">'+trava+u3ModsForm().map(lin).join('')+'</div>'+
+    '<div class="sect">Opções</div>'+field('Ver todos os locais da frota','o_frota','checkbox',!!p.frotaTodos,{full:true})+
+    '<p class="sub" style="margin:4px 0 0">Do perfil padrão (não mudam no ajuste; para outra combinação use Duplicar): dados de RH e salários: '+sn(o.rh)+' · dados bancários: '+sn(o.banco)+' · aprovar como diretoria: '+sn(o.dir)+'.</p>'+
+    '<div class="sect">O que este perfil pode fazer</div><p class="sub" id="u3AjRes" style="margin:0">'+esc(p2Resumo(k))+'</p></div>';
+  modal({title:'Ajustar perfil: '+(b.nome||k),wide:true,nofocus:true,body,
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button>'+(aj?'<button class="btn" data-act="u3Padrao" data-id="'+esc(k)+'">Voltar ao padrão</button>':'')+'<button class="btn pri" data-act="modalSave">Salvar ajuste</button>',
+    save:root=>{const e=u3GravarAj(k,readForm(root));if(e){toast(e,'neg');return false;}}});
+  if(foco)setTimeout(()=>{try{const tr=document.querySelector('#u3AjForm [data-u3g="'+foco+'"]');if(tr){tr.scrollIntoView({block:'center'});const s=tr.querySelector('select');if(s)s.focus();}}catch(e){}},60);}
+function u3GravarAj(k,v){const b=u3B()[k];if(!b)return 'Perfil não encontrado.';const x=u3LerAj(k,v),aj=u3AjDoc(k);
+  if(k==='admin'&&U3_SISTEMA.some(g=>v['m_'+g]!==undefined&&v['m_'+g]!=='w'))return 'O Administrador não perde o acesso a Sistema.';
+  if(!Object.keys(x.mod).length&&!Object.keys(x.opc).length){if(aj){del('perfc',u3AjId(k));toast('Sem diferença do padrão: o perfil voltou ao padrão do sistema.','pos');}else toast('Nada mudou em relação ao padrão.');return '';}
+  put('perfc',Object.assign(aj?cl(aj):{},{id:u3AjId(k),base:k,ajuste:true,nome:b.nome||k,mod:x.mod,opc:x.opc,ativo:true}));
+  toast('Perfil ajustado. Já vale para quem usa '+(b.nome||k)+'.','pos');return '';}
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.closest||!t.closest('#u3AjForm'))return;const f=$('#u3AjForm'),r=$('#u3AjRes');if(!f||!r)return;
+  const k=U3.ajK;if(!k||!u3B()[k])return;try{r.textContent=u3ResumoAj(k,u3LerAj(k,readForm(f)));}catch(err){}});
+A.u3Ajustar=d=>{U3.ajK=d.id;const pc=get('perfc',d.id);if(pc&&/^c_/.test(d.id)){A.perfcEdit({id:d.id});u3Foco(d.g);return;}u3FormAjuste(d.id,d.g||'');};
+A.u3Padrao=d=>{const k=d.id,b=u3B()[k];if(!b||!u3AjDoc(k)){toast('Este perfil já está no padrão do sistema.');return;}
+  if(!(me.owner||mayW('usr'))){toast('Só o Administrador ou o dono ajustam perfis de acesso.','neg');return;}
+  confirmBox('Voltar o perfil "'+esc(b.nome||k)+'" ao padrão do sistema? O ajuste é desfeito para todas as pessoas que usam este perfil (pede a sua senha de novo).',()=>{del('perfc',u3AjId(k));toast('Perfil de volta ao padrão do sistema.','pos');},'Voltar ao padrão');};
+function u3Foco(g){if(!g)return;setTimeout(()=>{try{const s=document.querySelector('#perfcForm [data-f="m_'+g+'"]');if(!s)return;const tr=s.closest('tr');if(tr){tr.classList.add('u3-foco');tr.scrollIntoView({block:'center'});}s.focus();}catch(e){}},60);}
+/* Editar num perfil padrão abre o ajuste (antes: "não se edita") */
+{const a0=A.perfcEdit;A.perfcEdit=d=>{if(!get('perfc',d.id)&&u3B()[d.id]){U3.ajK=d.id;u3FormAjuste(d.id,d.g||'');return;}const r=a0(d);u3Foco(d.g);return r;};}
+Object.assign(ACT_GROUP,{u3Ajustar:'usr',u3Padrao:'usr',u3EditPerfil:'usr'});
+/* lista de Perfis de acesso: Ajustar e Voltar ao padrão nos perfis padrão */
+{const v0=V.perfc;V.perfc=function(){let h=v0.apply(this,arguments);if(!(me.owner||mayW('usr')))return h;
+  Object.keys(u3B()).forEach(k=>{const p=PERFIS[k];if(!p||p.custom||p.interno)return;const dup='<button class="btn sm" data-act="perfcDup" data-id="'+esc(k)+'">Duplicar</button>',aj=u3AjDoc(k);
+    if(!h.includes(dup))return;
+    h=h.replace(dup,(aj?pill('ajustado','warn')+' ':'')+'<button class="btn sm pri" data-act="u3Ajustar" data-id="'+esc(k)+'">Ajustar</button>'+dup+(aj?'<button class="btn sm" data-act="u3Padrao" data-id="'+esc(k)+'">Voltar ao padrão</button>':''));});
+  return h.split('Perfil padrão do sistema: não se edita. Use Duplicar para criar um parecido.').join('Perfil padrão do sistema. "Ajustar" muda o acesso módulo a módulo para todos que usam o perfil; "Voltar ao padrão" desfaz. Para um perfil diferente, use Duplicar.')
+    .replace('Criar, alterar ou desativar um perfil pede a sua senha de novo e fica na auditoria.','Criar, ajustar, alterar ou desativar um perfil pede a sua senha de novo e fica na auditoria. O Administrador não perde o acesso a Sistema.');};}
+
+/* ================= 3. Segregação de funções: Ajustar perfil no conflito ================= */
+if(typeof V.segf==='function'&&typeof segAnalise==='function'){const v0=V.segf;V.segf=function(){let h=v0.apply(this,arguments);if(!(me.owner||mayW('usr')))return h;
+  let R=[];try{R=segAnalise();}catch(e){return h;}
+  R.forEach(r=>{if(!r.ambos||!r.ambos.length||!['conf','mit'].includes(r.sit.k))return;
+    const g=(r.gF||[]).find(x=>(r.gA||[]).includes(x))||(r.gF||[])[0]||'';const ks=[...new Set(r.ambos.map(p=>p.perfil))].filter(k=>PERFIS[k]&&k!=='admin');
+    const bts=ks.map(k=>'<button class="btn sm" data-act="u3Ajustar" data-id="'+esc(k)+'" data-g="'+esc(g)+'" title="Abre o perfil no módulo '+esc(u3NomeMod(g))+'">Ajustar perfil: '+esc(PERFIS[k].nome||k)+'</button>').join('');
+    const adm=r.ambos.some(p=>p.perfil==='admin')?'<div class="sub">Administradores fazem e aprovam: troque o perfil da pessoa em Sistema › Usuários.</div>':'';
+    if(!bts&&!adm)return;const a='<tr><td><b>'+esc(r.ativ)+'</b>',i=h.indexOf(a);if(i<0)return;const j=h.indexOf('</td></tr>',i);if(j<0)return;
+    h=h.slice(0,j)+'<div class="acts" style="flex-wrap:wrap;justify-content:flex-start;margin-top:6px">'+bts+'</div>'+adm+h.slice(j);});
+  return h.replace('Para separar funções, ajuste os perfis em Sistema › Usuários','Para separar funções, use "Ajustar perfil" no conflito (ou Sistema › Perfis de acesso)');};}
+
+/* ================= 5. tabela "O que cada perfil pode fazer" ================= */
+const U3_CURTO={fin:'Financeiro',fluxo:'Fluxo e DRE',contas:'Bancos',plano:'Plano de contas',nf:'Notas e pedidos',ctb:'Contabilidade',comp:'Compras',est:'Estoque',cad:'Cadastros',proj:'Obras',ctr:'Comercial',serv:'Serviços',qual:'Qualidade',ferr:'Ferramentas',fab:'Fábrica',frota:'Frota',rh:'RH',folha:'Salários',ponto:'Ponto',jur:'Trabalhista',sst:'SST',empdoc:'Empreiteiros',lgpd:'LGPD',agenda:'Agenda',chat:'Chat',painel:'Painel',dir:'Diretoria',usr:'Sistema'};
+function u3PerfisLista(){return Object.keys(PERFIS).filter(k=>!U3_FORA.includes(k)&&!/^__/.test(k)&&PERFIS[k]&&!PERFIS[k].inativo&&!(PERFIS[k].interno&&!PERFIS[k].custom));}
+function u3TabelaPerfis(){u3Estilo();const ks=u3PerfisLista(),gs=P2_MODS.map(m=>m[0]).filter(g=>U3_CURTO[g]).concat(['usr']),edita=me.owner||mayW('usr');
+  const cel=(p,g)=>{const m=u3ModoDe(p,g),so=m==='w'&&p.so&&Array.isArray(p.so[g]);
+    return m==='w'?'<span class="u3-c g" title="'+esc(U3_CURTO[g])+': grava'+(so?' (só parte: '+esc(p.so[g].map(c=>COL_NOME[c]||c).join(', '))+')':'')+'">G'+(so?'*':'')+'</span>':m==='r'?'<span class="u3-c c" title="'+esc(U3_CURTO[g])+': consulta">C</span>':'<span class="u3-c n" title="'+esc(U3_CURTO[g])+': sem acesso">–</span>';};
+  const linha=k=>{const p=PERFIS[k],o=p2Opcoes(k),n=u3Usam(k),aj=!p.custom&&!!u3AjDoc(k);
+    const tag=p.custom?pill('personalizado','acc'):aj?pill('ajustado','warn'):p.antigo?pill('antigo','warn'):'';
+    const op=[o.rh?'Salários e dados de RH':'',o.banco?'Dados bancários':'',o.frota?'Frota: todos os locais':'',o.dir?'Aprova como diretoria':'',o.sst&&!o.rh?'ASO e SST (sem salário)':''].filter(Boolean);
+    return '<tr><td class="u3-p"><b>'+esc(p.nome||k)+'</b> '+tag+(op.length?'<div class="sub">'+esc(op.join(' · '))+'</div>':'')+'</td><td class="num">'+n+'</td>'+gs.map(g=>'<td>'+cel(p,g)+'</td>').join('')+
+      '<td>'+(edita?'<button class="btn sm" data-act="u3EditPerfil" data-id="'+esc(k)+'">'+(p.custom?'Editar':'Ajustar')+'</button>':'')+'</td></tr>';};
+  return '<div class="card" id="u3Perfis"><h2>O que cada perfil pode fazer</h2><p class="sub" style="margin:0 0 8px">Todos os perfis em uso no sistema (padrão, ajustados e personalizados), módulo a módulo, com as opções especiais e quantas pessoas usam cada um. A tabela se atualiza sozinha quando um perfil muda. O servidor aplica as mesmas regras: o que o perfil não grava é recusado.</p>'+
+    '<div class="u3-leg" style="margin:0 0 6px"><span><span class="u3-c g">G</span> grava</span><span><span class="u3-c g">G*</span> grava só parte do módulo</span><span><span class="u3-c c">C</span> consulta</span><span><span class="u3-c n">–</span> sem acesso</span></div>'+
+    '<div class="tw" style="border:0;max-height:70vh;overflow:auto"><table class="u3-mx"><thead><tr><th class="u3-p">Perfil</th><th class="num">Pessoas</th>'+gs.map(g=>'<th class="u3-m" title="'+esc(u3NomeMod(g))+'">'+esc(U3_CURTO[g])+'</th>').join('')+'<th></th></tr></thead><tbody>'+ks.map(linha).join('')+'</tbody></table></div>'+'</div>';}
+A.u3EditPerfil=d=>{const k=d.id;if(!PERFIS[k])return;ui.mod='sis';ui.tab='perfc';try{history.replaceState(null,'','#perfc');}catch(e){}render();U3.ajK=k;
+  if(PERFIS[k].custom)A.perfcEdit({id:k});else u3FormAjuste(k,'');};
+
+/* ================= 4. Sistema › Usuários: Novo usuário e papel de cada tela ================= */
+const U3_TOPO_USR='<div class="note" id="u3UsrTopo" style="margin:0"><b>Sistema › Usuários</b> (esta tela): quem usa o sistema e o que cada pessoa pode fazer: perfil de acesso, colaborador ligado e locais da frota. Para cadastrar alguém use <b>Novo usuário</b>: cria o login, envia o convite por e-mail e já define o perfil. <b>Editar</b> muda perfil, nome, e-mail e senha ou suspende o acesso.';
+{const vu=V.usr;V.usr=function(){let h=vu.apply(this,arguments);if(store.mode!=='db')return h;const w=me.owner||mayW('usr');
+  /* tabelas antigas de perfis (fixas, sem todos os perfis) saem; entra a tabela gerada da lista real */
+  h=h.replace(/<div class="card"><h2>O que cada perfil faz<\/h2>[\s\S]*?<\/tbody><\/table><\/div><\/div>/,'')
+     .replace(/<div class="card" style="margin-top:12px"><h2>Perfis de acesso<\/h2>[\s\S]*?<\/tbody><\/table><\/div><\/div>/,'');
+  if(w)h=h.replace('<button class="btn pri" data-act="usrAdd">Adicionar pessoa</button>','<button class="btn pri" data-act="u3Novo">Novo usuário</button>');
+  if(u3Self()){
+    /* no servidor próprio, o acesso é pelo login (e-mail e senha): somem os textos do compartilhamento da página do Claude */
+    h=h.replace(/<div class="card"><h2>Conferência de acesso[\s\S]*?e você libera o perfil aqui\.<\/p><\/div>/,'')
+       .replace(/<div class="note"><b>Como o acesso funciona\.<\/b>[\s\S]*?nível de compartilhamento como proteção dos dados\.<\/div>/,'');}
+  const topo=U3_TOPO_USR+(u3Self()?' <b>Contas de acesso</b> (página do servidor, só do dono): segurança dos logins: verificação em duas etapas, aparelhos conectados, excluir um login e cópias de segurança.'+(me.owner?' <a class="btn sm" href="/contas" style="margin-left:4px">Abrir Contas de acesso</a>':''):'')+'</div>';
+  h=h.replace('<div class="stack">','<div class="stack">'+topo);
+  return h+(w?u3TabelaPerfis():'');};}
+const u3PerfOpts=()=>Object.keys(PERFIS).filter(k=>k!=='pendente'&&PERFIS[k]&&!PERFIS[k].interno&&!PERFIS[k].inativo).map(k=>[k,PERFIS[k].nome]);
+const u3EmailOk=e=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e||''));
+function u3SenhaProv(){const A2='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';try{const a=new Uint8Array(16);crypto.getRandomValues(a);a.forEach(b=>{s+=A2[b%A2.length];});}catch(e){for(let i=0;i<16;i++)s+=A2[Math.floor(Math.random()*A2.length)];}
+  return s.slice(0,4)+'-'+s.slice(4,8)+'-'+s.slice(8,12)+'-'+s.slice(12,16);}
+const u3Nivel=perfil=>perfil==='colaborador'?'interact':'admin';
+A.u3Novo=()=>{if(!(me.owner||mayW('usr'))){toast('Só o Administrador cria usuários.','neg');return;}
+  if(!u3Self()){A.usrAdd();return;}
+  const ls=frLocais(),fs=S.func.filter(f=>f.status!=='desligado').slice().sort(byNome);
+  const body='<div id="u3Novo"><div class="fg">'+field('Nome','nome','text','',{ph:'Nome e sobrenome'})+field('E-mail (é o login)','email','email','',{ph:'pessoa@empresa.com.br'})+
+    field('Perfil de acesso','perfil','select','leitura',{opts:u3PerfOpts()})+
+    field('Colaborador ligado (opcional: ponto e Minha área)','funcId','select','',{opts:fs.map(f=>[f.id,f.nome+(f.usrId?' (já ligado a outro usuário)':'')]),blank:'Nenhum'})+'</div>'+
+    (ls.length?'<div class="sect">Locais da frota</div><p class="sub" style="margin:0 0 6px">Valem para perfis que consultam a frota sem ver todos os locais. Sem marcar, a pessoa vê só os veículos dos locais do colaborador ligado.</p><div style="display:flex;flex-wrap:wrap;gap:4px 14px">'+ls.map((l,i)=>field(esc(l),'u3loc_'+i,'checkbox',false)).join('')+'</div>':'')+
+    '<div class="sect">Senha</div>'+field('Como a pessoa entra','modo','select','convite',{opts:[['convite','Enviar convite por e-mail: a pessoa cria a própria senha'],['senha','Gerar senha provisória (aparece uma vez, para você passar à pessoa)']]})+
+    '<p class="sub" id="u3EmailSt" style="margin:4px 0 0">Conferindo o envio de e-mail do servidor…</p>'+
+    '<p class="sub" style="margin:10px 0 0">Criar o login pede a sua senha de novo e fica na auditoria. Se o e-mail já tiver login, o sistema oferece ligar a ele ou editar, sem duplicar.</p></div>';
+  modal({title:'Novo usuário',wide:true,body,saveLabel:'Criar usuário',save:root=>{const v=readForm(root);const e=u3NovoValida(v);if(e){toast(e,'neg');return false;}
+    v.locais=ls.filter((l,i)=>v['u3loc_'+i]);u3NovoCriar(v);return false;}});
+  u3EmailStatus().then(ok=>{const p=$('#u3EmailSt'),s=$('#f_modo');if(!p)return;
+    if(ok){p.textContent='O e-mail do servidor está configurado: a pessoa recebe o link (vale 72 horas) para criar a senha.';}
+    else{p.textContent='O envio de e-mail não está configurado no servidor: será gerada uma senha provisória.';if(s){s.value='senha';const o=s.querySelector('option[value=convite]');if(o)o.disabled=true;}}});};
+function u3EmailStatus(){if(U3.email!=null)return Promise.resolve(U3.email);return u3Fetch('/api/email/status').then(r=>r.ok?r.json():{}).then(j=>{U3.email=!!(j&&j.configurado);return U3.email;},()=>false);}
+function u3NovoValida(v){if(String(v.nome||'').trim().length<3)return 'Informe o nome (ao menos 3 letras).';if(!u3EmailOk(v.email))return 'E-mail inválido.';
+  if(!PERFIS[v.perfil]||v.perfil==='pendente')return 'Escolha o perfil de acesso.';return '';}
+/* login que já existe com o e-mail (busca de pessoas do servidor, só administradores veem o e-mail) */
+function u3ContaPorEmail(email){const e=String(email||'').trim().toLowerCase();return u3Fetch('/api/busca-pessoas?q='+encodeURIComponent(e)).then(r=>r.ok?r.json():[]).then(ls=>(Array.isArray(ls)?ls:[]).find(c=>String(c.email||'').toLowerCase()===e)||null,()=>null);}
+async function u3NovoCriar(v){if(U3.ocupado)return;U3.ocupado=true;
+  try{const email=String(v.email).trim().toLowerCase(),ja=await u3ContaPorEmail(email);if(ja){u3JaExiste(ja,v);return;}
+    const convite=v.modo==='convite'&&(await u3EmailStatus());let senha=convite?'':u3SenhaProv();
+    const r=await u3Fetch('/api/contas',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({nome:String(v.nome).trim(),email,nivel:u3Nivel(v.perfil),convite,senha})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){if(/já está em uso/.test(j.erro||'')){const c=await u3ContaPorEmail(email);if(c){u3JaExiste(c,v);return;}toast('Este e-mail já tem um login desativado. O dono reativa em Contas de acesso.','neg');return;}
+      toast('O usuário não foi criado: '+(j.erro||('erro '+r.status)),'neg');return;}
+    const id=j.id;u3LigarUsr(id,v);
+    if(convite&&j.convite==='falhou'){senha=u3SenhaProv();const r2=await u3Fetch('/api/contas/'+encodeURIComponent(id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({nome:String(v.nome).trim(),email,nivel:u3Nivel(v.perfil),senha,ativo:true})});
+      if(!r2.ok){u3Resultado(v,email,'','O convite não foi enviado ('+(j.erroEmail||'falha no e-mail')+') e a senha provisória não foi gravada. Use Editar › Nova senha.');return;}
+      u3Resultado(v,email,senha,'O convite por e-mail falhou ('+(j.erroEmail||'falha no envio')+'). Foi gerada uma senha provisória.');return;}
+    u3Resultado(v,email,convite?'':senha,convite?'Convite enviado para '+email+'. A pessoa cria a própria senha pelo link (vale 72 horas).':'');
+  }catch(e){toast('Sem conexão com o servidor: o usuário não foi criado.','neg');}finally{U3.ocupado=false;}}
+/* grava o usuário do sistema (perfil, colaborador e locais) para o login id */
+function u3LigarUsr(id,v){const ex=(S.usr||[]).find(u=>u.uid===id);
+  const rec=Object.assign(ex?cl(ex):{id:(get('usr',id)?uid():id),uid:id},{perfil:v.perfil,apelido:String(v.nome||'').trim()||(ex&&ex.apelido)||'',ativo:true});
+  if(Array.isArray(v.locais)&&v.locais.length)rec.locaisVeic=v.locais.slice();
+  put('usr',rec);
+  if(v.funcId){S.func.filter(f=>f.usrId===id&&f.id!==v.funcId).forEach(f=>put('func',Object.assign(cl(f),{usrId:''})));const f=get('func',v.funcId);if(f&&f.usrId!==id)put('func',Object.assign(cl(f),{usrId:id}));}
+  try{loadProfiles([id]);}catch(e){}return rec;}
+function u3Resultado(v,email,senha,msg){const pf=(PERFIS[v.perfil]||{}).nome||v.perfil;
+  modal({title:'Usuário criado',wide:true,nofocus:true,body:'<p style="margin:0 0 8px"><b>'+esc(v.nome)+'</b> · '+esc(email)+' · perfil '+esc(pf)+'</p>'+(msg?'<p class="note" style="margin:0 0 8px">'+esc(msg)+'</p>':'')+
+    (senha?'<label class="f"><span>Senha provisória (aparece só agora)</span><input id="u3Senha" readonly value="'+esc(senha)+'" style="font-family:var(--font-mono);font-size:16px"></label><p class="sub" style="margin:6px 0 0">Passe a senha à pessoa por um canal seguro (pessoalmente ou por mensagem privada). Ela entra com o e-mail e esta senha e pode trocá-la em Segurança da minha conta.</p>':''),
+    foot:(senha?'<button class="btn" data-act="u3CopiarSenha">Copiar senha</button>':'')+'<button class="btn pri" data-act="closeModal">Concluir</button>'});}
+A.u3CopiarSenha=()=>{const t=($('#u3Senha')||{}).value||'';try{navigator.clipboard.writeText(t).then(()=>toast('Senha copiada.','pos'),()=>toast('Copie a senha da caixa.','neg'));}catch(e){toast('Copie a senha da caixa.','neg');}};
+function u3JaExiste(c,v){const u=(S.usr||[]).find(x=>x.uid===c.id),pf=u?((PERFIS[u.perfil]||{}).nome||u.perfil):'';U3.ja={c,v};
+  modal({title:'Este e-mail já tem login',wide:true,nofocus:true,body:'<p style="margin:0 0 8px">Já existe um login com <b>'+esc(c.email||v.email)+'</b>: <b>'+esc(c.name||'')+'</b>.</p>'+
+    (u?'<p class="note" style="margin:0">Esta pessoa já está em Usuários, com o perfil <b>'+esc(pf)+'</b>'+(u.ativo===false?' (suspensa)':'')+'. Para mudar o perfil, o colaborador ou a senha, use Editar.</p>':'<p class="note" style="margin:0">O login existe, mas ainda não tem perfil no sistema. "Ligar a este login" dá a ele o perfil <b>'+esc((PERFIS[v.perfil]||{}).nome||v.perfil)+'</b> escolhido, sem criar outro login.</p>'),
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button>'+(u?'<button class="btn pri" data-act="u3JaEditar" data-id="'+esc(u.id)+'">Editar este usuário</button>':'<button class="btn pri" data-act="u3JaLigar">Ligar a este login</button>')});}
+A.u3JaLigar=()=>{const x=U3.ja;if(!x)return;u3LigarUsr(x.c.id,x.v);U3.ja=null;closeModal();toast('Login ligado: '+(x.c.name||x.v.nome)+' agora tem o perfil '+((PERFIS[x.v.perfil]||{}).nome||x.v.perfil)+'.','pos');};
+A.u3JaEditar=d=>{U3.ja=null;closeModal();A.usrEdit({id:d.id});};
+Object.assign(ACT_GROUP,{u3Novo:'usr',u3JaLigar:'usr',u3JaEditar:'usr',u3CopiarSenha:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{u3Novo:'Cria o login, envia o convite e define o perfil de uma vez.',u3Ajustar:'Muda o acesso deste perfil módulo a módulo.',u3Padrao:'Desfaz o ajuste e volta ao perfil padrão do sistema.'});
+/* celular: com um nome longo no topo (ex.: "André (dono)") a barra passava da largura da tela */
+try{if(typeof document!=='undefined'&&document.createElement&&document.head){const st=document.createElement('style');st.textContent='@media (max-width:600px){.who b{max-width:52px}.tools{gap:2px}.who-b{padding:4px 2px}}';document.head.appendChild(st);}}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='126',APP_DATA='2026-10-28';
+const APP_VER='127',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['127','2026-10-28',['Safari: importadores de PDF (banco de horas, escala de férias, CRLV, orçamentos) voltam a funcionar; e o sistema volta a abrir em versões mais antigas do Safari.', 'Ordem de fabricação: PDF com o logo da INA cadastrado em Configurações (qualquer formato de imagem).', 'Contas a pagar e a receber: filtro De … até por vencimento, emissão ou pagamento/recebimento.', 'Sistema › Usuários: botão Novo usuário com formulário único que cria o acesso e envia o convite; tabela do que cada perfil pode fazer com todos os perfis, quantas pessoas usam e botão para editar. Contas de acesso fica só para o dono.', 'Perfis de acesso: perfis padrão podem ser ajustados (e voltar ao padrão), valendo também no servidor; na Segregação de funções, cada conflito tem o botão Ajustar perfil.']],
   ['126','2026-10-28',['Importar cadastros › Projetos, Propostas e Acervo técnico (planilhas Índice e Controle da INA): atualizam o que já existe e criam o que falta, com conferência (antes → depois), quadro por ano planilha x importado e Desfazer. Propostas antigas entram como histórico, sem distorcer os indicadores; valores em moeda antiga vão para observações.', 'Comercial › Habilitação › Controle de acervo: projetos encerrados por etapa do acervo (A iniciar, sem ART, ART, atestado pedido, atestado emitido, acervado/CAT), dias parado, indicadores e alerta de atestado pedido há mais de 60 dias. Projeto encerrado entra sozinho no controle.']],
   ['125','2026-10-28',['Obras › Ordens de fabricação (fábrica de Tuiuti): OS ligada ao projeto com numeração geral da fábrica (P412-95, P412-96…), itens com peso, acabamento, lista de materiais que gera a solicitação de compra, aprovação no sistema e anexos em PDF. Gerar PDF monta a OS no padrão atual seguida dos anexos; Enviar por e-mail manda para a fábrica (endereço em Configurações).', 'Etapas: Aguardando aprovação, Aguardando compra de material, Em produção, Galvanização (notas de remessa e retorno, pesos e alerta de atraso), Pintura, Inspeção de qualidade, Separação e embalagem, Enviado e Entregue (com assinatura de quem recebeu).', 'Obras › Painel de produção: quadro por etapa, cronograma previsto x realizado, OS em atraso, entregas da semana, aguardando material e galvanização parada. Novo perfil Encarregado da fábrica: só OS e painel.']],
   ['124','2026-10-28',['Conciliação bancária: a lista não volta mais sozinha para o topo enquanto você rola; a tela ficou muito mais rápida (redesenho de cerca de 4 s para menos de 0,1 s com 10 mil linhas de extrato), o que também evita a aba recarregar no Safari.', 'Buscar contas para esta linha: caixa de seleção maior e a linha inteira clicável (também no toque). Caixas de seleção de todo o sistema ficaram com tamanho legível.']],
