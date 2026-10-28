@@ -25145,9 +25145,419 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{u4Link:'Envia por e-mail 
   try{if(typeof SETOR_COR==='object')SETOR_COR.fab='#4338ca';}catch(e){}}
 try{const st=document.createElement('style');st.textContent='html.cores-setor .nav-b[data-mod="fab"]{background:#4338ca;color:#fff}';document.head.appendChild(st);}catch(e){}
 
+/* ===== v131: aparência do menu (escolha de cada pessoa, para teste) =====
+   Sistema › Configurações › Aparência do menu (e "Aparência do menu" no Ir para…/menu da conta). Opções: Atual (padrão),
+   F1 (três linhas), F2 (duas linhas + menu da conta), C (barra lateral de ícones + painel), D (mega-menu + favoritas).
+   Vale só para a pessoa neste navegador (localStorage, por usuário) e também fica no estado pessoal do chat (CH.st.menuAp),
+   quando ele já foi carregado. A opção Atual não muda nada. As outras reorganizam o topo depois de cada render (RH_POST),
+   reaproveitando os botões que o sistema já monta (#nav, #subnav, #who): nada some, só muda de lugar. */
+const MN_OPS=[
+ ['atual','Atual','Como é hoje: módulos no topo, telas logo abaixo, ferramentas e conta à direita.'],
+ ['F1','Três linhas','Linha 1: busca larga, ferramentas e conta. Linha 2: módulos rolando para os lados (setas, rodinha do mouse, arrastar ou toque). Linha 3: telas do módulo, com Favoritar e Recolher.'],
+ ['F2','Duas linhas','Módulos rolando ocupam quase toda a largura. À direita só busca, favoritos, chat e o menu da conta (iniciais), que tem o resto: nome, perfil, versão, ajuda, novo, configurações, agenda, segurança e sair.'],
+ ['C','Barra lateral','Ícones coloridos dos módulos à esquerda. Ao passar o mouse ou clicar, abre o painel com as telas do módulo, que some ao sair ou escolher. Topo enxuto com o caminho, busca, versão e Sair. No celular vira o botão Menu.'],
+ ['D','Mega-menu','Módulos no topo. Clicar no módulo abre todas as telas em colunas. Sem barra de telas fixa; logo abaixo, a barra com as telas favoritas e as recentes.']];
+const MNA={op:'atual',painel:'',mega:'',pmAb:'',ptr:0,drag:null,dragFim:0,contaFechou:false,recAdd:''};
+const mnUid=()=>{try{return me.uid||'local';}catch(e){return 'local';}};
+const mnLS=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){}return null;};
+function mnOp(){let v=mnLS('cg.menuAp.'+mnUid());if(!v){try{v=(typeof CH!=='undefined'&&CH.st&&CH.st.menuAp)||'';}catch(e){v='';}}return MN_OPS.some(o=>o[0]===v)?v:'atual';}
+function mnGravar(v){if(!MN_OPS.some(o=>o[0]===v))v='atual';mnLS('cg.menuAp.'+mnUid(),v);
+  /* preferência por usuário no sistema: só grava se o estado pessoal já foi carregado (para não apagar o resto dele) */
+  try{if(typeof chStSave==='function'&&typeof CH!=='undefined'&&CH.st&&CH.st.desde&&CH.st.menuAp!==v)chStSave({menuAp:v});}catch(e){}return v;}
+const mnRecolhido=()=>mnLS('cg.menuRecolhe.'+mnUid())==='1';
+/* ---- módulos e telas que o perfil vê (mesmo filtro do menu atual, inclusive leSoTabs do perfil Fábrica) ---- */
+const mnTelaOk=tab=>{try{const p=PERFIS[me.perfil]||{};if(me.owner||!p.leSoTabs||typeof osfMenuOk!=='function')return true;return osfMenuOk(tab);}catch(e){return true;}};
+const mnItens=m=>m?mItens(m).filter(i=>mnTelaOk(i[0])):[];
+function mnMods(){return MENU.filter(m=>areaVisivel(m)).map(m=>({m,its:mnItens(m)})).filter(x=>x.its.length);}
+function mnMod(id){const m=MENU.find(x=>x[0]===id);if(!m)return null;const its=mnItens(m);return its.length?{m,its}:null;}
+const mnCurId=()=>{try{const c=(typeof MNU!=='undefined'&&MNU.cur)||modOf(ui.tab);return c?c[0]:(ui.mod||'');}catch(e){return ui.mod||'';}};
+const MN_SIG={inicio:'IN',comer:'CO',obras:'OB',sup:'SU',finan:'FI',fisc:'FS',pess:'PE',sstq:'SS',qsgi:'QU',fab:'FA',frota:'FR',equip:'EQ',cad:'CA',sis:'SI',meu:'MA'};
+const mnSig=m=>MN_SIG[m[0]]||gsNorm(m[1]).replace(/[^a-z]/g,'').slice(0,2).toUpperCase();
+const mnCor=id=>{try{return (typeof coresLigadas==='function'&&coresLigadas()&&typeof SETOR_COR==='object'&&SETOR_COR[id])||'';}catch(e){return '';}};
+function mnGrupos(its){const g=[];its.forEach(i=>{const n=i[3]||'Principais';let x=g.find(y=>y[0]===n);if(!x){x=[n,[]];g.push(x);}x[1].push(i);});return g;}
+const mnBtn=(m,i,cls)=>'<button type="button" class="'+cls+'" data-act="nav" data-mod="'+esc(m[0])+'" data-tab="'+esc(i[0])+'"'+(i[2]!=null?' data-nftipo="'+esc(i[2])+'"':'')+(itemOn(i)&&mnCurId()===m[0]?' aria-current="page"':'')+'>'+esc(i[1])+'</button>';
+function mnTelaNome(){const x=mnMod(mnCurId());const i=x&&x.its.find(itemOn);return i?i[1]:(typeof tabNome==='function'?tabNome(ui.tab):ui.tab);}
+/* caminho Módulo › Tela (C e D); o módulo abre o painel (C) ou o mega-menu (D) */
+function mnCaminhoHtml(act){const x=mnMod(mnCurId());
+  return (x?'<button type="button" class="mn-cam-m" data-act="'+act+'" data-mod="'+esc(x.m[0])+'" aria-haspopup="true" aria-expanded="'+((act==='mnMega'?MNA.mega:MNA.painel)===x.m[0])+'" title="Telas de '+esc(x.m[1])+'">'+esc(x.m[1])+' ▾</button><span class="mn-sep" aria-hidden="true">›</span>':'')+
+    '<span class="mn-cam-t" aria-current="page">'+esc(mnTelaNome())+'</span>';}
+/* ---- C: barra lateral e painel ---- */
+function mnSideHtml(markInner){const cur=mnCurId();
+  return '<div class="mn-side-mark" aria-hidden="true">'+(markInner||'')+'</div><div class="mn-side-l" role="toolbar" aria-orientation="vertical" aria-label="Módulos">'+mnMods().map(({m})=>{const cor=mnCor(m[0]);
+    return '<button type="button" class="mn-sb" data-act="mnPainel" data-mod="'+esc(m[0])+'" aria-label="'+esc(m[1])+'" title="'+esc(m[1])+'" aria-haspopup="true" aria-controls="mnPainel" aria-expanded="'+(MNA.painel===m[0])+'"'+(cur===m[0]?' aria-current="page"':'')+(cor?' style="--c:'+cor+'"':'')+'>'+esc(mnSig(m))+'</button>';}).join('')+'</div>';}
+function mnPainelHtml(id){const x=mnMod(id);if(!x)return '';const cor=mnCor(id);
+  return '<div class="mn-pt"'+(cor?' style="border-color:'+cor+'"':'')+'>'+esc(x.m[1])+'</div><nav aria-label="Telas de '+esc(x.m[1])+'">'+mnGrupos(x.its).map(g=>'<div class="mn-gh">'+esc(g[0])+'</div>'+g[1].map(i=>mnBtn(x.m,i,'mn-pi')).join('')).join('')+'</nav>';}
+/* C no celular: todos os módulos, cada um abre a sua lista */
+function mnPainelMobHtml(){const cur=mnCurId(),ab=MNA.pmAb||cur,lista=mnMods();const xc=mnMod(cur);if(xc&&!lista.some(y=>y.m[0]===cur))lista.push(xc);
+  return '<div class="mn-pt">Módulos e telas</div><nav aria-label="Módulos e telas">'+lista.map(({m,its})=>{const a=ab===m[0],cor=mnCor(m[0]);
+    return '<div class="mn-pm"><button type="button" class="mn-pm-h" data-act="mnPmAbre" data-mod="'+esc(m[0])+'" aria-expanded="'+a+'"'+(cur===m[0]?' aria-current="true"':'')+'><i class="mn-dot"'+(cor?' style="background:'+cor+'"':'')+'></i>'+esc(m[1])+'<span aria-hidden="true">'+(a?'▴':'▾')+'</span></button>'+
+      (a?'<div class="mn-pm-l">'+mnGrupos(its).map(g=>'<div class="mn-gh">'+esc(g[0])+'</div>'+g[1].map(i=>mnBtn(m,i,'mn-pi')).join('')).join('')+'</div>':'')+'</div>';}).join('')+'</nav>';}
+/* ---- D: mega-menu e barra de favoritas/recentes ---- */
+function mnMegaHtml(id){const x=mnMod(id);if(!x)return '';const cor=mnCor(id);
+  return '<div class="mn-mg-h"'+(cor?' style="border-color:'+cor+'"':'')+'><b>'+esc(x.m[1])+'</b><button type="button" class="mn-x" data-act="mnFechar" aria-label="Fechar o menu de '+esc(x.m[1])+'">×</button></div><nav class="mn-mg-cols" aria-label="Telas de '+esc(x.m[1])+'">'+
+    mnGrupos(x.its).map(g=>'<div class="mn-mg-col"><div class="mn-gh">'+esc(g[0])+'</div>'+g[1].map(i=>mnBtn(x.m,i,'mn-pi')).join('')+'</div>').join('')+'</nav>';}
+const MN_REC_K=()=>'cg.menuRecentes.'+mnUid();
+function mnRecentes(){try{const v=JSON.parse(mnLS(MN_REC_K())||'[]');return Array.isArray(v)?v.filter(t=>typeof t==='string'):[];}catch(e){return [];}}
+function mnRecAdd(t){if(!t||MNA.recAdd===t)return;MNA.recAdd=t;const v=mnRecentes().filter(x=>x!==t);v.unshift(t);mnLS(MN_REC_K(),JSON.stringify(v.slice(0,10)));}
+const mnTelaPode=t=>!!(V[t]&&mayR(GROUP_OF_TAB[t])&&mnTelaOk(t)&&NAV.some(n=>n[0]===t));
+function mnFavBarHtml(){const fav=(typeof favLer==='function'?favLer():[]).filter(mnTelaPode),rec=mnRecentes().filter(t=>mnTelaPode(t)&&t!==ui.tab&&!fav.includes(t)).slice(0,5),ft=typeof favTem==='function'&&favTem(ui.tab);
+  const chip=(t,on)=>'<button type="button" class="mn-chip" data-act="nav" data-tab="'+esc(t)+'"'+(t===ui.tab?' aria-current="page"':'')+'>'+(on?'★ ':'')+esc(tabNome(t))+'</button>';
+  return '<div class="mn-fb-cam">'+mnCaminhoHtml('mnMega')+'</div><button type="button" class="mn-chip mn-fav" data-act="favAlterna" aria-pressed="'+ft+'" title="'+(ft?'Tirar dos favoritos':'Fixar esta tela nos favoritos')+'">'+(ft?'★ Favorita':'☆ Favoritar')+'</button>'+
+    '<span class="mn-fb-l">Favoritas</span>'+(fav.length?fav.map(t=>chip(t,true)).join(''):'<span class="mn-fb-v">nenhuma ainda</span>')+
+    (rec.length?'<span class="mn-fb-l">Recentes</span>'+rec.map(t=>chip(t,false)).join(''):'');}
+/* ---- menu da conta (F2, C e D): tudo o que não fica à vista no topo ---- */
+function mnItensTopo(h){const out=[],re=/<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/g;let x;
+  while((x=re.exec(String(h||'')))){const at=x[2],g=k=>{const y=at.match(new RegExp('(?:^|\\s)'+k+'="([^"]*)"'));return y?y[1]:'';};
+    out.push({tag:x[1],attrs:at,act:g('data-act'),tab:g('data-tab'),mod:g('data-mod'),href:g('href'),cls:g('class'),id:g('id'),label:g('aria-label')||g('title'),txt:x[3].replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim()});}
+  return out;}
+const MN_VIS={
+  F1:it=>it.act!=='gsOpen',
+  F2:it=>it.act==='gsOpen'||it.act==='favMenu'||(it.act==='nav'&&it.tab==='chat'),
+  C:it=>/verchip/.test(it.cls)||it.act==='sairConta',
+  D:it=>it.act==='gsOpen'||it.act==='sairConta'};
+/* separa os botões do topo em "à vista" e "no menu da conta" (a busca fica sempre à vista: botão ou caixa larga) */
+function mnBarra(op,h){const its=mnItensTopo(h).filter(it=>it.id!=='mnContaB'),vis=MN_VIS[op]||(()=>true);
+  const avista=its.filter(vis),conta=op==='F1'||op==='atual'?[]:its.filter(it=>!vis(it)&&it.act!=='gsOpen'&&!/verchip/.test(it.cls));
+  return {avista,conta,todos:its};}
+function mnRotulo(it){if(it.act==='sairConta')return 'Sair';if(/seguranca/.test(it.href))return 'Segurança da conta';if(/who-b/.test(it.cls))return 'Minha área';
+  if(it.act==='novoMenu')return '+ Novo registro';if(it.act==='favMenu')return '★ Favoritos';if(it.act==='nav'&&it.tab==='tut')return 'Ajuda e novidades';
+  if(it.act==='nav'&&it.mod==='sis')return 'Configurações';if(it.act==='nav'&&(it.tab==='agenda'||it.tab==='chat'))return it.label||(it.tab==='chat'?'Chat':'Agenda');
+  return it.label||it.txt||'Abrir';}
+function mnContaHtml(op,h){const b=mnBarra(op,h),nm=String(h||'').match(/<b>([^<]*)<\/b>\s*<span>([^<]*)<\/span>/);
+  const nome=nm?nm[1]:'Você',perfil=nm?nm[2]:esc((PERFIS[me.perfil]||{}).nome||''),ver=typeof APP_VER!=='undefined'?'v'+esc(APP_VER)+' de '+esc(fmtDate(APP_DATA)):'';
+  const it=b.conta.map(x=>{const lab=esc(mnRotulo(x));
+    if(x.tag==='a')return '<a class="pop-it" href="'+x.href+'">'+lab+'</a>';
+    if(x.act==='novoMenu'||x.act==='favMenu')return '<button type="button" class="pop-it" data-act="mnContaPop" data-v="'+x.act+'">'+lab+'</button>';
+    const dd=(x.attrs.match(/\sdata-[a-z0-9-]+="[^"]*"/g)||[]).join('');
+    return '<button type="button" class="pop-it'+(x.act==='sairConta'?' mn-sair':'')+'"'+dd+'>'+lab+'</button>';});
+  const sair=it.filter((_,k)=>b.conta[k].act==='sairConta'||/seguranca/.test(b.conta[k].href)),resto=it.filter((_,k)=>!(b.conta[k].act==='sairConta'||/seguranca/.test(b.conta[k].href)));
+  return '<div class="mn-ch"><b>'+nome+'</b><span>'+perfil+(ver?' · '+ver:'')+'</span></div>'+resto.join('')+'<button type="button" class="pop-it" data-act="mnEscolher">Aparência do menu</button>'+(sair.length?'<div class="mn-div"></div>'+sair.join(''):'');}
+function mnContaBtn(h){const nm=String(h||'').match(/<b>([^<]*)<\/b>\s*<span>/),ini=(typeof iniciais==='function'?iniciais(nm?nm[1].replace(/&[a-z#0-9]+;/g,' '):'Você'):'EU')||'EU';
+  return '<button type="button" class="tbtn mn-conta" id="mnContaB" data-act="mnConta" aria-haspopup="true" aria-expanded="false" aria-label="Menu da conta: nome, versão, ajuda, configurações, segurança e sair" title="Menu da conta">'+esc(ini)+' <span aria-hidden="true">▾</span></button>';}
+/* ---- cartão de escolha (Configurações e janela) ---- */
+function mnMini(k){const c=['#475569','#1d4ed8','#c2410c','#a16207','#15803d','#7e22ce'],ch=n=>c.slice(0,n).map(x=>'<i style="background:'+x+'"></i>').join('');
+  if(k==='C')return '<span class="mn-mini mn-mini-C" aria-hidden="true"><span class="mm-side">'+ch(5)+'</span><span class="mm-pan"><em></em><em></em><em></em></span><span class="mm-top"></span></span>';
+  if(k==='D')return '<span class="mn-mini" aria-hidden="true"><span class="mm-row mm-dk">'+ch(6)+'</span><span class="mm-mega"><em></em><em></em><em></em></span><span class="mm-row mm-lt"></span></span>';
+  if(k==='F1')return '<span class="mn-mini" aria-hidden="true"><span class="mm-row mm-dk"><b class="mm-busca"></b></span><span class="mm-row mm-dk">‹'+ch(6)+'›</span><span class="mm-row mm-sub"></span></span>';
+  if(k==='F2')return '<span class="mn-mini" aria-hidden="true"><span class="mm-row mm-dk">‹'+ch(6)+'›<b class="mm-ic"></b><b class="mm-ic"></b><b class="mm-ic"></b></span><span class="mm-row mm-sub"></span></span>';
+  return '<span class="mn-mini" aria-hidden="true"><span class="mm-row mm-dk">'+ch(6)+'<b class="mm-ic"></b><b class="mm-ic"></b></span><span class="mm-row mm-sub"></span></span>';}
+function mnOpcoesHtml(){const op=mnOp();
+  return '<div class="mn-opts" role="radiogroup" aria-label="Aparência do menu">'+MN_OPS.map(o=>'<button type="button" class="mn-opt" role="radio" aria-checked="'+(o[0]===op)+'" data-act="mnAparencia" data-v="'+o[0]+'">'+mnMini(o[0])+'<b>'+esc(o[0]==='atual'?'Atual (padrão)':o[0]+' · '+o[1])+'</b><span>'+esc(o[2])+'</span></button>').join('')+'</div>'+
+    '<div class="acts" style="margin-top:10px;justify-content:flex-start"><button class="btn" data-act="mnAparencia" data-v="atual"'+(op==='atual'?' disabled':'')+'>Voltar ao padrão</button></div>';}
+function mnCartaoHtml(){return '<div class="card" id="mnCard" style="margin-top:14px"><h2>Aparência do menu</h2><p class="sub" style="margin:0 0 10px">Para teste: escolha como o menu aparece para você. Vale só para você, neste navegador, e muda na hora. Nada some: Sair, Segurança, versão e todas as ferramentas continuam acessíveis em todas as opções. Em qualquer tela, Ctrl+K abre o "Ir para…".</p>'+mnOpcoesHtml()+'</div>';}
+{const v0=V.cfg;if(v0)V.cfg=function(){return v0.apply(this,arguments)+mnCartaoHtml();};}
+A.mnAparencia=d=>{const v=mnGravar(d.v),o=MN_OPS.find(x=>x[0]===v);mnFecharTudo();render();const m=document.getElementById('mnCardM');if(m)m.innerHTML=mnOpcoesHtml();
+  try{mnRolarAtual(true);}catch(e){}toast('Aparência do menu: '+(v==='atual'?'Atual (padrão)':v+' · '+o[1])+'.','pos');};
+A.mnEscolher=()=>{mnFecharTudo();modal({title:'Aparência do menu',nofocus:true,body:'<p class="sub" style="margin:0 0 10px">Vale só para você, neste navegador. Muda na hora; "Voltar ao padrão" volta para o menu Atual.</p><div id="mnCardM">'+mnOpcoesHtml()+'</div>',foot:'<button class="btn" data-act="closeModal">Fechar</button>'});};
+/* ---- ações dos menus ---- */
+const mnPeloMouse=()=>Date.now()-MNA.ptr<700;
+const mnMobile=()=>{try{return window.innerWidth<=820;}catch(e){return false;}};
+function mnFoca(sel){setTimeout(()=>{const b=document.querySelector(sel);if(b&&b.focus)b.focus();},0);}
+function mnPainelAbrir(id,foco){if(!id)return;MNA.painel=id;mnPintaPainel();if(foco)mnFoca('#mnPainel .mn-pi[aria-current],#mnPainel .mn-pi,#mnPainel .mn-pm-h');}
+function mnPintaPainel(){const p=document.getElementById('mnPainel');if(!p)return;const r=document.documentElement;
+  if(!MNA.painel){p.hidden=true;r.classList.remove('mn-painel-on');}else{const h=MNA.painel==='*'?mnPainelMobHtml():mnPainelHtml(MNA.painel);if(p.__h!==h){p.innerHTML=h;p.__h=h;}p.hidden=false;r.classList.add('mn-painel-on');}
+  document.querySelectorAll('#mnSide .mn-sb').forEach(b=>b.setAttribute('aria-expanded',String(MNA.painel===b.dataset.mod)));
+  const mb=document.getElementById('mnMenuB');if(mb)mb.setAttribute('aria-expanded',String(MNA.painel==='*'));}
+function mnPainelFechar(volta){const id=MNA.painel;if(!id)return;MNA.painel='';mnPintaPainel();
+  if(volta)mnFoca(id==='*'?'#mnMenuB':'#mnSide .mn-sb[data-mod="'+id+'"]');}
+function mnMegaAbrir(id,foco){MNA.mega=id;mnPintaMega();if(foco)mnFoca('#mnMega .mn-pi[aria-current],#mnMega .mn-pi');}
+function mnPintaMega(){const g=document.getElementById('mnMega');if(!g)return;
+  if(!MNA.mega){g.hidden=true;}else{const h=mnMegaHtml(MNA.mega);if(g.__h!==h){g.innerHTML=h;g.__h=h;}g.hidden=false;const ti=document.querySelector('header.top .top-in');if(ti)g.style.top=(ti.offsetHeight+4)+'px';}
+  document.querySelectorAll('#nav .nav-b,#mnFavBar .mn-cam-m').forEach(b=>{if(b.dataset.act==='mnMega')b.setAttribute('aria-expanded',String(MNA.mega===b.dataset.mod));});}
+function mnMegaFechar(volta){const id=MNA.mega;if(!id)return;MNA.mega='';mnPintaMega();if(volta)mnFoca('#nav .nav-b[data-mod="'+id+'"]');}
+function mnFecharTudo(){MNA.painel='';MNA.mega='';try{mnPintaPainel();mnPintaMega();}catch(e){}}
+A.mnPainel=d=>{if(MNA.painel===d.mod){mnPainelFechar(!mnPeloMouse());return;}mnPainelAbrir(d.mod,!mnPeloMouse());};
+A.mnMenuMob=()=>{if(MNA.painel==='*'){mnPainelFechar(true);return;}MNA.pmAb='';mnPainelAbrir('*',true);};
+A.mnPmAbre=d=>{MNA.pmAb=(MNA.pmAb||mnCurId())===d.mod?'-':d.mod;mnPintaPainel();mnFoca('#mnPainel .mn-pm-h[data-mod="'+d.mod+'"]');};
+A.mnMega=d=>{if(MNA.mega===d.mod){mnMegaFechar(!mnPeloMouse());return;}mnMegaAbrir(d.mod,!mnPeloMouse());};
+A.mnFechar=()=>{const m=MNA.mega;mnFecharTudo();if(m)mnFoca('#nav .nav-b[data-mod="'+m+'"]');};
+A.mnRolar=d=>{const n=document.getElementById('nav');if(!n)return;try{n.scrollBy({left:(+d.v||1)*Math.max(160,n.clientWidth*.7),behavior:'smooth'});}catch(e){n.scrollLeft+=(+d.v||1)*200;}setTimeout(mnSetas,350);};
+A.mnRecolher=()=>{const v=!mnRecolhido();mnLS('cg.menuRecolhe.'+mnUid(),v?'1':'0');render();mnFoca(v?'#mnExp':'#subnav .mn-recb');};
+A.mnConta=(d,el)=>{if(MNA.contaFechou){MNA.contaFechou=false;return;}if(MNU.aberto==='conta'){popFechar();return;}const b=document.getElementById('mnContaB')||el;if(!b)return;
+  popAbrir(b,mnContaHtml(MNA.op,($('#who')||{}).innerHTML||''),'conta');b.setAttribute('aria-expanded','true');const p=document.getElementById('popMenu');if(p){p.setAttribute('role','menu');p.setAttribute('aria-label','Menu da conta');}};
+A.mnContaPop=d=>{const a=document.getElementById('mnContaB');setTimeout(()=>{try{if(typeof A[d.v]==='function')A[d.v]({},a);}catch(e){}},15);};
+{const pf=popFechar;popFechar=function(){const r=pf.apply(this,arguments);const b=document.getElementById('mnContaB');if(b)b.setAttribute('aria-expanded','false');return r;};}
+Object.assign(ACT_GROUP,{mnAparencia:null,mnEscolher:null,mnPainel:null,mnMenuMob:null,mnPmAbre:null,mnMega:null,mnFechar:null,mnRolar:null,mnRecolher:null,mnConta:null,mnContaPop:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{mnRecolher:'Recolhe ou mostra a barra com as telas do módulo. O sistema lembra a sua escolha.',mnConta:'Menu da conta: nome, perfil, versão, ajuda, novo registro, configurações, agenda, segurança e sair.',mnAparencia:'Muda a aparência do menu só para você, neste navegador.'});
+/* ---- setas e módulo aberto sempre à vista ---- */
+function mnSetas(){const n=document.getElementById('nav'),l=document.getElementById('mnL'),r=document.getElementById('mnR');if(!n||!l||!r)return;
+  const max=n.scrollWidth-n.clientWidth,tem=max>2;l.hidden=r.hidden=!tem;l.disabled=n.scrollLeft<=1;r.disabled=n.scrollLeft>=max-1;}
+function mnRolarAtual(forca){const op=MNA.op;if(op==='C'){const b=document.querySelector('#mnSide .mn-sb[aria-current]');if(b&&b.scrollIntoView)try{b.scrollIntoView({block:'nearest'});}catch(e){}return;}
+  if(op==='atual')return;const n=document.getElementById('nav'),b=n&&n.querySelector('.nav-b[aria-current]');if(!b)return;
+  const bl=b.offsetLeft-n.offsetLeft,br=bl+b.offsetWidth;if(forca||bl<n.scrollLeft||br>n.scrollLeft+n.clientWidth){n.scrollLeft=Math.max(0,bl-(n.clientWidth-b.offsetWidth)/2);}mnSetas();}
+/* ---- monta as peças novas do topo (uma vez) ---- */
+const MN_SVG_BUSCA='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+function mnMontar(){if(typeof document==='undefined'||!document.getElementById)return false;
+  if(document.getElementById('mnNavW'))return true;
+  const top=document.querySelector('header.top'),ti=top&&top.querySelector('.top-in'),nav=document.getElementById('nav'),brand=ti&&ti.querySelector('.brand');
+  if(!top||!ti||!nav||!brand||typeof ti.insertBefore!=='function'||typeof document.createElement!=='function')return false;
+  const w=document.createElement('div');w.id='mnNavW';ti.insertBefore(w,nav);
+  w.insertAdjacentHTML('beforeend','<button type="button" class="mn-ar" id="mnL" data-act="mnRolar" data-v="-1" tabindex="-1" aria-label="Rolar os módulos para a esquerda">‹</button>');
+  w.appendChild(nav);
+  w.insertAdjacentHTML('beforeend','<button type="button" class="mn-ar" id="mnR" data-act="mnRolar" data-v="1" tabindex="-1" aria-label="Rolar os módulos para a direita">›</button><button type="button" class="tbtn" id="mnExp" data-act="mnRecolher" aria-expanded="false" aria-controls="subnav" title="Mostrar a barra com as telas do módulo">▾ Telas</button>');
+  brand.insertAdjacentHTML('beforebegin','<button type="button" class="tbtn" id="mnMenuB" data-act="mnMenuMob" aria-haspopup="true" aria-expanded="false" aria-controls="mnPainel" aria-label="Abrir o menu de módulos e telas"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="tl2">Menu</span></button>');
+  brand.insertAdjacentHTML('afterend','<button type="button" id="mnBusca" data-act="gsOpen" aria-label="Ir para tela, ação ou registro (Ctrl+K)" aria-keyshortcuts="Control+K Meta+K" title="Ir para… (Ctrl+K)">'+MN_SVG_BUSCA+'<span class="mn-bt">Buscar tela, ação ou registro…</span><kbd>Ctrl+K</kbd></button><nav id="mnCam" aria-label="Você está em"></nav>');
+  top.insertAdjacentHTML('beforeend','<div id="mnFavBar" role="navigation" aria-label="Telas favoritas e recentes"></div><div id="mnMega" hidden></div>');
+  document.body.insertAdjacentHTML('afterbegin','<div id="mnSide"></div><div id="mnPainel" role="region" aria-label="Telas do módulo" hidden></div>');
+  /* rolagem dos módulos: rodinha, arrastar com o mouse (o toque já rola sozinho), setas */
+  const rola=()=>/\bmn-(F1|F2|D)\b/.test(document.documentElement.className);
+  nav.addEventListener('wheel',e=>{if(!rola()||nav.scrollWidth<=nav.clientWidth+1)return;const d=Math.abs(e.deltaY)>Math.abs(e.deltaX)?e.deltaY:e.deltaX;if(!d)return;nav.scrollLeft+=d;e.preventDefault();mnSetas();},{passive:false});
+  nav.addEventListener('scroll',()=>mnSetas(),{passive:true});
+  nav.addEventListener('pointerdown',e=>{if(!rola()||e.pointerType!=='mouse'||e.button!==0)return;MNA.drag={x:e.clientX,sl:nav.scrollLeft,mov:false};});
+  window.addEventListener('pointermove',e=>{const g=MNA.drag;if(!g)return;const dx=e.clientX-g.x;if(!g.mov&&Math.abs(dx)>6){g.mov=true;nav.classList.add('mn-arrasta');}if(g.mov)nav.scrollLeft=g.sl-dx;});
+  window.addEventListener('pointerup',()=>{const g=MNA.drag;MNA.drag=null;nav.classList.remove('mn-arrasta');if(g&&g.mov){MNA.dragFim=1;setTimeout(()=>{MNA.dragFim=0;},0);}});
+  /* o clique que vem logo depois de arrastar não abre o módulo */
+  nav.addEventListener('click',e=>{if(MNA.dragFim){MNA.dragFim=0;e.stopPropagation();e.preventDefault();}},true);
+  nav.addEventListener('keydown',e=>{if(!rola())return;const bs=[...nav.querySelectorAll('.nav-b')],i=bs.indexOf(document.activeElement);if(i<0)return;
+    if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const j=Math.max(0,Math.min(bs.length-1,i+(e.key==='ArrowRight'?1:-1)));bs[j].focus();e.preventDefault();}
+    else if(e.key==='Home'||e.key==='End'){bs[e.key==='Home'?0:bs.length-1].focus();e.preventDefault();}
+    else if(e.key==='ArrowDown'&&MNA.op==='D'){mnMegaAbrir(bs[i].dataset.mod,true);e.preventDefault();}});
+  nav.addEventListener('focusin',e=>{const b=e.target;if(b&&b.classList&&b.classList.contains('nav-b')&&rola()){const bl=b.offsetLeft-nav.offsetLeft;if(bl<nav.scrollLeft||bl+b.offsetWidth>nav.scrollLeft+nav.clientWidth)nav.scrollLeft=Math.max(0,bl-40);}});
+  /* C: painel abre ao passar o mouse e some ao sair */
+  const side=document.getElementById('mnSide'),pan=document.getElementById('mnPainel');let tAb=0,tFe=0;
+  const sai=()=>{clearTimeout(tAb);clearTimeout(tFe);tFe=setTimeout(()=>{const a=document.activeElement;if(MNA.painel&&MNA.painel!=='*'&&!(a&&(side.contains(a)||pan.contains(a))&&!mnPeloMouse()))mnPainelFechar(false);},320);};
+  side.addEventListener('mouseover',e=>{const b=e.target.closest&&e.target.closest('.mn-sb');clearTimeout(tFe);if(!b)return;clearTimeout(tAb);tAb=setTimeout(()=>{if(MNA.op==='C'&&!mnMobile()&&MNA.painel!==b.dataset.mod)mnPainelAbrir(b.dataset.mod,false);},140);});
+  side.addEventListener('mouseleave',sai);pan.addEventListener('mouseleave',sai);pan.addEventListener('mouseenter',()=>{clearTimeout(tFe);clearTimeout(tAb);});
+  side.addEventListener('keydown',e=>{const bs=[...side.querySelectorAll('.mn-sb')],i=bs.indexOf(document.activeElement);if(i<0)return;
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){bs[Math.max(0,Math.min(bs.length-1,i+(e.key==='ArrowDown'?1:-1)))].focus();e.preventDefault();}
+    else if(e.key==='ArrowRight'){mnPainelAbrir(bs[i].dataset.mod,true);e.preventDefault();}});
+  /* setas dentro do painel (C) e do mega-menu (D) */
+  const setas=(box,e)=>{const bs=[...box.querySelectorAll('.mn-pi,.mn-pm-h')].filter(b=>b.offsetParent!==null||b.getClientRects().length),i=bs.indexOf(document.activeElement);if(!bs.length)return;
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){const j=i<0?0:Math.max(0,Math.min(bs.length-1,i+(e.key==='ArrowDown'?1:-1)));bs[j].focus();e.preventDefault();}
+    else if((e.key==='ArrowRight'||e.key==='ArrowLeft')&&box.id==='mnMega'&&i>=0){const cols=[...box.querySelectorAll('.mn-mg-col')],c=cols.findIndex(x=>x.contains(bs[i])),n=cols[c+(e.key==='ArrowRight'?1:-1)];if(n){const f=n.querySelector('.mn-pi');if(f)f.focus();}e.preventDefault();}
+    else if(e.key==='ArrowLeft'&&box.id==='mnPainel'&&MNA.painel!=='*'){mnPainelFechar(true);e.preventDefault();}
+    else if(e.key==='Home'||e.key==='End'){bs[e.key==='Home'?0:bs.length-1].focus();e.preventDefault();}};
+  pan.addEventListener('keydown',e=>setas(pan,e));
+  const mg=document.getElementById('mnMega');mg.addEventListener('keydown',e=>setas(mg,e));
+  pan.addEventListener('focusout',e=>{const t=e.relatedTarget;if(t&&!pan.contains(t)&&!side.contains(t)&&!(t.closest&&t.closest('#mnMenuB,#mnCam')))setTimeout(()=>{const a=document.activeElement;if(MNA.painel&&!(a&&(pan.contains(a)||side.contains(a))))mnPainelFechar(false);},0);});
+  mg.addEventListener('focusout',e=>{const t=e.relatedTarget;if(t&&!mg.contains(t)&&!(t.closest&&t.closest('#nav,#mnFavBar')))setTimeout(()=>{const a=document.activeElement;if(MNA.mega&&!(a&&mg.contains(a)))mnMegaFechar(false);},0);});
+  return true;}
+/* escolher uma tela fecha o painel/mega-menu; clicar fora fecha; Esc fecha e devolve o foco */
+if(typeof document!=='undefined'&&document.addEventListener){
+  window.addEventListener('pointerdown',e=>{MNA.ptr=Date.now();const t=e.target;
+    if(MNU.aberto==='conta'&&t&&t.closest&&t.closest('#mnContaB'))MNA.contaFechou=true;
+    if(MNA.mega&&t&&t.closest&&!t.closest('#mnMega,#nav,#mnFavBar .mn-cam-m'))mnMegaFechar(false);
+    if(MNA.painel&&t&&t.closest&&!t.closest('#mnPainel,#mnSide,#mnMenuB,#mnCam .mn-cam-m'))mnPainelFechar(false);},true);
+  window.addEventListener('mousedown',e=>{MNA.ptr=Date.now();},true);
+  document.addEventListener('click',e=>{const t=e.target&&e.target.closest&&e.target.closest('#mnMega [data-act=nav],#mnPainel [data-act=nav]');if(t){MNA.painel='';MNA.mega='';}},true);
+  window.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&(MNA.mega||MNA.painel)&&!document.getElementById('irpK')&&!document.getElementById('popMenu')){e.stopImmediatePropagation();e.preventDefault();if(MNA.mega)mnMegaFechar(true);else mnPainelFechar(true);return;}
+    const p=document.getElementById('popMenu');if(p&&p.dataset.k==='conta'&&(e.key==='ArrowDown'||e.key==='ArrowUp')){const bs=[...p.querySelectorAll('.pop-it')],i=bs.indexOf(document.activeElement);if(bs.length){bs[i<0?0:(i+(e.key==='ArrowDown'?1:-1)+bs.length)%bs.length].focus();e.preventDefault();}}},true);
+  window.addEventListener('resize',()=>{clearTimeout(MNA.tRz);MNA.tRz=setTimeout(()=>{try{if(MNA.painel==='*'&&!mnMobile())mnPainelFechar(false);if(MNA.painel&&MNA.painel!=='*'&&mnMobile())mnPainelFechar(false);mnPintaMega();mnSetas();}catch(e){}},150);});
+}
+/* "Recolher" no fim da barra de telas (F1 e F2): reposto também quando a barra é recalculada ao redimensionar */
+function mnSubExtra(){const sub=document.getElementById('subnav');if(!sub||!sub.insertAdjacentHTML)return;const q=sub.querySelector&&sub.querySelector('.mn-recb');
+  if(!(MNA.op==='F1'||MNA.op==='F2')){if(q)q.remove();return;}
+  if(!q&&sub.innerHTML)sub.insertAdjacentHTML('beforeend','<button type="button" class="sub-b mn-recb" data-act="mnRecolher" aria-expanded="true" aria-controls="subnav" title="Recolher a barra de telas (o sistema lembra)">▴ Recolher</button>');}
+if(typeof subnavEncher==='function'){const s0=subnavEncher;subnavEncher=function(){const r=s0.apply(this,arguments);try{mnSubExtra();}catch(e){}return r;};}
+/* ---- aplica a opção depois de cada render ---- */
+function mnAplicar(){if(typeof document==='undefined'||!document.documentElement||!document.documentElement.classList)return;
+  const op=mnOp(),r=document.documentElement;const mudou=MNA.op!==op;MNA.op=op;
+  ['F1','F2','C','D'].forEach(k=>r.classList.toggle('mn-'+k,op===k));r.classList.toggle('mn-on',op!=='atual');
+  if(store.ready)mnRecAdd(ui.tab);
+  if(op==='atual'){if(mudou)mnFecharTudo();r.classList.remove('mn-recolhido');try{mnSubExtra();}catch(e){}return;}
+  if(!mnMontar())return;
+  if(mudou)mnFecharTudo();
+  r.classList.toggle('mn-recolhido',(op==='F1'||op==='F2')&&mnRecolhido());
+  const ex=document.getElementById('mnExp');if(ex)ex.setAttribute('aria-expanded',String(!mnRecolhido()));
+  const who=document.getElementById('who');
+  if(op!=='F1'&&who&&who.innerHTML&&!document.getElementById('mnContaB'))who.insertAdjacentHTML('beforeend',mnContaBtn(who.innerHTML));
+  mnSubExtra();
+  if(op==='C'){const mk=document.getElementById('mark'),sd=document.getElementById('mnSide');const h=mnSideHtml(mk?mk.innerHTML:'');if(sd.__h!==h){sd.innerHTML=h;sd.__h=h;}
+    document.getElementById('mnCam').innerHTML=mnCaminhoHtml(mnMobile()?'mnMenuMob':'mnPainel');mnPintaPainel();}
+  if(op==='D'){document.querySelectorAll('#nav .nav-b').forEach(b=>{b.dataset.act='mnMega';b.setAttribute('aria-haspopup','true');b.setAttribute('aria-expanded',String(MNA.mega===b.dataset.mod));b.setAttribute('aria-controls','mnMega');});
+    document.getElementById('mnFavBar').innerHTML=mnFavBarHtml();mnPintaMega();}
+  const ch=(ui.mod||'')+'|'+ui.tab;if(mudou||MNA.chave!==ch){MNA.chave=ch;mnRolarAtual(mudou);}else mnSetas();}
+RH_POST.push(()=>{try{mnAplicar();}catch(e){}});
+/* ---- estilos ---- */
+try{const st=document.createElement('style');st.textContent=
+'#mnNavW{display:contents}#mnL,#mnR,#mnExp,#mnBusca,#mnCam,#mnMenuB,#mnSide,#mnPainel,#mnFavBar,#mnMega{display:none}'+
+'#mnL[hidden],#mnR[hidden]{display:none!important}#mnMega[hidden],#mnPainel[hidden]{display:none!important}'+
+'html.mn-on #nav{flex:1 1 auto!important;order:0!important;flex-basis:auto!important;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;min-width:0}html.mn-on #nav::-webkit-scrollbar{display:none}#nav.mn-arrasta{cursor:grabbing;user-select:none}'+
+'html.mn-F1 #mnNavW,html.mn-F2 #mnNavW,html.mn-D #mnNavW{display:flex;align-items:center;gap:2px;min-width:0;flex:1 1 0}'+
+'html.mn-F1 #mnL,html.mn-F1 #mnR,html.mn-F2 #mnL,html.mn-F2 #mnR,html.mn-D #mnL,html.mn-D #mnR{display:inline-flex}'+
+'.mn-ar{appearance:none;border:0;background:transparent;color:var(--side-on);font:600 22px/1 var(--font-body);width:26px;height:34px;border-radius:6px;cursor:pointer;flex:none;align-items:center;justify-content:center;padding:0}.mn-ar:hover{background:var(--side-hl)}.mn-ar:disabled{opacity:.25;cursor:default}'+
+'html.mn-recolhido.mn-F1 #subnav,html.mn-recolhido.mn-F2 #subnav{display:none!important}html.mn-recolhido.mn-F1 #mnExp,html.mn-recolhido.mn-F2 #mnExp{display:inline-flex;flex:none;margin-left:4px}'+
+'html.mn-F1 #subnav,html.mn-F2 #subnav{position:relative;padding-right:calc(clamp(16px,3vw,36px) + 104px)}.mn-recb{position:absolute;right:clamp(16px,3vw,36px);top:50%;transform:translateY(-50%);border:1px solid rgba(255,255,255,.22)!important}'+
+'#mnBusca{appearance:none;align-items:center;gap:8px;min-width:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.2);color:var(--side-fg);border-radius:8px;padding:7px 10px;font:500 13px var(--font-body);cursor:text;text-align:left}#mnBusca:hover{background:rgba(255,255,255,.12);color:var(--side-on)}#mnBusca:focus-visible{outline:2px solid var(--accent);outline-offset:1px}'+
+'#mnBusca .mn-bt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#mnBusca kbd{font:600 10.5px var(--font-body);border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 5px;opacity:.8;flex:none}'+
+/* F1 */
+'html.mn-F1 .top-in{flex-wrap:wrap;row-gap:6px;column-gap:14px}html.mn-F1 .brand{order:1}html.mn-F1 #mnBusca{display:flex;order:2;flex:1 1 260px;max-width:560px}html.mn-F1 #who{order:3;margin-left:auto}html.mn-F1 #mnNavW{order:4;flex:1 1 100%}'+
+'html.mn-F1 #who .tools [data-act=gsOpen]{display:none!important}'+
+/* F2 */
+'html.mn-F2 .top-in,html.mn-D .top-in{gap:10px}html.mn-F2 .brand small,html.mn-F2 .brand b,html.mn-D .brand small,html.mn-D .brand b,html.mn-C .brand small,html.mn-C .brand b{display:none!important}'+
+'html.mn-F2 #who .tools>*:not([data-act=gsOpen]):not([data-act=favMenu]):not([data-tab=chat]){display:none!important}html.mn-F2 #who>*:not(.tools):not(#mnContaB){display:none!important}'+
+'html.mn-F2 #who .tools .tl,html.mn-D #who .tools .tl{display:none}'+
+'.mn-conta{font-weight:700!important;letter-spacing:.03em}'+
+/* C */
+'html.mn-C #mnNavW,html.mn-C #nav,html.mn-C #subnav{display:none!important}html.mn-C .top-in{flex-wrap:nowrap;gap:10px}'+
+'html.mn-C #mnCam{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:6px;font-size:14px;color:var(--side-fg)}html.mn-C #mnBusca{display:flex;flex:0 1 300px}'+
+'html.mn-C #who .tools>*:not(.verchip){display:none!important}html.mn-C #who>*:not(.tools):not([data-act=sairConta]):not(#mnContaB){display:none!important}'+
+'.mn-cam-m{appearance:none;border:0;background:rgba(255,255,255,.1);color:var(--side-on);font:600 13.5px var(--font-body);padding:5px 9px;border-radius:6px;cursor:pointer;white-space:nowrap;flex:none}.mn-cam-m:hover{background:rgba(255,255,255,.18)}.mn-sep{opacity:.6}.mn-cam-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--side-on);font-weight:500}'+
+'@media (min-width:821px){html.mn-C body{padding-left:64px}html.mn-C .brand{display:none}html.mn-C #mnSide{display:flex;position:fixed;left:0;top:0;bottom:0;width:64px;z-index:45;flex-direction:column;align-items:center;gap:6px;background:var(--side);padding:10px 0;overflow-y:auto;scrollbar-width:none}'+
+'html.mn-C #mnPainel{display:block;position:fixed;left:64px;top:0;bottom:0;width:280px;z-index:44}}'+
+'#mnSide .mn-side-mark{flex:none;margin-bottom:6px}#mnSide .mn-side-mark:empty{display:none}#mnSide .mn-side-mark{width:40px;height:40px;border-radius:8px;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font:600 13px var(--font-disp);overflow:hidden}#mnSide .mn-side-mark img{max-width:36px;max-height:36px}'+
+'.mn-side-l{display:flex;flex-direction:column;gap:6px;align-items:center}.mn-sb{appearance:none;border:0;width:42px;height:42px;flex:none;border-radius:10px;background:var(--c,var(--side-hl));color:#fff;font:700 12px var(--font-body);letter-spacing:.03em;cursor:pointer;opacity:.82}.mn-sb:hover,.mn-sb[aria-expanded=true]{opacity:1;filter:brightness(1.1)}'+
+'.mn-sb[aria-current]{opacity:1;box-shadow:0 0 0 2px var(--side),0 0 0 4px #fff}html:not(.cores-setor) .mn-sb[aria-current]{background:var(--accent);color:var(--accent-fg)}.mn-sb:focus-visible{outline:2px solid #fff;outline-offset:2px}'+
+'#mnPainel{background:var(--surface);color:var(--fg);border-right:1px solid var(--line);box-shadow:6px 0 22px rgba(0,0,0,.18);overflow:auto;padding:14px 12px 24px}'+
+'.mn-pt{font:700 16px var(--font-disp);padding:2px 8px 10px;border-bottom:3px solid var(--line);margin-bottom:6px}.mn-gh{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:12px 8px 4px}'+
+'.mn-pi{display:block;width:100%;appearance:none;border:0;background:none;color:inherit;font:500 14px var(--font-body);text-align:left;padding:7px 8px;border-radius:6px;cursor:pointer}.mn-pi:hover,.mn-pi:focus-visible{background:var(--hover);outline:none}.mn-pi:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}.mn-pi[aria-current]{background:var(--accent-soft);color:var(--accent);font-weight:600}'+
+'.mn-pm{border-bottom:1px solid var(--line)}.mn-pm-h{display:flex;align-items:center;gap:10px;width:100%;appearance:none;border:0;background:none;color:inherit;font:600 15px var(--font-body);padding:11px 8px;cursor:pointer;text-align:left}.mn-pm-h span{margin-left:auto;opacity:.6}.mn-pm-h[aria-current]{color:var(--accent)}.mn-dot{width:12px;height:12px;border-radius:4px;background:var(--muted);flex:none}.mn-pm-l{padding:0 0 8px 14px}'+
+'@media (max-width:820px){html.mn-C #mnMenuB{display:inline-flex;flex:none}html.mn-C .brand{flex:none}html.mn-C #mnBusca{flex:none;padding:7px 9px}html.mn-C #mnBusca .mn-bt,html.mn-C #mnBusca kbd,html.mn-C #who .tools .verchip{display:none!important}#mnMenuB .tl2{display:none}'+
+'html.mn-C #mnPainel{display:block;position:fixed;left:0;top:0;bottom:0;width:min(340px,88vw);z-index:60}html.mn-C.mn-painel-on body::after{content:"";position:fixed;inset:0;background:rgba(10,16,28,.35);z-index:59}html.mn-C #who{gap:6px;margin-left:0}}'+
+/* D */
+'html.mn-D #subnav{display:none!important}html.mn-D #who .tools>*:not([data-act=gsOpen]){display:none!important}html.mn-D #who>*:not(.tools):not([data-act=sairConta]):not(#mnContaB){display:none!important}'+
+'html.mn-D #nav .nav-b[aria-current]::after{content:" ▾";font-size:.8em}'+
+'html.mn-D #mnFavBar{display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:thin;background:var(--side-hl);color:var(--side-fg);padding:6px clamp(16px,3vw,36px);font-size:13px;white-space:nowrap}'+
+'.mn-fb-cam{display:flex;align-items:center;gap:6px;flex:none;margin-right:6px}.mn-fb-l{flex:none;font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.75;margin-left:8px}.mn-fb-v{flex:none;opacity:.6;font-size:12.5px}'+
+'.mn-chip{appearance:none;flex:none;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:var(--side-fg);border-radius:999px;padding:3px 10px;font:500 12.5px var(--font-body);cursor:pointer;white-space:nowrap}.mn-chip:hover,.mn-chip[aria-current]{background:rgba(255,255,255,.16);color:var(--side-on)}.mn-chip.mn-fav[aria-pressed=true]{color:#f5c542}'+
+'html.mn-D #mnMega{display:block;position:absolute;left:clamp(8px,1.5vw,16px);right:clamp(8px,1.5vw,16px);z-index:50;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.22);padding:12px 18px 16px;max-height:calc(100vh - 110px);overflow:auto}'+
+'.mn-mg-h{display:flex;align-items:center;gap:8px;border-bottom:3px solid var(--line);padding:2px 0 8px;margin-bottom:4px}.mn-mg-h b{font:700 16px var(--font-disp)}.mn-x{margin-left:auto;appearance:none;border:0;background:none;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;border-radius:6px;padding:2px 8px}.mn-x:hover{background:var(--hover)}'+
+'.mn-mg-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:2px 22px}'+
+/* conta e cartão */
+'#popMenu .mn-ch{padding:8px 10px 10px;border-bottom:1px solid var(--line);margin-bottom:4px}#popMenu .mn-ch b{display:block;font-size:14px}#popMenu .mn-ch span{display:block;font-size:12px;color:var(--muted)}#popMenu a.pop-it{text-decoration:none;box-sizing:border-box}#popMenu .mn-div{border-top:1px solid var(--line);margin:4px 0}#popMenu .mn-sair{color:var(--neg)}'+
+'.mn-opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}.mn-opt{appearance:none;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:10px;cursor:pointer;display:flex;flex-direction:column;gap:6px;font:inherit}.mn-opt:hover{border-color:var(--accent)}.mn-opt[aria-checked=true]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);background:var(--accent-soft)}.mn-opt span{font-size:12.5px;color:var(--muted);line-height:1.35}'+
+'.mn-mini{display:block;position:relative;height:74px;border-radius:6px;background:var(--bg);border:1px solid var(--line);overflow:hidden}.mn-mini .mm-row{display:flex;align-items:center;gap:3px;height:16px;padding:0 6px;color:#cbd5e1;font-size:11px;line-height:1}.mm-dk{background:#0f1b2d}.mm-sub{background:#1a2638;height:10px!important}.mm-lt{background:#dfe5ee;height:9px!important}'+
+'.mn-mini i{display:inline-block;width:14px;height:7px;border-radius:2px;flex:none}.mm-ic{display:inline-block;width:7px;height:7px;border-radius:2px;background:#64748b;margin-left:auto}.mm-ic+.mm-ic{margin-left:2px}.mm-busca{display:inline-block;width:46%;height:7px;border-radius:3px;background:#334155;margin:0 auto}'+
+'.mm-mega{position:absolute;left:10px;right:10px;top:20px;height:28px;background:#fff;border:1px solid #cfd6e1;border-radius:4px;display:flex;gap:6px;padding:5px}.mm-mega em,.mm-pan em{display:block;flex:1;background:#dfe5ee;border-radius:2px}'+
+'.mn-mini-C .mm-side{position:absolute;left:0;top:0;bottom:0;width:16px;background:#0f1b2d;display:flex;flex-direction:column;align-items:center;gap:3px;padding-top:4px}.mn-mini-C .mm-side i{width:9px;height:9px}.mn-mini-C .mm-pan{position:absolute;left:16px;top:0;bottom:0;width:38%;background:#fff;border-right:1px solid #cfd6e1;display:flex;flex-direction:column;gap:5px;padding:6px}.mn-mini-C .mm-pan em{flex:none;height:5px}.mn-mini-C .mm-top{position:absolute;left:16px;right:0;top:0;height:12px;background:#e2e8f0;z-index:-1}'+
+'@media (max-width:880px){html.mn-F1 #subnav,html.mn-F2 #subnav{padding-right:16px}.mn-recb{position:static!important;transform:none!important;flex:none;margin-left:6px}html.mn-F1 #mnBusca{order:2}html.mn-F1 #who{order:3;flex:1 1 100%;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}html.mn-F2 .top-in,html.mn-D .top-in{flex-wrap:nowrap}html.mn-F2 #who,html.mn-D #who{margin-left:0;gap:4px}html.mn-on #mnL,html.mn-on #mnR{display:none!important}}'+
+'@media (max-width:480px){html.mn-F1 #mnBusca kbd{display:none}}';
+document.head.appendChild(st);}catch(e){}
+
+/* ===== v131: busca rápida "Ir para…" (Ctrl+K / Cmd+K e botão de busca do topo) =====
+   Substitui a janela "Buscar em todo o sistema" (A.gsOpen), que continua acessível pelo último item "Ver todos os resultados".
+   Procura enquanto digita (sem acento e sem diferença de maiúsculas): telas que o perfil pode abrir (nome, módulo e sinônimos
+   da busca geral), ações "Novo …" que o perfil pode gravar e registros das fontes da busca geral (GS_SRC), até 5 por tipo.
+   Índice em memória, refeito só quando os dados mudam (reindex/bulkPut) ou o perfil muda. */
+const IRP={ver:0,idx:null,chave:'',sel:0,res:[],volta:null,q:''};
+{const r0=reindex;reindex=function(){const x=r0.apply(this,arguments);IRP.ver++;return x;};}
+{const b0=bulkPut;bulkPut=function(){const x=b0.apply(this,arguments);IRP.ver++;return x;};}
+const IRP_ACOES=[
+ ['Novo lançamento a pagar (despesa)','pag','novoLanc',{tipo:'pagar'}],['Novo lançamento a receber (receita)','rec','novoLanc',{tipo:'receber'}],
+ ['Novo diário de obra','rdo','rdoNovo'],['Nova OS (ordem de serviço)','os','osNova'],['Nova ordem de fabricação','osf','osfNovo'],
+ ['Nova solicitação de compra','sc','scNovo'],['Nova cotação','cot','cotNova'],['Novo pedido de compra','ped','pedNovo'],['Novo pedido de venda','psv','psvNovo'],
+ ['Novo projeto (obra)','proj','novoProj'],['Novo produto','cadprod','novoProd'],['Novo cliente','cli','novoParc',{kind:'cliente'}],['Novo fornecedor','forn','novoParc',{kind:'fornecedor'}],
+ ['Nova reunião','agenda','agNova'],['Novo contrato com cliente','ctr','ctrNovo'],['Nova recorrência','recor','recorNova'],['Novo romaneio','rom','romNovo'],
+ ['Nova permissão de trabalho','pte','pteNova'],['Novo RDA','rda','rdaNovo'],['Nova inspeção ou auditoria','insp','inspNovo'],['Novo plano de ação','pa','paNovo']];
+const irpNavTem=t=>NAV.some(n=>n[0]===t);
+const irpAcaoOk=o=>typeof A[o[2]]==='function'&&!!V[o[1]]&&irpNavTem(o[1])&&mayR(GROUP_OF_TAB[o[1]])&&mayW(GROUP_OF_TAB[o[1]])&&(ACT_GROUP[o[2]]==null||mayW(ACT_GROUP[o[2]]))&&mnTelaOk(o[1]);
+function irpAcoes(){const out=[],vis=new Set(),add=o=>{const k=o[2]+'|'+JSON.stringify(o[3]||{});if(vis.has(k))return;vis.add(k);if(irpAcaoOk(o))out.push(o);};
+  IRP_ACOES.forEach(add);
+  Object.keys(MODS2).forEach(t=>{const d=MODS2[t];if(d&&d.novo&&/^nov[oa]\b/i.test(d.novo))add([d.novo,t,t+'Novo']);});
+  if(typeof NOVO_OPC!=='undefined')NOVO_OPC.forEach(o=>add(['Novo registro: '+o[0].toLowerCase(),o[1],o[2],o[3]]));
+  const r=out.map(o=>({t:'acao',o,titulo:o[0],sub:'ação · '+tabNome(o[1]),h:gsNorm(o[0]+' '+tabNome(o[1])+' criar cadastrar incluir')}));
+  if(typeof A.mnEscolher==='function'){const o=['Mudar a aparência do menu',null,'mnEscolher'];r.push({t:'acao',o,titulo:o[0],sub:'ação · só para você',h:gsNorm(o[0]+' aparencia menu layout opcao visual barra lateral mega')});}
+  return r;}
+function irpTelas(){const out=[],vis=new Set();
+  MENU.forEach(m=>{mnItens(m).forEach(i=>{const k=i[0]+'|'+(i[2]==null?'':i[2]);if(vis.has(k)||!irpNavTem(i[0])&&i[0]!=='nf')return;vis.add(k);vis.add(i[0]);
+    out.push({t:'tela',tab:i[0],nft:i[2],mod:m[0],titulo:i[1],sub:m[1],nome:gsNorm(i[1]),h:gsNorm(i[1]+' '+m[1]+' '+((typeof GS_SIN!=='undefined'&&GS_SIN[i[0]])||''))});});});
+  NAV.forEach(n=>{if(vis.has(n[0])||!V[n[0]]||!mayR(GROUP_OF_TAB[n[0]])||!mnTelaOk(n[0]))return;vis.add(n[0]);
+    out.push({t:'tela',tab:n[0],nft:null,mod:'',titulo:n[1],sub:n[2]||'',nome:gsNorm(n[1]),h:gsNorm(n[1]+' '+(n[2]||'')+' '+((typeof GS_SIN!=='undefined'&&GS_SIN[n[0]])||''))});});
+  return out;}
+/* texto procurado por tipo de registro (dados protegidos: CPF só para quem grava no RH e quando o servidor entregou) */
+const IRP_TXT={
+  lanc:r=>[r.desc,r.numero,r.doc,r.nf,r.nfNum,r.categoria,r.parcId?parcNome(r.parcId):''].join(' '),
+  opp:r=>[r.numero,r.titulo,r.cliente,r.edital,r.orgao,r.parcId?parcNome(r.parcId):''].join(' '),
+  proj:r=>[r.codigo,r.nome,r.cliente,r.parcId?parcNome(r.parcId):''].join(' '),
+  func:r=>[r.nome,r.funcao,r.matricula].concat(!r._restrito&&mayW(GROUP_OF_TAB.func)&&!(typeof funcRestrito==='function'&&funcRestrito())?[r.cpf]:[]).join(' ')};
+const IRP_SHOW={opp:r=>(r.numero?r.numero+' · ':'')+(r.titulo||''),lanc:r=>(r.numero?'nº '+r.numero+' · ':'')+(r.desc||'')+' · '+money(r.valor)+' · venc. '+fmtDate(r.venc)};
+const irpTipo=(col,r,lab)=>col==='lanc'?(r.tipo==='receber'?'Conta a receber':'Conta a pagar'):col==='parc'?(r.tipo==='fornecedor'?'Fornecedor':r.tipo==='ambos'?'Cliente e fornecedor':'Cliente'):col==='proj'?'Projeto / obra':lab;
+function irpChave(){let n=0;try{GS_SRC.forEach(s=>{n=n*31+((S[s[0]]||[]).length)|0;});}catch(e){}return IRP.ver+'|'+me.perfil+'|'+(me.owner?1:0)+'|'+n;}
+function irpIndice(){const ch=irpChave();if(IRP.idx&&IRP.chave===ch)return IRP.idx;
+  const reg=[];GS_SRC.forEach(s=>{const col=s[0];let tab;try{tab=s[4]({})[0];}catch(e){return;}
+    if(!mayR(GROUP_OF_TAB[tab])||!mnTelaOk(tab))return;
+    if(col==='lanc'&&!(mayR(GROUP_OF_TAB.pag)||mayR(GROUP_OF_TAB.rec)))return;
+    const arr=(S[col]||[]).slice(),tx=IRP_TXT[col]||s[2],L=new Array(arr.length);
+    for(let i=0;i<arr.length;i++){let h='';try{h=gsNorm(tx(arr[i]));}catch(e){}L[i]=h;}
+    reg.push({col,lab:s[1],arr,L,show:IRP_SHOW[col]||s[3]});});
+  IRP.idx={reg,telas:irpTelas(),acoes:irpAcoes()};IRP.chave=ch;return IRP.idx;}
+const irpPont=(h,nome,t)=>t.reduce((a,w)=>a+(nome.startsWith(w)?4:0)+(new RegExp('(^|\\s)'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).test(h)?2:0)+(nome.includes(w)?1:0),0);
+function irpBuscar(q){const ix=irpIndice(),t=gsNorm(q).split(/\s+/).filter(Boolean);if(!t.length)return irpRecentes();
+  const telas=ix.telas.filter(x=>t.every(w=>x.h.includes(w))).map(x=>Object.assign({sc:irpPont(x.h,x.nome,t)},x)).sort((a,b)=>b.sc-a.sc).slice(0,8);
+  const acoes=ix.acoes.filter(x=>t.every(w=>x.h.includes(w))).map(x=>Object.assign({sc:irpPont(x.h,gsNorm(x.titulo),t)},x)).sort((a,b)=>b.sc-a.sc).slice(0,5);
+  const regs=[];ix.reg.forEach(g=>{const tipos={};let n=0;
+    for(let i=0;i<g.L.length&&n<60;i++){const h=g.L[i];let ok=true;for(const w of t)if(h.indexOf(w)<0){ok=false;break;}if(!ok)continue;
+      const r=g.arr[i],tp=irpTipo(g.col,r,g.lab);(tipos[tp]=tipos[tp]||[]).push({r,sc:(h.startsWith(t[0])?3:0)+irpPont(h,h,t)});n++;}
+    Object.keys(tipos).forEach(tp=>tipos[tp].sort((a,b)=>b.sc-a.sc).slice(0,5).forEach(x=>{let tit='';try{tit=g.show(x.r);}catch(e){tit=x.r.nome||x.r.desc||x.r.id;}regs.push({t:'reg',col:g.col,id:x.r.id,titulo:tit,sub:tp});}));});
+  const out=telas.concat(acoes,regs);out.push({t:'todos',titulo:'Ver todos os resultados de “'+q.trim()+'” na busca completa',sub:'busca'});return out;}
+/* recentes (por pessoa, neste navegador); revalidados com as permissões de agora */
+const IRP_REC_K=()=>'cg.irpara.'+mnUid();
+function irpRecLer(){try{const v=JSON.parse(mnLS(IRP_REC_K())||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
+function irpRecGrava(x){const k=x.t==='tela'?{t:'tela',tab:x.tab,nft:x.nft==null?null:x.nft,mod:x.mod}:x.t==='acao'?{t:'acao',a:x.o[2],d:x.o[3]||null,tab:x.o[1]}:x.t==='reg'?{t:'reg',col:x.col,id:x.id}:null;if(!k)return;
+  const s=JSON.stringify(k),v=irpRecLer().filter(y=>JSON.stringify(y)!==s);v.unshift(k);mnLS(IRP_REC_K(),JSON.stringify(v.slice(0,8)));}
+function irpRecentes(){const ix=irpIndice(),out=[];
+  irpRecLer().forEach(k=>{let x=null;
+    if(k.t==='tela')x=ix.telas.find(y=>y.tab===k.tab&&(y.nft==null?null:y.nft)===(k.nft==null?null:k.nft));
+    else if(k.t==='acao')x=ix.acoes.find(y=>y.o[2]===k.a&&JSON.stringify(y.o[3]||null)===JSON.stringify(k.d||null));
+    else if(k.t==='reg'){const g=ix.reg.find(y=>y.col===k.col),r=g&&g.arr.find(y=>y.id===k.id);if(r){let tit='';try{tit=g.show(r);}catch(e){}x={t:'reg',col:k.col,id:k.id,titulo:tit,sub:irpTipo(k.col,r,g.lab)};}}
+    if(x)out.push(Object.assign({rec:true},x));});
+  if(!out.length)(typeof favLer==='function'?favLer():[]).forEach(t=>{const x=ix.telas.find(y=>y.tab===t);if(x)out.push(Object.assign({rec:true,fav:true},x));});
+  return out;}
+/* ---- abrir o resultado ---- */
+function irpAbrirRes(x){if(!x)return;irpFechar(false);
+  if(x.t!=='todos')irpRecGrava(x);
+  if(x.t==='tela'){ui.tab=x.tab;if(x.mod)ui.mod=x.mod;if(x.nft!=null&&ui.nf)ui.nf.tipo=x.nft;try{history.replaceState(null,'','#'+ui.tab);}catch(e){}render();try{window.scrollTo(0,0);}catch(e){}return;}
+  if(x.t==='acao'&&x.o[1]==null){try{A[x.o[2]]({},null);}catch(e){}return;}
+  if(x.t==='acao'){const o=x.o;ui.tab=o[1];const m=MENU.find(y=>mnItens(y).some(i=>i[0]===o[1]));if(m)ui.mod=m[0];render();setTimeout(()=>{try{A[o[2]](Object.assign({},o[3]||{}),null);}catch(e){}},30);return;}
+  if(x.t==='reg'){A.gsGo({col:x.col,id:x.id});return;}
+  if(x.t==='todos'){const q=IRP.q;irpGsAntigo();setTimeout(()=>{const i=document.getElementById('gsQ');if(i){i.value=q;try{gsRender();}catch(e){}}},0);}}
+/* ---- caixa central ---- */
+const irpGsAntigo=A.gsOpen;
+const IRP_IC={tela:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>',
+  acao:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  reg:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>',
+  todos:MN_SVG_BUSCA};
+function irpListaHtml(res,q){if(!res.length)return '<div class="irp-vz">'+(q?'Nada encontrado para “'+esc(q)+'”.':'Digite o nome de uma tela, uma ação (ex.: novo diário) ou um registro (cliente, colaborador, obra, nº da proposta, conta).')+'</div>';
+  let h='',ult='';const sec=x=>x.rec?(x.fav?'Favoritas':'Recentes'):x.t==='tela'?'Telas':x.t==='acao'?'Ações':x.t==='reg'?'Registros':'';
+  res.forEach((x,k)=>{const s=sec(x);if(s&&s!==ult){h+='<div class="irp-sec" role="presentation">'+s+'</div>';ult=s;}
+    h+='<div class="irp-o'+(x.t==='todos'?' irp-todos':'')+'" role="option" id="irpO'+k+'" data-i="'+k+'" aria-selected="'+(k===IRP.sel)+'"><span class="irp-ic">'+(IRP_IC[x.t]||'')+'</span><span class="irp-t">'+esc(x.titulo||'')+'</span><small>'+esc(x.sub||'')+'</small></div>';});
+  return h;}
+function irpPinta(){const l=document.getElementById('irpL'),i=document.getElementById('irpQ');if(!l||!i)return;
+  IRP.q=i.value;IRP.res=irpBuscar(IRP.q);if(IRP.sel>=IRP.res.length)IRP.sel=0;l.innerHTML=irpListaHtml(IRP.res,IRP.q.trim());irpSel(IRP.sel);}
+function irpSel(k){IRP.sel=k;const l=document.getElementById('irpL'),i=document.getElementById('irpQ');if(!l)return;
+  l.querySelectorAll('.irp-o').forEach(o=>o.setAttribute('aria-selected',String(+o.dataset.i===k)));const o=document.getElementById('irpO'+k);
+  if(i)i.setAttribute('aria-activedescendant',o?o.id:'');if(o&&o.scrollIntoView)try{o.scrollIntoView({block:'nearest'});}catch(e){}}
+function irpAbrir(){if(typeof document==='undefined'||!document.body||!document.body.insertAdjacentHTML)return;
+  const ja=document.getElementById('irpQ');if(ja){ja.focus();ja.select();return;}
+  try{if(typeof popFechar==='function')popFechar();if(typeof mnFecharTudo==='function')mnFecharTudo();}catch(e){}
+  IRP.volta=document.activeElement;IRP.sel=0;
+  document.body.insertAdjacentHTML('beforeend','<div id="irpK" class="irp-ov"><div class="irp-box" role="dialog" aria-modal="true" aria-label="Ir para tela, ação ou registro"><div class="irp-in">'+MN_SVG_BUSCA+
+    '<input id="irpQ" type="text" role="combobox" aria-expanded="true" aria-controls="irpL" aria-autocomplete="list" aria-label="Ir para: digite tela, ação ou registro" placeholder="Ir para… tela, ação ou registro" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div>'+
+    '<div id="irpL" role="listbox" aria-label="Resultados"></div><div class="irp-ft">Enter abre · ↑↓ escolhe · Esc fecha · Ctrl+K em qualquer tela</div></div></div>');
+  const k=document.getElementById('irpK'),i=document.getElementById('irpQ');
+  i.addEventListener('input',()=>{IRP.sel=0;irpPinta();});
+  i.addEventListener('keydown',e=>{const n=IRP.res.length;
+    if(e.key==='ArrowDown'){if(n)irpSel((IRP.sel+1)%n);e.preventDefault();}
+    else if(e.key==='ArrowUp'){if(n)irpSel((IRP.sel-1+n)%n);e.preventDefault();}
+    else if(e.key==='Home'&&e.ctrlKey){irpSel(0);e.preventDefault();}
+    else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();irpAbrirRes(IRP.res[IRP.sel]);}
+    else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();irpFechar(true);}
+    else if(e.key==='Tab'){e.preventDefault();}});
+  k.addEventListener('mousedown',e=>{if(e.target===k){e.preventDefault();irpFechar(true);}});
+  k.addEventListener('mousemove',e=>{const o=e.target.closest&&e.target.closest('.irp-o');if(o&&+o.dataset.i!==IRP.sel)irpSel(+o.dataset.i);});
+  k.addEventListener('click',e=>{const o=e.target.closest&&e.target.closest('.irp-o');if(o){e.stopPropagation();irpAbrirRes(IRP.res[+o.dataset.i]);}});
+  irpPinta();i.focus();}
+function irpFechar(volta){const k=document.getElementById('irpK');if(k)k.remove();const v=IRP.volta;IRP.volta=null;if(volta&&v&&v.focus&&v.isConnected)try{v.focus();}catch(e){}}
+A.gsOpen=()=>irpAbrir();
+/* Esc com a caixa aberta não fecha outras janelas por baixo */
+if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('irpK')){e.stopImmediatePropagation();e.preventDefault();irpFechar(true);}},true);
+if(typeof TIP_ACT!=='undefined')TIP_ACT.gsOpen='Ir para… (Ctrl+K): procura telas, ações (Novo…) e registros que o seu perfil pode ver.';
+try{const st=document.createElement('style');st.textContent=
+'.irp-ov{position:fixed;inset:0;z-index:1200;background:rgba(10,16,28,.42);display:flex;justify-content:center;align-items:flex-start;padding:min(12vh,96px) 12px 12px}'+
+'.irp-box{width:min(640px,100%);max-height:calc(100vh - 120px);display:flex;flex-direction:column;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden}'+
+'.irp-in{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);color:var(--muted)}.irp-in input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font:500 16px var(--font-body);padding:2px 0}'+
+'.irp-in kbd,.irp-ft{font-size:11.5px;color:var(--muted)}.irp-in kbd{border:1px solid var(--line);border-radius:4px;padding:1px 6px}'+
+'#irpL{overflow:auto;padding:4px 0;flex:1 1 auto}.irp-sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:10px 16px 4px}'+
+'.irp-o{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;min-width:0}.irp-o[aria-selected=true]{background:var(--accent-soft)}.irp-o .irp-ic{color:var(--muted);display:inline-flex;flex:none}.irp-o[aria-selected=true] .irp-ic{color:var(--accent)}'+
+'.irp-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.irp-o small{flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}.irp-todos .irp-t{color:var(--accent)}'+
+'.irp-vz{padding:16px;color:var(--muted);font-size:13.5px}.irp-ft{padding:8px 16px;border-top:1px solid var(--line)}';
+document.head.appendChild(st);}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='130.2',APP_DATA='2026-10-28';
+const APP_VER='131',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['131','2026-10-28',['Aparência do menu (para teste, escolha de cada pessoa) em Sistema › Configurações ou no menu da conta: Atual, F1 (três linhas, módulos rolando para os lados), F2 (duas linhas com menu da conta), C (barra lateral de ícones com painel de telas) e D (mega-menu com Favoritas e recentes).', 'Busca rápida Ir para… (Ctrl+K ou Cmd+K, e o botão de busca do topo): encontra telas, ações Novo… e registros (clientes, fornecedores, colaboradores, obras, propostas, contas), só o que o perfil pode ver.']],
   ['130.2','2026-10-28',['Botão Sair (e Enviar link de senha em Usuários › Editar) de volta: tinham sumido desde a versão 124 por um arquivo do sistema sobrescrito por engano.', 'Fábrica virou módulo próprio no menu superior, ao lado de Qualidade, com Painel de produção e Ordens de fabricação (saiu de Obras).']],
   ['130.1','2026-10-28',['Sistema › Usuários: coluna Acesso com a situação de cada pessoa (ativo, sem senha, desativado, bloqueado por tentativas, cria a senha no próximo acesso) e a última falha de entrada com o motivo; botões Enviar convite/link de senha, Senha provisória (troca obrigatória no primeiro acesso), Reativar e Desbloquear; aviso das contas importadas sem senha com Enviar convite a todos.', 'Login: dica para usar Esqueci minha senha; Esqueci minha senha envia o convite para quem ainda não criou a senha; bloqueio por tentativas mais tolerante para quem usa a mesma internet no escritório (o limite por e-mail continua protegendo cada conta).']],
   ['130','2026-10-28',['Recebimento de notas › Caixa nfe@: leitura da caixa nfe@inaservicos.com.br (Microsoft 365) de hora em hora. Os XML anexados vão para o Arquivo fiscal e os e-mails lidos para a pasta Processadas. Quatro listas: notas recebidas só por e-mail (lançar ou ligar), Não pagar (cancelada ou inexistente na SEFAZ), notas captadas sem XML por e-mail e e-mails com PDF sem XML (pedir o XML).', 'Arquivo fiscal: cada nota mostra todas as origens (importação, upload, SEFAZ, e-mail) e as situações Não encontrada na SEFAZ e Denegada.']],
