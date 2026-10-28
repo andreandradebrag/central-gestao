@@ -22771,9 +22771,510 @@ if(typeof document!=='undefined'&&document.addEventListener){
 /* ===== v124: caixas de seleção e botões de opção legíveis em todo o sistema (a regra geral input{width:100%} as esmagava) ===== */
 try{const st=document.createElement('style');st.textContent='input[type=checkbox],input[type=radio]{width:18px;height:18px;min-width:18px;min-height:18px;flex:none;padding:0;cursor:pointer;accent-color:var(--accent,#2457d6)}input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--accent,#2457d6);outline-offset:2px}';document.head.appendChild(st);}catch(e){}
 
+/* ===== v125: Obras › Ordens de fabricação (OS da fábrica de Tuiuti) e perfil Fábrica =====
+   - Coleção osf (grupo de permissão novo 'fab'): uma OS por registro, número P<código do projeto sem o P>-<sequência geral da
+     fábrica> (ex.: P412-95). A sequência é única para todas as OS (próxima = maior + 1), sugerida e editável, sem repetição.
+   - Etapas: 1 Aguardando aprovação, 2 Aguardando compra de material, 3 Em produção, 4 Galvanização (fornecedor externo),
+     5 Pintura, 6 Inspeção de qualidade, 7 Separação e embalagem, 8 Enviado, 9 Entregue. Aprovação, produção e entrega sempre
+     valem; galvanização e pintura seguem o acabamento; material, inspeção, embalagem e envio são marcados ao criar.
+     A OS só sai de "Aguardando aprovação" com aprovação no sistema (quem pode aprovar: osfPodeAprovar, igual no servidor).
+   - Lista de materiais gera uma solicitação de compra no fluxo que já existe (mesmo caminho do pedido de material do diário de
+     obra: a solicitação nasce "aguardando aprovação" em Suprimentos e segue para cotação e pedido). Quando todas as
+     solicitações ligadas ficam "atendidas" (pedidos recebidos), a etapa "Aguardando material" avança sozinha.
+   - Perfil Fábrica: grava só Ordens de fabricação e Painel de produção (e a solicitação de compra do material da OS).
+   - Painel de produção, PDF da OS e envio por e-mail ficam em new_osf2.js. */
+if(!COLS.includes('osf')){COLS.push('osf');S.osf=S.osf||[];IDX.osf=new Map();}
+if(typeof LIVE_COLS!=='undefined'&&!LIVE_COLS.includes('osf'))LIVE_COLS.push('osf');
+COL_NOME.osf='Ordem de fabricação';
+Object.assign(GROUP_OF_TAB,{osf:'fab',osfp:'fab'});
+Object.assign(TAB_COLS,{osf:['osf'],osfp:['osf']});
+[['osf','Ordens de fabricação','Obras'],['osfp','Painel de produção','Obras']].forEach(n=>{if(!NAV.some(x=>x[0]===n[0]))NAV.push(n);});
+{const ob=MENU.find(m=>m[0]==='obras');if(ob)[['osf','Ordens de fabricação',null,'Fábrica'],['osfp','Painel de produção',null,'Fábrica']].forEach(i=>{if(!ob[2].some(x=>x[0]===i[0]))ob[2].push(i);});}
+if(typeof DBW_TABCOLS!=='undefined')Object.assign(DBW_TABCOLS,{osf:['osf','sc','ped','proj'],osfp:['osf','sc','proj']});
+if(!MODS.some(m=>m[0]==='fab'))MODS.push(['fab','Fábrica: ordens de fabricação e painel de produção']);
+if(typeof P2_MODS!=='undefined'&&!P2_MODS.some(m=>m[0]==='fab'))P2_MODS.push(['fab','Fábrica: ordens de fabricação e painel de produção']);
+
+/* ---------- perfis ---------- */
+PERFIS.fabrica={nome:'Fábrica (encarregado)',desc:'Encarregado da fábrica de Tuiuti: ordens de fabricação, painel de produção, anexos das OS e a solicitação de compra do material da OS. Vê só o necessário do projeto (código, nome e cliente). Não vê o resto de Obras, financeiro, RH nem dados bancários. Não aprova a OS.',
+  w:['fab','comp','chat','agenda'],r:['meu','ajuda'],so:{comp:['sc']},leSo:{comp:['sc','prod']},leSoTabs:{comp:['sc']}};
+/* leSo (servidor, perfis.json): dentro de Compras o perfil Fábrica lê só solicitações de compra e produtos (não cotações, fornecedores,
+   pedidos nem estoque). leSoTabs: no menu, de Compras aparece só "Solicitações". */
+const osfMenuOk=(tab,pf)=>{const p=PERFIS[pf||me.perfil]||{};if(!p.leSoTabs)return true;const t=p.leSoTabs[GROUP_OF_TAB[tab]];return !t||t.includes(tab);};
+{const r0=renderMenu;renderMenu=function(){const p=PERFIS[me.perfil]||{};if(me.owner||!p.leSoTabs)return r0.apply(this,arguments);const bak=MENU.map(m=>m[2]);
+  MENU.forEach(m=>{m[2]=m[2].filter(i=>osfMenuOk(i[0]));});try{return r0.apply(this,arguments);}finally{MENU.forEach((m,k)=>{m[2]=bak[k];});}};}
+/* grava Obras sem restrição (Gestor de projetos; o Administrador já grava tudo): grava as OS; quem consulta tudo (Somente leitura,
+   Leitura completa) consulta. Os outros perfis (inclusive os que só consultam Obras) não leem as OS. */
+Object.keys(PERFIS).forEach(k=>{const p=PERFIS[k];if(!p||k==='fabrica'||p.w==='*')return;
+  if(Array.isArray(p.w)&&p.w.includes('proj')&&!(p.so&&p.so.proj)){if(!p.w.includes('fab'))p.w.push('fab');}
+  else if(['leitura','leituratotal'].includes(k)&&Array.isArray(p.r)&&!p.r.includes('fab'))p.r.push('fab');});
+
+/* ---------- etapas ---------- */
+const OSF_ET=[['aprov','Aguardando aprovação','Aprovação'],['mat','Aguardando compra de material','Material'],['prod','Em produção','Produção'],['galv','Galvanização (fornecedor externo)','Galvanização'],['pint','Pintura','Pintura'],['insp','Inspeção de qualidade','Inspeção'],['emb','Separação e embalagem','Embalagem'],['env','Enviado','Enviado'],['ent','Entregue','Entregue']];
+const OSF_ORD=OSF_ET.map(e=>e[0]),OSF_FIXAS=['aprov','prod','ent'],OSF_OPC=['mat','insp','emb','env'];
+const OSF_COR={aprov:'#8f5600',mat:'#b45309',prod:'#1f4fd8',galv:'#6d28d9',pint:'#c2410c',insp:'#0e7490',emb:'#4d7c0f',env:'#0f766e',ent:'#16774a'};
+const osfEtNome=k=>(OSF_ET.find(e=>e[0]===k)||['',k])[1],osfEtCurto=k=>(OSF_ET.find(e=>e[0]===k)||['','',k])[2];
+const OSF_EMAIL_PAD='pr.tuiuti@inaservicos.com.br';
+function osfCfg(){const o=cfg().osf||{},n=(v,d)=>v===''||v==null||isNaN(+v)?d:+v;
+  return {email:String(o.email||'').trim()||OSF_EMAIL_PAD,galvDias:Math.max(1,n(o.galvDias,15)),pesoTol:Math.max(0,n(o.pesoTol,5)),aprov:Array.isArray(o.aprov)?o.aprov.filter(Boolean):[],autorAprova:o.autorAprova===true,valorHora:n(o.valorHora,0)};}
+function osfAplica(r,k){if(!r)return false;if(OSF_FIXAS.includes(k))return true;if(k==='galv')return !!r.galv;if(k==='pint')return !!r.pint;return ((r.etapas||{})[k]||{}).on!==false;}
+const osfEtapasDe=r=>OSF_ORD.filter(k=>osfAplica(r,k));
+function osfProx(r,de){const i=OSF_ORD.indexOf(de||r.etapa||'aprov');for(let k=i+1;k<OSF_ORD.length;k++)if(osfAplica(r,OSF_ORD[k]))return OSF_ORD[k];return null;}
+function osfAnt(r,de){const i=OSF_ORD.indexOf(de||r.etapa||'aprov');for(let k=i-1;k>=0;k--)if(osfAplica(r,OSF_ORD[k]))return OSF_ORD[k];return null;}
+const osfEt=(r,k)=>((r&&r.etapas)||{})[k]||{};
+const osfAberta=r=>!!r&&!r.cancelada&&r.etapa!=='ent';
+
+/* ---------- numeração: P<código sem o P>-<sequência geral> ---------- */
+const osfSeq=r=>{if(!r)return 0;const s=+r.seq;if(s>0)return Math.round(s);const m=String(r.numero||'').match(/-(\d+)\s*$/);return m?+m[1]:0;};
+const osfProxSeq=()=>Math.max(0,...S.osf.map(osfSeq))+1;
+function osfCodProj(p){const c=String((p&&p.codigo)||'').trim();if(!c)return '';const s=c.replace(/^P[\s.\-_/]*/i,'').replace(/\s+/g,'');return s||c;}
+function osfNumero(projId,seq){const p=get('proj',projId);const c=osfCodProj(p)||'?';return 'P'+c+'-'+(Math.round(+seq)||0);}
+function osfValida(r){
+  if(!r.projId||!get('proj',r.projId))return 'Escolha o projeto da OS.';
+  const s=+r.seq;if(!(s>0)||Math.round(s)!==s)return 'A sequência precisa ser um número inteiro maior que zero.';
+  const dup=S.osf.find(x=>x.id!==r.id&&osfSeq(x)===s);if(dup)return 'A sequência '+s+' já é usada pela OS '+(dup.numero||'')+'. A sequência é única para todas as OS da fábrica (próxima livre: '+osfProxSeq()+').';
+  const num=osfNumero(r.projId,s);if(S.osf.some(x=>x.id!==r.id&&String(x.numero||'').toLowerCase()===num.toLowerCase()))return 'Já existe uma OS com o número '+num+'.';
+  if(!String(r.objeto||'').trim())return 'Descreva o objeto da OS.';
+  if(!r.emissao)return 'Informe a data de emissão.';
+  if(r.pint&&!String(r.cor||'').trim())return 'Informe a cor da pintura.';
+  if((r.itens||[]).some(i=>!(+i.qtd>0)))return 'Cada peça precisa de quantidade maior que zero.';
+  return '';}
+/* projeto: código, nome e cliente guardados na OS (o perfil Fábrica não lê o cadastro de clientes) */
+function osfDadosProj(r){const p=get('proj',r.projId);if(!p)return r;const pc=p.parcId?get('parc',p.parcId):null;
+  r.projCod=p.codigo||'';r.projNome=p.nome||'';r.cliNome=(pc&&pc.nome)||p.cliNome||r.cliNome||'';return r;}
+const osfProjTxt=r=>r?[r.projCod,r.projNome].filter(Boolean).join(' · ')||(r.projId?projNome(r.projId):'—'):'—';
+const osfTotPecas=r=>sum(r.itens||[],i=>+i.qtd||0),osfTotPeso=r=>r2(sum(r.itens||[],i=>(+i.qtd||0)*(+i.peso||0)));
+
+/* ---------- aprovação: quem pode (o servidor aplica a mesma regra em /api/osf/aprovar) ----------
+   dono; Diretoria (e a lista "diretoria" da matriz de aprovadores, com substitutos); a lista de aprovadores da OS em
+   Sistema › Configurações › Fábrica, se preenchida; sem lista, quem grava Obras sem restrição (Gestor de projetos e
+   Administrador). O Encarregado da fábrica não aprova. Quem criou a OS não aprova a própria (a não ser que a configuração permita). */
+function osfPodeAprovar(r){if(store.mode!=='db'||me.owner)return true;const u=actorId(),c=osfCfg(),p=PERFIS[me.perfil]||{};
+  if(r&&r.crBy&&r.crBy===u&&!c.autorAprova)return false;
+  if(me.perfil==='diretoria'||(p.custom&&p.aprovDir))return true;
+  try{if(typeof aprovadoresDe==='function'&&(aprovadoresDe('diretoria')||[]).filter(Boolean).includes(u))return true;}catch(e){}
+  if(c.aprov.length)return c.aprov.includes(u);
+  return p.w==='*'||(Array.isArray(p.w)&&p.w.includes('proj')&&!(p.so&&p.so.proj)&&!p.custom);}
+const osfSrv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV()&&typeof segaPost==='function';
+
+/* ---------- avançar / voltar ---------- */
+function osfMarca(r,de,para,o){o=o||{};const n=cl(r),h=todayStr(),u=o.por||actorId();n.etapas=cl(r.etapas||{});
+  const e0=Object.assign({},n.etapas[de]||{}),e1=Object.assign({},n.etapas[para]||{});
+  if(o.volta){e0.ini='';e0.por='';e1.fim='';e1.porFim='';}else{e0.fim=h;e0.porFim=u;e1.ini=h;e1.por=u;e1.fim='';}
+  n.etapas[de]=e0;n.etapas[para]=e1;n.etapa=para;
+  n.avanc=(r.avanc||[]).concat([Object.assign({de,para,em:Date.now(),por:u},o.auto?{auto:true}:{},o.volta?{volta:true,motivo:o.motivo||''}:{})]);return n;}
+/* devolve {erro} ou {rec} (sem gravar) */
+function osfAvancar(r,o){o=o||{};if(!r)return {erro:'OS não encontrada.'};if(r.cancelada)return {erro:'A OS está cancelada.'};
+  const cur=r.etapa||'aprov';if(cur==='ent')return {erro:'A OS já foi entregue.'};
+  if(cur==='aprov'&&!r.aprov)return {erro:'A OS precisa ser aprovada no sistema antes de seguir (botão Aprovar, por quem tem permissão de aprovação).'};
+  if(cur==='galv'){const g=r.galvD||{};if(!g.dataRet)return {erro:'Informe a data de retorno da galvanização (e a NF de retorno) antes de seguir.'};}
+  if(cur==='insp'){const i=r.insp||{};if(!(i.med&&i.acab&&i.qtd))return {erro:'Marque o checklist da inspeção (medidas, acabamento e quantidade) antes de seguir.'};if(!String(i.resp||'').trim())return {erro:'Informe o responsável pela inspeção.'};}
+  const nx=osfProx(r,cur);if(!nx)return {erro:'Não há próxima etapa.'};
+  if(o.para&&o.para!==nx)return {erro:'A próxima etapa desta OS é "'+osfEtNome(nx)+'". Avance uma etapa por vez.'};
+  if(nx==='ent'){const e=o.entrega||r.entrega||{};if(!String(e.quem||'').trim()||!e.data)return {erro:'Para marcar como entregue, registre quem recebeu e a data.',pedeEntrega:true};}
+  let n=osfMarca(r,cur,nx,o);if(nx==='ent'&&o.entrega){n.entrega=o.entrega;n.etapas.ent.ini=o.entrega.data||n.etapas.ent.ini;n.etapas.ent.fim=o.entrega.data||todayStr();}
+  return {rec:n,para:nx};}
+function osfVoltar(r,motivo){if(!r||r.cancelada)return {erro:'A OS está cancelada.'};const cur=r.etapa||'aprov',ant=osfAnt(r,cur);
+  if(!ant||ant==='aprov')return {erro:'Não dá para voltar para "Aguardando aprovação". Se a OS mudou, cancele e crie outra.'};
+  if(cur==='ent')return {erro:'A OS já foi entregue: a entrega assinada não se desfaz.'};
+  if(!String(motivo||'').trim())return {erro:'Informe o motivo para voltar a etapa.'};
+  return {rec:osfMarca(r,cur,ant,{volta:true,motivo}),para:ant};}
+
+/* ---------- material: solicitações de compra ligadas ---------- */
+const osfScs=r=>((r&&r.scIds)||[]).map(id=>get('sc',id)).filter(Boolean);
+const osfScAtivas=r=>osfScs(r).filter(s=>!['cancelada','recusada'].includes(s.status));
+function osfMatOk(r){const a=osfScAtivas(r);return a.length>0&&a.every(s=>s.status==='atendida');}
+/* avança sozinha a etapa "Aguardando material" quando todas as solicitações ligadas foram atendidas (pedidos recebidos) */
+function osfAutoMat(){if(!mayW('fab'))return 0;let n=0;S.osf.slice().forEach(r=>{if(r.cancelada||r.etapa!=='mat'||!osfMatOk(r))return;const x=osfAvancar(r,{auto:true});if(x.rec){put('osf',x.rec);n++;}});return n;}
+function osfMatPend(r){return (r.mats||[]).map((m,i)=>Object.assign({i},m)).filter(m=>m.desc&&+m.qtd>0&&!(m.scId&&(()=>{const s=get('sc',m.scId);return s&&!['cancelada','recusada'].includes(s.status);})()));}
+function osfGerarSc(r){const pend=osfMatPend(r);if(!pend.length)return {erro:'Todos os materiais da lista já estão numa solicitação de compra em andamento.'};
+  if(!mayW('comp'))return {erro:'Seu perfil não cria solicitação de compra. Peça ao comprador ou ao gestor.'};
+  const h=todayStr(),nec=r.necessidade&&r.necessidade>h?addDays(r.necessidade,-7)>h?addDays(r.necessidade,-7):r.necessidade:addDays(h,7);
+  const sc={id:uid(),numero:nextNum('sc'),data:h,status:'aprovacao',origem:'osf',osfId:r.id,solUid:actorId(),projId:r.projId||'',etapaId:'',necessidade:nec,solicitante:r.solicitante||nameOf(actorId()),aprovUid:'',localEntrega:'Fábrica de Tuiuti',obs:'Material da ordem de fabricação '+(r.numero||'')+' · '+String(r.objeto||'').slice(0,120),
+    itens:pend.map(m=>({prodId:m.prodId||'',desc:m.desc,un:m.un||'UN',qtd:+m.qtd||0}))};
+  put('sc',sc);
+  const n=cl(r);n.mats=(r.mats||[]).map((m,i)=>pend.some(p=>p.i===i)?Object.assign({},m,{scId:sc.id}):m);n.scIds=[...new Set((r.scIds||[]).concat([sc.id]))];put('osf',n);
+  try{const ms=matCfg().aprov;(ms||[]).forEach(u=>avisoChat(u,'Solicitação de material nº '+sc.numero+' da ordem de fabricação '+(r.numero||'')+' ('+sc.itens.length+' item(ns), precisa até '+fmtDate(sc.necessidade)+') aguarda a sua aprovação.'));}catch(e){}
+  return {sc};}
+
+/* ---------- custo ---------- */
+function osfCusto(r){const peds=S.ped.filter(p=>p.status!=='cancelado'&&p.scId&&(r.scIds||[]).includes(p.scId));const leNf=mayR('nf');
+  const mat=leNf?r2(sum(peds,p=>typeof pedTotal==='function'?pedTotal(p):0)):null,galv=r2(+((r.galvD||{}).valor)||0),horas=r2((+r.horas||0)*(+r.valorHora||0));
+  return {mat,peds:peds.length,galv,horas,tot:r2((mat||0)+galv+horas),leNf};}
+
+/* ---------- alertas ---------- */
+const osfDiasEtapa=r=>{const i=osfEt(r,r.etapa).ini;const d=i?dTo(i):null;return d==null?null:Math.max(0,-d);};
+const osfAtrasada=r=>osfAberta(r)&&!!r.necessidade&&r.necessidade<todayStr();
+function osfGalvDias(r){if(!r||r.cancelada||!r.galv)return null;const g=r.galvD||{},env=g.dataEnv||osfEt(r,'galv').ini;if(!env||g.dataRet)return null;if(r.etapa!=='galv')return null;return Math.max(0,-dTo(env));}
+function osfPesoDif(r){const g=(r&&r.galvD)||{},a=+g.pesoEnv||0,b=+g.pesoCob||0;if(!(a>0&&b>0))return null;return {dif:r2(b-a),pct:r2((b-a)/a*100)};}
+function osfAlertas(r){const L=[],c=osfCfg();if(!r||r.cancelada)return L;
+  if(osfAtrasada(r))L.push(['neg','Atrasada: a necessidade era '+fmtDate(r.necessidade)]);
+  const gd=osfGalvDias(r);if(gd!=null&&gd>c.galvDias)L.push(['neg','Na galvanização há '+gd+' dias (limite '+c.galvDias+')']);
+  const pd=osfPesoDif(r);if(pd&&Math.abs(pd.pct)>c.pesoTol)L.push(['warn','Peso cobrado '+(pd.dif>0?'acima':'abaixo')+' do enviado em '+fmtQ(Math.abs(pd.dif))+' kg ('+String(Math.abs(pd.pct)).replace('.',',')+'%)']);
+  const pv=osfEt(r,r.etapa).prev;if(osfAberta(r)&&pv&&pv<todayStr()&&r.etapa!=='aprov')L.push(['warn','Etapa "'+osfEtCurto(r.etapa)+'" passou da data prevista ('+fmtDate(pv)+')']);
+  if(r.etapa==='aprov'&&!r.aprov)L.push(['warn','Aguardando aprovação']);
+  return L;}
+function osfIndicadores(ls){const h=todayStr(),a=ls.filter(osfAberta),c=osfCfg();
+  return {abertas:a.length,atraso:a.filter(osfAtrasada).length,prox7:a.filter(r=>r.necessidade&&r.necessidade>=h&&r.necessidade<=addDays(h,7)).length,
+    mat:a.filter(r=>r.etapa==='mat').length,galv:a.filter(r=>{const d=osfGalvDias(r);return d!=null&&d>c.galvDias;}).length,aprov:a.filter(r=>r.etapa==='aprov').length};}
+
+/* ---------- telas ---------- */
+ui.osf=ui.osf||{q:'',proj:'',et:'',sit:'abertas'};
+const osfEtPill=r=>r.cancelada?pill('Cancelada','neg'):pill(osfEtCurto(r.etapa||'aprov'),r.etapa==='ent'?'pos':r.etapa==='aprov'?'warn':'acc');
+function osfFiltra(ls,f){const q=String(f.q||'').toLowerCase();
+  return ls.filter(r=>(!f.proj||r.projId===f.proj)&&(!f.et||r.etapa===f.et)&&(!f.cli||r.cliNome===f.cli)&&(f.sit==='todas'||(f.sit==='entregues'?(!r.cancelada&&r.etapa==='ent'):f.sit==='canceladas'?!!r.cancelada:osfAberta(r)))&&
+    (!q||[r.numero,r.objeto,r.projCod,r.projNome,r.cliNome,r.solicitante].join(' ').toLowerCase().includes(q)));}
+const osfOrd=(a,b)=>String(a.necessidade||'9999').localeCompare(String(b.necessidade||'9999'))||osfSeq(b)-osfSeq(a);
+const osfProjOpts=()=>{const ids=new Set(S.osf.map(r=>r.projId));return S.proj.filter(p=>ids.has(p.id)).map(p=>[p.id,projNome(p.id)]).concat(S.osf.filter(r=>!get('proj',r.projId)&&r.projId).map(r=>[r.projId,osfProjTxt(r)])).filter((x,i,a)=>a.findIndex(y=>y[0]===x[0])===i);};
+let osfCss=false;
+function osfEstilo(){if(osfCss||typeof document==='undefined'||!document.createElement)return;osfCss=true;try{const st=document.createElement('style');st.textContent=
+  '.osf-tab td,.osf-tab th{vertical-align:top}.osf-tab .act{white-space:normal}.osf-tab .act .btn{margin:0 4px 4px 0}'+
+  '.osf-al .pill,.osf-grid .pill{white-space:normal;text-align:left;max-width:100%}'+
+  '@media (max-width:760px){.osf-tab,.osf-ed table{min-width:0!important;width:100%}.osf-tab thead{display:none}.osf-tab tr{display:block;border-bottom:1px solid var(--line);padding:8px 10px}.osf-tab td{display:block;border:0;padding:2px 0}.osf-tab td[data-l]::before{content:attr(data-l)": ";color:var(--muted);font-size:12px}}'+
+  '.osf-et{width:100%}.osf-et td{padding:6px}.osf-et tr.cur td{background:var(--accent-soft,rgba(31,79,216,.08))}.osf-al{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}'+
+  '.osf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:6px 18px;margin:0 0 10px}.osf-grid div span{display:block;color:var(--muted);font-size:12px}'+
+  '.osf-ed table{width:100%}.osf-ed input,.osf-ed select{min-width:0}.osf-sig{max-width:100%;border:1px solid var(--line);border-radius:6px;background:#fff}'+
+  '@media (max-width:760px){.osf-ed thead{display:none}.osf-ed tr{display:grid;grid-template-columns:1fr 1fr;gap:4px;border-bottom:1px solid var(--line);padding:6px 0}.osf-ed td{border:0;padding:0}.osf-ed td.wide{grid-column:1/-1}}';
+  document.head.appendChild(st);}catch(e){}}
+V.osf=()=>{osfEstilo();try{osfAutoMat();}catch(e){}const f=ui.osf,w=mayW('fab'),ls=osfFiltra(S.osf,f).sort(osfOrd),k=osfIndicadores(S.osf);
+  const acts=(mayW('cfg')?'<button class="btn" data-act="osfCfg">Configurações</button>':'')+'<button class="btn" data-act="nav" data-mod="obras" data-tab="osfp">Painel de produção</button>'+(w?'<button class="btn pri" data-act="osfNovo">Nova OS</button>':'');
+  return pageHead('Ordens de fabricação','Ordens de serviço da fábrica de Tuiuti: peças, acabamento, materiais, aprovação, etapas de produção, PDF no padrão da OS e envio à fábrica por e-mail.',acts)+
+  '<div class="stack"><div class="kpis">'+kpi('OS abertas',String(k.abertas),'não entregues')+kpi('Aguardando aprovação',String(k.aprov),'só saem com aprovação',k.aprov?'warn':'')+kpi('Em atraso',String(k.atraso),'necessidade passou',k.atraso?'neg':'')+kpi('Entregas em 7 dias',String(k.prox7),'pela data de necessidade')+kpi('Na galvanização',String(k.galv),'há mais de '+osfCfg().galvDias+' dias',k.galv?'neg':'')+'</div>'+
+  '<div class="bar"><label class="f grow"><span>Buscar</span><input data-filter="osf.q" value="'+esc(f.q)+'" placeholder="Número, objeto, projeto, cliente ou solicitante"></label>'+
+  '<label class="f"><span>Projeto</span><select data-filter="osf.proj">'+opt(osfProjOpts(),f.proj,'Todos')+'</select></label>'+
+  '<label class="f"><span>Etapa</span><select data-filter="osf.et">'+opt(OSF_ET.map(e=>[e[0],e[1]]),f.et,'Todas')+'</select></label>'+
+  '<label class="f"><span>Situação</span><select data-filter="osf.sit">'+opt([['abertas','Abertas'],['entregues','Entregues'],['canceladas','Canceladas'],['todas','Todas']],f.sit)+'</select></label></div>'+
+  '<div class="tw"><table class="osf-tab"><thead><tr><th>Nº</th><th>Projeto e cliente</th><th>Objeto</th><th>Necessidade</th><th>Etapa</th><th></th></tr></thead><tbody>'+
+  (ls.length?ls.map(r=>{const al=osfAlertas(r).filter(a=>a[0]==='neg'),d=osfDiasEtapa(r);
+    return '<tr><td data-l="Nº"><b class="mono">'+esc(r.numero||'')+'</b><div class="sub">emissão '+fmtDate(r.emissao)+'</div></td><td data-l="Projeto">'+esc(osfProjTxt(r))+(r.cliNome?'<div class="sub">'+esc(r.cliNome)+'</div>':'')+'</td>'+
+      '<td data-l="Objeto">'+esc(String(r.objeto||'').slice(0,140))+((r.objeto||'').length>140?'…':'')+'<div class="sub">'+fmtQ(osfTotPecas(r))+' peça(s) · '+fmtQ(osfTotPeso(r))+' kg'+(r.galv?' · galvanizado':'')+(r.pint?' · pintura '+esc(r.cor||''):'')+'</div></td>'+
+      '<td data-l="Necessidade" class="mono">'+fmtDate(r.necessidade)+(osfAtrasada(r)?' '+pill('atrasada','neg'):'')+'</td>'+
+      '<td data-l="Etapa">'+osfEtPill(r)+(d!=null&&osfAberta(r)?'<div class="sub">há '+d+' dia(s)</div>':'')+al.slice(0,2).map(a=>'<div class="sub neg">'+esc(a[1])+'</div>').join('')+'</td>'+
+      '<td class="act"><button class="btn sm pri" data-act="osfAbrir" data-id="'+esc(r.id)+'">Abrir</button>'+(w&&osfAberta(r)&&!(r.etapa==='aprov')?'<button class="btn sm" data-act="osfAvancarBt" data-id="'+esc(r.id)+'">Avançar</button>':'')+(r.etapa==='aprov'&&!r.aprov&&!r.cancelada&&osfPodeAprovar(r)?'<button class="btn sm" data-act="osfAprovar" data-id="'+esc(r.id)+'">Aprovar</button>':'')+'<button class="btn sm" data-act="osfPdf" data-id="'+esc(r.id)+'">PDF</button></td></tr>';}).join(''):emptyRow(6,'Nenhuma OS neste filtro.'+(w?' Use "Nova OS".':'')))+'</tbody></table></div>'+
+  '<p class="sub" style="margin:0">Número = P + código do projeto sem o P + sequência geral da fábrica (única para todas as OS). A OS só sai de "Aguardando aprovação" depois de aprovada no sistema. Galvanização e pintura seguem o acabamento escolhido.</p></div>';};
+
+/* ---------- formulário (criar e editar enquanto aguarda aprovação) ---------- */
+let osfEd=null;
+const osfItRow=(it,i)=>'<tr data-i="'+i+'"><td class="wide"><input data-osfi="itens|'+i+'|peca" value="'+esc(it.peca||'')+'" placeholder="Peça" aria-label="Peça"></td><td><input type="number" step="any" inputmode="decimal" data-osfi="itens|'+i+'|qtd" value="'+esc(it.qtd==null?'':it.qtd)+'" aria-label="Quantidade"></td><td><input data-osfi="itens|'+i+'|medida" value="'+esc(it.medida||'')+'" placeholder="ex.: 2.000 mm" aria-label="Medida"></td><td><input data-osfi="itens|'+i+'|material" value="'+esc(it.material||'')+'" aria-label="Material"></td><td><input type="number" step="any" inputmode="decimal" data-osfi="itens|'+i+'|peso" value="'+esc(it.peso==null?'':it.peso)+'" aria-label="Peso estimado por peça (kg)"></td><td><button class="btn sm dng" data-act="osfEdDel" data-k="itens" data-i="'+i+'" aria-label="Remover peça">×</button></td></tr>';
+const osfMtRow=(m,i)=>'<tr data-i="'+i+'"><td class="wide"><input data-osfi="mats|'+i+'|desc" value="'+esc(m.desc||'')+'" list="osfProdDl" placeholder="Material" aria-label="Material"'+(m.scId?' disabled':'')+'></td><td><input data-osfi="mats|'+i+'|un" value="'+esc(m.un||'UN')+'" aria-label="Unidade"'+(m.scId?' disabled':'')+'></td><td><input type="number" step="any" inputmode="decimal" data-osfi="mats|'+i+'|qtd" value="'+esc(m.qtd==null?'':m.qtd)+'" aria-label="Quantidade"'+(m.scId?' disabled':'')+'></td><td>'+(m.scId?'<span class="sub">na solicitação '+esc((get('sc',m.scId)||{}).numero||'')+'</span>':'<button class="btn sm dng" data-act="osfEdDel" data-k="mats" data-i="'+i+'" aria-label="Remover material">×</button>')+'</td></tr>';
+function osfEdTot(){const el=$('#osfTot');if(el&&osfEd)el.textContent='Total: '+fmtQ(osfTotPecas(osfEd))+' peça(s) · '+fmtQ(osfTotPeso(osfEd))+' kg estimados';
+  const nu=$('#osfNum');if(nu&&osfEd)nu.textContent=osfEd.projId&&get('proj',osfEd.projId)?osfNumero(osfEd.projId,osfEd.seq):'escolha o projeto';}
+function osfEdRender(){const a=$('#osfItens');if(a)a.innerHTML=osfEd.itens.map(osfItRow).join('');const b=$('#osfMats');if(b)b.innerHTML=osfEd.mats.map(osfMtRow).join('');osfEdTot();}
+function osfForm(r){osfEd=r;const novo=!get('osf',r.id),ck=(k,l)=>'<label class="f chk"><input type="checkbox" data-osfe="'+k+'"'+(((r.etapas||{})[k]||{}).on!==false?' checked':'')+'><span>'+l+'</span></label>';
+  const prods='<datalist id="osfProdDl">'+S.prod.slice(0,5000).map(p=>'<option value="'+esc(p.nome||'')+'">').join('')+'</datalist>';
+  modal({title:novo?'Nova ordem de fabricação':'Editar OS '+(r.numero||''),wide:true,nofocus:!novo,
+    body:'<div class="fg">'+field('Projeto *','projId','select',r.projId,{opts:projOpts(),blank:'Escolha o projeto'})+field('Sequência da fábrica *','seq','number',r.seq,{step:1})+
+      '<label class="f"><span>Número da OS</span><b id="osfNum" class="mono" style="padding:8px 0">'+esc(r.projId?osfNumero(r.projId,r.seq):'escolha o projeto')+'</b></label>'+field('Data de emissão *','emissao','date',r.emissao)+
+      field('Objeto *','objeto','textarea',r.objeto,{full:true,rows:3})+field('Quantidade (texto como na OS impressa)','qtdTexto','textarea',r.qtdTexto||'',{full:true,rows:2,ph:'ex.: Fabricação de 14 vãos de 8.000 mm, sendo cada vão composto por 4 peças de 2.000 mm, totalizando 56 peças de 2.000 mm.'})+'</div>'+
+      '<div class="sect">Peças</div><div class="tw osf-ed" style="border:0"><table><thead><tr><th>Peça</th><th>Qtd.</th><th>Medida</th><th>Material</th><th>Peso estimado (kg por peça)</th><th></th></tr></thead><tbody id="osfItens">'+r.itens.map(osfItRow).join('')+'</tbody></table></div>'+
+      '<div class="acts" style="justify-content:space-between;margin:6px 0"><button class="btn sm" data-act="osfEdAdd" data-k="itens">Adicionar peça</button><b id="osfTot" class="sub"></b></div>'+
+      '<div class="sect">Acabamento</div><div class="fg">'+field('Galvanização (fornecedor externo)','galv','checkbox',!!r.galv)+field('Pintura','pint','checkbox',!!r.pint)+field('Cor da pintura','cor','text',r.cor||'',{ph:'ex.: amarelo segurança'})+'</div>'+
+      '<div class="sect">Entrega</div><div class="fg">'+field('Data prevista da necessidade','necessidade','date',r.necessidade||'')+field('Local de entrega','localEntrega','text',r.localEntrega||'')+field('Horário de entrega','horaEntrega','text',r.horaEntrega||'',{ph:'ex.: 08:00 às 17:48'})+field('Solicitante','solicitante','text',r.solicitante||'')+'</div>'+
+      '<div class="sect">Etapas que se aplicam</div><p class="sub" style="margin:0 0 6px">Aprovação, produção e entrega sempre valem. Galvanização e pintura seguem o acabamento.</p><div class="fg">'+ck('mat','Aguardando compra de material')+ck('insp','Inspeção de qualidade')+ck('emb','Separação e embalagem')+ck('env','Enviado (transporte)')+'</div>'+
+      '<div class="sect">Lista de materiais</div>'+prods+'<div class="tw osf-ed" style="border:0"><table><thead><tr><th>Material</th><th>Un.</th><th>Qtd.</th><th></th></tr></thead><tbody id="osfMats">'+r.mats.map(osfMtRow).join('')+'</tbody></table></div>'+
+      '<div class="acts" style="margin:6px 0"><button class="btn sm" data-act="osfEdAdd" data-k="mats">Adicionar material</button></div><p class="sub" style="margin:0 0 8px">Depois de salvar, use "Gerar solicitação de compra" na OS: o pedido segue o fluxo de Suprimentos (aprovação, cotação e pedido).</p>'+
+      '<div class="fg">'+field('Observações','obs','textarea',r.obs||'',{full:true,rows:2})+'</div>',
+    saveLabel:novo?'Criar OS':'Salvar',save:root=>osfFormSalvar(root)});
+  osfEdTot();}
+function osfFormSalvar(root){const v=readForm(root),r=cl(osfEd);
+  ['projId','emissao','objeto','qtdTexto','cor','necessidade','localEntrega','horaEntrega','solicitante','obs'].forEach(k=>{r[k]=v[k]==null?'':v[k];});
+  r.seq=v.seq==null?null:+v.seq;r.galv=!!v.galv;r.pint=!!v.pint;if(!r.pint)r.cor='';
+  r.itens=(r.itens||[]).filter(i=>String(i.peca||'').trim()||+i.qtd>0).map(i=>({peca:String(i.peca||'').trim(),qtd:+i.qtd||0,medida:String(i.medida||'').trim(),material:String(i.material||'').trim(),peso:i.peso===''||i.peso==null?null:+i.peso}));
+  r.mats=(r.mats||[]).filter(m=>String(m.desc||'').trim()&&+m.qtd>0).map(m=>{const p=S.prod.find(x=>x.nome===m.desc);return Object.assign({},m,{desc:String(m.desc).trim(),un:m.un||(p&&p.un)||'UN',qtd:+m.qtd||0,prodId:p?p.id:(m.prodId||'')});});
+  const e=osfValida(r);if(e){toast(e,'neg');return false;}
+  r.etapas=cl(r.etapas||{});$$('[data-osfe]',root).forEach(c=>{const k=c.dataset.osfe;r.etapas[k]=Object.assign({},r.etapas[k]||{},{on:!!c.checked});});
+  ['galv','pint'].forEach(k=>{r.etapas[k]=Object.assign({},r.etapas[k]||{},{on:!!r[k]});});
+  if(r.necessidade){const en=Object.assign({},r.etapas.ent||{});if(!en.prev||en._auto){en.prev=r.necessidade;en._auto=true;}r.etapas.ent=en;}
+  r.numero=osfNumero(r.projId,r.seq);osfDadosProj(r);
+  const novo=!get('osf',r.id);if(novo){r.etapa='aprov';r.etapas.aprov=Object.assign({},r.etapas.aprov||{},{on:true,ini:r.emissao||todayStr(),por:actorId()});r.avanc=[{de:'',para:'aprov',em:Date.now(),por:actorId()}];}
+  put('osf',r);toast(novo?'OS '+r.numero+' criada. Ela aguarda aprovação para seguir.':'OS salva.','pos');osfEd=null;}
+function osfInput(e){if(!osfEd)return;const t=e.target;if(!t||!t.dataset)return;
+  if(t.dataset.osfi){const [k,i,c]=t.dataset.osfi.split('|');const it=(osfEd[k]||[])[+i];if(!it)return;it[c]=t.type==='number'?(t.value===''?null:parseFloat(t.value)):t.value;
+    if(k==='mats'&&c==='desc'){const p=S.prod.find(x=>x.nome===t.value);if(p){it.prodId=p.id;if(!it.un||it.un==='UN'){it.un=p.un||'UN';const u=t.closest&&t.closest('tr')&&t.closest('tr').querySelector('[data-osfi$="|un"]');if(u)u.value=it.un;}}}
+    osfEdTot();return;}
+  if(t.dataset.f==='projId'||t.dataset.f==='seq'){osfEd[t.dataset.f]=t.dataset.f==='seq'?(t.value===''?null:+t.value):t.value;osfEdTot();}}
+if(typeof document!=='undefined'&&document.addEventListener){document.addEventListener('input',osfInput);document.addEventListener('change',osfInput);}
+A.osfEdAdd=d=>{if(!osfEd)return;const k=d.k;osfEd[k]=osfEd[k]||[];osfEd[k].push(k==='itens'?{peca:'',qtd:1,medida:'',material:'',peso:null}:{desc:'',un:'UN',qtd:1,prodId:''});osfEdRender();};
+A.osfEdDel=d=>{if(!osfEd)return;const k=d.k,l=osfEd[k]||[];if(l[+d.i]&&l[+d.i].scId)return;l.splice(+d.i,1);osfEdRender();};
+function osfNovoRec(){const h=todayStr();return {id:uid(),seq:osfProxSeq(),projId:'',emissao:h,objeto:'',qtdTexto:'',itens:[{peca:'',qtd:1,medida:'',material:'',peso:null}],galv:false,pint:false,cor:'',mats:[],scIds:[],necessidade:addDays(h,10),localEntrega:'',horaEntrega:'',solicitante:me.nome||nameOf(actorId())||'',obs:'',etapa:'aprov',etapas:{mat:{on:true},insp:{on:true},emb:{on:true},env:{on:true}},anexos:[]};}
+A.osfNovo=()=>{if(!mayW('fab')){toast('Seu perfil não cria ordens de fabricação.','neg');return;}osfForm(osfNovoRec());};
+A.osfEditar=d=>{const r=get('osf',d.id);if(!r)return;if(!mayW('fab')){toast('Seu perfil não altera ordens de fabricação.','neg');return;}
+  if(r.aprov||r.etapa!=='aprov'||r.cancelada){toast('Depois de aprovada, a OS não muda peças, objeto nem acabamento. Use a OS para datas, galvanização, inspeção e observações; se a OS mudou, cancele e crie outra.','neg');return;}
+  const x=cl(r);x.itens=(x.itens||[]).slice();x.mats=(x.mats||[]).slice();x.etapas=x.etapas||{};osfForm(x);};
+
+/* ---------- detalhe da OS ---------- */
+let osfCur='';
+function osfDetHtml(r){const w=mayW('fab')&&!r.cancelada,c=osfCfg(),cu=osfCusto(r),al=osfAlertas(r),et=osfEtapasDe(r),g=r.galvD||{},ins=r.insp||{},en=r.entrega||null;
+  const dt=(k,campo)=>{const v=osfEt(r,k)[campo];return v?fmtDate(v):'—';};
+  let h=(al.length?'<div class="osf-al">'+al.map(a=>pill(a[1],a[0])).join('')+'</div>':'')+
+  '<div class="osf-grid"><div><span>Projeto</span>'+esc(osfProjTxt(r))+'</div><div><span>Cliente</span>'+esc(r.cliNome||'—')+'</div><div><span>Emissão</span>'+fmtDate(r.emissao)+'</div>'+
+  '<div><span>Necessidade</span>'+fmtDate(r.necessidade)+'</div><div><span>Local e horário de entrega</span>'+esc([r.localEntrega,r.horaEntrega].filter(Boolean).join(' · ')||'—')+'</div><div><span>Solicitante</span>'+esc(r.solicitante||'—')+'</div>'+
+  '<div><span>Aprovação</span>'+(r.aprov?'<b class="pos">'+esc(r.aprov.nome||nameOf(r.aprov.por))+'</b> · '+fmtDT(r.aprov.em):'<b class="neg">aguardando</b>')+'</div><div><span>Etapa atual</span>'+osfEtPill(r)+'</div><div><span>Acabamento</span>'+(r.galv?'galvanizado':'sem galvanização')+' · '+(r.pint?'pintura '+esc(r.cor||''):'sem pintura')+'</div></div>'+
+  '<p style="margin:0 0 6px"><b>Objeto:</b> '+esc(r.objeto||'')+'</p>'+(r.qtdTexto?'<p style="margin:0 0 6px"><b>Quantidade:</b> '+esc(r.qtdTexto)+'</p>':'');
+  h+='<div class="sect">Peças</div><div class="tw" style="border:0"><table class="osf-tab"><thead><tr><th>Peça</th><th class="num">Qtd.</th><th>Medida</th><th>Material</th><th class="num">Peso est. (kg)</th></tr></thead><tbody>'+
+    ((r.itens||[]).length?r.itens.map(i=>'<tr><td data-l="Peça">'+esc(i.peca||'')+'</td><td data-l="Qtd." class="num">'+fmtQ(i.qtd)+'</td><td data-l="Medida">'+esc(i.medida||'')+'</td><td data-l="Material">'+esc(i.material||'')+'</td><td data-l="Peso" class="num">'+(i.peso==null?'—':fmtQ((+i.qtd||0)*(+i.peso||0)))+'</td></tr>').join(''):emptyRow(5,'Sem peças detalhadas.'))+
+    '</tbody></table></div><p class="sub" style="margin:4px 0 0">Total: '+fmtQ(osfTotPecas(r))+' peça(s) · '+fmtQ(osfTotPeso(r))+' kg estimados</p>';
+  h+='<div class="sect">Etapas</div><div class="tw" style="border:0"><table class="osf-et osf-tab"><thead><tr><th>Etapa</th><th>Prevista</th><th>Início</th><th>Conclusão</th><th>Quem avançou</th></tr></thead><tbody>'+
+    et.map(k=>{const e=osfEt(r,k);return '<tr'+(k===r.etapa&&!r.cancelada?' class="cur"':'')+'><td data-l="Etapa"><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+OSF_COR[k]+';margin-right:6px"></i>'+esc(osfEtNome(k))+'</td>'+
+      '<td data-l="Prevista">'+(w&&k!=='aprov'?'<input type="date" data-f="prev_'+k+'" value="'+esc(e.prev||'')+'" aria-label="Data prevista: '+esc(osfEtNome(k))+'" style="max-width:160px">':dt(k,'prev'))+'</td><td data-l="Início" class="mono">'+dt(k,'ini')+'</td><td data-l="Conclusão" class="mono">'+dt(k,'fim')+'</td><td data-l="Quem">'+(e.por?esc(nameOf(e.por)):'—')+'</td></tr>';}).join('')+'</tbody></table></div>';
+  if(r.galv)h+='<div class="sect">Galvanização (fornecedor externo)</div><div class="fg">'+[['g_forn','Galvanizador','text',g.forn],['g_nfRem','Nº da NF de remessa','text',g.nfRem],['g_dataEnv','Data de envio','date',g.dataEnv||osfEt(r,'galv').ini||''],['g_pesoEnv','Peso enviado (kg)','number',g.pesoEnv],['g_nfRet','Nº da NF de retorno','text',g.nfRet],['g_dataRet','Data de retorno','date',g.dataRet],['g_pesoCob','Peso cobrado (kg)','number',g.pesoCob],['g_valor','Valor da galvanização (R$)','number',g.valor]].map(x=>field(x[1],x[0],x[2],x[3]==null?'':x[3],{dis:!w})).join('')+'</div>'+
+    '<p class="sub" style="margin:4px 0 0">Alerta quando a OS fica na galvanização mais de '+c.galvDias+' dias sem retorno e quando o peso cobrado difere do enviado em mais de '+String(c.pesoTol).replace('.',',')+'%.'+(osfPesoDif(r)?' Diferença atual: '+fmtQ(osfPesoDif(r).dif)+' kg ('+String(osfPesoDif(r).pct).replace('.',',')+'%).':'')+'</p>';
+  if(osfAplica(r,'insp'))h+='<div class="sect">Inspeção de qualidade</div><div class="fg">'+field('Medidas conferidas','i_med','checkbox',!!ins.med,{dis:!w})+field('Acabamento conferido','i_acab','checkbox',!!ins.acab,{dis:!w})+field('Quantidade conferida','i_qtd','checkbox',!!ins.qtd,{dis:!w})+field('Responsável pela inspeção','i_resp','text',ins.resp||'',{dis:!w})+field('Data','i_data','date',ins.data||'',{dis:!w})+field('Observações da inspeção','i_obs','text',ins.obs||'',{dis:!w,full:true})+'</div>';
+  if(en)h+='<div class="sect">Entrega</div><p style="margin:0 0 6px">Recebido por <b>'+esc(en.quem||'')+'</b> em '+fmtDate(en.data)+(en.assin&&en.assin.em?' · assinado na tela em '+fmtDT(en.assin.em):'')+'</p>'+(en.assin&&safeImg(en.assin.img)?'<img class="osf-sig" src="'+en.assin.img+'" alt="Assinatura de quem recebeu" width="280">':'');
+  /* materiais */
+  const scs=osfScs(r),pend=osfMatPend(r);
+  h+='<div class="sect">Lista de materiais</div>'+((r.mats||[]).length?'<div class="tw" style="border:0"><table class="osf-tab"><thead><tr><th>Material</th><th>Un.</th><th class="num">Qtd.</th><th>Solicitação</th></tr></thead><tbody>'+r.mats.map(m=>{const s=m.scId?get('sc',m.scId):null;return '<tr><td data-l="Material">'+esc(m.desc)+'</td><td data-l="Un.">'+esc(m.un||'')+'</td><td data-l="Qtd." class="num">'+fmtQ(m.qtd)+'</td><td data-l="Solicitação">'+(s?'nº '+esc(s.numero)+' '+pill((typeof SC_ST!=='undefined'&&SC_ST[s.status]?SC_ST[s.status][0]:s.status),(typeof SC_ST!=='undefined'&&SC_ST[s.status]?SC_ST[s.status][1]:'')):'<span class="sub">ainda não pedida</span>')+'</td></tr>';}).join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Sem lista de materiais.</p>')+
+    (w&&pend.length?'<div class="acts" style="margin:6px 0"><button class="btn" data-act="osfSc" data-id="'+esc(r.id)+'">Gerar solicitação de compra ('+pend.length+' item(ns))</button></div>':'')+
+    (scs.length?'<p class="sub" style="margin:4px 0 0">'+(osfMatOk(r)?'Todas as solicitações ligadas foram atendidas.':'A etapa "Aguardando material" avança sozinha quando todas as solicitações ligadas ficarem "Atendida" (pedidos recebidos).')+'</p>':'');
+  /* custo */
+  h+='<div class="sect">Custo da OS</div><div class="osf-grid"><div><span>Material (pedidos de compra ligados)</span>'+(cu.leNf?money(cu.mat)+' <span class="sub">('+cu.peds+' pedido(s))</span>':'<span class="sub">sem acesso aos pedidos</span>')+'</div><div><span>Galvanização (valor informado)</span>'+money(cu.galv)+'</div><div><span>Horas de produção</span>'+(w?'<span style="display:flex;gap:6px"><input type="number" step="any" data-f="horas" value="'+esc(r.horas==null?'':r.horas)+'" aria-label="Horas" style="max-width:90px" placeholder="horas"><input type="number" step="any" data-f="valorHora" value="'+esc(r.valorHora==null?(c.valorHora||''):r.valorHora)+'" aria-label="Valor da hora (R$)" style="max-width:110px" placeholder="R$/hora"></span>':(+r.horas||0)+' h × '+money(+r.valorHora||0))+'</div><div><span>Total</span><b>'+money(cu.tot)+'</b></div></div>'+
+    '<p class="sub" style="margin:0">O material e a galvanização já entram no custo da obra pelos pedidos e contas a pagar ligados ao projeto; este total é só da OS (não é somado de novo ao projeto).</p>';
+  /* anexos */
+  const ax=r.anexos||[];
+  h+='<div class="sect">Anexos (croqui, desenhos)</div>'+(ax.length?'<div class="tw" style="border:0"><table class="osf-tab"><tbody>'+ax.map((a,i)=>'<tr><td data-l="Arquivo">'+esc(a.nome)+'<div class="sub">'+fmtBytes(a.tam)+' · '+esc(nameOf(a.por))+' · '+fmtDT(a.em)+'</div></td><td class="act"><a class="btn sm" href="'+esc(anxUrl(a))+'" target="_blank" rel="noopener">Abrir</a>'+(w?'<button class="btn sm dng" data-act="osfAnxDel" data-id="'+esc(r.id)+'" data-i="'+i+'">Remover</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Nenhum anexo.</p>')+
+    (w?'<div class="acts" style="margin:6px 0"><button class="btn" data-act="osfAnxEscolher" data-id="'+esc(r.id)+'">Anexar PDF ou imagem</button></div><input type="file" id="osfFile" accept="application/pdf,image/png,image/jpeg" hidden>':'')+
+    '<p class="sub" style="margin:0">Os anexos em PDF entram no PDF da OS, depois da página da OS, na ordem acima.</p>';
+  if((r.emails||[]).length)h+='<div class="sect">Enviada por e-mail</div><ul style="margin:0;padding-left:18px">'+r.emails.slice(-10).reverse().map(m=>'<li>'+fmtDT(m.em)+' por '+esc(nameOf(m.por))+' para '+esc(m.para)+(m.cc&&m.cc.length?' (cópia: '+esc([].concat(m.cc).join(', '))+')':'')+'</li>').join('')+'</ul>';
+  h+='<div class="sect">Observações</div>'+(w?field('Observações','obs','textarea',r.obs||'',{full:true,rows:2}):'<p style="margin:0">'+esc(r.obs||'—')+'</p>');
+  if((r.avanc||[]).length)h+='<div class="sect">Histórico</div><ul style="margin:0;padding-left:18px">'+r.avanc.slice(-12).reverse().map(a=>'<li>'+fmtDT(a.em)+' · '+(a.volta?'voltou para':a.de?'avançou para':'criada em')+' "'+esc(osfEtCurto(a.para))+'"'+(a.auto?' (automático: material atendido)':'')+' · '+esc(a.por==='servidor'?'servidor':nameOf(a.por))+(a.motivo?' · motivo: '+esc(a.motivo):'')+'</li>').join('')+'</ul>';
+  if(r.cancelada)h+='<div class="note" style="margin-top:10px">Cancelada em '+fmtDT(r.cancelada.em)+' por '+esc(nameOf(r.cancelada.por))+(r.cancelada.motivo?': '+esc(r.cancelada.motivo):'')+'</div>';
+  return h;}
+function osfAbrir(id){const r=get('osf',id);if(!r)return;osfCur=id;osfEstilo();const w=mayW('fab')&&!r.cancelada,nx=osfAberta(r)?osfProx(r):null,b=(a,l,c)=>'<button class="btn'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+esc(r.id)+'">'+l+'</button>';
+  modal({title:'OS '+(r.numero||'')+(r.cancelada?' (cancelada)':''),wide:true,nofocus:true,body:osfDetHtml(r),
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(r.etapa==='aprov'&&!r.aprov&&!r.cancelada&&osfPodeAprovar(r)?b('osfAprovar','Aprovar','pri'):'')+
+      (w&&r.etapa==='aprov'&&!r.aprov?b('osfEditar','Editar'):'')+(w&&osfAberta(r)&&r.etapa!=='aprov'&&osfAnt(r)&&osfAnt(r)!=='aprov'?b('osfVoltarBt','Voltar etapa'):'')+(w&&osfAberta(r)?b('osfCancelar','Cancelar OS','dng'):'')+
+      b('osfPdf','Gerar PDF da OS')+(w?b('osfEmail','Enviar por e-mail'):'')+(w&&nx&&r.etapa!=='aprov'?b('osfAvancarBt','Avançar para '+osfEtCurto(nx)):'')+(w?'<button class="btn pri" data-act="modalSave">Salvar</button>':''),
+    save:w?root=>osfDetSalvar(r.id,root):null});}
+function osfDetSalvar(id,root,quieto){const r=get('osf',id);if(!r)return;const v=readForm(root),n=cl(r);n.etapas=cl(r.etapas||{});
+  OSF_ORD.forEach(k=>{if(('prev_'+k) in v){const e=Object.assign({},n.etapas[k]||{});e.prev=v['prev_'+k]||'';if(k==='ent')delete e._auto;n.etapas[k]=e;}});
+  if(r.galv&&('g_forn' in v)){const g=Object.assign({},r.galvD||{});['forn','nfRem','dataEnv','nfRet','dataRet'].forEach(k=>{g[k]=v['g_'+k]||'';});['pesoEnv','pesoCob','valor'].forEach(k=>{g[k]=v['g_'+k]==null?null:+v['g_'+k];});
+    if(g.dataRet&&g.dataEnv&&g.dataRet<g.dataEnv){toast('A data de retorno da galvanização é antes do envio.','neg');return false;}n.galvD=g;}
+  if('i_resp' in v){n.insp={med:!!v.i_med,acab:!!v.i_acab,qtd:!!v.i_qtd,resp:v.i_resp||'',data:v.i_data||'',obs:v.i_obs||''};}
+  if('horas' in v){n.horas=v.horas;n.valorHora=v.valorHora;}
+  if('obs' in v)n.obs=v.obs||'';
+  put('osf',n);if(!quieto)toast('OS salva.','pos');return true;}
+A.osfAbrir=d=>osfAbrir(d.id);
+/* avançar pela tela: Entregue pede quem recebeu e a assinatura */
+function osfAvancarUI(r,para){if(!r)return;if(!mayW('fab')){toast('Seu perfil não avança etapas da OS.','neg');return;}
+  const nx=osfProx(r);if(para&&para!==nx){toast(nx?'A próxima etapa desta OS é "'+osfEtNome(nx)+'". Avance uma etapa por vez.':'Não há próxima etapa.','neg');return;}
+  if(nx==='ent'){A.osfEntregar({id:r.id});return;}
+  const x=osfAvancar(r);if(x.erro){toast(x.erro,'neg');return;}put('osf',x.rec);toast('OS '+r.numero+' em "'+osfEtNome(x.para)+'".','pos');if(osfCur===r.id&&!$('#ov').hidden&&$('#mt')&&/^OS /.test($('#mt').textContent))osfAbrir(r.id);}
+/* com a OS aberta, o que foi preenchido (ex.: retorno da galvanização, checklist da inspeção) é salvo antes de avançar */
+const osfModalAberto=id=>{try{return osfCur===id&&!$('#ov').hidden&&!!$('#mb [data-f]')&&/^OS /.test($('#mt').textContent||'');}catch(e){return false;}};
+A.osfAvancarBt=d=>{if(osfModalAberto(d.id)&&mayW('fab')){if(osfDetSalvar(d.id,$('#mb'),true)===false)return;}osfAvancarUI(get('osf',d.id));};
+A.osfVoltarBt=d=>{const r=get('osf',d.id);if(!r)return;const ant=osfAnt(r);modal({title:'Voltar a OS '+r.numero+' para "'+osfEtCurto(ant)+'"',body:field('Motivo','motivo','textarea','',{full:true,rows:2}),saveLabel:'Voltar etapa',save:root=>{const v=readForm(root),x=osfVoltar(get('osf',r.id),v.motivo);if(x.erro){toast(x.erro,'neg');return false;}put('osf',x.rec);toast('Etapa voltou para "'+osfEtNome(x.para)+'".');}});};
+A.osfEntregar=d=>{const r=get('osf',d.id);if(!r)return;const x0=osfAvancar(r,{entrega:{quem:'x',data:todayStr()}});if(x0.erro){toast(x0.erro,'neg');return;}
+  modal({title:'Entrega da OS '+r.numero,body:'<div class="fg">'+field('Quem recebeu *','quem','text','')+field('Data *','data','date',todayStr())+'</div><p style="margin:10px 0 6px">Assinatura de quem recebeu (com o dedo no celular ou com o mouse):</p><canvas id="sigPad" width="560" height="180" style="width:100%;max-width:560px;height:180px;border:1px dashed var(--line);border-radius:8px;touch-action:none;background:#fff"></canvas><div class="acts" style="margin:6px 0 0"><button class="btn sm" data-act="sigLimpar">Limpar assinatura</button></div>',
+    saveLabel:'Registrar entrega',save:root=>{const v=readForm(root),cv=$('#sigPad');const sig=cv&&cv.dataset&&cv.dataset.dirty==='1'&&cv.toDataURL?cv.toDataURL('image/png'):'';
+      if(!v.quem||!v.data){toast('Informe quem recebeu e a data.','neg');return false;}if(!sig){toast('Peça a quem recebeu para assinar no quadro.','neg');return false;}
+      const x=osfAvancar(get('osf',r.id),{entrega:{quem:v.quem,data:v.data,assin:{img:sig,em:Date.now(),por:actorId()}}});if(x.erro){toast(x.erro,'neg');return false;}put('osf',x.rec);toast('Entrega registrada.','pos');}});
+  if(typeof sigInit==='function')sigInit();};
+A.osfCancelar=d=>{const r=get('osf',d.id);if(!r)return;modal({title:'Cancelar a OS '+r.numero,body:'<p style="margin:0 0 8px">A OS fica no histórico como cancelada e a sequência '+osfSeq(r)+' não é reaproveitada.</p>'+field('Motivo','motivo','textarea','',{full:true,rows:2}),saveLabel:'Cancelar OS',save:root=>{const v=readForm(root);if(!v.motivo){toast('Informe o motivo.','neg');return false;}put('osf',Object.assign(cl(get('osf',r.id)),{cancelada:{em:Date.now(),por:actorId(),motivo:v.motivo}}));toast('OS cancelada.');}});};
+/* aprovação: no servidor próprio, pela rota (o servidor confere quem aprova e carimba); na página publicada, direto */
+function osfAprovarLocal(r){const n=cl(r);n.aprov={por:actorId(),nome:nameOf(actorId()),em:Date.now()};if(n.etapa==='aprov'){const x=osfAvancar(n);if(x.rec)return x.rec;}return n;}
+A.osfAprovar=d=>{const r=get('osf',d.id);if(!r||r.aprov||r.cancelada)return;if(!osfPodeAprovar(r)){toast(r.crBy===actorId()&&!osfCfg().autorAprova?'Quem criou a OS não aprova a própria. Outra pessoa com permissão de aprovação precisa aprovar.':'Seu perfil não aprova ordens de fabricação (diretoria, aprovadores da OS ou gestor de obras).','neg');return;}
+  confirmBox('Aprovar a OS <b>'+esc(r.numero)+'</b> ('+esc(String(r.objeto||'').slice(0,160))+')? Ela segue para "'+esc(osfEtNome(osfProx(r,'aprov')))+'". A aprovação fica registrada com o seu nome, data e hora.',()=>{
+    if(osfSrv()){segaPost('/api/osf/aprovar',{id:r.id}).then(j=>{if(j&&j.data)segaLocal('osf',Object.assign({},j.data,{id:r.id}));toast('OS aprovada.','pos');},e=>toast('A aprovação não foi gravada: '+e.message,'neg'));return;}
+    put('osf',osfAprovarLocal(r));toast('OS aprovada.','pos');},'Aprovar');};
+A.osfSc=d=>{const r=get('osf',d.id);if(!r)return;const pend=osfMatPend(r);if(!pend.length){toast('Nada a pedir: os materiais já estão numa solicitação.','neg');return;}
+  confirmBox('Gerar a solicitação de compra com '+pend.length+' material(is) da OS '+esc(r.numero)+'? Ela entra em Suprimentos aguardando aprovação de material e segue para cotação e pedido.',()=>{const x=osfGerarSc(get('osf',r.id));if(x.erro){toast(x.erro,'neg');return;}toast('Solicitação de compra nº '+x.sc.numero+' criada.','pos');},'Gerar solicitação');};
+/* anexos: mesmo armazenamento de arquivos dos outros registros (o servidor libera o arquivo para quem lê a OS) */
+let osfAnxId='';
+A.osfAnxEscolher=d=>{if(!mayW('fab')){toast('Seu perfil não anexa arquivos à OS.','neg');return;}osfAnxId=d.id;const f=$('#osfFile');if(f&&f.click)f.click();};
+async function osfAnxUpload(f){const as=await getAssets();if(!as){toast('Anexar arquivos só funciona na página publicada ou no sistema instalado, para quem pode gravar.','neg');return;}
+  const ct=f.type||(/\.pdf$/i.test(f.name)?'application/pdf':'');if(!/^(application\/pdf|image\/(png|jpeg))$/.test(ct)){toast('Use PDF, PNG ou JPG.','neg');return;}
+  try{const up=await as.upload(f,{type:ct});const r=get('osf',osfAnxId);if(!r)return;put('osf',Object.assign(cl(r),{anexos:(r.anexos||[]).concat([{id:up.id,nome:String(f.name).slice(0,120),tam:up.sizeBytes||f.size,ct:up.contentType||ct,por:actorId(),em:Date.now()}])}));toast('Arquivo anexado.','pos');osfAbrir(r.id);}catch(e){toast(typeof anxErr==='function'?anxErr(e):'Não foi possível anexar.','neg');}}
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('change',e=>{const t=e.target;if(!t||t.id!=='osfFile')return;const f=t.files&&t.files[0];t.value='';if(f&&osfAnxId)osfAnxUpload(f);});
+A.osfAnxDel=d=>{const r=get('osf',d.id);if(!r)return;const a=(r.anexos||[])[+d.i];if(!a)return;confirmBox('Remover o anexo "'+esc(a.nome)+'" da OS?',async()=>{put('osf',Object.assign(cl(get('osf',r.id)),{anexos:(r.anexos||[]).filter((x,i)=>i!==+d.i)}));try{const as=await getAssets();if(as)await as.delete(a.id);}catch(e){}toast('Anexo removido.');osfAbrir(r.id);},'Remover',true);};
+Object.assign(ACT_GROUP,{osfNovo:'fab',osfEditar:'fab',osfEdAdd:null,osfEdDel:null,osfAbrir:null,osfAvancarBt:'fab',osfVoltarBt:'fab',osfEntregar:'fab',osfCancelar:'fab',osfAprovar:null,osfSc:'fab',osfAnxEscolher:'fab',osfAnxDel:'fab',osfCfg:'cfg',osfCfgSalvar:'cfg'});
+
+/* ---------- configurações (Sistema › Configurações e botão na tela) ---------- */
+function osfCfgCard(){const c=osfCfg(),us=typeof usrOpts==='function'?usrOpts():[];
+  return '<div class="card" id="osfCfgCard"><h2>Fábrica (ordens de fabricação)</h2><div class="fg">'+field('E-mail da fábrica (destino do PDF da OS)','osfEmail','email',c.email)+field('Alerta de galvanização sem retorno (dias)','osfGalvDias','number',c.galvDias,{step:1})+field('Tolerância de diferença de peso na galvanização (%)','osfPesoTol','number',c.pesoTol)+field('Valor padrão da hora de produção (R$)','osfValorHora','number',c.valorHora||'')+field('Quem criou a OS também pode aprová-la','osfAutor','checkbox',c.autorAprova)+'</div>'+
+    '<p class="sub" style="margin:10px 0 4px">Aprovadores da OS (além do dono e da diretoria). Sem ninguém marcado, aprovam o Gestor de projetos e o Administrador. O Encarregado da fábrica não aprova.</p><div style="display:flex;flex-wrap:wrap;gap:6px 16px">'+(us.length?us.map(u=>'<label class="f chk" style="min-width:0"><input type="checkbox" data-osfaprov="'+esc(u[0])+'"'+(c.aprov.includes(u[0])?' checked':'')+'><span>'+esc(u[1])+'</span></label>').join(''):'<span class="sub">Sem usuários cadastrados.</span>')+'</div>'+
+    '<div class="acts" style="justify-content:flex-start;margin-top:10px"><button class="btn" data-act="osfCfgSalvar">Salvar configurações da fábrica</button></div></div>';}
+A.osfCfgSalvar=()=>{if(!mayW('cfg')){toast('Só quem altera as configurações.','neg');return;}const val=id=>{const e=$('#f_'+id);return e?e.value:'';},chk=id=>{const e=$('#f_'+id);return !!(e&&e.checked);};
+  const em=String(val('osfEmail')).trim();if(em&&!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(em)){toast('E-mail da fábrica inválido.','neg');return;}
+  const aprov=$$('[data-osfaprov]').filter(x=>x.checked).map(x=>x.dataset.osfaprov);
+  const o={email:em||OSF_EMAIL_PAD,galvDias:Math.max(1,Math.round(+val('osfGalvDias')||15)),pesoTol:Math.max(0,+String(val('osfPesoTol')).replace(',','.')||0),valorHora:Math.max(0,+String(val('osfValorHora')).replace(',','.')||0),autorAprova:chk('osfAutor'),aprov};
+  put('cfg',Object.assign(cl(cfg()),{id:'empresa',osf:o}));toast('Configurações da fábrica salvas.','pos');};
+A.osfCfg=()=>{modal({title:'Configurações da fábrica',wide:true,nofocus:true,body:osfCfgCard(),foot:'<button class="btn pri" data-act="closeModal">Fechar</button>'});};
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!mayW('cfg'))return h;const card=osfCfgCard(),i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+card+h.slice(i):h+card;};}
+
+/* ---------- dados de exemplo: a OS do modelo (P412-95) e uma aguardando aprovação ---------- */
+function sampleOsf(){if(S.osf.some(r=>r.ex))return;const ps=S.proj.filter(p=>p.ex);const p1=S.proj.find(p=>/^P[\s\-]*412$/i.test(String(p.codigo||'').trim()))||ps[0];if(!p1)return;const p2=ps.find(p=>p.id!==p1.id)||p1,h=todayStr();
+  const base=(o)=>osfDadosProj(Object.assign({id:uid(),ex:true,anexos:[],scIds:[],mats:[],avanc:[]},o));
+  const ap={por:'exemplo',nome:'Walison',em:Date.parse('2026-09-14T10:30:00-03:00')};
+  const r1=base({seq:95,projId:p1.id,emissao:'2026-09-14',objeto:'Fabricação de guarda-corpo, em tubo de aço carbono Ø 50,8 mm, galvanizado a fogo, com parte intermediária executada em tubo de aço carbono Ø 25,4 mm. O conjunto deverá possuir base fabricada conforme especificações, com acabamento em pintura na cor amarelo segurança, conforme croqui enviado em anexo.',
+    qtdTexto:'Fabricação de 14 vãos de 8.000 mm, sendo cada vão composto por 4 peças de 2.000 mm, totalizando 56 peças de 2.000 mm.',
+    itens:[{peca:'Guarda-corpo (peça de 2.000 mm)',qtd:56,medida:'2.000 mm',material:'Tubo aço carbono Ø 50,8 mm e Ø 25,4 mm',peso:14.5}],galv:true,pint:true,cor:'Amarelo segurança',
+    mats:[{desc:'Tubo de aço carbono Ø 50,8 mm (barra 6 m)',un:'BR',qtd:40,prodId:''},{desc:'Tubo de aço carbono Ø 25,4 mm (barra 6 m)',un:'BR',qtd:30,prodId:''},{desc:'Tinta esmalte amarelo segurança 3,6 L',un:'GL',qtd:6,prodId:''}],
+    necessidade:'2026-09-24',localEntrega:'Escritório INA',horaEntrega:'08:00 às 17:48',solicitante:'Luigi',aprov:ap,etapa:'galv',
+    etapas:{aprov:{on:true,ini:'2026-09-14',fim:'2026-09-14'},mat:{on:true,ini:'2026-09-14',fim:'2026-09-16',prev:'2026-09-16'},prod:{on:true,ini:'2026-09-16',fim:'2026-09-19',prev:'2026-09-19'},galv:{on:true,ini:'2026-09-19',prev:'2026-09-21'},pint:{on:true,prev:'2026-09-22'},insp:{on:true,prev:'2026-09-23'},emb:{on:true,prev:'2026-09-23'},env:{on:true,prev:'2026-09-24'},ent:{on:true,prev:'2026-09-24'}},
+    galvD:{forn:'Galvanizadora (exemplo)',nfRem:'1520',dataEnv:'2026-09-19',pesoEnv:812},
+    avanc:[{de:'',para:'aprov',em:Date.parse('2026-09-14T09:00:00-03:00'),por:'exemplo'},{de:'aprov',para:'mat',em:ap.em,por:'exemplo'},{de:'mat',para:'prod',em:Date.parse('2026-09-16T08:00:00-03:00'),por:'exemplo'},{de:'prod',para:'galv',em:Date.parse('2026-09-19T15:00:00-03:00'),por:'exemplo'}],obs:'OS de exemplo igual ao modelo enviado pelo cliente.'});
+  const r2=base({seq:96,projId:p2.id,emissao:h,objeto:'Fabricação de suportes metálicos para condensadoras, em cantoneira de aço carbono, com furação para fixação e pintura na cor cinza.',qtdTexto:'Fabricação de 12 suportes de 900 mm.',
+    itens:[{peca:'Suporte de condensadora',qtd:12,medida:'900 mm',material:'Cantoneira 2" x 3/16"',peso:6.2}],galv:false,pint:true,cor:'Cinza',mats:[{desc:'Cantoneira de aço 2" x 3/16" (barra 6 m)',un:'BR',qtd:8,prodId:''}],
+    necessidade:addDays(h,12),localEntrega:'Obra '+(p2.nome||''),horaEntrega:'07:00 às 16:00',solicitante:'Luigi',etapa:'aprov',
+    etapas:{aprov:{on:true,ini:h},mat:{on:true},prod:{on:true,prev:addDays(h,6)},galv:{on:false},pint:{on:true,prev:addDays(h,8)},insp:{on:true},emb:{on:true},env:{on:true,prev:addDays(h,11)},ent:{on:true,prev:addDays(h,12)}},avanc:[{de:'',para:'aprov',em:Date.now(),por:'exemplo'}]});
+  [r1,r2].forEach(r=>{r.numero=osfNumero(r.projId,r.seq);put('osf',r);});}
+loadSample=(f=>function(){const r=f.apply(this,arguments);try{sampleOsf();}catch(e){}return r;})(loadSample);
+/* A.removeSample é definido depois dos módulos: o embrulho é aplicado quando ele for atribuído */
+{const emb=r0=>typeof r0!=='function'?r0:function(){const cb=confirmBox;confirmBox=function(msg,fn,l,p){confirmBox=cb;return cb(msg,function(){S.osf.filter(r=>r.ex).forEach(r=>del('osf',r.id));return fn.apply(this,arguments);},l,p);};try{return r0.apply(this,arguments);}finally{confirmBox=cb;}};
+  let cur=emb(A.removeSample);try{Object.defineProperty(A,'removeSample',{configurable:true,enumerable:true,get(){return cur;},set(f){cur=emb(f);}});}catch(e){}}
+
+/* ===== v125: Obras › Painel de produção, PDF da OS (padrão do modelo + anexos) e envio por e-mail à fábrica =====
+   - Painel: quadro por etapa (um cartão por OS; arrastar para a próxima etapa ou botão Avançar), cronograma (previsto x
+     realizado por OS), indicadores e filtros por projeto, cliente e etapa.
+   - PDF: página da OS desenhada com o pdf-lib (logo, título, número, emissão, objeto, quantidade, peças, acabamento, entrega,
+     solicitante, aprovação, etapas com datas, materiais, rodapé com os dados da empresa) + os PDFs anexados, na sequência.
+   - E-mail: POST /api/osf/email (servidor próprio): só quem grava as OS; destino = e-mail da fábrica (Configurações) e
+     "copiar para" opcional; o servidor registra quem enviou e quando na OS e na auditoria. */
+ui.osfp=ui.osfp||{proj:'',cli:'',et:'',vis:'quadro'};
+let osfpCss=false;
+function osfpEstilo(){if(osfpCss||typeof document==='undefined'||!document.createElement)return;osfpCss=true;try{const st=document.createElement('style');st.textContent=
+  '.osfp-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:8px}.osfp-card .pill{white-space:normal;max-width:100%;display:inline-block;margin-top:3px}'+
+  '.osfp-col{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:6px;min-height:90px;min-width:0}.osfp-col.osfp-hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface2))}'+
+  '.osfp-colh{font-size:12.5px;padding:2px 4px 6px;border-top:3px solid var(--line);border-radius:4px 4px 0 0}.osfp-card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 8px;margin:0 0 6px;font-size:12.5px;min-width:0;overflow-wrap:anywhere}'+
+  '.osfp-card[draggable=true]{cursor:grab}.osfp-card.osfp-drag{opacity:.45}.osfp-card .obj{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:2px 0}.osfp-card .acts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.osfp-card .btn{padding:2px 7px}'+
+  '.osfp-vazio{border:1px dashed var(--line);border-radius:8px;padding:10px;text-align:center;color:var(--muted);font-size:12px}'+
+  '.osfp-gt{display:grid;grid-template-columns:150px minmax(0,1fr);gap:4px 10px;align-items:center}.osfp-tr{position:relative;height:30px;background:var(--surface2);border-radius:6px;overflow:hidden}'+
+  '.osfp-b{position:absolute;height:10px;border-radius:3px}.osfp-b.prev{top:3px;background:color-mix(in srgb,var(--muted) 35%,transparent)}.osfp-b.real{top:16px}.osfp-hoje{position:absolute;top:0;bottom:0;width:2px;background:var(--neg)}'+
+  '.osfp-leg{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted)}.osfp-leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}'+
+  '.osfp-tabs{display:flex;gap:6px;flex-wrap:wrap}@media (max-width:760px){.osfp-board{grid-template-columns:1fr}.osfp-gt{grid-template-columns:1fr}.osfp-gt .lbl{margin-top:6px}}';
+  document.head.appendChild(st);}catch(e){}}
+function osfpFiltra(){const f=ui.osfp;return S.osf.filter(r=>!r.cancelada&&(!f.proj||r.projId===f.proj)&&(!f.cli||r.cliNome===f.cli)&&(!f.et||r.etapa===f.et));}
+function osfpCard(r,w){const al=osfAlertas(r).filter(a=>a[0]==='neg'),d=osfDiasEtapa(r),nx=osfAberta(r)?osfProx(r):null,pode=w&&nx&&r.etapa!=='aprov';
+  return '<div class="osfp-card" data-osfpid="'+esc(r.id)+'"'+(pode?' draggable="true"':'')+'><b class="mono">'+esc(r.numero||'')+'</b> <span class="sub">'+esc(r.projCod||'')+'</span><div class="obj">'+esc(r.objeto||'')+'</div>'+
+    '<div class="sub">necessidade '+fmtDate(r.necessidade)+(d!=null&&osfAberta(r)?' · '+d+' dia(s) na etapa':'')+'</div>'+al.map(a=>'<div>'+pill(a[1],'neg')+'</div>').join('')+(r.etapa==='aprov'&&!r.aprov?'<div>'+pill('aguardando aprovação','warn')+'</div>':'')+
+    '<div class="acts"><button class="btn sm" data-act="osfAbrir" data-id="'+esc(r.id)+'">Abrir</button>'+(pode?'<button class="btn sm pri" data-act="osfAvancarBt" data-id="'+esc(r.id)+'">Avançar</button>':'')+(r.etapa==='aprov'&&!r.aprov&&osfPodeAprovar(r)?'<button class="btn sm pri" data-act="osfAprovar" data-id="'+esc(r.id)+'">Aprovar</button>':'')+'</div></div>';}
+function osfpQuadro(ls,w){const h=todayStr(),lim=addDays(h,-30);
+  return '<div class="osfp-board">'+OSF_ET.map(e=>{let its=ls.filter(r=>(r.etapa||'aprov')===e[0]);if(e[0]==='ent')its=its.filter(r=>((r.entrega||{}).data||osfEt(r,'ent').fim||h)>=lim);its.sort(osfOrd);
+    return '<div class="osfp-col" data-osfpcol="'+e[0]+'"><div class="osfp-colh" style="border-top-color:'+OSF_COR[e[0]]+'"><b>'+esc(e[2])+'</b> <span class="sub">'+its.length+'</span></div>'+its.map(r=>osfpCard(r,w)).join('')+(its.length?'':'<div class="osfp-vazio">'+(e[0]==='ent'?'Nenhuma entrega nos últimos 30 dias':'Nenhuma OS')+'</div>')+'</div>';}).join('')+'</div>'+
+    '<p class="sub" style="margin:8px 0 0">Arraste o cartão para a próxima etapa da OS (no celular, use "Avançar"). Saem de "Aprovação" só com o botão Aprovar. Entregue pede quem recebeu e a assinatura.</p>';}
+/* cronograma: barra clara = previsto (emissão até a última data prevista/necessidade); barras coloridas = realizado por etapa */
+function osfpCrono(ls){const h=todayStr(),rows=ls.filter(r=>r.emissao).sort((a,b)=>String(a.emissao).localeCompare(String(b.emissao))||osfSeq(a)-osfSeq(b)).slice(-60);
+  if(!rows.length)return '<div class="note">Nenhuma OS com data de emissão neste filtro.</div>';
+  const fimPrev=r=>[r.necessidade].concat(OSF_ORD.map(k=>osfEt(r,k).prev)).filter(Boolean).sort().pop()||r.emissao;
+  const fimReal=r=>r.etapa==='ent'?((r.entrega||{}).data||osfEt(r,'ent').fim||h):h;
+  let a=rows.map(r=>r.emissao).sort()[0],b=rows.map(r=>[fimPrev(r),fimReal(r)].sort().pop()).sort().pop();if(b<h)b=h;b=addDays(b,2);a=addDays(a,-1);
+  const tot=Math.max(1,-dTo(a)+dTo(b)),x=d=>Math.max(0,Math.min(100,(-dTo(a)+dTo(d))/tot*100));
+  const seg=(d1,d2,cls,cor,t)=>{const l=x(d1),r=x(d2);return '<span class="osfp-b '+cls+'" title="'+esc(t)+'" style="left:'+l.toFixed(2)+'%;width:'+Math.max(0.6,r-l).toFixed(2)+'%'+(cor?';background:'+cor:'')+'"></span>';};
+  return '<div class="osfp-leg">'+OSF_ET.map(e=>'<span><i style="background:'+OSF_COR[e[0]]+'"></i>'+esc(e[2])+'</span>').join('')+'<span><i style="background:color-mix(in srgb,var(--muted) 35%,transparent)"></i>Previsto</span><span><i style="background:var(--neg)"></i>Hoje</span></div>'+
+    '<p class="sub" style="margin:6px 0">De '+fmtDate(a)+' a '+fmtDate(b)+'. Em cima, o previsto (emissão até a necessidade ou a última data prevista); embaixo, o realizado por etapa (início e conclusão reais).</p>'+
+    '<div class="osfp-gt">'+rows.map(r=>{let real='';osfEtapasDe(r).forEach(k=>{const e=osfEt(r,k);if(!e.ini)return;const f=e.fim||(k===r.etapa?h:e.ini);real+=seg(e.ini,addDays(f,1),'real',OSF_COR[k],osfEtNome(k)+': '+fmtDate(e.ini)+' a '+(e.fim?fmtDate(e.fim):'em andamento'));});
+      return '<div class="lbl"><b class="mono">'+esc(r.numero)+'</b><div class="sub">'+esc(String(r.objeto||'').slice(0,40))+'</div></div><div class="osfp-tr" role="img" aria-label="'+esc('OS '+r.numero+': previsto de '+fmtDate(r.emissao)+' a '+fmtDate(fimPrev(r))+'; etapa atual '+osfEtNome(r.etapa))+'">'+seg(r.emissao,addDays(fimPrev(r),1),'prev','','Previsto: '+fmtDate(r.emissao)+' a '+fmtDate(fimPrev(r)))+real+'<span class="osfp-hoje" style="left:'+x(h).toFixed(2)+'%"></span></div>';}).join('')+'</div>';}
+V.osfp=()=>{osfEstilo();osfpEstilo();try{osfAutoMat();}catch(e){}const f=ui.osfp,w=mayW('fab'),ls=osfpFiltra(),k=osfIndicadores(ls),c=osfCfg();
+  const clis=[...new Set(S.osf.map(r=>r.cliNome).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR')).map(x=>[x,x]);
+  const tabs='<div class="osfp-tabs">'+[['quadro','Quadro por etapa'],['crono','Cronograma']].map(t=>'<button class="btn'+(f.vis===t[0]?' pri':'')+'" data-act="osfpVis" data-v="'+t[0]+'"'+(f.vis===t[0]?' aria-pressed="true"':' aria-pressed="false"')+'>'+t[1]+'</button>').join('')+'</div>';
+  return pageHead('Painel de produção','Ordens de fabricação da fábrica de Tuiuti por etapa, com prazos, atrasos e galvanização.','<button class="btn" data-act="nav" data-mod="obras" data-tab="osf">Lista de OS</button>'+(w?'<button class="btn pri" data-act="osfNovo">Nova OS</button>':''))+
+  '<div class="stack"><div class="kpis">'+kpi('OS abertas',String(k.abertas),'não entregues')+kpi('Em atraso',String(k.atraso),'necessidade passou e não entregue',k.atraso?'neg':'')+kpi('Entregas em 7 dias',String(k.prox7),'pela data de necessidade')+kpi('Aguardando material',String(k.mat),'compra de material')+kpi('Galvanização atrasada',String(k.galv),'mais de '+c.galvDias+' dias sem retorno',k.galv?'neg':'')+'</div>'+
+  '<div class="bar"><label class="f"><span>Projeto</span><select data-filter="osfp.proj">'+opt(osfProjOpts(),f.proj,'Todos')+'</select></label><label class="f"><span>Cliente</span><select data-filter="osfp.cli">'+opt(clis,f.cli,'Todos')+'</select></label><label class="f"><span>Etapa</span><select data-filter="osfp.et">'+opt(OSF_ET.map(e=>[e[0],e[1]]),f.et,'Todas')+'</select></label></div>'+
+  tabs+(f.vis==='crono'?osfpCrono(ls):osfpQuadro(ls,w))+'</div>';};
+A.osfpVis=d=>{ui.osfp.vis=d.v==='crono'?'crono':'quadro';render();};
+ACT_GROUP.osfpVis=null;
+/* arrastar e soltar (só para a próxima etapa da OS) */
+let osfpDrag='';
+const osfpCol=e=>e.target&&e.target.closest?e.target.closest('.osfp-col'):null;
+if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('dragstart',e=>{const c=e.target&&e.target.closest&&e.target.closest('.osfp-card');if(!c)return;osfpDrag=c.dataset.osfpid;try{e.dataTransfer.setData('text/plain','osf:'+osfpDrag);e.dataTransfer.effectAllowed='move';}catch(x){}c.classList.add('osfp-drag');});
+  document.addEventListener('dragend',e=>{const c=e.target&&e.target.closest&&e.target.closest('.osfp-card');if(c)c.classList.remove('osfp-drag');document.querySelectorAll('.osfp-hover').forEach(x=>x.classList.remove('osfp-hover'));});
+  document.addEventListener('dragover',e=>{const c=osfpCol(e);if(!c||!osfpDrag)return;e.preventDefault();document.querySelectorAll('.osfp-hover').forEach(x=>{if(x!==c)x.classList.remove('osfp-hover');});c.classList.add('osfp-hover');});
+  document.addEventListener('drop',e=>{const c=osfpCol(e);if(!c||!osfpDrag)return;e.preventDefault();c.classList.remove('osfp-hover');const id=osfpDrag;osfpDrag='';const r=get('osf',id);if(!r||r.etapa===c.dataset.osfpcol)return;osfpSoltar(r,c.dataset.osfpcol);});}
+function osfpSoltar(r,para){if(!mayW('fab')){toast('Seu perfil não avança etapas da OS.','neg');return false;}if(r.etapa==='aprov'){toast('A OS sai de "Aguardando aprovação" só pelo botão Aprovar.','neg');return false;}osfAvancarUI(r,para);return true;}
+
+/* ---------- PDF da OS ---------- */
+const OSF_RODAPE=['INA-SERVIÇOS TÉCNICOS LTDA','Sede: Estr. Munic. Sargento Sebastião Dias Martins, nº 300 - Bairro dos Vieiras - Tuiuti - SP - CEP 12930-000','Tel.: (011) 4015 6101 - E-mail: inaservicos@inaservicos.com.br'];
+function osfRodape(){const c=cfg();if(!c.razao)return OSF_RODAPE;const end=[c.end?(c.end+(c.endNum?', nº '+c.endNum:'')):'',c.bairro,[c.cidade,c.uf].filter(Boolean).join(' - '),c.cep?'CEP '+c.cep:''].filter(Boolean).join(' - ');
+  return [String(c.razao).toUpperCase(),end?'Sede: '+end:'',[c.telefone?'Tel.: '+c.telefone:'',c.email?'E-mail: '+c.email:'',c.cnpj?'CNPJ '+fmtDoc(c.cnpj):''].filter(Boolean).join(' - ')].filter(Boolean);}
+/* só caracteres que a fonte padrão do PDF (WinAnsi) desenha */
+const OSF_WA='–—‘’‚“”„•…€™ŠšŒœŸŽž†‡ˆ‰‹›';
+const osfPdfTxt=s=>String(s==null?'':s).replace(/[\t\r]/g,' ').replace(/[^\n\x20-\x7e\xa0-\xff]/g,ch=>OSF_WA.includes(ch)?ch:ch==='Ø'?'Ø':'?');
+function osfWrap(t,font,size,maxW){const out=[];osfPdfTxt(t).split('\n').forEach(par=>{const ws=par.split(/\s+/).filter(Boolean);let l='';if(!ws.length){out.push('');return;}
+  ws.forEach(w=>{const tl=l?l+' '+w:w;if(font.widthOfTextAtSize(tl,size)<=maxW||!l)l=tl;else{out.push(l);l=w;}});if(l)out.push(l);});return out;}
+async function osfPdfMontar(r,o){o=o||{};await loadScript(PDFLIB_URL,()=>!!window.PDFLib);const L=window.PDFLib,doc=await L.PDFDocument.create();
+  doc.setTitle('Ordem de serviço '+(r.numero||''));doc.setAuthor(osfPdfTxt(cfg().razao||cfg().fantasia||'INA Serviços Técnicos'));doc.setCreator('Central de Gestão');
+  const F=await doc.embedFont(L.StandardFonts.Helvetica),FB=await doc.embedFont(L.StandardFonts.HelveticaBold),FI=await doc.embedFont(L.StandardFonts.HelveticaBoldOblique);
+  const W=595.28,H=841.89,M=48,preto=L.rgb(0.07,0.1,0.15),cinza=L.rgb(0.35,0.39,0.47),linha=L.rgb(0.75,0.78,0.84);
+  let pg=doc.addPage([W,H]),y=H-M,osPag=1;
+  const rodape=p=>{const rl=osfRodape();let yy=40;rl.slice().reverse().forEach((t,i)=>{const fz=i===rl.length-1?8:7,f=i===rl.length-1?FB:F,tx=osfPdfTxt(t),tw=f.widthOfTextAtSize(tx,fz);p.drawText(tx,{x:Math.max(M,(W-tw)/2),y:yy,size:fz,font:f,color:cinza});yy+=10;});};
+  const nova=()=>{rodape(pg);pg=doc.addPage([W,H]);osPag++;y=H-M;};
+  const precisa=h=>{if(y-h<70)nova();};
+  const txt=(t,x,yy,o2)=>pg.drawText(osfPdfTxt(t),Object.assign({x,y:yy,size:10.5,font:F,color:preto},o2||{}));
+  const para=(rot,t,o2)=>{o2=o2||{};const sz=o2.size||10.5,lh=sz*1.35,rw=rot?FB.widthOfTextAtSize(osfPdfTxt(rot)+' ',8.5):0,ls=osfWrap(t,o2.bold?FB:F,sz,W-2*M-rw);precisa(lh*Math.min(ls.length,3)+4);
+    if(rot)txt(rot,M,y,{size:8.5,font:FB});ls.forEach((l,i)=>{precisa(lh);txt(l,M+(i===0?rw:0),y,{size:sz,font:o2.bold?FB:F});y-=lh;});y-=4;};
+  const lin=(rot,val,x0,larg)=>{txt(rot,x0,y,{size:10});const rw=F.widthOfTextAtSize(osfPdfTxt(rot),10)+6;const v=osfWrap(val||' ',F,10,larg-rw)[0]||'';txt(v,x0+rw,y+1.5,{size:10});pg.drawLine({start:{x:x0+rw-2,y:y-2},end:{x:x0+larg,y:y-2},thickness:0.6,color:preto});};
+  /* cabeçalho: logo (Configurações › Logo) ou o nome */
+  const c=cfg();let logoOk=false;
+  if(c.logo&&safeImg(c.logo)){try{const b64=c.logo.split(',')[1],by=Uint8Array.from(atob(b64),ch=>ch.charCodeAt(0));const im=/^data:image\/png/.test(c.logo)?await doc.embedPng(by):/^data:image\/jpe?g/.test(c.logo)?await doc.embedJpg(by):null;
+    if(im){const s=Math.min(150/im.width,46/im.height);pg.drawImage(im,{x:M,y:y-im.height*s+6,width:im.width*s,height:im.height*s});logoOk=true;}}catch(e){}}
+  if(!logoOk){txt('INA',M,y-22,{size:30,font:FI,color:L.rgb(0.8,0.05,0.05)});txt(osfPdfTxt(c.fantasia&&!/^ina\b/i.test(c.fantasia)?c.fantasia:'Serviços Técnicos Ltda'),M,y-34,{size:8,font:FB});}
+  y-=72;
+  const sigla=String(c.fantasia||'INA').trim().split(/[\s\-–]+/)[0].toUpperCase()||'INA',tit='ORDEM DE SERVIÇO – '+sigla,tw=FB.widthOfTextAtSize(osfPdfTxt(tit),17);
+  txt(tit,(W-tw)/2,y,{size:17,font:FB});y-=38;
+  const m=String(r.numero||'').match(/^P(.*)-(\d+)$/)||[null,r.numero||'',''];
+  txt('Nº:  P',M,y,{size:10.5});txt(m[1],M+44,y,{size:10.5});pg.drawLine({start:{x:M+38,y:y-2},end:{x:M+92,y:y-2},thickness:0.6});txt('-',M+97,y,{size:10.5});txt(m[2],M+110,y,{size:10.5});pg.drawLine({start:{x:M+104,y:y-2},end:{x:M+150,y:y-2},thickness:0.6});
+  const em=String(r.emissao||'').split('-');txt('Data Emissão:',W-M-222,y,{size:10.5});[[em[2]||'',W-M-138],['/',W-M-108],[em[1]||'',W-M-96],['/',W-M-66],[em[0]||'',W-M-52]].forEach((q,i)=>{txt(q[0],q[1],y,{size:10.5});if(i%2===0)pg.drawLine({start:{x:q[1]-6,y:y-2},end:{x:q[1]+(i===4?40:24),y:y-2},thickness:0.6});});
+  y-=26;
+  para('Projeto:',osfProjTxt(r)+(r.cliNome?' · Cliente: '+r.cliNome:''),{size:10});
+  y-=4;para('Objeto:',r.objeto||'');
+  y-=6;para('QUANTIDADE:',r.qtdTexto||(fmtQ(osfTotPecas(r))+' peça(s)'));
+  /* peças */
+  const its=r.itens||[];if(its.length){y-=4;precisa(40);const cols=[[M,'Peça',190],[M+192,'Qtd.',42],[M+236,'Medida',72],[M+310,'Material',130],[M+442,'Peso est. (kg)',57]];
+    const head=()=>{pg.drawRectangle({x:M-2,y:y-4,width:W-2*M+4,height:15,color:L.rgb(0.93,0.94,0.96)});cols.forEach(q=>txt(q[1],q[0]+2,y,{size:8.5,font:FB}));y-=16;};head();
+    its.forEach(i=>{const pc=osfWrap(i.peca||'',F,9,cols[0][2]-4),mt=osfWrap(i.material||'',F,9,cols[3][2]-4),nl=Math.max(pc.length,mt.length,1);if(y-nl*11<80){nova();head();}
+      pc.forEach((l,k)=>txt(l,cols[0][0]+2,y-k*11,{size:9}));txt(fmtQ(i.qtd),cols[1][0]+2,y,{size:9});txt(i.medida||'',cols[2][0]+2,y,{size:9});mt.forEach((l,k)=>txt(l,cols[3][0]+2,y-k*11,{size:9}));txt(i.peso==null?'—':fmtQ((+i.qtd||0)*(+i.peso||0)),cols[4][0]+2,y,{size:9});
+      y-=nl*11;pg.drawLine({start:{x:M-2,y:y+6},end:{x:W-M+2,y:y+6},thickness:0.4,color:linha});y-=3;});
+    txt('Total: '+fmtQ(osfTotPecas(r))+' peça(s) · '+fmtQ(osfTotPeso(r))+' kg estimados',M,y,{size:9,font:FB});y-=16;}
+  para('Acabamento:','Galvanização: '+(r.galv?'sim (fornecedor externo)':'não')+'   ·   Pintura: '+(r.pint?'sim, cor '+(r.cor||''):'não'),{size:10});
+  y-=10;precisa(130);const nec=String(r.necessidade||'').split('-');
+  txt('Data prevista da necessidade:',M,y,{size:10.5});[[nec[2]||'',M+232],['/',M+268],[nec[1]||'',M+282],['/',M+318],[nec[0]||'',M+332]].forEach((q,i)=>{txt(q[0],q[1],y,{size:10.5});if(i%2===0)pg.drawLine({start:{x:q[1]-8,y:y-2},end:{x:q[1]+(i===4?40:28),y:y-2},thickness:0.6});});y-=20;
+  lin('Local de entrega:',r.localEntrega||'',M,W-2*M);y-=20;lin('Horário de entrega:',r.horaEntrega||'',M,300);y-=20;lin('Solicitante:',r.solicitante||'',M,W-2*M);y-=20;
+  lin('Aprovação:',r.aprov?((r.aprov.nome||nameOf(r.aprov.por))+' — aprovado no sistema em '+fmtDT(r.aprov.em)):'AGUARDANDO APROVAÇÃO',M,W-2*M);y-=28;
+  /* etapas */
+  precisa(40);txt('Etapas',M,y,{size:10.5,font:FB});y-=15;const ce=[[M,'Etapa',230],[M+232,'Prevista',85],[M+320,'Início',85],[M+408,'Conclusão',90]];
+  pg.drawRectangle({x:M-2,y:y-4,width:W-2*M+4,height:15,color:L.rgb(0.93,0.94,0.96)});ce.forEach(q=>txt(q[1],q[0]+2,y,{size:8.5,font:FB}));y-=15;
+  osfEtapasDe(r).forEach(k=>{precisa(14);const e=osfEt(r,k),d=v=>v?fmtDate(v):'___/___/____';txt(osfEtNome(k)+(k===r.etapa&&!r.cancelada?'  (atual)':''),ce[0][0]+2,y,{size:9,font:k===r.etapa?FB:F});txt(k==='aprov'?'—':d(e.prev),ce[1][0]+2,y,{size:9});txt(d(e.ini),ce[2][0]+2,y,{size:9});txt(d(e.fim),ce[3][0]+2,y,{size:9});
+    y-=14;pg.drawLine({start:{x:M-2,y:y+10},end:{x:W-M+2,y:y+10},thickness:0.4,color:linha});});
+  y-=6;const g=r.galvD||{};if(r.galv&&(g.forn||g.nfRem||g.nfRet))para('Galvanização:',[g.forn,g.nfRem?'NF remessa '+g.nfRem:'',+g.pesoEnv?'enviado '+fmtQ(g.pesoEnv)+' kg':'',g.nfRet?'NF retorno '+g.nfRet:'',g.dataRet?'retorno '+fmtDate(g.dataRet):'',+g.pesoCob?'cobrado '+fmtQ(g.pesoCob)+' kg':''].filter(Boolean).join(' · '),{size:9.5});
+  if((r.mats||[]).length)para('Materiais:',r.mats.map(x=>x.desc+': '+fmtQ(x.qtd)+' '+(x.un||'')).join('; '),{size:9.5});
+  if(r.entrega)para('Entrega:','recebido por '+(r.entrega.quem||'')+' em '+fmtDate(r.entrega.data)+(r.entrega.assin?' (assinado na tela)':''),{size:9.5});
+  if(r.obs)para('Observações:',r.obs,{size:9.5});
+  const ax=(r.anexos||[]);if(ax.length)para('Anexos:',ax.map((a,i)=>(i+1)+'. '+a.nome).join('   '),{size:9});
+  rodape(pg);
+  /* anexos na sequência */
+  let anxPag=0;const falhas=[];
+  for(const a of ax){try{const bf=o.buscar?await o.buscar(a):await (await fetch(anxUrl(a),{credentials:'same-origin'})).arrayBuffer();const u8=new Uint8Array(bf);
+      const ehPdf=u8[0]===0x25&&u8[1]===0x50&&u8[2]===0x44&&u8[3]===0x46;
+      if(ehPdf){const src=await L.PDFDocument.load(u8,{ignoreEncryption:true});const ps=await doc.copyPages(src,src.getPageIndices());ps.forEach(p=>doc.addPage(p));anxPag+=ps.length;}
+      else if(/^image\/(png|jpeg)$/.test(a.ct||'')||/\.(png|jpe?g)$/i.test(a.nome||'')){const im=(u8[0]===0x89&&u8[1]===0x50)?await doc.embedPng(u8):await doc.embedJpg(u8);const p=doc.addPage([W,H]),s=Math.min((W-2*M)/im.width,(H-2*M)/im.height,1);p.drawImage(im,{x:(W-im.width*s)/2,y:(H-im.height*s)/2,width:im.width*s,height:im.height*s});anxPag++;}
+      else falhas.push(a.nome+' (tipo não aceito)');}catch(e){falhas.push((a.nome||'anexo')+' ('+(e&&e.message?String(e.message).slice(0,80):'não abriu')+')');}}
+  const bytes=await doc.save();return {bytes,osPag,anxPag,paginas:osPag+anxPag,falhas,nome:'OS-'+slug(r.numero||'os')+'.pdf'};}
+async function osfPdfBlob(r){const x=await osfPdfMontar(r);x.blob=new Blob([x.bytes],{type:'application/pdf'});return x;}
+A.osfPdf=async d=>{const r=get('osf',d.id);if(!r)return;toast('Gerando o PDF da OS…');
+  try{const x=await osfPdfBlob(r);if(x.falhas.length)toast('Anexo(s) que não entraram no PDF: '+x.falhas.join('; '),'neg');await savePdf(x.nome,x.blob);}catch(e){toast('Não foi possível gerar o PDF: '+(e&&e.message||e),'neg');}};
+ACT_GROUP.osfPdf=null;
+
+/* ---------- e-mail para a fábrica ---------- */
+const OSF_EMAIL_MAX=20*1024*1024;
+const osfEmailsOk=t=>String(t||'').split(/[,;\s]+/).filter(Boolean);
+function osfB64(u8){let s='';const n=0x8000;for(let i=0;i<u8.length;i+=n)s+=String.fromCharCode.apply(null,u8.subarray(i,i+n));return btoa(s);}
+A.osfEmail=d=>{const r=get('osf',d.id);if(!r)return;if(!mayW('fab')){toast('Seu perfil não envia a OS por e-mail.','neg');return;}const c=osfCfg();
+  modal({title:'Enviar a OS '+r.numero+' por e-mail',body:'<p style="margin:0 0 8px">O sistema monta o PDF da OS (página da OS + '+(r.anexos||[]).length+' anexo(s)) e envia para a fábrica.</p><div class="fg">'+field('Para (e-mail da fábrica)','para','email',c.email,{dis:true})+field('Copiar para (opcional, separe por vírgula)','cc','text','',{full:true,ph:'ex.: compras@inaservicos.com.br'})+'</div><p class="sub" style="margin:8px 0 0">Para trocar o e-mail da fábrica: Sistema › Configurações › Fábrica. O envio fica registrado na OS e na auditoria.</p>',
+    saveLabel:'Gerar PDF e enviar',save:root=>{const v=readForm(root),cc=osfEmailsOk(v.cc);if(cc.length>5){toast('No máximo 5 e-mails em "copiar para".','neg');return false;}
+      const ruim=cc.find(e=>!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(e));if(ruim){toast('E-mail inválido: '+ruim,'neg');return false;}
+      osfEmailEnviar(r.id,cc);}});};
+async function osfEmailEnviar(id,cc){const r=get('osf',id);if(!r)return;
+  const baixar=x=>modal({title:'E-mail não enviado',body:'<p style="margin:0">'+esc(x)+'</p><p class="sub" style="margin:8px 0 0">Você pode baixar o PDF e enviar pelo seu e-mail.</p>',foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn pri" data-act="osfPdf" data-id="'+esc(id)+'">Baixar o PDF</button>'});
+  if(!osfSrv()){baixar('O envio por e-mail funciona no sistema instalado no servidor da empresa (com o e-mail configurado).');return;}
+  toast('Gerando o PDF e enviando…');let x;try{x=await osfPdfBlob(r);}catch(e){toast('Não foi possível gerar o PDF: '+(e&&e.message||e),'neg');return;}
+  if(x.bytes.length>OSF_EMAIL_MAX){baixar('O PDF ficou com '+fmtBytes(x.bytes.length)+', acima do limite de 20 MB para e-mail.');return;}
+  segaPost('/api/osf/email',{id,cc,nome:x.nome,pdf:osfB64(x.bytes),paginas:x.paginas}).then(j=>{if(j&&j.data)segaLocal('osf',Object.assign({},j.data,{id}));toast('OS enviada para '+(j&&j.para||osfCfg().email)+'.','pos');if(x.falhas.length)toast('Anexo(s) que não entraram no PDF: '+x.falhas.join('; '),'neg');},
+    e=>{if(e&&e.st===503)baixar(e.message||'O envio de e-mail não está configurado no servidor.');else toast('E-mail não enviado: '+(e&&e.message||e),'neg');});}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='124',APP_DATA='2026-10-28';
+const APP_VER='125',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['125','2026-10-28',['Obras › Ordens de fabricação (fábrica de Tuiuti): OS ligada ao projeto com numeração geral da fábrica (P412-95, P412-96…), itens com peso, acabamento, lista de materiais que gera a solicitação de compra, aprovação no sistema e anexos em PDF. Gerar PDF monta a OS no padrão atual seguida dos anexos; Enviar por e-mail manda para a fábrica (endereço em Configurações).', 'Etapas: Aguardando aprovação, Aguardando compra de material, Em produção, Galvanização (notas de remessa e retorno, pesos e alerta de atraso), Pintura, Inspeção de qualidade, Separação e embalagem, Enviado e Entregue (com assinatura de quem recebeu).', 'Obras › Painel de produção: quadro por etapa, cronograma previsto x realizado, OS em atraso, entregas da semana, aguardando material e galvanização parada. Novo perfil Encarregado da fábrica: só OS e painel.']],
   ['124','2026-10-28',['Conciliação bancária: a lista não volta mais sozinha para o topo enquanto você rola; a tela ficou muito mais rápida (redesenho de cerca de 4 s para menos de 0,1 s com 10 mil linhas de extrato), o que também evita a aba recarregar no Safari.', 'Buscar contas para esta linha: caixa de seleção maior e a linha inteira clicável (também no toque). Caixas de seleção de todo o sistema ficaram com tamanho legível.']],
   ['123','2026-10-28',['Sistema › Configurações › Notas fiscais: ambiente e busca na SEFAZ. Troca entre Homologação e Produção (com confirmação e senha), liga e desliga a busca automática, escolhe quem consulta as NF-e recebidas (Omie ou Central, com o aviso da regra de um só sistema) e a busca de NFS-e no Ambiente Nacional. Só Administrador e dono alteram; toda mudança vai para a auditoria.', 'Cada ambiente guarda a própria sequência de notas da SEFAZ; o rascunho de XML de NF-e sai no ambiente escolhido. A emissão continua no Omie (NF-e) e no portal da prefeitura (NFS-e).']],
   ['122','2026-10-28',['Importar cadastros › Banco de horas (relatório do ponto): lê o PDF "Relatório Banco de Horas Colaboradores" (um colaborador por página) e grava, por competência, as horas por tipo de dia, quitações, validade e saldos do período e acumulado. Conferência antes de gravar, ligação pelo nome (os não encontrados são escolhidos e lembrados) e Desfazer.', 'Pessoal › Banco de horas: coluna Saldo no relatório com a diferença para o saldo do sistema, indicadores de saldos negativos e a tabela da competência no extrato do colaborador. Só RH e Administrador veem.']],

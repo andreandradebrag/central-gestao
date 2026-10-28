@@ -931,6 +931,85 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
      quem lê Obras (proj), Comercial e contratos (ctr, onde fica o orçamento e a EAP) e Salários e folha. */
   const CHORA_LE = ['proj', 'ctr', 'rh', 'folha'];
   const leChora = conta => { const pr = PERM.perfis[perfilDe(conta)]; if (!pr) return false; if (pr.w === '*' || pr.r === '*') return true; return CHORA_LE.some(g => (pr.w || []).includes(g) || (Array.isArray(pr.r) && pr.r.includes(g))); };
+  /* v125: ordens de fabricação (osf, módulo 'fab' no perfis.json). Lê e grava quem grava Obras sem restrição (Gestor de projetos,
+     Administrador) e o perfil Fábrica; consultam Somente leitura, Leitura completa e Diretoria. Quem só tem o módulo Fábrica (sem
+     ler Obras) lê do projeto só código, nome, situação e o nome do cliente (soFabProj/redigir). Aprovação e envio por e-mail só
+     pelas rotas /api/osf/aprovar e /api/osf/email. */
+  const temGrupo = (conta, g) => { const pr = PERM.perfis[perfilDe(conta)]; if (!pr) return false; if (pr.w === '*' || pr.r === '*') return true; return (pr.w || []).includes(g) || (Array.isArray(pr.r) && pr.r.includes(g)); };
+  const soFabProj = conta => !!conta && conta.nivel !== 'owner' && NIV[conta.nivel] >= NIV.admin && temGrupo(conta, 'fab') && !leModulo(conta, 'proj');
+  const PROJ_FAB = ['id', 'codigo', 'nome', 'parcId', 'status', 'cidade', 'uf', 'inicio', 'fim', 'ex', 'ts'];
+  const OSF_ORD = ['aprov', 'mat', 'prod', 'galv', 'pint', 'insp', 'emb', 'env', 'ent'];
+  const osfAplica = (d, k) => ['aprov', 'prod', 'ent'].includes(k) ? true : k === 'galv' ? !!d.galv : k === 'pint' ? !!d.pint : (((d.etapas || {})[k]) || {}).on !== false;
+  const osfSeqDe = d => { const s = +(d && d.seq); if (s > 0) return Math.round(s); const m = String((d && d.numero) || '').match(/-(\d+)\s*$/); return m ? +m[1] : 0; };
+  const osfCfgS = () => cfgEmp().osf || {};
+  /* quem aprova a OS: dono; diretoria (papel, personalizado com "aprova como diretoria" e a lista diretoria da matriz, com substitutos);
+     a lista de aprovadores da OS (cfg.osf.aprov), se preenchida; sem lista, quem grava Obras sem restrição. Igual a osfPodeAprovar no navegador. */
+  function osfAprovador(conta) {
+    if (ehDono(conta)) return true; if (ehDiretor(conta)) return true;
+    const l = lista(osfCfgS().aprov); if (l.length) return l.includes(conta.id);
+    const pr = defDe(conta); if (!pr || pr.custom) return false;
+    return pr.w === '*' || ((pr.w || []).includes('proj') && !(pr.so && pr.so.proj));
+  }
+  function regraOsf(conta, id, velho, novo) {
+    const v = velho || {};
+    if (v.aprov !== undefined) novo.aprov = v.aprov; else delete novo.aprov; /* aprovação só pela rota */
+    if (v.emails !== undefined) novo.emails = v.emails; else delete novo.emails; /* envios só pela rota */
+    if (novo.etapa != null && !OSF_ORD.includes(novo.etapa)) return erro('Etapa inválida.', 400);
+    if (!novo.cancelada && (novo.etapa || 'aprov') !== 'aprov' && !novo.aprov) return erro('A OS só sai de "Aguardando aprovação" depois de aprovada (botão Aprovar, por quem tem permissão de aprovação).', 409);
+    if (v.entrega && v.entrega.assin) novo.entrega = v.entrega; /* entrega assinada não muda */
+    else if (novo.entrega && novo.entrega.assin && typeof novo.entrega.assin === 'object') novo.entrega = Object.assign({}, novo.entrega, { assin: Object.assign({}, novo.entrega.assin, { srvEm: Date.now(), srvPor: conta.id }) });
+    if (v.cancelada && !novo.cancelada) novo.cancelada = v.cancelada; /* cancelada não volta */
+    const sq = osfSeqDe(novo); if (!(sq > 0)) return erro('Informe a sequência da OS (número inteiro).', 400);
+    const num = String(novo.numero || '').trim().toLowerCase();
+    for (const o of col('osf')) { if (o.id === id) continue; if (osfSeqDe(o) === sq) return erro('A sequência ' + sq + ' já é usada pela OS ' + (o.numero || '') + '. A sequência é única para todas as OS da fábrica.', 409); if (num && String(o.numero || '').trim().toLowerCase() === num) return erro('Já existe uma OS com o número ' + novo.numero + '.', 409); }
+    return null;
+  }
+  function rotaOsfAprovar(conta, req, b) {
+    const id = String(b.id || ''), p = 'osf/' + id; if (!/^[\w\-.]{1,80}$/.test(id)) return erro('OS inválida.', 400);
+    const d = doc(p); if (!d) return erro('OS não encontrada.', 404);
+    if (d.cancelada) return erro('A OS está cancelada.', 409); if (d.aprov) return erro('Esta OS já foi aprovada.', 409);
+    if (d.crBy && d.crBy === conta.id && !ehDono(conta) && osfCfgS().autorAprova !== true) return erro('Quem criou a OS não aprova a própria. Outra pessoa com permissão de aprovação precisa aprovar.');
+    if (!osfAprovador(conta)) { auditar(conta, req, 'OSF_APROVAR_NEGADO', p, null, null); return erro('Seu perfil não aprova ordens de fabricação (diretoria, aprovadores da OS em Configurações ou gestor de obras).'); }
+    const n = JSON.parse(JSON.stringify(d)), agora = Date.now(); n.aprov = carimbo(conta, req, { nome: nomeConta(conta.id) });
+    if ((n.etapa || 'aprov') === 'aprov') { let nx = 'ent'; for (let k = 1; k < OSF_ORD.length; k++) if (osfAplica(n, OSF_ORD[k])) { nx = OSF_ORD[k]; break; }
+      const h = hojeSP(); n.etapas = Object.assign({}, n.etapas || {}); n.etapas.aprov = Object.assign({}, n.etapas.aprov || {}, { fim: h, porFim: conta.id }); n.etapas[nx] = Object.assign({}, n.etapas[nx] || {}, { ini: h, por: conta.id, fim: '' });
+      n.etapa = nx; n.avanc = (Array.isArray(n.avanc) ? n.avanc : []).concat([{ de: 'aprov', para: nx, em: agora, por: conta.id }]); }
+    salvar(p, n, conta, req, 'OSF_APROVAR', d); return { ok: true, data: n };
+  }
+  const OSF_EMAIL_PAD = 'pr.tuiuti@inaservicos.com.br', OSF_PDF_MAX = 20 * 1024 * 1024, osfEnvios = new Map();
+  const emailOk = e => /^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/.test(String(e || ''));
+  async function rotaOsfEmail(conta, req, res) {
+    const fim = (st, o) => json(res, st, o), b = await lerJson(req), id = String(b.id || ''), p = 'osf/' + id;
+    if (!/^[\w\-.]{1,80}$/.test(id)) return fim(400, { code: 'invalid_argument', erro: 'OS inválida.' });
+    if (!(ehDono(conta) || (pode(conta, p, 'w') && perfilPermite(conta, p, 'w') && gravacaoPermitida(conta, p) && gravaCol(conta, 'osf')))) { auditar(conta, req, 'OSF_EMAIL_NEGADO', p, null, null); return fim(403, { code: 'not_granted', erro: 'Só quem grava as ordens de fabricação envia a OS por e-mail.' }); }
+    const d = doc(p); if (!d) return fim(404, { code: 'not_found', erro: 'OS não encontrada.' });
+    const c = osfCfgS(), para = emailOk(c.email) ? String(c.email).trim() : OSF_EMAIL_PAD;
+    const cc = [...new Set((Array.isArray(b.cc) ? b.cc : String(b.cc || '').split(/[,;\s]+/)).map(x => String(x).trim()).filter(Boolean))];
+    if (cc.length > 5 || cc.some(x => !emailOk(x))) return fim(400, { code: 'invalid_argument', erro: 'Confira os e-mails de "copiar para" (no máximo 5).' });
+    const pdf = Buffer.from(String(b.pdf || ''), 'base64');
+    if (pdf.length > OSF_PDF_MAX) return fim(413, { code: 'too_large', erro: 'O PDF passa de 20 MB. Baixe e envie em partes.' });
+    if (pdf.length < 8 || pdf.subarray(0, 5).toString('latin1') !== '%PDF-') return fim(400, { code: 'invalid_argument', erro: 'PDF inválido.' });
+    const agora = Date.now(), env = (osfEnvios.get(conta.id) || []).filter(t => agora - t < 3600e3); if (env.length >= 20) return fim(429, { code: 'rate_limited', erro: 'Muitos envios na última hora. Tente mais tarde.' });
+    if (!EMAIL.configurado()) { auditar(conta, req, 'OSF_EMAIL_SEM_SMTP', p, null, { para, cc }); return fim(503, { code: 'unavailable', semSmtp: true, erro: 'O envio de e-mail não está configurado no servidor (SMTP). Baixe o PDF e envie pelo seu e-mail; o administrador configura o SMTP conforme o LEIA-ME.' }); }
+    let nome = String(b.nome || '').replace(/[^\w.\-]+/g, '_').slice(0, 80) || ('OS-' + id); if (!/\.pdf$/i.test(nome)) nome += '.pdf';
+    const quem = nomeConta(conta.id), assunto = 'Ordem de serviço ' + (d.numero || '') + (d.objeto ? ' · ' + String(d.objeto).replace(/\s+/g, ' ').slice(0, 80) : '');
+    const linhas = ['Segue em anexo a ordem de serviço ' + (d.numero || '') + ' (PDF com a OS e os anexos).', 'Projeto: ' + [d.projCod, d.projNome].filter(Boolean).join(' · ') + (d.cliNome ? ' · Cliente: ' + d.cliNome : ''),
+      'Necessidade: ' + (d.necessidade ? String(d.necessidade).split('-').reverse().join('/') : '—') + (d.localEntrega ? ' · Entrega: ' + d.localEntrega : '') + (d.horaEntrega ? ' (' + d.horaEntrega + ')' : ''), 'Enviado por ' + quem + ' pela Central de Gestão.'];
+    const html = '<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;color:#0f1b2d">' + linhas.map(l => '<p style="margin:0 0 10px">' + esc(l) + '</p>').join('') + '</body></html>';
+    try { await EMAIL.enviar({ para, cc, assunto, texto: linhas.join('\n\n') + '\n', html, anexos: [{ nome, tipo: 'application/pdf', dados: pdf }] }); }
+    catch (e) { auditar(conta, req, 'OSF_EMAIL_FALHA', p, null, { para, cc, erro: String((e && e.message) || e).slice(0, 200) }); return fim(502, { code: 'unavailable', erro: 'O e-mail não foi enviado: ' + String((e && e.message) || e).slice(0, 200) }); }
+    env.push(agora); osfEnvios.set(conta.id, env);
+    const atual = doc(p) || d, n = JSON.parse(JSON.stringify(atual));
+    n.emails = (Array.isArray(n.emails) ? n.emails : []).concat([{ em: agora, por: conta.id, para, cc, bytes: pdf.length, paginas: +b.paginas || null, arq: nome }]).slice(-50);
+    salvar(p, n, conta, req, 'OSF_EMAIL', atual); return fim(200, { ok: true, data: n, para });
+  }
+  /* v125: "leSo" no perfil (perfis.json): dentro de um módulo, as únicas coleções que o perfil LÊ. O Encarregado da fábrica tem Compras só
+     para a solicitação de compra do material da OS: lê solicitações e produtos, não cotações, fornecedores, pedidos nem estoque. */
+  function leSoFora(conta, c0) {
+    const pr = PERM.perfis[perfilDe(conta)]; if (!pr || !pr.leSo || pr.w === '*' || pr.r === '*') return false;
+    const gs = (PERM.leitura && PERM.leitura[c0]) || PERM.colecoes[c0] || [], meus = gs.filter(g => (pr.w || []).includes(g) || (Array.isArray(pr.r) && pr.r.includes(g)));
+    return meus.length > 0 && meus.every(g => Array.isArray(pr.leSo[g]) && !pr.leSo[g].includes(c0));
+  }
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
@@ -940,6 +1019,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
     if (c0 === 'chora' && leChora(conta)) return true; /* v120 */
+    if (c0 === 'proj' && soFabProj(conta)) return true; /* v125: só código, nome, situação e cliente (redigir) */
+    if (leSoFora(conta, c0)) return false; /* v125: leSo do perfil (Fábrica: em Compras, só solicitações e produtos) */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
     if (leParcial(conta, c0, data)) return true; /* v115: RH só as contas da folha; Qualidade só as do custo da não qualidade */
     const k = 'plog:' + c0; if (!memo || !memo.has(k)) { if (memo) memo.set(k, 1); try { permLog.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), 'leitura:' + c0, Date.now()); } catch (e) { } }
@@ -955,6 +1036,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     return ['folha', 'rh'].some(g => pr.w.includes(g) || pr.r.includes(g));
   }
   function redigir(conta, p, data) {
+    if (data && /^proj\/[^/]+$/.test(p) && soFabProj(conta)) { /* v125: perfil Fábrica vê do projeto só o necessário para a OS */
+      const o = {}; PROJ_FAB.forEach(k => { if (data[k] !== undefined) o[k] = data[k]; }); const pc = data.parcId ? doc('parc/' + data.parcId) : null; if (pc && pc.nome) o.cliNome = String(pc.nome); o._restrito = true; return o; }
     if (data && !veBanco(conta)) { /* v111: dados bancários e arquivo da remessa só para Financeiro, Administrador e Diretoria */
       if (/^parc\/[^/]+$/.test(p)) { const o = Object.assign({}, data); let tinha = false; FIN_BK.concat(['bancoHist']).forEach(k => { if (o[k] != null && o[k] !== '' && !(Array.isArray(o[k]) && !o[k].length)) tinha = true; delete o[k]; }); if (o.bancoPend) { o._bancoPendente = true; tinha = true; } delete o.bancoPend; if (tinha) o._bancoOculto = true; return o; }
       if (/^remessa\/[^/]+$/.test(p)) { const o = Object.assign({}, data); delete o.txt; o._restrito = true; return o; }
@@ -1344,7 +1427,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* =====================================================================
      ENTRADA: regras antes de gravar ou excluir um documento
      ===================================================================== */
-  const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco'];
+  const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf']; /* v125: osf = e-mail da fábrica e aprovadores da OS */
   /* v111: a Diretoria não lança, mas decide: liberação (docLib) e aprovação/recusa de medições, sem mudar outros campos */
   const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
     fzpedfech: ['st', 'porConf', 'emConf', 'devObs', 'eventos'], opp: ['goAprov', 'goReq', 'goHist'] };
@@ -1515,6 +1598,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'fzpedfech') { e = regraPedFech(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */
       if (c0 === 'nfse') { e = regraNfseCanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'notas') { e = regraNotaConf(conta, req, velho, novo); if (e) return e; }
       e = travaPonto(c0, velho, novo); if (e) return e;
@@ -1561,6 +1645,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (m === 'POST' && (p === '/api/competencia/fechar' || p === '/api/competencia/reabrir')) { await R(b => rotaCompetencia(p.endsWith('fechar') ? 'fechar' : 'reabrir', conta, req, b)); return true; }
     if (m === 'POST' && p === '/api/epi/assinar') { await R(b => rotaEpiAssinar(conta, req, b)); return true; }
     if (m === 'POST' && p === '/api/minha-area/confirmar') { await R(b => rotaMinhaArea(conta, req, b)); return true; }
+    if (m === 'POST' && p === '/api/osf/aprovar') { await R(b => rotaOsfAprovar(conta, req, b)); return true; } /* v125 */
+    if (m === 'POST' && p === '/api/osf/email') { await rotaOsfEmail(conta, req, res); return true; } /* v125 */
     if (m === 'POST' && p === '/api/pesquisa/link') { await R(b => rotaPesqLink(conta, req, b)); return true; }
     if (m === 'POST' && p === '/api/admin/avisos') { /* dono: mandar agora o aviso aos aprovadores ou o resumo dos cadastros bancários */
       if (!ehDono(conta)) { json(res, 403, { code: 'not_granted', erro: 'Só o dono.' }); return true; }

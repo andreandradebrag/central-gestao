@@ -234,6 +234,23 @@ No serviço **gestao › Ambiente** do Easypanel, preencha e clique em **Implant
 
 Para conferir: **Contas de acesso › E-mail do sistema › Enviar e-mail de teste**.
 
+### 7.3.1. Ordem de fabricação por e-mail para a fábrica (v125)
+
+O botão **Obras › Ordens de fabricação › (abrir a OS) › Enviar por e-mail** usa o mesmo SMTP acima. Não há variável nova no Easypanel.
+
+- **E-mail da fábrica:** padrão `pr.tuiuti@inaservicos.com.br`. Para trocar, vá em **Sistema › Configurações › Fábrica (ordens de fabricação)**. Lá também ficam:
+  - o limite de dias para o alerta de galvanização (padrão 15);
+  - a tolerância de diferença de peso (padrão 5%);
+  - os aprovadores da OS.
+
+  Só um administrador altera esses dados, e o servidor confere isso.
+- **O que é enviado:** um PDF único, montado no navegador. Ele tem a página da OS e, em seguida, os PDFs e imagens anexados à OS. O limite é de 20 MB.
+- **Cópia:** na hora de enviar, você pode informar até 5 endereços em "copiar para".
+- **Quem pode enviar:** só quem grava as OS, ou seja, o Gestor de projetos, o Administrador e o perfil Fábrica. O limite é de 20 envios por hora por pessoa.
+- **Registro:** quem enviou e quando ficam gravados na OS e na auditoria (`OSF_EMAIL`).
+- **Sem SMTP configurado:** a tela avisa e oferece **Baixar o PDF**, para você enviar pelo seu próprio e-mail. A tentativa fica na auditoria como `OSF_EMAIL_SEM_SMTP`.
+- **Biblioteca de PDF:** o PDF usa o pdf-lib (`vendor/pdflib/pdf-lib.min.js`, veja "Bibliotecas do navegador"). Enquanto o arquivo não estiver copiado para a pasta `vendor`, ele é carregado pela CDN.
+
 
 ## Cópia de segurança
 

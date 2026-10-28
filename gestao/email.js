@@ -3,7 +3,8 @@
    Configuração no Easypanel (serviço gestao › Ambiente):
      SMTP_HOST, SMTP_PORT (465 = SSL direto; 587 ou 25 = STARTTLS), SMTP_USUARIO, SMTP_SENHA,
      SMTP_REMETENTE (ex.: "INA Serviços <inaservicos@inaservicos.com.br>"; padrão = SMTP_USUARIO).
-   Usado para o convite de novo usuário e para "Esqueci minha senha". */
+   Usado para o convite de novo usuário e para "Esqueci minha senha".
+   v125: cópia (cc) e anexos ([{nome, tipo, dados: Buffer}]), usados no envio da ordem de fabricação (PDF) à fábrica. */
 const net = require('node:net');
 const tls = require('node:tls');
 const crypto = require('node:crypto');
@@ -48,10 +49,13 @@ function conversa(sock) {
   };
 }
 
-async function enviar({ para, assunto, texto, html }) {
+async function enviar({ para, assunto, texto, html, cc, anexos }) {
   const c = CFG();
   if (!configurado()) throw new Error('E-mail não configurado no servidor (SMTP).');
   if (!/^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/.test(para)) throw new Error('E-mail do destinatário inválido.');
+  const copias = [...new Set([].concat(cc || []).map(x => String(x).trim()).filter(Boolean))].filter(x => x.toLowerCase() !== String(para).toLowerCase());
+  if (copias.length > 10 || copias.some(x => !/^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$/.test(x))) throw new Error('E-mail de cópia inválido.');
+  const anx = [].concat(anexos || []).filter(a => a && a.dados && a.dados.length);
   const abrir = () => new Promise((ok, err) => {
     const op = { host: c.host, port: c.port, servername: c.host, timeout: 20000 };
     const s = c.tlsDireto && !c.semTls ? tls.connect(op, () => ok(s)) : net.connect(op, () => ok(s));
@@ -71,13 +75,21 @@ async function enviar({ para, assunto, texto, html }) {
     await cv.cmd(b64(c.senha), [235]).catch(() => { throw new Error('Usuário ou senha do e-mail recusados (confira SMTP_USUARIO e SMTP_SENHA).'); });
     await cv.cmd('MAIL FROM:<' + enderecoDe(c.remetente) + '>', [250]);
     await cv.cmd('RCPT TO:<' + para + '>', [250, 251]);
+    for (const x of copias) await cv.cmd('RCPT TO:<' + x + '>', [250, 251]);
     await cv.cmd('DATA', [354]);
     const fronteira = 'cg' + crypto.randomBytes(12).toString('hex'), dominio = enderecoDe(c.remetente).split('@')[1] || 'localhost';
-    const msg = ['From: ' + remetenteFmt(c.remetente), 'To: <' + para + '>', 'Subject: ' + cab(assunto), 'Date: ' + new Date().toUTCString(),
-      'Message-ID: <' + crypto.randomBytes(16).toString('hex') + '@' + dominio + '>', 'MIME-Version: 1.0', 'Content-Type: multipart/alternative; boundary="' + fronteira + '"', '',
-      '--' + fronteira, 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', '', linhas76(b64(texto)),
+    const corpo = ['--' + fronteira, 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', '', linhas76(b64(texto)),
       '--' + fronteira, 'Content-Type: text/html; charset=utf-8', 'Content-Transfer-Encoding: base64', '', linhas76(b64(html || texto)),
-      '--' + fronteira + '--', ''].join('\r\n');
+      '--' + fronteira + '--', ''];
+    const cabs = ['From: ' + remetenteFmt(c.remetente), 'To: <' + para + '>'].concat(copias.length ? ['Cc: ' + copias.map(x => '<' + x + '>').join(', ')] : []).concat(['Subject: ' + cab(assunto), 'Date: ' + new Date().toUTCString(),
+      'Message-ID: <' + crypto.randomBytes(16).toString('hex') + '@' + dominio + '>', 'MIME-Version: 1.0']);
+    let msg;
+    if (!anx.length) msg = cabs.concat(['Content-Type: multipart/alternative; boundary="' + fronteira + '"', ''], corpo).join('\r\n');
+    else { /* v125: multipart/mixed com o texto e os anexos (base64) */
+      const misto = 'cm' + crypto.randomBytes(12).toString('hex'), nomeArq = n => String(n || 'anexo').replace(/["\\\r\n]/g, '_').slice(0, 120);
+      const partes = anx.map(a => ['--' + misto, 'Content-Type: ' + String(a.tipo || 'application/octet-stream').replace(/[^\w.+\-\/]/g, '') + '; name="' + cab(nomeArq(a.nome)) + '"', 'Content-Transfer-Encoding: base64',
+        'Content-Disposition: attachment; filename="' + cab(nomeArq(a.nome)) + '"', '', linhas76(Buffer.from(a.dados).toString('base64'))].join('\r\n'));
+      msg = cabs.concat(['Content-Type: multipart/mixed; boundary="' + misto + '"', '', '--' + misto, 'Content-Type: multipart/alternative; boundary="' + fronteira + '"', ''], corpo, partes, ['--' + misto + '--', '']).join('\r\n'); }
     await cv.cmd(msg + '\r\n.', [250]);
     cv.sock.write('QUIT\r\n'); cv.sock.end();
     return true;

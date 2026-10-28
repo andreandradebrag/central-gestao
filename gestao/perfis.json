@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-28T13:15:33.349Z",
+ "gerado": "2026-10-28T14:18:08.519Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -71,7 +71,8 @@
     "agenda",
     "ctr",
     "serv",
-    "qual"
+    "qual",
+    "fab"
    ],
    "r": [
     "nf",
@@ -103,6 +104,7 @@
     "serv",
     "qual",
     "meu",
+    "fab",
     "ajuda"
    ],
    "nome": "Somente leitura"
@@ -185,6 +187,7 @@
     "folha",
     "meu",
     "empdoc",
+    "fab",
     "ajuda"
    ],
    "nome": "Leitura completa"
@@ -446,6 +449,30 @@
    "sensRh": true,
    "antigo": true,
    "nome": "Segurança do trabalho (antigo — troque por Gestor ou Técnico de segurança do trabalho)"
+  },
+  "fabrica": {
+   "w": [
+    "fab",
+    "comp",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "meu",
+    "ajuda"
+   ],
+   "so": {
+    "comp": [
+     "sc"
+    ]
+   },
+   "leSo": {
+    "comp": [
+     "sc",
+     "prod"
+    ]
+   },
+   "nome": "Fábrica (encarregado)"
   }
  },
  "colecoes": {
@@ -892,6 +919,9 @@
   ],
   "chora": [
    "rh"
+  ],
+  "osf": [
+   "fab"
   ],
   "ctremp": [
    "proj",
@@ -1358,6 +1388,9 @@
   "chora": [
    "rh"
   ],
+  "osf": [
+   "fab"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -1506,6 +1539,10 @@
   [
    "empdoc",
    "Documentos mensais dos empreiteiros (folha e guias dos empregados deles)"
+  ],
+  [
+   "fab",
+   "Fábrica: ordens de fabricação e painel de produção"
   ],
   [
    "ajuda",
