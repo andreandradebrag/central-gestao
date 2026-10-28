@@ -22595,9 +22595,157 @@ function bhiCel(f,r){if(!r)return '<td class="num sub">—</td>';
     return seg.slice(0,p2+5)+cel+seg.slice(p2+5);}).join('<tr>');
   return h.slice(0,a+7)+corpo+h.slice(b);};}
 
+/* ===== v123: notas fiscais — ambiente (homologação/produção) e busca automática na SEFAZ (Sistema › Configurações) =====
+   A configuração mora no conector fiscal (banco dele) e é lida/alterada por /api/fiscal-config no servidor da Central:
+   ler = quem lê notas; alterar = só Administrador ou dono, com a senha confirmada e trilha de auditoria.
+   A Central NÃO emite notas: NF-e pelo Omie e NFS-e no portal da prefeitura de Tuiuti. A chave vale para as consultas e a
+   manifestação feitas pelo conector (NF-e na SEFAZ, NFS-e no Ambiente Nacional) e para o tpAmb do rascunho de XML de NF-e. */
+const FAMB={st:null,erro:'',carregando:false,ts:0,busy:false};
+const fambSelf=()=>!!window.__SELFHOST;
+const fambPode=()=>!!(me&&(me.owner||me.perfil==='admin'))&&!(FAMB.st&&FAMB.st.podeAlterar===false);
+const fambAmbNome=a=>+a===1?'Produção':'Homologação (testes)';
+const fambDT=s=>{if(!s)return '';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'});};
+/* ambiente em uso, para o rascunho de NF-e: o que o conector informou (tela de configurações ou cartão de NFs recebidas);
+   sem informação, o último visto neste navegador; senão homologação (2), como sempre foi */
+function fambAmbAtual(){
+  const c=FAMB.st&&FAMB.st.config;if(c&&(+c.ambiente===1||+c.ambiente===2))return +c.ambiente;
+  const s=typeof FIS!=='undefined'&&FIS.st;if(s&&(+s.ambienteCod===1||+s.ambienteCod===2))return +s.ambienteCod;
+  if(s&&s.ambiente)return /produ/i.test(s.ambiente)?1:2;
+  try{const v=+localStorage.getItem('fambAmb');if(v===1||v===2)return v;}catch(e){}
+  return 2;
+}
+async function fambCarregar(forca){
+  if(!fambSelf()){FAMB.erro='local';return;}
+  if(FAMB.carregando)return;if(!forca&&FAMB.ts&&Date.now()-FAMB.ts<60000)return;
+  FAMB.carregando=true;
+  try{const r=await fetch('/api/fiscal-config',{credentials:'same-origin',cache:'no-store'});const j=await r.json().catch(()=>({}));
+    if(r.status===200&&j&&j.config){FAMB.st=j;FAMB.erro='';try{localStorage.setItem('fambAmb',String(j.config.ambiente));}catch(e){}}
+    else if(r.status===503){FAMB.erro='off';FAMB.st=null;}
+    else if(r.status===403){FAMB.erro='sem';FAMB.st=null;}
+    else{FAMB.erro='fora';FAMB.st=null;}}
+  catch(e){FAMB.erro='fora';FAMB.st=null;}
+  finally{FAMB.ts=Date.now();FAMB.carregando=false;schedule();}
+}
+function fambCard(){
+  const tit='<h2>Notas fiscais: ambiente e busca na SEFAZ</h2>';
+  const expl='<p class="sub" style="margin:0 0 10px">A Central <b>não emite</b> notas: a NF-e é emitida pelo Omie e a NFS-e no portal da prefeitura de Tuiuti. Esta escolha vale para o que o <b>conector fiscal</b> faz em nome da empresa (buscar as NF-e emitidas contra o CNPJ na SEFAZ, a manifestação do destinatário e a busca de NFS-e no Ambiente Nacional) e para o ambiente (tpAmb) do <b>rascunho de XML de NF-e</b> gerado aqui.</p>';
+  if(!fambSelf())return '<div class="card" id="fambCard">'+tit+expl+'<div class="note">O conector fiscal só existe quando o sistema roda no servidor próprio (VPS). Aqui o rascunho de XML de NF-e usa homologação (tpAmb 2).</div></div>';
+  fambCarregar(false);
+  const pode=fambPode();
+  if(FAMB.erro==='off')return '<div class="card" id="fambCard">'+tit+expl+'<div class="note"><b>Conector fiscal desligado neste servidor</b> (variáveis FISCAL_URL e FISCAL_TOKEN). Veja o LEIA-ME da instalação.</div></div>';
+  if(FAMB.erro==='sem')return '<div class="card" id="fambCard">'+tit+'<p class="sub" style="margin:0">Seu perfil não consulta a configuração das notas fiscais.</p></div>';
+  const fora=FAMB.erro==='fora';
+  if(!FAMB.st&&!fora)return '<div class="card" id="fambCard">'+tit+expl+'<p class="sub" style="margin:0">Consultando o conector fiscal…</p></div>';
+  const j=FAMB.st||{},c=j.config||{},o=j.origem||{},P=j.padrao||{},dis=(fora||FAMB.busy||!pode)?' disabled':'';
+  const orig=k=>o[k]==='banco'?'definido nesta tela':'padrão do servidor';
+  const btn=(act,v,txt,on,extra)=>'<button class="btn'+(on?' pri':'')+'" data-act="'+act+'" data-v="'+v+'" aria-pressed="'+(on?'true':'false')+'"'+dis+(extra||'')+'>'+txt+'</button>';
+  const est=fora?pill('conector fora do ar','neg'):null;
+  const linha=(rotulo,estado,botoes,ajuda)=>'<div class="li" style="align-items:flex-start;gap:12px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)"><div style="flex:1 1 260px;min-width:0"><b>'+rotulo+'</b> '+estado+(ajuda?'<div class="sub" style="margin-top:2px">'+ajuda+'</div>':'')+'</div>'+(pode&&botoes?'<div class="acts" style="flex-wrap:wrap;gap:6px;justify-content:flex-start">'+botoes+'</div>':'')+'</div>';
+  const amb=+c.ambiente;
+  const ambEst=est||pill(amb===1?'Produção':'Homologação (testes)',amb===1?'pos':'warn');
+  const ambAj=fora?'Sem resposta do conector: o estado não pôde ser lido.':(amb===1?'As consultas e as manifestações valem de verdade na SEFAZ e no Ambiente Nacional.':'As consultas vão para os servidores de teste (hom1 da SEFAZ e produção restrita do Ambiente Nacional); manifestações não valem.')+' Rascunho de NF-e com tpAmb '+(fora?fambAmbAtual():amb)+'.'+(fora?'':' <span class="sub">('+orig('ambiente')+')</span>');
+  const nsuOmie=!c.nfe_dist;
+  const autoEst=est||pill(c.auto?'Ligada':'Desligada',c.auto?'pos':'warn');
+  const autoAj=fora?'':(c.auto?'A cada '+esc(String(j.intervaloMin||60))+' min'+(j.proximaAuto?' · próxima por volta de '+esc(fambDT(j.proximaAuto)):''):'O conector não busca sozinho; “Buscar agora” em Fiscal › NFs recebidas continua, respeitando as esperas da SEFAZ.')+' · última busca: '+(j.ultimaBusca?esc(fambDT(j.ultimaBusca))+(j.ultimaBuscaOrigem?' ('+esc(j.ultimaBuscaOrigem)+')':''):'ainda não buscou')+' <span class="sub">('+orig('auto')+')</span>';
+  const nsuEst=est||pill(nsuOmie?'Omie consulta':'Central consulta',nsuOmie?'':'warn');
+  const nsuAj=fora?'':(nsuOmie?'A Central não consulta a SEFAZ por NSU; as NF-e de compra entram pelo Omie (importe os XMLs) ou por “Baixar XML”.':'A Central é a única a buscar as NF-e deste CNPJ por NSU. O Agente da NF-e do Omie precisa ficar desligado.')+' Ciência automática: '+(c.auto_ciencia?'ligada (até 10 dias da emissão)':'desligada')+'. <span class="sub">('+orig('nfe_dist')+')</span>';
+  const nfseEst=est||pill(c.nfse?'Ligada':'Desligada',c.nfse?'pos':'warn');
+  const nfseAj=fora?'':'NFS-e recebidas de prestadores, pelo Ambiente de Dados Nacional. <span class="sub">('+orig('nfse')+')</span>';
+  const algumBanco=Object.keys(o).some(k=>o[k]==='banco');
+  const quem=j.alteradaEm&&algumBanco?'<p class="sub" style="margin:8px 0 0">Última alteração nesta tela: '+esc(fambDT(j.alteradaEm))+(j.alteradaPor?' por '+esc(j.alteradaPor):'')+'.'+(P.ambiente?' Padrão do servidor: '+esc(fambAmbNome(P.ambiente))+', NF-e por NSU '+(P.nfe_dist?'Central':'Omie')+', busca automática '+(P.auto===false?'desligada':'ligada')+'.':'')+'</p>':'';
+  return '<div class="card" id="fambCard">'+tit+expl+
+    (fora?'<div class="note" style="margin:0 0 8px"><b class="neg">Conector fiscal fora do ar.</b> Não foi possível ler nem alterar a configuração. Confira se o serviço “fiscal” está rodando. <button class="btn sm" data-act="fambRecarregar">Tentar de novo</button></div>':'')+
+    (j.problema&&!fora?'<p class="sub warn" style="margin:0 0 8px">'+esc(j.problema)+'</p>':'')+
+    linha('Ambiente:',ambEst,btn('fambAmb','2','Homologação (testes)',!fora&&amb===2)+btn('fambAmb','1','Produção',!fora&&amb===1),ambAj)+
+    linha('Busca automática:',autoEst,btn('fambAuto','1','Ligar',!fora&&!!c.auto)+btn('fambAuto','0','Desligar',!fora&&!c.auto),autoAj)+
+    linha('NF-e por NSU:',nsuEst,btn('fambNsu','omie','Omie consulta (recomendado enquanto usar o Omie)',!fora&&nsuOmie)+btn('fambNsu','central','Central consulta',!fora&&!nsuOmie),nsuAj)+
+    linha('NFS-e do Ambiente Nacional:',nfseEst,btn('fambNfse','1','Ligar',!fora&&!!c.nfse)+btn('fambNfse','0','Desligar',!fora&&!c.nfse),nfseAj)+
+    quem+
+    (pode?'<div class="acts" style="justify-content:flex-start;margin-top:10px">'+(algumBanco?'<button class="btn" data-act="fambPadrao"'+dis+'>Voltar ao padrão do servidor</button>':'')+'<button class="btn" data-act="fambRecarregar"'+(FAMB.busy?' disabled':'')+'>Atualizar</button></div>'+
+      '<p class="sub" style="margin:6px 0 0">Alterar pede a confirmação da sua senha e fica na auditoria e no registro do conector.</p>':
+      '<p class="sub" style="margin:8px 0 0">Só o Administrador ou o dono altera estas opções.</p>')+
+    '</div>';
+}
+async function fambSalvar(corpo,ok){
+  if(FAMB.busy)return false;FAMB.busy=true;render();let feito=false;
+  try{const r=await fetch('/api/fiscal-config',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(corpo)});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok&&j&&j.ok&&j.config){FAMB.st=j;FAMB.erro='';feito=true;try{localStorage.setItem('fambAmb',String(j.config.ambiente));}catch(e){}
+      toast(ok||(j.alterado===false?'Nada mudou.':'Configuração do conector fiscal salva.'),'pos');}
+    else if(r.status===502){FAMB.erro='fora';toast(j.erro||'O conector fiscal não respondeu.','neg');}
+    else toast((j&&(j.erro||j.msg))||'Não foi possível salvar.','neg');}
+  catch(e){FAMB.erro='fora';toast('Sem conexão com o servidor.','neg');}
+  finally{FAMB.busy=false;FAMB.ts=Date.now();if(typeof FIS!=='undefined'){FIS.ts=0;if(feito&&typeof fisCarregar==='function')fisCarregar(true);}render();}
+  return feito;
+}
+A.fambRecarregar=()=>{FAMB.erro='';FAMB.st=null;FAMB.ts=0;fambCarregar(true);render();};
+A.fambAmb=d=>{
+  const v=+(d&&d.v);if(!(v===1||v===2)||!FAMB.st||FAMB.erro)return;if(+FAMB.st.config.ambiente===v){toast('Já está em '+fambAmbNome(v)+'.','pos');return;}
+  if(v===2){confirmBox('Voltar para <b>homologação (testes)</b>? As consultas passam a ir para os servidores de teste e as manifestações deixam de valer. A sequência (NSU) e as esperas de produção ficam guardadas para quando voltar. O rascunho de XML de NF-e passa a sair com tpAmb 2.',()=>{fambSalvar({ambiente:2},'Ambiente: homologação (testes).');},'Voltar para homologação');return;}
+  modal({title:'Passar para produção',
+    body:'<p style="margin:0 0 8px"><b>Em produção as consultas e as manifestações passam a valer de verdade</b> na SEFAZ e no Ambiente Nacional da NFS-e, com o certificado da empresa:</p>'+
+      '<ul style="margin:0 0 8px;padding-left:18px"><li>a busca de NF-e por NSU entra na sequência oficial do CNPJ'+(FAMB.st.config.nfe_dist?' (o Agente da NF-e do Omie precisa estar desligado)':' (hoje desligada: o Omie é quem consulta)')+';</li><li>ciência, confirmação, desconhecimento e “não realizada” ficam registradas na SEFAZ e não se desfazem;</li><li>a SEFAZ bloqueia o CNPJ por 1 hora em caso de consumo indevido;</li><li>o rascunho de XML de NF-e passa a sair com tpAmb 1. A emissão continua no Omie (NF-e) e no portal de Tuiuti (NFS-e).</li></ul>'+
+      '<label class="chk"><input type="checkbox" id="fambOkProd"> Entendi que as consultas e manifestações passam a valer de verdade.</label>'+
+      '<label class="f" style="margin-top:10px"><span>Sua senha (ou o código do aplicativo)</span><input type="password" id="fambSenha" autocomplete="current-password"></label><p class="neg" id="fambErr" role="alert" style="margin:6px 0 0;min-height:1.2em"></p>',
+    saveLabel:'Passar para produção',nofocus:true,
+    save:()=>{const chk=$('#fambOkProd'),s=$('#fambSenha'),er=$('#fambErr');const segredo=s?s.value:'';
+      if(!chk||!chk.checked){if(er)er.textContent='Marque a confirmação para continuar.';return false;}
+      if(!segredo){if(er)er.textContent='Digite sua senha.';if(s)s.focus();return false;}
+      (async()=>{try{const r=await fetch('/api/reautenticar',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({segredo})});
+          if(r.status===401){location.href='/login';return;}
+          if(!r.ok){const j=await r.json().catch(()=>({}));if(er)er.textContent=j.erro||'Senha ou código incorreto.';if(s){s.value='';s.focus();}return;}
+          closeModal();await fambSalvar({ambiente:1},'Ambiente: produção. As consultas e manifestações agora valem de verdade.');}
+        catch(e){if(er)er.textContent='Sem conexão com o servidor.';}})();
+      return false;}});
+};
+A.fambAuto=d=>{const v=d&&d.v==='1';if(!FAMB.st||FAMB.erro)return;if(!!FAMB.st.config.auto===v)return;
+  if(!v){confirmBox('Desligar a busca automática? O conector deixa de consultar a SEFAZ e o Ambiente Nacional sozinho. Notas novas só entram quando alguém clicar em “Buscar agora” (Fiscal › NFs recebidas).',()=>{fambSalvar({auto:false},'Busca automática desligada.');},'Desligar');return;}
+  fambSalvar({auto:true},'Busca automática ligada.');};
+A.fambNfse=d=>{const v=d&&d.v==='1';if(!FAMB.st||FAMB.erro)return;if(!!FAMB.st.config.nfse===v)return;
+  if(!v){confirmBox('Desligar a busca de NFS-e no Ambiente Nacional? As NFS-e de prestadores deixam de chegar sozinhas; será preciso lançá-las à mão.',()=>{fambSalvar({nfse:false},'Busca de NFS-e desligada.');},'Desligar');return;}
+  fambSalvar({nfse:true},'Busca de NFS-e ligada.');};
+A.fambNsu=d=>{const v=d&&d.v;if(!FAMB.st||FAMB.erro||(v!=='omie'&&v!=='central'))return;const cen=v==='central';if(!!FAMB.st.config.nfe_dist===cen)return;
+  if(!cen){confirmBox('Deixar o <b>Omie</b> como o único a consultar as NF-e deste CNPJ? A Central para de consultar a SEFAZ por NSU (e a ciência automática). Depois religue o Agente da NF-e no Omie.',()=>{fambSalvar({nfe_dist:false},'NF-e por NSU: o Omie consulta.');},'Omie consulta');return;}
+  modal({title:'Central consulta as NF-e por NSU',
+    body:'<div class="note" style="margin:0 0 10px;border-color:var(--neg,#c62828)"><b class="neg">Só um sistema por CNPJ pode consultar as NF-e por NSU.</b> É a regra da sequência única da SEFAZ (NT 2014.002): se o Omie e a Central consultarem o mesmo CNPJ, a SEFAZ responde “consumo indevido” (656), bloqueia o CNPJ por 1 hora e cada nota vai para quem consultar primeiro.</div>'+
+      '<p style="margin:0 0 8px">Antes de ligar aqui, desligue o <b>Agente da NF-e no Omie</b>. As notas que o Omie já capturou entram na Central por “Importar XML ou ZIP”. A primeira consulta pode receber um 656 de “fora de sequência”; o conector adota o NSU devolvido e segue dali.</p>'+
+      '<label class="chk"><input type="checkbox" id="fambOmieOff"> Já desliguei o Agente da NF-e no Omie</label><p class="neg" id="fambErr2" role="alert" style="margin:6px 0 0;min-height:1.2em"></p>',
+    saveLabel:'Central consulta',nofocus:true,
+    save:()=>{const c=$('#fambOmieOff');if(!c||!c.checked){const e=$('#fambErr2');if(e)e.textContent='Marque “Já desliguei o Agente da NF-e no Omie” para continuar.';return false;}
+      closeModal();fambSalvar({nfe_dist:true},'NF-e por NSU: a Central consulta.');return false;}});
+};
+A.fambPadrao=()=>{if(!FAMB.st||FAMB.erro)return;const P=FAMB.st.padrao||{};
+  confirmBox('Voltar ao padrão do servidor (variáveis do serviço fiscal)? Fica: ambiente '+esc(fambAmbNome(P.ambiente||2))+', NF-e por NSU '+(P.nfe_dist?'Central':'Omie')+', NFS-e '+(P.nfse===false?'desligada':'ligada')+', busca automática '+(P.auto===false?'desligada':'ligada')+'.',()=>{fambSalvar({restaurar:true},'Configuração do conector de volta ao padrão do servidor.');},'Voltar ao padrão',+P.ambiente===1);};
+Object.assign(ACT_GROUP,{fambAmb:'cfg',fambAuto:'cfg',fambNfse:'cfg',fambNsu:'cfg',fambPadrao:'cfg'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{fambAmb:'Escolhe entre homologação (testes) e produção para as consultas e manifestações do conector fiscal.',fambAuto:'Liga ou desliga a busca automática de notas na SEFAZ e no Ambiente Nacional.',fambNsu:'Escolhe quem consulta as NF-e do CNPJ por NSU: o Omie ou a Central (só um pode).',fambNfse:'Liga ou desliga a busca de NFS-e no Ambiente Nacional.',fambPadrao:'Volta às variáveis do serviço fiscal.',fambRecarregar:'Lê de novo a configuração do conector fiscal.'});
+/* Sistema › Configurações: o cartão (só leitura para quem não é Administrador/dono) */
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!(mayR('cfg')||mayR('nf')))return h;const card=fambCard();
+  /* entra na pilha de cartões das configurações (antes do cartão "Cores por setor", que fica fora dela) */
+  const k=h.indexOf('<div class="card" style="margin-top:14px"><h2>Cores por setor'),b=k>=0?h.slice(0,k):h,r=k>=0?h.slice(k):'',i=b.lastIndexOf('</div>');
+  return i>0?b.slice(0,i)+card+b.slice(i)+r:h+card;};}
+/* Fiscal › NFs recebidas: ambiente e busca automática no cartão do conector */
+if(typeof fisCard==='function'){const f0=fisCard;fisCard=function(){
+  let h=f0.apply(this,arguments);const st=typeof FIS!=='undefined'&&FIS.st;
+  if(typeof h!=='string')return h;
+  if(fambSelf()&&FIS.erro&&FIS.erro!=='off'&&h.indexOf('<h2>SEFAZ e Ambiente Nacional</h2>')>=0)
+    return h.replace('<h2>SEFAZ e Ambiente Nacional</h2>','<h2>SEFAZ e Ambiente Nacional</h2><p style="margin:0 0 6px">'+pill('conector fora do ar','neg')+'</p>');
+  if(!st||h.indexOf('data-act="fisSync"')<0)return h;
+  const amb=+st.ambienteCod||(/produ/i.test(st.ambiente||'')?1:2),auto=st.buscaAuto!==false;
+  const linha='<p class="sub" style="margin:4px 0 0">'+pill(amb===1?'Produção':'Homologação (testes)',amb===1?'pos':'warn')+' '+pill(auto?'Busca automática ligada':'Busca automática desligada',auto?'pos':'warn')+(amb===2?' As consultas vão para os servidores de teste.':'')+' <span class="sub">Alterar em Sistema › Configurações.</span></p>';
+  if(!auto)h=h.split('Busca automática a cada '+st.intervaloMin+' min').join('Busca automática desligada (só “Buscar agora”)');
+  const k='<h2 style="margin:0 0 4px">SEFAZ e Ambiente Nacional</h2>',i=h.indexOf(k);
+  return i>=0?h.slice(0,i+k.length)+linha+h.slice(i+k.length):h;};}
+/* rascunho de XML de NF-e: tpAmb conforme o ambiente escolhido */
+if(typeof buildXml==='function'){const b0=buildXml;buildXml=function(){
+  const x=b0.apply(this,arguments);if(typeof x!=='string')return x;const a=fambAmbAtual();
+  return x.replace('<tpAmb>2</tpAmb>','<tpAmb>'+a+'</tpAmb>').replace('Não está assinado nem foi transmitido à SEFAZ.','Não está assinado nem foi transmitido à SEFAZ. Ambiente: '+(a===1?'produção (tpAmb 1)':'homologação (tpAmb 2)')+', conforme Sistema › Configurações.');};}
+/* lê o ambiente uma vez ao abrir (servidor próprio), para o rascunho de NF-e sair certo mesmo sem abrir as configurações */
+if(fambSelf())setTimeout(()=>{try{fambCarregar(false);}catch(e){}},2500);
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='122',APP_DATA='2026-10-28';
+const APP_VER='123',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['123','2026-10-28',['Sistema › Configurações › Notas fiscais: ambiente e busca na SEFAZ. Troca entre Homologação e Produção (com confirmação e senha), liga e desliga a busca automática, escolhe quem consulta as NF-e recebidas (Omie ou Central, com o aviso da regra de um só sistema) e a busca de NFS-e no Ambiente Nacional. Só Administrador e dono alteram; toda mudança vai para a auditoria.', 'Cada ambiente guarda a própria sequência de notas da SEFAZ; o rascunho de XML de NF-e sai no ambiente escolhido. A emissão continua no Omie (NF-e) e no portal da prefeitura (NFS-e).']],
   ['122','2026-10-28',['Importar cadastros › Banco de horas (relatório do ponto): lê o PDF "Relatório Banco de Horas Colaboradores" (um colaborador por página) e grava, por competência, as horas por tipo de dia, quitações, validade e saldos do período e acumulado. Conferência antes de gravar, ligação pelo nome (os não encontrados são escolhidos e lembrados) e Desfazer.', 'Pessoal › Banco de horas: coluna Saldo no relatório com a diferença para o saldo do sistema, indicadores de saldos negativos e a tabela da competência no extrato do colaborador. Só RH e Administrador veem.']],
   ['121','2026-10-27',['Cores por setor: cada aba do menu superior tem a cor do seu setor e o fundo da página fica com a cor do setor aberto, bem clara. Para desligar neste navegador: Sistema › Configurações › Cores por setor.']],
   ['120','2026-10-27',['Comercial › Oportunidades: Nº da proposta na 1ª coluna (próximo número sugerido, editável, sem repetição; botão para separar o número que hoje está no título), coluna Projeto com link, colunas mais largas e títulos em até 3 linhas.', 'Botões Participar e Desistir no lugar do Go/no-go: Participar segue para a proposta e, com margem abaixo do mínimo, continua pedindo a aprovação do diretor; Desistir pede o motivo.', 'Valores em dinheiro em todo o sistema: digite só os números e o campo mostra R$ 2.000.000,00.', 'Habilitação: tipos de documento em ordem alfabética e filtro por documento.', 'EAP e Curva S: obras listadas pelo projeto (P490 · contrato · objeto).', 'Pessoal › Custo-hora por função: o RH calcula a média por função (com encargos e benefícios, só funções com 3 ou mais pessoas, sem expor salários) ou informa um valor de referência. Na EAP, a mão de obra recebe o valor da hora e o material o custo médio; valores gravados só mudam pelo botão Atualizar valores.']],

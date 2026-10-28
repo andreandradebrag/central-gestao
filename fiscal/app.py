@@ -22,9 +22,16 @@ Variáveis de ambiente:
   AUTO_CIENCIA    1 = dá ciência automática nas NF-e resumidas para baixar o XML completo
                   (padrão: igual a NFE_DIST; só dentro do prazo de 10 dias da NT 2020.001 v1.60)
   NFSE_ADN        1 = busca NFS-e no Ambiente Nacional (padrão 1)
-  DATA_DIR        pasta do banco (padrão /data)
+  BUSCA_AUTO      1 = o agendador busca sozinho a cada INTERVALO_MIN (padrão 1); 0 = só "Buscar agora"
+  DATA_DIR       pasta do banco (padrão /data)
   PORT            porta (padrão 8000)
   CA_BUNDLE       arquivo de autoridades certificadoras extra (ICP-Brasil), se precisar
+
+v123: AMBIENTE, NFE_DIST, NFSE_ADN, BUSCA_AUTO e AUTO_CIENCIA passam a ser só o VALOR PADRÃO. A tela
+Sistema › Configurações da Central grava a configuração em uso no banco do conector (chave 'cfg_runtime',
+rota POST /tool/config com o cabeçalho x-fiscal-config: 1); o valor do banco tem prioridade. Sem valor no
+banco (ou depois de "Voltar ao padrão"), vale a variável. As sequências de NSU, as esperas e os bloqueios da
+SEFAZ/ADN e os documentos ficam separados por ambiente (produção x homologação).
 """
 import base64, gzip, hashlib, json, os, re, sqlite3, tempfile, threading, time, traceback, atexit, shutil
 from datetime import datetime, timezone, timedelta
@@ -61,6 +68,12 @@ TP_NOME = {v[0]: k for k, v in EVENTOS.items()}
 UMA_HORA = 3600
 PRAZO_CIENCIA_DIAS = 10      # NT 2020.001 v1.60 (produção 01/06/2026)
 PRAZO_CONCLUSIVO_DIAS = 90   # confirmação, desconhecimento e não realizada
+# v123: configuração em tempo de execução (tela Sistema › Configurações da Central)
+CAMPOS_CFG = ('ambiente', 'nfe_dist', 'nfse', 'auto', 'auto_ciencia')
+ROTULO_CFG = {'ambiente': 'ambiente', 'nfe_dist': 'NF-e por NSU', 'nfse': 'NFS-e do Ambiente Nacional', 'auto': 'busca automática', 'auto_ciencia': 'ciência automática'}
+# estado que pertence a um ambiente da SEFAZ/ADN: sequências de NSU, esperas, bloqueios e retornos
+POR_AMB = ('nfe_ult_nsu', 'nfe_max_nsu', 'nfe_espera_ate', 'nfe_bloqueio_ate', 'nfe_conflito', 'nfe_ultimo_retorno', 'nfe_chave_cont',
+           'nfse_ult_nsu', 'nfse_espera_ate', 'ultima_sync')
 
 
 def env(k, d=''):
@@ -80,6 +93,11 @@ class Config:
         self.auto_ciencia = env('AUTO_CIENCIA', '1' if self.nfe_dist else '0') != '0'
         self.chave_max_hora = 3                                # bem abaixo do limite de 20/h da SEFAZ
         self.nfse = env('NFSE_ADN', '1') != '0'
+        self.auto = env('BUSCA_AUTO', '1') != '0'
+        # v123: valores das variáveis = padrão; a configuração gravada no banco do conector tem prioridade
+        self.padrao = {'ambiente': self.amb, 'nfe_dist': self.nfe_dist, 'nfse': self.nfse, 'auto': self.auto,
+                       'auto_ciencia': (env('AUTO_CIENCIA') != '0') if env('AUTO_CIENCIA') else None}  # None = segue nfe_dist
+        self.origem = {k: 'ambiente' for k in CAMPOS_CFG}
         self.data = env('DATA_DIR', '/data')
         self.port = int(env('PORT', '8000'))
         self.ca = env('CA_BUNDLE') or True
@@ -218,16 +236,52 @@ class Banco:
               importado integer default 0, importado_por text, importado_dt text, eventos text default '[]', criado text, atualizado text, extra text default '{}');
             create table if not exists log(ts text, nivel text, msg text);
             ''')
+            # v123: documento marcado com o ambiente em que foi recebido (1 produção, 2 homologação)
+            if 'amb' not in [r[1] for r in self.c.execute('pragma table_info(docs)')]:
+                self.c.execute('alter table docs add column amb integer')
+                self.c.commit()
+        self.amb = None   # ambiente em uso; definido pelo Conector (chaves de POR_AMB ficam separadas por ambiente)
+
+    def _k(self, k):
+        return f'{k}@amb{self.amb}' if self.amb and k in POR_AMB else k
 
     def get(self, k, d=None):
+        return self.get_cru(self._k(k), d)
+
+    def get_cru(self, k, d=None):
         with self.lk:
             r = self.c.execute('select v from estado where k=?', (k,)).fetchone()
         return json.loads(r[0]) if r else d
 
     def set(self, k, v):
+        self.set_cru(self._k(k), v)
+
+    def set_cru(self, k, v):
         with self.lk:
             self.c.execute('insert into estado(k,v) values(?,?) on conflict(k) do update set v=excluded.v', (k, json.dumps(v)))
             self.c.commit()
+
+    def migrar_por_ambiente(self, amb):
+        """v123: até a v122 o NSU, as esperas e os bloqueios eram únicos. Ficam com o ambiente que estava em uso
+        (o da variável AMBIENTE), uma única vez; o outro ambiente começa do zero."""
+        with self.lk:
+            if self.get_cru('por_amb_migrado'):
+                return False
+            movidos = []
+            for k in POR_AMB:
+                r = self.c.execute('select v from estado where k=?', (k,)).fetchone()
+                if r is None:
+                    continue
+                if self.c.execute('select 1 from estado where k=?', (f'{k}@amb{amb}',)).fetchone() is None:
+                    self.c.execute('insert into estado(k,v) values(?,?)', (f'{k}@amb{amb}', r[0]))
+                self.c.execute('delete from estado where k=?', (k,))
+                movidos.append(k)
+            self.c.execute('update docs set amb=? where amb is null', (amb,))
+            self.c.commit()
+            self.set_cru('por_amb_migrado', {'amb': amb, 'em': agora(), 'chaves': movidos})
+        if movidos:
+            self.log(f"Sequências de NSU, esperas e bloqueios separados por ambiente: os valores atuais ficaram com {'produção' if amb == 1 else 'homologação'}.")
+        return True
 
     def log(self, msg, nivel='info'):
         with self.lk:
@@ -255,7 +309,7 @@ class Banco:
             else:
                 novo = dict(chave=d['chave'], tipo='nfe', situacao='resumo', nsu='', emit_cnpj='', emit_nome='', numero='', serie='', emissao='',
                             valor=0, xml='', manifestacao='', manif_dt='', manif_por='', importado=0, importado_por='', importado_dt='', eventos='[]',
-                            criado=agora(), atualizado=agora(), extra='{}')
+                            criado=agora(), atualizado=agora(), extra='{}', amb=self.amb)
                 novo.update({k: v for k, v in d.items() if v is not None})
             cols = list(novo.keys())
             self.c.execute(f'insert or replace into docs({",".join(cols)}) values({",".join("?" * len(cols))})', [novo[c] for c in cols])
@@ -397,6 +451,109 @@ class Conector:
                 self.erro_cert = 'Não foi possível abrir o certificado (senha ou arquivo inválido): ' + type(e).__name__
         if self.http is None and requests is not None:
             self.http = requests.Session()
+        self.proxima_auto = 0
+        # v123: separa NSU/esperas por ambiente (uma vez, com o ambiente da variável) e aplica a configuração do banco
+        self.db.migrar_por_ambiente(cfg.padrao['ambiente'])
+        self.aplicar_config()
+
+    # ---- v123: configuração em tempo de execução (banco do conector > variáveis de ambiente)
+    def aplicar_config(self):
+        """Lê 'cfg_runtime' do banco e aplica sobre os padrões das variáveis. Os endereços (www1/hom1, ADN produção/
+        produção restrita) são escolhidos a cada chamada por self.cfg.amb, então a troca vale sem reiniciar."""
+        rt = self.db.get_cru('cfg_runtime') or {}
+        val = rt.get('valores') or {}
+        P, cfg, org = self.cfg.padrao, self.cfg, {}
+        for k in ('ambiente', 'nfe_dist', 'nfse', 'auto'):
+            org[k] = 'banco' if k in val else 'ambiente'
+        cfg.amb = int(val.get('ambiente', P['ambiente']))
+        cfg.nfe_dist = bool(val.get('nfe_dist', P['nfe_dist']))
+        cfg.nfse = bool(val.get('nfse', P['nfse']))
+        cfg.auto = bool(val.get('auto', P['auto']))
+        if 'auto_ciencia' in val:
+            cfg.auto_ciencia, org['auto_ciencia'] = bool(val['auto_ciencia']), 'banco'
+        elif P['auto_ciencia'] is not None:
+            cfg.auto_ciencia, org['auto_ciencia'] = P['auto_ciencia'], 'ambiente'
+        else:
+            cfg.auto_ciencia, org['auto_ciencia'] = cfg.nfe_dist, 'ambiente'   # sem AUTO_CIENCIA: segue a NF-e por NSU
+        cfg.origem = org
+        self.db.amb = cfg.amb
+
+    def config_efetiva(self):
+        c = self.cfg
+        return {'ambiente': c.amb, 'nfe_dist': c.nfe_dist, 'nfse': c.nfse, 'auto': c.auto, 'auto_ciencia': c.auto_ciencia}
+
+    def config_view(self):
+        rt = self.db.get_cru('cfg_runtime') or {}
+        us = self.db.get('ultima_sync') or {}
+        return {'config': self.config_efetiva(), 'origem': dict(self.cfg.origem), 'padrao': dict(self.cfg.padrao),
+                'alteradaPor': rt.get('por', ''), 'alteradaEm': rt.get('em', ''), 'intervaloMin': self.cfg.intervalo,
+                'ultimaBusca': us.get('em', ''), 'ultimaBuscaOrigem': us.get('origem', ''),
+                'proximaAuto': datetime.fromtimestamp(self.proxima_auto, timezone.utc).isoformat() if self.cfg.auto and self.proxima_auto > time.time() else '',
+                'problema': self.pronto(),
+                'enderecos': {'nfe': URL['dist'][self.cfg.amb].split('/')[2], 'nfse': URL['adn'][self.cfg.amb].split('/')[2]}}
+
+    @staticmethod
+    def validar_config(inp):
+        """Devolve (mudanças, restaurar, erro). Aceita 1/0, true/false e '1'/'0'; ambiente 1 (produção) ou 2 (homologação);
+        null volta aquele campo ao padrão da variável; restaurar=true volta tudo."""
+        if not isinstance(inp, dict):
+            return None, False, 'Configuração inválida.'
+        mud, restaurar = {}, False
+        for k, v in inp.items():
+            if k == 'restaurar':
+                if v not in (True, False, 0, 1, '0', '1') or isinstance(v, float):
+                    return None, False, 'Valor inválido para restaurar.'
+                restaurar = v in (True, 1, '1')
+                continue
+            if k not in CAMPOS_CFG:
+                return None, False, f'Campo desconhecido: {str(k)[:40]}.'
+            if v is None:
+                mud[k] = None
+            elif k == 'ambiente':
+                if isinstance(v, bool) or v not in (1, 2, '1', '2'):
+                    return None, False, 'Ambiente inválido: use 1 (produção) ou 2 (homologação).'
+                mud[k] = int(v)
+            else:
+                if isinstance(v, float) or v not in (True, False, 0, 1, '0', '1'):
+                    return None, False, f'Valor inválido para {ROTULO_CFG[k]}: use ligado (1) ou desligado (0).'
+                mud[k] = v in (True, 1, '1')
+        return mud, restaurar, ''
+
+    def config_salvar(self, inp, usuario=''):
+        mud, restaurar, erro = self.validar_config(inp)
+        if erro:
+            return {'ok': False, 'msg': erro}
+        if not mud and not restaurar:
+            return dict(ok=True, alterado=False, **self.config_view())
+        if not self.lk.acquire(blocking=False):
+            return {'ok': False, 'msg': 'Uma busca está em andamento. Tente de novo em alguns minutos.'}
+        try:
+            antes = self.config_efetiva()
+            rt = self.db.get_cru('cfg_runtime') or {}
+            val = {} if restaurar else dict(rt.get('valores') or {})
+            for k, v in mud.items():
+                if v is None:
+                    val.pop(k, None)
+                else:
+                    val[k] = v
+            self.db.set_cru('cfg_runtime', {'valores': val, 'por': usuario or '', 'em': agora()})
+            self.aplicar_config()
+            depois = self.config_efetiva()
+
+            def f(k, v):
+                return ('produção' if v == 1 else 'homologação') if k == 'ambiente' else ('ligada' if v else 'desligada') if k != 'nfe_dist' else ('Central' if v else 'Omie')
+            dif = [f'{ROTULO_CFG[k]}: {f(k, antes[k])} → {f(k, depois[k])}' for k in CAMPOS_CFG if antes[k] != depois[k]]
+            self.db.log(f"Configuração alterada por {usuario or 'não informado'}" + (' (voltou ao padrão das variáveis)' if restaurar else '') + ': ' +
+                        ('; '.join(dif) if dif else 'sem mudança efetiva') + '.', 'aviso' if dif else 'info')
+            if antes['ambiente'] != depois['ambiente']:
+                v = self.config_view()['enderecos']
+                self.db.log(f"Endereços em uso: NF-e {v['nfe']} · NFS-e {v['nfse']}. NSU e esperas deste ambiente: NF-e {self.db.get('nfe_ult_nsu', '0')}, NFS-e {self.db.get('nfse_ult_nsu', 0)}.")
+            hist = (self.db.get_cru('cfg_hist') or [])[-19:]
+            hist.append({'em': agora(), 'por': usuario or '', 'antes': antes, 'depois': depois, 'restaurar': restaurar})
+            self.db.set_cru('cfg_hist', hist)
+        finally:
+            self.lk.release()
+        return dict(ok=True, alterado=bool(dif), mudancas=dif, **self.config_view())
 
     # ---- transporte
     def post(self, url, dados, headers):
@@ -461,7 +618,7 @@ class Conector:
     def sync_nfe(self, forcar=False):
         # forcar fica só por compatibilidade: não fura mais a espera da SEFAZ (NT 2014.002)
         if not self.cfg.nfe_dist:
-            return {'ok': True, 'desligado': True, 'msg': 'Busca de NF-e por NSU desligada (NFE_DIST=0): as NF-e deste CNPJ são capturadas pelo Agente da NF-e do Omie.'}
+            return {'ok': True, 'desligado': True, 'msg': 'Busca de NF-e por NSU desligada (Omie consulta; NFE_DIST=0 ou Sistema › Configurações): as NF-e deste CNPJ são capturadas pelo Agente da NF-e do Omie.'}
         ate = bloqueado(self.db)
         if ate:
             return {'ok': True, 'aguardando': True, 'msg': 'A SEFAZ pede 1 hora entre consultas sem novidade (ou após consumo indevido). Próxima busca de NF-e após ' + hora_br(ate) + '.'}
@@ -485,7 +642,7 @@ class Conector:
                     maior = False
                 if 'ultnsu' in (r['xMotivo'] or '').lower() or maior:
                     self.db.set('nfe_conflito', {'em': agora(), 'nosso': ult, 'sefaz': r['ultNSU'], 'motivo': r['xMotivo']})
-                    self.db.log('Outro sistema consulta a Distribuição DF-e deste CNPJ (provável Agente da NF-e do Omie). Use um só: veja NFE_DIST no LEIA-ME.', 'erro')
+                    self.db.log('Outro sistema consulta a Distribuição DF-e deste CNPJ (provável Agente da NF-e do Omie). Use um só: Sistema › Configurações da Central (NF-e por NSU) ou NFE_DIST no LEIA-ME.', 'erro')
                 if r['ultNSU']:
                     ult = r['ultNSU']
                     self.db.set('nfe_ult_nsu', ult)
@@ -670,14 +827,14 @@ class Conector:
         return {'ok': True, 'novos': novos, 'ultNSU': ult}
 
     # ---- rotina
-    def sincronizar(self, forcar=False):
+    def sincronizar(self, forcar=False, origem='manual'):
         msg = self.pronto()
         if msg:
             return {'ok': False, 'msg': msg}
         if not self.lk.acquire(blocking=False):
             return {'ok': False, 'msg': 'Uma busca já está em andamento.'}
         try:
-            out = {'ok': True, 'em': agora()}
+            out = {'ok': True, 'em': agora(), 'origem': origem, 'ambiente': self.cfg.amb}
             try:
                 out['nfe'] = self.sync_nfe(forcar)
             except Exception as e:
@@ -699,7 +856,7 @@ class Conector:
         bloq = bloqueado(self.db)
         with self.db.lk:
             cont = {r['k']: r['n'] for r in self.db.c.execute(
-                "select tipo||'_'||(case when importado=1 then 'importadas' else 'pendentes' end) k, count(*) n from docs where situacao!='evento' group by 1")}
+                "select tipo||'_'||(case when importado=1 then 'importadas' else 'pendentes' end) k, count(*) n from docs where situacao!='evento' and (amb=? or amb is null) group by 1", (self.cfg.amb,))}
             logs = [dict(r) for r in self.db.c.execute('select * from log order by rowid desc limit 15')]
         return {'ok': not self.pronto(), 'problema': self.pronto(), 'cnpj': self.cfg.cnpj, 'uf': self.cfg.uf,
                 'ambiente': 'produção' if self.cfg.amb == 1 else 'homologação', 'certificado': self.cert.info() if self.cert else None,
@@ -708,11 +865,15 @@ class Conector:
                 'autoCiencia': self.cfg.auto_ciencia, 'nfse': self.cfg.nfse, 'intervaloMin': self.cfg.intervalo,
                 'nfeUltNSU': self.db.get('nfe_ult_nsu', '0'), 'nfeMaxNSU': self.db.get('nfe_max_nsu', ''), 'nfseUltNSU': self.db.get('nfse_ult_nsu', 0),
                 'proximaNfe': datetime.fromtimestamp(espera, timezone.utc).isoformat() if espera and espera > time.time() else '',
-                'ultimaSync': self.db.get('ultima_sync'), 'ultimoRetornoSefaz': self.db.get('nfe_ultimo_retorno'), 'contagem': cont, 'log': logs}
+                'ultimaSync': self.db.get('ultima_sync'), 'ultimoRetornoSefaz': self.db.get('nfe_ultimo_retorno'), 'contagem': cont, 'log': logs,
+                # v123: configuração efetiva e de onde veio cada valor (banco = tela da Central; ambiente = variável)
+                'ambienteCod': self.cfg.amb, 'buscaAuto': self.cfg.auto,
+                'proximaAuto': datetime.fromtimestamp(self.proxima_auto, timezone.utc).isoformat() if self.cfg.auto and self.proxima_auto > time.time() else '',
+                'configuracao': self.config_view()}
 
     def listar(self, q):
-        sql = "select chave,tipo,situacao,nsu,emit_cnpj,emit_nome,numero,serie,emissao,valor,manifestacao,manif_dt,manif_por,importado,importado_por,importado_dt,eventos,criado,atualizado,extra, length(xml)>0 temXml from docs where situacao!='evento'"
-        p = []
+        sql = "select chave,tipo,situacao,nsu,emit_cnpj,emit_nome,numero,serie,emissao,valor,manifestacao,manif_dt,manif_por,importado,importado_por,importado_dt,eventos,criado,atualizado,extra, length(xml)>0 temXml from docs where situacao!='evento' and (amb=? or amb is null)"
+        p = [self.cfg.amb]   # v123: só os documentos do ambiente em uso
         if q.get('tipo') in ('nfe', 'nfse'):
             sql += ' and tipo=?'
             p.append(q['tipo'])
@@ -741,10 +902,15 @@ class Conector:
             self.db.c.commit()
         return {'ok': bool(n)}
 
-    def ferramenta(self, nome, inp, usuario=''):
+    def ferramenta(self, nome, inp, usuario='', pode_config=False):
         inp = inp or {}
         if nome == 'status':
             return self.status()
+        if nome == 'config':
+            # ler é livre (com o token); alterar só pela rota da Central que exigiu a senha (cabeçalho x-fiscal-config)
+            if inp and not pode_config:
+                raise PermissionError('config')
+            return self.config_salvar(inp, usuario)
         if nome == 'sincronizar':
             return self.sincronizar(bool(inp.get('forcar')))
         if nome == 'listar_documentos':
@@ -821,9 +987,11 @@ def servidor(con: Conector, cfg: Config):
                 m = re.fullmatch(r'/tool/([a-z_]+)', p)
                 if metodo == 'POST' and m:
                     try:
-                        return self.resp(200, con.ferramenta(m.group(1), self.corpo(), usuario))
+                        return self.resp(200, con.ferramenta(m.group(1), self.corpo(), usuario, self.headers.get('x-fiscal-config', '') == '1'))
                     except KeyError:
                         return self.resp(404, {'erro': 'Ferramenta desconhecida.'})
+                    except PermissionError:
+                        return self.resp(403, {'erro': 'A configuração do conector só é alterada em Sistema › Configurações da Central (com confirmação de senha).'})
                 return self.resp(404, {'erro': 'Rota não encontrada.'})
             except Exception as e:
                 # detalhe só no log do contêiner; quem chamou recebe uma mensagem genérica com um código para procurar no log
@@ -847,14 +1015,25 @@ def falha_ref(contexto, e=None):
     return ref
 
 
+def rodada_agendada(con: Conector):
+    """Uma rodada do agendador. Com a busca automática desligada (BUSCA_AUTO=0 ou tela da Central) não chama a SEFAZ nem o ADN;
+    "Buscar agora" continua funcionando, com as mesmas esperas da SEFAZ."""
+    if not con.cfg.auto:
+        return {'ok': True, 'desligado': True}
+    if con.pronto():
+        return None
+    return con.sincronizar(origem='automática')
+
+
 def agendador(con: Conector, cfg: Config):
+    con.proxima_auto = time.time() + 20
     time.sleep(20)
     while True:
         try:
-            if not con.pronto():
-                con.sincronizar()
+            rodada_agendada(con)
         except Exception:
             traceback.print_exc()
+        con.proxima_auto = time.time() + cfg.intervalo * 60
         time.sleep(cfg.intervalo * 60)
 
 
@@ -865,7 +1044,8 @@ def main():
     banco = Banco(cfg.data)
     con = Conector(cfg, banco)
     p = con.pronto()
-    banco.log('Conector fiscal iniciado (' + ('produção' if cfg.amb == 1 else 'homologação') + ')' + (' - ' + p if p else ''), 'aviso' if p else 'info')
+    banco.log('Conector fiscal iniciado (' + ('produção' if cfg.amb == 1 else 'homologação') + ('' if cfg.origem.get('ambiente') == 'ambiente' else ', definido na Central') +
+              ('' if cfg.auto else ', busca automática desligada') + ')' + (' - ' + p if p else ''), 'aviso' if p else 'info')
     threading.Thread(target=agendador, args=(con, cfg), daemon=True).start()
     srv = servidor(con, cfg)
     print(f'Conector fiscal na porta {cfg.port}', flush=True)

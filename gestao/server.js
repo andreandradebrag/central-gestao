@@ -816,6 +816,33 @@ async function rotear(req, res) {
   const dcu = defConta(conta), cu = dcu && dcu.custom ? dcu : null, cuW = g => !!cu && cu.w.includes(g), cuR = g => !!cu && (cu.w.includes(g) || cu.r.includes(g));
   if (p.startsWith('/api/solides/') && !perfilEm(conta, ['admin', 'rh']) && !(cuW('ponto') && cu.sensRh)) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar a integração de ponto.' });
   if (p.startsWith('/api/bancos/') && !perfilEm(conta, ['admin', 'financeiro']) && !(cuW('contas') && cu.banco)) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar o extrato automático.' });
+  /* v123: ambiente fiscal (homologação/produção) e busca automática na SEFAZ. Ler: quem lê notas; alterar: só Administrador ou dono,
+     com a senha confirmada (reauth) e trilha de auditoria. O conector só aceita a alteração com o cabeçalho x-fiscal-config, que o
+     repasse genérico /api/fiscal/* não envia. */
+  if (p === '/api/fiscal-config' && (m === 'GET' || m === 'POST')) {
+    const leitor = perfilEm(conta, ['admin', 'financeiro', 'fiscal', 'projetos', 'leitura', 'leituratotal']) || cuR('nf'), admin = conta.nivel === 'owner' || perfilEm(conta, ['admin']);
+    const chamar = (corpo, grava) => fetch(FISCAL_URL + '/tool/config', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json', 'x-fiscal-token': FISCAL_TOKEN, 'x-usuario': encodeURIComponent(conta.nome || conta.email || conta.id) }, grava ? { 'x-fiscal-config': '1' } : {}), body: JSON.stringify(corpo || {}), signal: AbortSignal.timeout(30000) }).then(async r => ({ st: r.status, j: await r.json().catch(() => ({})) }));
+    if (m === 'GET') {
+      if (!leitor) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite ver a configuração fiscal.' });
+      if (!FISCAL_URL) return json(res, 503, { code: 'capability_disabled', erro: 'Conector fiscal não configurado (FISCAL_URL).', podeAlterar: admin });
+      try { const r = await chamar({}, false); return json(res, r.st === 200 ? 200 : 502, Object.assign({}, r.j, { podeAlterar: admin })); }
+      catch (e) { return json(res, 502, { erro: 'O conector fiscal não respondeu. Confira se o serviço está no ar.', podeAlterar: admin }); }
+    }
+    let b = {}; try { b = await lerJson(req); } catch (e) { return json(res, 400, { code: 'invalid_argument', erro: 'JSON inválido.' }); }
+    if (!admin) { REG.auditar(conta, req, 'FISCAL_CONFIG_NEGADO', 'fiscal/config', null, { pedido: b }); return json(res, 403, { code: 'not_granted', erro: 'Só o Administrador ou o dono altera o ambiente fiscal e a busca automática.' }); }
+    const CAMPOS = ['ambiente', 'nfe_dist', 'nfse', 'auto', 'auto_ciencia', 'restaurar'];
+    if (!b || typeof b !== 'object' || Array.isArray(b) || !Object.keys(b).length || Object.keys(b).some(k => !CAMPOS.includes(k))) return json(res, 400, { code: 'invalid_argument', erro: 'Configuração inválida.' });
+    if (!END.reautenticado(req)) { REG.auditar(conta, req, 'FISCAL_CONFIG_PEDE_SENHA', 'fiscal/config', null, { pedido: b }); if (END.exigirReauth(req, res)) return; }
+    if (!FISCAL_URL) return json(res, 503, { code: 'capability_disabled', erro: 'Conector fiscal não configurado (FISCAL_URL).' });
+    try {
+      const a0 = await chamar({}, false), r = await chamar(b, true), antes = a0.j && a0.j.config || null;
+      if (r.st !== 200 || !r.j || !r.j.ok) { REG.auditar(conta, req, 'FISCAL_CONFIG_RECUSADO', 'fiscal/config', antes, { pedido: b, erro: (r.j && (r.j.msg || r.j.erro)) || ('HTTP ' + r.st) }); return json(res, r.st === 200 ? 400 : 502, { code: 'invalid_argument', erro: (r.j && (r.j.msg || r.j.erro)) || 'O conector fiscal recusou a configuração.' }); }
+      REG.auditar(conta, req, 'FISCAL_CONFIG', 'fiscal/config', antes, r.j.config);
+      return json(res, 200, Object.assign({}, r.j, { podeAlterar: true }));
+    } catch (e) { REG.auditar(conta, req, 'FISCAL_CONFIG_FALHA', 'fiscal/config', null, { pedido: b }); return json(res, 502, { erro: 'O conector fiscal não respondeu. Confira se o serviço está no ar.' }); }
+  }
+  /* v123: a configuração do conector não passa pelo repasse genérico (sem senha nem auditoria) */
+  if (p.startsWith('/api/fiscal/') && /^\/tool\/config\b/i.test(p.slice('/api/fiscal'.length).replace(/\/{2,}/g, '/'))) return json(res, 403, { code: 'not_granted', erro: 'Use Sistema › Configurações › Notas fiscais: ambiente e busca na SEFAZ.' });
   if (p.startsWith('/api/fiscal/') && !perfilEm(conta, ['admin', 'financeiro', 'fiscal', 'projetos', 'leitura', 'leituratotal']) && !cuR('nf')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite acessar as notas fiscais.' });
   /* conector fiscal: consultar (GET) para quem lê notas; emitir, cancelar e demais ações só Administrador, Financeiro e Fiscal */
   if (p.startsWith('/api/fiscal/') && m !== 'GET' && m !== 'HEAD' && !perfilEm(conta, ['admin', 'financeiro', 'fiscal']) && !cuW('nf')) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil só consulta as notas fiscais; emitir ou cancelar fica com Administrador, Financeiro ou Fiscal.' });

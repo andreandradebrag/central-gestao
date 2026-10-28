@@ -371,6 +371,139 @@ class T(unittest.TestCase):
         tipo, d = app.ler_nfse(NFSE.encode())
         self.assertNotIn('CST', json.loads(d['extra']))
 
+    # ------------------------------------------------ v123: configuração em tempo de execução (Sistema › Configurações)
+    def test_config_banco_tem_prioridade(self):
+        self.assertEqual(self.con.config_view()['origem']['ambiente'], 'ambiente')
+        r = self.con.config_salvar({'ambiente': 1, 'nfe_dist': 0, 'nfse': '0'}, 'Andre')
+        self.assertTrue(r['ok'], r)
+        self.assertEqual(r['config']['ambiente'], 1)
+        # um conector novo (reinício do serviço) com as mesmas variáveis usa o valor do banco
+        con = app.Conector(app.Config(), self.db, http=self.http)
+        st = con.status()
+        self.assertEqual((st['ambiente'], st['ambienteCod'], st['nfeDist'], st['nfse']), ('produção', 1, False, False))
+        self.assertEqual(st['configuracao']['origem'], {'ambiente': 'banco', 'nfe_dist': 'banco', 'nfse': 'banco', 'auto': 'ambiente', 'auto_ciencia': 'ambiente'})
+        self.assertEqual(st['configuracao']['padrao']['ambiente'], 2)
+        self.assertEqual(st['configuracao']['alteradaPor'], 'Andre')
+        out = con.sincronizar()
+        self.assertTrue(out['nfe'].get('desligado'))
+        self.assertNotIn('nfse', out)
+        self.assertEqual((self.http.posts, self.http.gets), ([], []))
+        # o registro diz quem mudou e o antes → depois
+        log = ' | '.join(l['msg'] for l in st['log'])
+        self.assertIn('Configuração alterada por Andre', log)
+        self.assertIn('ambiente: homologação → produção', log)
+        self.assertIn('NF-e por NSU: Central → Omie', log)
+        # um campo volta ao padrão (null) e depois tudo (restaurar)
+        r = con.config_salvar({'nfse': None}, 'Andre')
+        self.assertEqual((r['config']['nfse'], r['origem']['nfse']), (True, 'ambiente'))
+        r = con.config_salvar({'restaurar': True}, 'Andre')
+        self.assertEqual(r['config'], {'ambiente': 2, 'nfe_dist': True, 'nfse': True, 'auto': True, 'auto_ciencia': True})
+        self.assertEqual(set(r['origem'].values()), {'ambiente'})
+
+    def test_troca_de_ambiente_usa_nsu_separado(self):
+        # homologação (padrão do teste) já tem sequência e está em espera da SEFAZ
+        self.db.set('nfe_ult_nsu', '000000000000050')
+        self.db.set('nfse_ult_nsu', 9)
+        self.db.set('nfe_espera_ate', app.time.time() + 1800)
+        self.assertTrue(self.con.sincronizar()['nfe'].get('aguardando'))
+        self.con.config_salvar({'ambiente': 1}, 'Andre')
+        self.assertEqual(self.db.get('nfe_ult_nsu', '0'), '0')   # produção começa a sua própria sequência
+        self.assertFalse(app.bloqueado(self.db))                   # a espera era da homologação
+        self.http.fila_dist = [ret_dist('137', '000000000000000', '000000000000000')]
+        self.con.sincronizar()
+        url, dados, h = self.dist_posts()[-1]
+        self.assertIn('www1.nfe.fazenda.gov.br', url)               # endereço trocado sem reiniciar
+        x = etree.fromstring(dados)
+        self.assertEqual((app.txt(x, 'tpAmb'), app.txt(x, 'ultNSU')), ('1', '000000000000000'))
+        self.assertIn('https://adn.nfse.gov.br/contribuintes/DFe/1', [g[0] for g in self.http.gets])   # ADN de produção, NSU do zero
+        self.assertTrue(all('producaorestrita' in g[0] for g in self.http.gets[:1]))                    # antes: produção restrita, NSU 10
+        self.assertTrue(app.bloqueado(self.db))                    # 137 em produção: espera só de produção
+        # volta para homologação: NSU e espera de lá continuam como estavam
+        self.con.config_salvar({'ambiente': 2}, 'Andre')
+        self.assertEqual(self.db.get('nfe_ult_nsu'), '000000000000050')
+        self.assertEqual(self.db.get('nfse_ult_nsu'), 9)
+        self.assertTrue(app.bloqueado(self.db))
+        self.assertEqual(self.db.get_cru('nfe_ult_nsu@amb1'), '000000000000000')
+        # documentos ficam no ambiente em que chegaram
+        self.db.salvar({'chave': CH1, 'tipo': 'nfe', 'situacao': 'resumo'})
+        self.assertEqual(len(self.con.listar({'tipo': 'nfe'})['documentos']), 1)
+        self.con.config_salvar({'ambiente': 1}, 'Andre')
+        self.assertEqual(self.con.listar({'tipo': 'nfe'})['documentos'], [])   # em produção só a NFS-e baixada lá
+
+    def test_migracao_nsu_antigo_vai_para_o_ambiente_em_uso(self):
+        d = tempfile.mkdtemp()
+        b = app.Banco(d)
+        b.set('nfe_ult_nsu', '000000000000077')      # como gravava a v122 (sem ambiente)
+        b.set('nfe_bloqueio_ate', app.time.time() + 600)
+        b.salvar({'chave': CH1, 'tipo': 'nfe', 'situacao': 'resumo'})
+        os.environ.update(AMBIENTE='1', DATA_DIR=d)
+        con = app.Conector(app.Config(), b, http=self.http)
+        self.assertEqual(b.get('nfe_ult_nsu'), '000000000000077')
+        self.assertIsNone(b.get_cru('nfe_ult_nsu'))
+        self.assertTrue(app.bloqueado(b))
+        self.assertEqual(len(con.listar({})['documentos']), 1)
+        con.config_salvar({'ambiente': 2}, 'x')
+        self.assertEqual(b.get('nfe_ult_nsu', '0'), '0')
+        self.assertFalse(app.bloqueado(b))
+        self.assertEqual(con.listar({})['documentos'], [])
+        app.Conector(app.Config(), b, http=self.http)              # segunda partida não migra de novo
+        self.assertEqual(b.get_cru('nfe_ult_nsu@amb1'), '000000000000077')
+
+    def test_auto_desligado_agendador_nao_chama_sefaz(self):
+        r = self.con.config_salvar({'auto': 0}, 'Andre')
+        self.assertFalse(r['config']['auto'])
+        out = app.rodada_agendada(self.con)
+        self.assertTrue(out.get('desligado'))
+        self.assertEqual((self.http.posts, self.http.gets), ([], []))
+        self.assertFalse(self.con.status()['buscaAuto'])
+        # "Buscar agora" continua (com as regras da v119)
+        self.assertTrue(self.con.sincronizar()['ok'])
+        self.assertEqual(len(self.dist_posts()), 1)
+        self.con.config_salvar({'auto': 1}, 'Andre')
+        self.db.set('nfse_espera_ate', 0)
+        out = app.rodada_agendada(self.con)
+        self.assertEqual(out['origem'], 'automática')
+        self.assertTrue(self.http.gets)
+
+    def test_config_validacao(self):
+        for ruim in ({'ambiente': 3}, {'ambiente': True}, {'ambiente': 'producao'}, {'nfe_dist': 'sim'}, {'auto': 2}, {'nfse': 0.5},
+                     {'auto_ciencia': [1]}, {'xpto': 1}, {'restaurar': 'talvez'}, [1, 2]):
+            r = self.con.config_salvar(ruim, 'Andre')
+            self.assertFalse(r['ok'], ruim)
+            self.assertTrue(r['msg'])
+        self.assertIsNone(self.db.get_cru('cfg_runtime'))
+        self.assertEqual(self.con.config_efetiva()['ambiente'], 2)
+        self.assertTrue(self.con.config_salvar({'ambiente': '1', 'auto_ciencia': False}, 'Andre')['ok'])
+
+    def test_http_config(self):
+        cfg = self.cfg
+        cfg.port = 0
+        srv = app.servidor(self.con, cfg)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f'http://127.0.0.1:{srv.server_address[1]}'
+
+        def req(body, tok='tok', h=None):
+            r = urllib.request.Request(base + '/tool/config', data=json.dumps(body).encode(), headers=dict({'x-fiscal-token': tok, 'content-type': 'application/json', 'x-usuario': 'Andre'}, **(h or {})))
+            try:
+                with urllib.request.urlopen(r) as f:
+                    return f.status, json.loads(f.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        try:
+            self.assertEqual(req({'ambiente': 1}, tok='x', h={'x-fiscal-config': '1'})[0], 401)   # sem token
+            self.assertEqual(req({'ambiente': 1}, tok='')[0], 401)
+            self.assertEqual(req({'ambiente': 1})[0], 403)                                     # token sem a rota da Central
+            self.assertIsNone(self.db.get_cru('cfg_runtime'))
+            c, j = req({})                                                                     # leitura
+            self.assertEqual((c, j['config']['ambiente']), (200, 2))
+            c, j = req({'ambiente': 9}, h={'x-fiscal-config': '1'})
+            self.assertEqual((c, j['ok']), (200, False))
+            c, j = req({'ambiente': 1}, h={'x-fiscal-config': '1'})
+            self.assertEqual((c, j['ok'], j['config']['ambiente'], j['alteradaPor']), (200, True, 1, 'Andre'))
+            self.assertEqual(self.con.status()['ambiente'], 'produção')
+        finally:
+            srv.shutdown()
+
 
 if __name__ == '__main__':
     unittest.main()

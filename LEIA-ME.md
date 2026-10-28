@@ -67,7 +67,9 @@ Crie um projeto, por exemplo `central`.
   NFE_DIST=0                   (0 = o Omie busca as NF-e; 1 = a Central busca. Leia abaixo)
   AUTO_CIENCIA=0               (se não preencher, segue o NFE_DIST)
   NFSE_ADN=1
+  BUSCA_AUTO=1                 (1 = busca sozinha a cada INTERVALO_MIN; 0 = só "Buscar agora")
   ```
+  Desde a v123 estas variáveis (`AMBIENTE`, `NFE_DIST`, `AUTO_CIENCIA`, `NFSE_ADN` e `BUSCA_AUTO`) são só o **valor padrão**. Quem manda é a tela **Sistema › Configurações › Notas fiscais: ambiente e busca na SEFAZ** (veja a seção 3.1.1).
 - **Mounts**:
   - Volume: nome `fiscal-dados`, caminho `/data`
   - Bind: host `/opt/central/certs`, caminho `/certs`
@@ -90,6 +92,25 @@ Por isso, **só um sistema por CNPJ** pode fazer essa busca: **o Omie ou a Centr
 - **Para voltar ao Omie:** faça o contrário. Mude para `NFE_DIST=0`, reinicie e só depois ligue o Agente da NF-e no Omie.
 
 Se o cartão fiscal mostrar o alerta vermelho **"Outro sistema está consultando as NF-e deste CNPJ"**, há dois sistemas buscando ao mesmo tempo. Desligue um deles como explicado acima.
+
+Desde a v123 a troca é feita na tela (seção 3.1.1, "NF-e por NSU"), sem reiniciar: escolher **Central consulta** mostra o aviso desta regra e só aceita depois de marcar **"Já desliguei o Agente da NF-e no Omie"**. Mudar a variável `NFE_DIST` só vale enquanto ninguém tiver escolhido pela tela (ou depois de "Voltar ao padrão do servidor").
+
+#### 3.1.1 Configuração pela tela (v123): ambiente e busca na SEFAZ
+
+Em **Sistema › Configurações**, cartão **Notas fiscais: ambiente e busca na SEFAZ**. Todos que leem as notas veem o estado; **só o Administrador ou o dono** alteram, e **cada alteração pede a senha de novo** (ou o código do aplicativo), fica na **auditoria** da Central (`FISCAL_CONFIG`, com antes e depois) e no **Registro** do conector ("Configuração alterada por … : antes → depois").
+
+- **Ambiente: Homologação (testes) / Produção.** Vale para o que o conector faz em nome da empresa: a busca de NF-e na SEFAZ, a manifestação do destinatário e a busca de NFS-e no Ambiente Nacional; e para o `tpAmb` do **rascunho de XML de NF-e** que a Central gera. **A Central não emite notas**: a NF-e continua sendo emitida pelo Omie e a NFS-e no portal da prefeitura de Tuiuti. Passar para Produção pede uma confirmação explícita (as consultas e manifestações passam a valer de verdade) e a senha. A troca vale na hora, sem reiniciar: o conector passa a usar `www1`/`www` da SEFAZ e `adn.nfse.gov.br` em produção, ou `hom1` e `adn.producaorestrita.nfse.gov.br` em homologação.
+- **Cada ambiente tem a sua fila (NSU), as suas esperas e os seus documentos.** Voltar de produção para homologação não usa o NSU de produção, e vice-versa; ao voltar, cada um continua de onde parou. Na primeira partida da v123 os valores que já existiam ficam com o ambiente da variável `AMBIENTE`.
+- **Busca automática: Ligar / Desligar.** Desligada, o conector não consulta sozinho; **Buscar agora** (Compras › NFs recebidas) continua funcionando, com as mesmas esperas da SEFAZ. O cartão mostra o intervalo (`INTERVALO_MIN`), a última busca e a próxima.
+- **NF-e por NSU: Omie consulta (recomendado enquanto usar o Omie) / Central consulta.** É o `NFE_DIST` (regra da fila única acima).
+- **NFS-e do Ambiente Nacional: Ligar / Desligar.** É o `NFSE_ADN`.
+- **Ciência automática** segue `AUTO_CIENCIA`; se a variável estiver vazia, fica ligada só quando a Central consulta as NF-e por NSU.
+
+O valor escolhido na tela fica gravado no banco do conector (volume `fiscal-dados`, chave `cfg_runtime`) e **tem prioridade sobre as variáveis**, mesmo depois de reiniciar ou reimplantar. Sem valor na tela, vale a variável (comportamento anterior). O cartão mostra, em cada linha, se o valor é "definido nesta tela" ou "padrão do servidor".
+
+**Como voltar ao padrão:** na mesma tela, botão **Voltar ao padrão do servidor** (aparece quando há algo gravado pela tela; também pede a senha). Tudo volta às variáveis do serviço `fiscal`. Se a Central estiver fora do ar, a alternativa é apagar a chave no banco do conector: `docker exec -it <contêiner fiscal> python3 -c "import sqlite3;c=sqlite3.connect('/data/fiscal.db');c.execute(\"delete from estado where k='cfg_runtime'\");c.commit()"` e reiniciar o serviço.
+
+Se o conector não responder, o cartão mostra **"conector fora do ar"** e os botões ficam desabilitados. A alteração só passa pela rota `/api/fiscal-config` da Central; o repasse genérico `/api/fiscal/tool/config` é recusado e o conector só aceita mudar a configuração com o cabeçalho que essa rota envia.
 
 ### 3.2 Serviço `gestao`
 
@@ -133,12 +154,13 @@ Se o cartão fiscal mostrar o alerta vermelho **"Outro sistema está consultando
 
 O cartão **SEFAZ e Ambiente Nacional** mostra:
 
-- **NF-e** emitidas contra o CNPJ (Distribuição DF-e), **só se `NFE_DIST=1`** (veja a seção 3.1: um só sistema por CNPJ). Com `NFE_DIST=0` o cartão avisa que as NF-e são capturadas pelo Agente da NF-e do Omie. Com `AUTO_CIENCIA=1` o conector dá ciência sozinho nas que chegam só como resumo, e o XML completo vem na busca seguinte. A ciência só é dada até **10 dias** da emissão; confirmação, desconhecimento e operação não realizada valem até **90 dias** (o sistema avisa quando a nota passou do prazo). Botões: **Importar** (vai para a lista de validação), **Baixar XML**, **Manifestar** (ciência, confirmação, desconhecimento, operação não realizada).
+- **Ambiente e busca automática**: o cartão mostra se está em **Produção** ou **Homologação (testes)** e se a busca automática está ligada. Para alterar: Sistema › Configurações (seção 3.1.1).
+- **NF-e** emitidas contra o CNPJ (Distribuição DF-e), **só se a Central consulta as NF-e por NSU** (`NFE_DIST=1` ou a tela da seção 3.1.1; veja a seção 3.1: um só sistema por CNPJ). Com `NFE_DIST=0` o cartão avisa que as NF-e são capturadas pelo Agente da NF-e do Omie. Com `AUTO_CIENCIA=1` o conector dá ciência sozinho nas que chegam só como resumo, e o XML completo vem na busca seguinte. A ciência só é dada até **10 dias** da emissão; confirmação, desconhecimento e operação não realizada valem até **90 dias** (o sistema avisa quando a nota passou do prazo). Botões: **Importar** (vai para a lista de validação), **Baixar XML**, **Manifestar** (ciência, confirmação, desconhecimento, operação não realizada).
 - **NFS-e** do Ambiente de Dados Nacional (ADN) em que a empresa aparece. **Lançar em contas a pagar** cria o título e cadastra o prestador pelo CNPJ.
 
 Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando não há documento novo, e depois de um erro 656 ("consumo indevido") ou de uma falha da SEFAZ ele **espera a hora inteira** (mais 5 minutos de folga, no caso do 656). **Mesmo clicando em "Buscar agora" ou em "Baixar XML", ele não consulta antes disso**, porque cada tentativa durante o bloqueio faz a SEFAZ começar a hora de novo. O cartão mostra até que horas está a espera.
 
-**Teste em homologação primeiro** (`AMBIENTE=2`): a SEFAZ de homologação normalmente não tem notas reais, então "nenhum documento" é o esperado. Confirme que não há erro de certificado nos logs e troque para `AMBIENTE=1`.
+**Teste em homologação primeiro** (`AMBIENTE=2`): a SEFAZ de homologação normalmente não tem notas reais, então "nenhum documento" é o esperado. Confirme que não há erro de certificado nos logs e troque para **Produção** em Sistema › Configurações (ou `AMBIENTE=1`, se ninguém escolheu pela tela).
 
 **Tuiuti-SP e NFS-e emitidas por prestadores**: a NFS-e só aparece no ADN se o município do prestador estiver no padrão nacional ou compartilhar as notas com o ADN. Notas de municípios fora do padrão continuam chegando pelo XML/PDF que o prestador envia ("Importar XML ou ZIP").
 
