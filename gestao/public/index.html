@@ -14576,8 +14576,66 @@ A.emContrato=d=>{const e=get('emprest',d.xid||d.id);if(!e)return;const c=cfg(),f
 /* ---------- alertas ---------- */
 {const af=alertasDp;alertasDp=function(){const it=af();if(!mayR('rh'))return it;const mes=todayStr().slice(0,7);let n=0;S.emprest.forEach(e=>{if(e.status!=='ativo'||e.forma==='folha')return;emAbertas(e).forEach(p=>{if(p.comp<mes)n++;});});if(n)it.push(['emprest',n+' parcela(s) de empréstimo a colaborador em atraso',String(n)]);return it;};}
 
-/* ===== v124: caixas de seleção e botões de opção legíveis em todo o sistema (a regra geral input{width:100%} as esmagava) ===== */
-try{const st=document.createElement('style');st.textContent='input[type=checkbox],input[type=radio]{width:18px;height:18px;min-width:18px;min-height:18px;flex:none;padding:0;cursor:pointer;accent-color:var(--accent,#2457d6)}input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--accent,#2457d6);outline-offset:2px}';document.head.appendChild(st);}catch(e){}
+/* ===== v84: Novo usuário em uma tela só (sistema na VPS) =====
+   Em Sistema › Usuários o botão "Novo usuário" cria o login no servidor (nome, e-mail, senha provisória)
+   e o perfil dentro do sistema de uma vez, sem passar por Contas de acesso. O nível do login sai do perfil:
+   Colaborador entra como Colaborador; os demais perfis entram como Equipe. */
+ACT_GROUP.usrNovo='usr';ACT_GROUP.usrLinkSenha='usr';
+/* o servidor sabe enviar e-mail? (convite e "esqueci minha senha") */
+const EMS={ok:null,em:0};
+function emailSondar(){if(!window.__SELFHOST||Date.now()-EMS.em<60000)return Promise.resolve(EMS.ok);EMS.em=Date.now();
+  return fetch('/api/email/status',{credentials:'same-origin'}).then(r=>r.ok?r.json():{}).then(j=>{EMS.ok=!!j.configurado;return EMS.ok;}).catch(()=>{EMS.ok=false;return false;});}
+const usrNivelDe=perfil=>perfil==='colaborador'?'interact':'admin';
+{const vu=V.usr;V.usr=()=>{let h=vu();if(!window.__SELFHOST||store.mode!=='db'||!mayW('usr'))return h;
+  h=h.replace('<button class="btn pri" data-act="usrAdd">Adicionar pessoa</button>','<button class="btn" data-act="usrAdd">Ligar login existente</button><button class="btn pri" data-act="usrNovo">Novo usuário</button>');
+  /* na VPS não há compartilhamento do Claude: some a Conferência de acesso e a nota passa a explicar o login próprio */
+  const i=h.indexOf('<div class="card"><h2>Conferência de acesso');
+  if(i>=0){const fins=['<div class="note"><b>Controle ainda desligado','<div class="note"><b>','<div class="tw"><table><thead><tr><th>Pessoa</th><th>Perfil</th>'].map(m=>h.indexOf(m,i+10)).filter(k=>k>i);if(fins.length)h=h.slice(0,i)+h.slice(Math.min.apply(null,fins));}
+  h=h.replace(/<div class="note"><b>Como o acesso funciona\.<\/b>[\s\S]*?<\/div>/,'<div class="note"><b>Como o acesso funciona.</b> Cada pessoa entra em app.inaservicos.com.br com o próprio e-mail e senha. O perfil escolhido aqui define o que ela vê e altera. Para criar alguém, use <b>Novo usuário</b>; para tirar o acesso, <b>Suspender</b> (pode voltar depois) ou, em Contas de acesso, <b>Excluir</b> o login.</div>');
+  return h;};}
+A.usrNovo=async()=>{
+  if(!mayW('usr')){toast('Seu perfil não permite cadastrar usuários.','neg');return;}
+  const comEmail=await emailSondar();
+  const perfOpts=Object.keys(PERFIS).filter(k=>k!=='pendente'&&!PERFIS[k].interno).map(k=>[k,PERFIS[k].nome]);
+  const livres=S.func.filter(f=>f.status!=='desligado'&&!f.usrId).slice().sort(byNome).map(f=>[f.id,f.nome]);
+  modal({title:'Novo usuário',wide:true,body:
+    '<div class="fg">'+field('Nome','nome','text','')+field('E-mail de login','email','email','')+
+    (comEmail?field('Enviar convite por e-mail (a pessoa cria a própria senha)','convite','checkbox',true,{full:true}):'')+
+    '<div id="usrSenhaBox"'+(comEmail?' hidden':'')+'>'+field('Senha provisória (mínimo 8)','senha','text',Math.random().toString(36).slice(2,6)+'-'+Math.random().toString(36).slice(2,8))+'</div>'+
+    field('Perfil no sistema','perfil','select',perfOpts.some(o=>o[0]==='colaborador')?'colaborador':perfOpts[0][0],{opts:perfOpts})+
+    field('Colaborador ligado (ponto e Minha área)','funcId','select','',{opts:livres,blank:'Nenhum'})+'</div>'+
+    '<p class="sub" style="margin:10px 0 0">'+(comEmail?'Com o convite, a pessoa recebe um link (válido por 72 horas) para criar a senha. Sem o convite, anote a senha provisória e passe para ela pessoalmente. ':'Anote o e-mail e a senha provisória e passe para a pessoa pessoalmente (o envio por e-mail ainda não foi configurado no servidor). ')+'Perfil <b>Só ponto e Minha área</b> vê só ponto, Minha área e chat; os outros perfis usam os módulos indicados na tabela abaixo.</p>',
+    onOpen:mb=>{const ck=$('#f_convite',mb);if(ck)ck.addEventListener('change',()=>{$('#usrSenhaBox',mb).hidden=ck.checked;});},
+    saveLabel:'Criar usuário',save:root=>{
+      const v=readForm(root),nome=String(v.nome||'').trim(),email=String(v.email||'').trim().toLowerCase(),senha=String(v.senha||'');
+      if(!nome){toast('Informe o nome.','neg');return false;}
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){toast('E-mail inválido.','neg');return false;}
+      const convite=!!v.convite;
+      if(!convite&&senha.length<8){toast('A senha precisa ter pelo menos 8 caracteres.','neg');return false;}
+      const btn=$('#mf .btn.pri');if(btn)btn.disabled=true;
+      fetch('/api/contas',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({nome,email,senha:convite?'':senha,convite,nivel:usrNivelDe(v.perfil)})})
+        .then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok||!j.id)throw new Error(j.erro||('Erro '+r.status));
+          put('usr',{id:uid(),uid:j.id,perfil:v.perfil,apelido:nome,ativo:true});
+          if(v.funcId){const f=get('func',v.funcId);if(f&&!f.usrId)put('func',Object.assign(cl(f),{usrId:j.id}));}
+          closeModal();try{loadProfiles([j.id]);}catch(e){}
+          if(!convite)toast('Usuário criado. Login: '+email+' · senha provisória: '+senha,'pos');
+          else if(j.convite==='enviado')toast('Usuário criado. Convite enviado para '+email+'.','pos');
+          else toast('Usuário criado, mas o e-mail não saiu ('+(j.erroEmail||'erro')+'). Use Editar › Enviar link de senha para tentar de novo, ou defina uma senha.','neg');
+          render();})
+        .catch(e=>{if(btn)btn.disabled=false;toast('Não criei o usuário: '+e.message,'neg');});
+      return false;
+    }});
+};
+/* botão Sair no topo (sistema na VPS): todo mundo, inclusive Colaborador, consegue sair da conta */
+{const w1=whoHtml;whoHtml=function(){const h=w1();if(!window.__SELFHOST)return h;
+  return h+'<button class="btn sm" data-act="sairConta" title="Sair da conta neste aparelho" style="margin-left:8px;align-self:center">Sair</button>';};}
+/* Editar acesso: botão para mandar por e-mail o link de criar/redefinir senha */
+{const e0=A.usrEdit;A.usrEdit=async d=>{await e0(d);if(!window.__SELFHOST||!$('#f_cEmail'))return;if(!(await emailSondar()))return;
+  const u=get('usr',d.id);if(!u||!$('#mf')||$('#mf [data-act=usrLinkSenha]'))return;
+  $('#mf').insertAdjacentHTML('afterbegin','<button class="btn" data-act="usrLinkSenha" data-id="'+esc(u.uid)+'" style="margin-right:auto">Enviar link de senha por e-mail</button>');};}
+A.usrLinkSenha=d=>{const b=$('#mf [data-act=usrLinkSenha]');if(b)b.disabled=true;
+  fetch('/api/contas/'+encodeURIComponent(d.id)+'/link',{method:'POST',credentials:'same-origin'}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.erro||('Erro '+r.status));toast('Link enviado para o e-mail da pessoa (vale por 1 hora; 72 horas se ela ainda não tem senha).','pos');})
+    .catch(e=>toast('O e-mail não saiu: '+e.message,'neg')).finally(()=>{if(b)b.disabled=false;});};
 
 /* ===== v86: ler a cotação do fornecedor em PDF (ou foto) com IA =====
    Em Cotações › mapa › Importar resposta: escolha o fornecedor e o PDF do orçamento no formato dele.
@@ -25079,9 +25137,18 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{u4Link:'Envia por e-mail 
     return u4Post('/api/contas-acesso/'+encodeURIComponent(c.id)+'/marcar-troca').then(r=>{if(!r.ok)return;try{const i=$('#u3Senha'),p=i&&i.closest('label')&&i.closest('label').nextElementSibling;if(p)p.textContent='Passe a senha à pessoa por um canal seguro (pessoalmente ou por mensagem privada). Ela entra com o e-mail e esta senha e o sistema pede que crie a própria senha na hora.';}catch(e){}});}).catch(()=>{});
   return out;};}
 
+/* ===== v130.2: Fábrica vira módulo próprio no menu superior (ao lado de Qualidade), saindo de Obras ===== */
+{const ob=MENU.find(m=>m[0]==='obras');const its=[['osfp','Painel de produção'],['osf','Ordens de fabricação']];
+  if(ob)ob[2]=ob[2].filter(i=>i[0]!=='osf'&&i[0]!=='osfp');
+  if(!MENU.some(m=>m[0]==='fab')){const iq=MENU.findIndex(m=>m[0]==='qsgi');MENU.splice(iq>=0?iq+1:MENU.length,0,['fab','Fábrica',its]);}
+  NAV.forEach(n=>{if(n[0]==='osf'||n[0]==='osfp')n[2]='Fábrica';});
+  try{if(typeof SETOR_COR==='object')SETOR_COR.fab='#4338ca';}catch(e){}}
+try{const st=document.createElement('style');st.textContent='html.cores-setor .nav-b[data-mod="fab"]{background:#4338ca;color:#fff}';document.head.appendChild(st);}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='130.1',APP_DATA='2026-10-28';
+const APP_VER='130.2',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['130.2','2026-10-28',['Botão Sair (e Enviar link de senha em Usuários › Editar) de volta: tinham sumido desde a versão 124 por um arquivo do sistema sobrescrito por engano.', 'Fábrica virou módulo próprio no menu superior, ao lado de Qualidade, com Painel de produção e Ordens de fabricação (saiu de Obras).']],
   ['130.1','2026-10-28',['Sistema › Usuários: coluna Acesso com a situação de cada pessoa (ativo, sem senha, desativado, bloqueado por tentativas, cria a senha no próximo acesso) e a última falha de entrada com o motivo; botões Enviar convite/link de senha, Senha provisória (troca obrigatória no primeiro acesso), Reativar e Desbloquear; aviso das contas importadas sem senha com Enviar convite a todos.', 'Login: dica para usar Esqueci minha senha; Esqueci minha senha envia o convite para quem ainda não criou a senha; bloqueio por tentativas mais tolerante para quem usa a mesma internet no escritório (o limite por e-mail continua protegendo cada conta).']],
   ['130','2026-10-28',['Recebimento de notas › Caixa nfe@: leitura da caixa nfe@inaservicos.com.br (Microsoft 365) de hora em hora. Os XML anexados vão para o Arquivo fiscal e os e-mails lidos para a pasta Processadas. Quatro listas: notas recebidas só por e-mail (lançar ou ligar), Não pagar (cancelada ou inexistente na SEFAZ), notas captadas sem XML por e-mail e e-mails com PDF sem XML (pedir o XML).', 'Arquivo fiscal: cada nota mostra todas as origens (importação, upload, SEFAZ, e-mail) e as situações Não encontrada na SEFAZ e Denegada.']],
   ['129','2026-10-28',['Recebimento de notas (antes NFs recebidas): abas Notas para lançar, Pendentes de ligação, Ligadas, Arquivo fiscal e Saídas emitidas. O XML original de cada NF-e fica guardado no servidor pelo prazo legal (5 anos a partir do ano seguinte), com busca, DANFE, download do XML e ZIP para o contador; exclusão bloqueada dentro do prazo.', 'Importar histórico (ZIP): guarda as NF-e de entrada e de saída e liga cada uma à conta a pagar ou a receber pelo CNPJ, número, valor e data — sem criar contas, sem estoque e sem lançamentos. XML do Omie com acentos corrompidos são restaurados quando possível; os demais ficam como cópia alterada.', 'Contas a pagar e a receber: botão DANFE em todo título ligado a nota, Anexar sempre visível, filtro Nota fiscal (sem, com, cancelada) e aviso de nota cancelada.']],
