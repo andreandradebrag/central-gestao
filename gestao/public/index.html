@@ -23271,9 +23271,646 @@ async function osfEmailEnviar(id,cc){const r=get('osf',id);if(!r)return;
   segaPost('/api/osf/email',{id,cc,nome:x.nome,pdf:osfB64(x.bytes),paginas:x.paginas}).then(j=>{if(j&&j.data)segaLocal('osf',Object.assign({},j.data,{id}));toast('OS enviada para '+(j&&j.para||osfCfg().email)+'.','pos');if(x.falhas.length)toast('Anexo(s) que não entraram no PDF: '+x.falhas.join('; '),'neg');},
     e=>{if(e&&e.st===503)baixar(e.message||'O envio de e-mail não está configurado no servidor.');else toast('E-mail não enviado: '+(e&&e.message||e),'neg');});}
 
+/* ===== v126: importar as planilhas do dono: Projetos (aba "Indice"), Propostas (aba "Índice") e Acervo (aba "Plan1") =====
+   Sistema › Importar cadastros. Para cada planilha: escolher o arquivo, CONFERÊNCIA (novos, atualizados, sem mudança e
+   ignorados, com o antes → depois de cada campo que muda e a opção de desmarcar linhas), gravar e desfazer pelo histórico.
+   Regra geral: ATUALIZA o que já existe e CRIA o que não for encontrado; campos que o sistema tem e a planilha não tem
+   ficam como estão. Importar de novo o mesmo arquivo não cria nada nem muda nada.
+   O leitor (i3Parse*) trabalha com as linhas que o SheetJS entrega (sheet_to_json, header:1, raw:true): datas chegam como
+   número serial do Excel. */
+const ACV_ET=[['inicio','A iniciar'],['nc','Sem ART (NC)'],['art','ART registrada'],['pedido','Atestado pedido (A)'],['emitido','Atestado emitido (B)'],['acervado','Acervado / CAT emitida (C)']];
+const acvEtN=k=>k==='dispensado'?'Não terá acervo':(ACV_ET.find(x=>x[0]===k)||[0,'—'])[1];
+const acvEtI=k=>ACV_ET.findIndex(x=>x[0]===k);
+
+/* ---------- utilitários do leitor ---------- */
+const i3N=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+/* vazio: nada, só traços/pontos, "s/n", interrogações */
+const i3Vazio=v=>{if(v==null||v==='')return true;if(typeof v==='number')return false;const s=String(v).trim();return !s||/^[-–—_.\s]*$/.test(s)||/^s\s*\/\s*n\.?$/i.test(s)||/^\?+$/.test(s);};
+const i3T=v=>i3Vazio(v)?'':String(v).replace(/\s+/g,' ').trim();
+const i3TL=v=>i3Vazio(v)?'':String(v).replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').trim();
+const i3Num=v=>typeof v==='number'&&isFinite(v)?v:null;
+const i3P2=n=>String(n).padStart(2,'0');
+const i3Iso=(y,m,d)=>{if(!(y>=1900&&y<=2100&&m>=1&&m<=12&&d>=1&&d<=31))return '';const dt=new Date(Date.UTC(y,m-1,d));return dt.getUTCMonth()===m-1?y+'-'+i3P2(m)+'-'+i3P2(d):'';};
+/* data: serial do Excel, Date, "29.04.94", "12/05/2023", "03/11/2025 às 09h". Ano com 2 dígitos: até 40 = 20aa, senão 19aa. */
+function i3Data(v){
+  if(v==null||v==='')return {iso:'',inv:''};
+  if(typeof v==='number'){if(v>=7000&&v<=80000){const d=new Date(Math.round((v-25569)*864e5));return {iso:d.toISOString().slice(0,10),inv:''};}return {iso:'',inv:String(v)};}
+  if(v instanceof Date&&!isNaN(v))return {iso:new Date(v.getTime()-v.getTimezoneOffset()*6e4).toISOString().slice(0,10),inv:''};
+  const s=String(v).trim();if(i3Vazio(s))return {iso:'',inv:''};
+  const m=s.match(/^(\d{1,2})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{2}|\d{4})(?!\d)/);
+  if(m){let y=+m[3];if(m[3].length===2)y=y<=40?2000+y:1900+y;const iso=i3Iso(y,+m[2],+m[1]);if(iso)return {iso,inv:''};}
+  return {iso:'',inv:s.slice(0,60)};}
+/* data dentro de um texto (ex.: "solicitado em 19/6/22") */
+const i3DataTxt=s=>{const m=String(s||'').match(/(?<!\d)(\d{1,2})\s*[.\/]\s*(\d{1,2})\s*[.\/]\s*(\d{2}|\d{4})(?!\d)/);if(!m)return '';let y=+m[3];if(m[3].length===2)y=y<=40?2000+y:1900+y;return i3Iso(y,+m[2],+m[1]);};
+/* nº de proposta: guarda como está (maiúsculas, sem espaços); compara sem zeros à esquerda ("01P" = "1P") */
+const i3NumProp=s=>String(s==null?'':s).toUpperCase().replace(/\s+/g,'');
+const i3PropK=s=>{const t=i3NumProp(s);const m=t.match(/^0*(\d+)(P.*)$/);return m?m[1]+m[2]:t;};
+const i3PropOk=s=>/^0*\d+P\d{0,2}$/i.test(String(s||'').replace(/\s+/g,''));
+/* código de projeto → número ("P490", "P-490", "490", "P 0490"); null quando não é um código simples */
+const i3ProjN=c=>{const m=String(c==null?'':c).trim().match(/^P?\s*[-.]?\s*0*(\d{1,5})$/i);return m?+m[1]:null;};
+/* nº de documento vindo como número do Excel (números com mais de 15 dígitos perdem os últimos dígitos no próprio Excel) */
+const i3NumDoc=v=>{if(typeof v==='number'&&isFinite(v)){if(Number.isSafeInteger(v))return {t:String(v),imp:false};if(Number.isInteger(v))return {t:BigInt(v).toString(),imp:true};return {t:String(v),imp:false};}return {t:i3T(v),imp:false};};
+
+/* ---------- planilha → abas (navegador) ---------- */
+async function i3LerArquivo(file){
+  const buf=await file.arrayBuffer();await loadScript(XLSX_URL,()=>!!window.XLSX);const X=window.XLSX,wb=X.read(buf,{type:'array'}),abas={};
+  wb.SheetNames.forEach(n=>{const ws=wb.Sheets[n];if(!ws||!ws['!ref']){abas[n]=[];return;}
+    /* no máximo 30 colunas e 6.000 linhas por aba: a aba do acervo declara 16.384 colunas */
+    const r=X.utils.decode_range(ws['!ref']);r.s.c=0;r.s.r=0;r.e.c=Math.min(r.e.c,29);r.e.r=Math.min(r.e.r,5999);
+    abas[n]=X.utils.sheet_to_json(ws,{header:1,raw:true,defval:'',range:r,blankrows:true});});
+  return {nomes:wb.SheetNames.slice(),abas};}
+/* aba pelo nome preferido; senão a primeira com o cabeçalho esperado. Devolve {nome, rows, h (linha do cabeçalho)} */
+function i3Aba(arq,nomes,ehCab){const cands=[];nomes.forEach(n=>{const k=arq.nomes.find(x=>i3N(x)===i3N(n));if(k)cands.push(k);});
+  arq.nomes.forEach(n=>{if(!cands.includes(n))cands.push(n);});
+  for(const n of cands){const rows=arq.abas[n]||[];for(let i=0;i<Math.min(rows.length,30);i++){if(ehCab(rows[i]||[]))return {nome:n,rows,h:i,pref:nomes.some(x=>i3N(x)===i3N(n))};}}
+  return null;}
+const i3Col=(cab,rx)=>cab.findIndex(c=>rx.test(i3N(c)));
+
+/* =====================================================================================================
+   1. PROPOSTAS (aba "Índice"): NO, Data Apres., Observação, OBJETO, LICITANTE, RESPONSÁVEL, VALOR, OBS, LOCALIZAÇÃO
+   ===================================================================================================== */
+const I3_CAT={ganha:'Ganha',perdida:'Perdida',cancelada:'Licitação fracassada / revogada / não contratada',desistencia:'Declinamos / não participamos',adiada:'Adiada (sine die)',elaboracao:'Em elaboração',enviada:'Enviada / aguardando',vencedor:'Só o nome de outra empresa (vencedora)',outro:'Texto sem resultado',vazio:'Sem resultado na planilha'};
+/* resultado pela coluna OBS */
+function i3Resultado(obs){const t=i3N(obs);if(!t)return {cat:'vazio'};
+  /* nome do vencedor: "Vencedor: X", "vencedora X", "X vencedora", "perdemos para X" */
+  const venc=()=>{const o=String(obs).replace(/\s+/g,' ').trim(),lp=(x)=>x.replace(/\s*(,|\bpor\b|\bcom\b|\bCNPJ\b|R\$|-\s|\().*$/i,'').replace(/[-–:\s]+$/,'').trim();
+    let m=o.match(/perdemos para\s+(.{3,80})/i);if(m&&lp(m[1]))return lp(m[1]).slice(0,80);
+    m=o.match(/(?:vencedor[a]?|venc\.|ganhadora|contratada)\s*[:\-–]?\s*([^(]{3,80})/i);if(m&&/^[A-Z0-9]/.test(m[1])&&!/^(status|da |do |de |a |o )/i.test(m[1])&&lp(m[1]))return lp(m[1]).slice(0,80);
+    m=o.match(/^(.{3,60}?)\s+(?:foi a )?(?:vencedor[a]?|ganhou)\b/i);if(m&&!/n[aã]o|perd|ganh/i.test(m[1]))return m[1].replace(/[-–:\s]+$/,'').trim();
+    return '';};
+  if(/\bperd(emos|emo|eu|ida)\b|\bnao ganh|\bvenc(edor|edora|edores)\b|\bvenc\.|\bganhador|\bganhou\b|\bcontratada:/.test(t))return {cat:'perdida',vencedor:venc()};
+  if(/\bganhamos\b|\bvencemos\b/.test(t))return {cat:'ganha'};
+  if(/declin|desist|nao partic|nao apresent|nao envi|nao entreg|nao temos atest|nao vao particip|apenas referencial|sem parceiro/.test(t))return {cat:'desistencia'};
+  if(/fracassad|revog|cancelad|suspens|nao contratad|anulad|executado internamente|mao de obra propria|equipe interna/.test(t))return {cat:'cancelada'};
+  if(/sine.?die|adiad|prorrogad/.test(t))return {cat:'adiada'};
+  if(/em elabora|elaborando|visita realizada/.test(t))return {cat:'elaboracao'};
+  if(/proposta (enviada|revisada|refeita|atualizada)|enviada proposta|aguardando|sem retorno|sem resposta|verificar|pesquisa|acompanhar|cobrar|negocia|atualizad|revisao/.test(t))return {cat:'enviada'};
+  /* texto curto, sem números: nome da empresa que venceu (a coluna se chama "INA/VENCEDOR") */
+  const s=String(obs).replace(/\s+/g,' ').trim();
+  if(s.length<=60&&!/\d/.test(s)&&s.split(' ').length<=7)return {cat:'vencedor',vencedor:s};
+  return {cat:'outro'};}
+/* projetos citados na LOCALIZAÇÃO ("Proj. P439", "Proj. 123", "P452", "Proj. 12 e 13"); o resto é a caixa do arquivo físico */
+function i3Loc(loc){const s=String(loc==null?'':loc).replace(/\s+/g,' ').trim();if(i3Vazio(s))return {proj:[],arq:''};
+  const proj=[];let resto=s;
+  const m=s.match(/proj\.?\s*p?\s*(\d{1,4})(\s*(?:e|,)\s*(?:proj\.?\s*)?p?\s*(\d{1,4}))*/i);
+  if(m){m[0].match(/\d{1,4}/g).forEach(x=>proj.push(+x));resto=s.replace(m[0],' ');}
+  else{const p=s.match(/(?:^|\s)P\s*-?\s*(\d{2,4})(?![\dP])/i);if(p&&!/^\d+\s*P\b/i.test(s)){proj.push(+p[1]);resto=s.replace(p[0],' ');}}
+  resto=resto.replace(/^[\s\-–,;:]+|[\s\-–,;:]+$/g,'').trim();
+  return {proj:[...new Set(proj)],arq:resto};}
+/* aba "Análise": Qtde, ANO, Participação, Ganhamos, Perdemos */
+function i3Analise(arq){const n=arq.nomes.find(x=>i3N(x)==='analise');if(!n)return [];const rows=arq.abas[n]||[];let h=-1;
+  for(let i=0;i<rows.length;i++){const r=(rows[i]||[]).map(i3N);if(r.includes('ano')&&r.some(c=>/^participa/.test(c))){h=i;break;}}
+  if(h<0)return [];const cab=(rows[h]||[]).map(i3N),ci=k=>cab.findIndex(c=>c.startsWith(k));
+  const cA=ci('ano'),cQ=ci('qtde'),cP=ci('participa'),cG=ci('ganhamos'),cD=ci('perdemos'),out=[];
+  for(let i=h+1;i<rows.length;i++){const r=rows[i]||[],a=+r[cA];if(!(a>=1990&&a<=2100))continue;out.push({ano:a,qtde:i3Num(r[cQ]),part:i3Num(r[cP]),ganh:i3Num(r[cG]),perd:i3Num(r[cD])});}
+  return out;}
+function i3ParseProp(arq){
+  const ehCab=r=>{const c=r.map(i3N);return c.some(x=>/^no\.?$|^n[o°º]\.?$/.test(x))&&c.includes('objeto')&&c.some(x=>x.startsWith('licitante'));};
+  const A=i3Aba(arq,['Índice','Indice'],ehCab);if(!A)throw new Error('Não encontrei a aba "Índice" com as colunas NO, OBJETO e LICITANTE.');
+  const cab=A.rows[A.h],c={no:i3Col(cab,/^no\.?$|^n[o°º]\.?$/),data:i3Col(cab,/^data/),obs1:i3Col(cab,/^observa/),obj:i3Col(cab,/^objeto/),lic:i3Col(cab,/^licitante/),resp:i3Col(cab,/^respons/),valor:i3Col(cab,/^valor/),obs:i3Col(cab,/^obs$|^obs\.?$/),loc:i3Col(cab,/^localiza/)};
+  const itens=[],ign=[],vistos=new Map();
+  for(let i=A.h+1;i<A.rows.length;i++){const r=A.rows[i]||[],g=k=>c[k]>=0?r[c[k]]:'';
+    const no=i3T(g('no'));
+    if(!no){if(r.some(x=>!i3Vazio(x)))ign.push({linha:i+1,motivo:/ganhamos|perdemos|participamos/i.test(r.join(' '))?'linha de totais':'linha sem número',txt:r.filter(x=>!i3Vazio(x)).join(' · ').slice(0,90)});continue;}
+    if(/^prop\.?$/i.test(no))continue; /* 2ª linha do cabeçalho */
+    if(!i3PropOk(no)){ign.push({linha:i+1,motivo:'número fora do padrão "1234P"',txt:no.slice(0,40)});continue;}
+    const d=i3Data(g('data')),vl=g('valor'),num=i3NumProp(no),k=i3PropK(no),loc=i3Loc(g('loc')),obs=i3TL(g('obs'));
+    const it={linha:i+1,numero:num,chave:k,data:d.iso,dataInv:d.inv,observacao:i3TL(g('obs1')),objeto:i3TL(g('obj')),licitante:i3T(g('lic')),resp:i3T(g('resp')),
+      valor:i3Num(vl),valorTxt:i3Num(vl)==null?i3T(vl):'',obsTxt:obs,locTxt:i3T(g('loc')),projNums:loc.proj,arqFis:loc.arq,res:i3Resultado(obs),dup:0};
+    /* "adiamento sine die" na coluna da data */
+    if(it.res.cat==='vazio'&&/sine.?die|adiad/i.test(d.inv))it.res={cat:'adiada'};
+    if(vistos.has(k)){const n=vistos.get(k)+1;vistos.set(k,n);it.dup=n;it.numero=num+'-'+n;it.chave=k+'-'+n;}else vistos.set(k,1);
+    itens.push(it);}
+  /* ano de referência: o da data; sem data, o da proposta anterior com data (a numeração segue a ordem do tempo) */
+  let ult=0;itens.forEach(it=>{if(it.data){ult=+it.data.slice(0,4);it.ano=ult;it.anoEst=false;}else{it.ano=ult||0;it.anoEst=true;}});
+  let prox=0;for(let i=itens.length-1;i>=0;i--){if(itens[i].data)prox=+itens[i].data.slice(0,4);else if(!itens[i].ano)itens[i].ano=prox;}
+  return {aba:A.nome,abaPref:A.pref,itens,ign,analise:i3Analise(arq),linhas:A.rows.length};}
+
+/* =====================================================================================================
+   2. PROJETOS (aba "Indice"): N° PROJ, N°. Prop, V/E, OBJETO, ART/acervo (NC/A/B/C), CONTRATANTE, VALOR, Faturado,
+      Saldo a faturar, Data Início, Data Término, Data Conclusão, LOCALIZAÇÃO
+   ===================================================================================================== */
+/* coluna de ART/acervo: NC, tem ART, A (pedido de atestado), B (atestado), C (acervo) */
+function i3AcvCod(v){const s=i3T(v),t=i3N(s);if(!t)return {sit:'',txt:'',data:''};
+  if(t==='nc')return {sit:'nc',txt:'',data:''};if(t==='a')return {sit:'pedido',txt:'',data:''};if(t==='b')return {sit:'emitido',txt:'',data:''};if(t==='c')return {sit:'acervado',txt:'',data:''};
+  if(t==='tem art')return {sit:'art',txt:'',data:''};
+  if(t==='pedir')return {sit:'art',txt:'pedir atestado',data:''};
+  if(/atestado solicitado|solicitado|ped\.? ?atest/.test(t))return {sit:'pedido',txt:s,data:i3DataTxt(s)};
+  if(/^atestado\b/.test(t))return {sit:'pedido',txt:s,data:i3DataTxt(s)};
+  return {sit:'',txt:s,data:''};}
+function i3ParseProj(arq){
+  const ehCab=r=>{const c=r.map(i3N);return c.some(x=>/^n[°ºo]?\.? ?proj/.test(x))&&c.some(x=>x.startsWith('objeto'));};
+  const A=i3Aba(arq,['Indice','Índice'],ehCab);if(!A)throw new Error('Não encontrei a aba "Indice" com as colunas N° PROJ e OBJETO.');
+  const cab=A.rows[A.h],c={num:i3Col(cab,/^n[°ºo]?\.? ?proj/),prop:i3Col(cab,/^n[°ºo]?\.? ?prop/),st:i3Col(cab,/vigente|encerrado/),obj:i3Col(cab,/^objeto/),acv:i3Col(cab,/s\/ ?art|acervo|atest/),
+    cont:i3Col(cab,/^contratante/),valor:i3Col(cab,/^valor/),fat:i3Col(cab,/^faturado/),saldo:i3Col(cab,/^saldo/),ini:i3Col(cab,/^data in/),ter:i3Col(cab,/^data ter/),conc:i3Col(cab,/^data conc/),loc:i3Col(cab,/^localiza/)};
+  const itens=[],ign=[];let cur=null;
+  for(let i=A.h+1;i<A.rows.length;i++){const r=A.rows[i]||[],g=k=>c[k]>=0?r[c[k]]:'';
+    if(!r.some(x=>!i3Vazio(x)))continue;
+    const nraw=g('num'),n=typeof nraw==='number'?nraw:/^\s*\d{1,5}\s*$/.test(String(nraw))?+String(nraw).trim():null;
+    if(n==null){
+      /* linha sem número: pedido/item do projeto de cima (ou só mais caixas do arquivo físico) */
+      if(!cur){ign.push({linha:i+1,motivo:'linha sem número de projeto',txt:r.filter(x=>!i3Vazio(x)).join(' · ').slice(0,90)});continue;}
+      const so=Object.keys(c).filter(k=>k!=='loc'&&c[k]>=0&&!i3Vazio(g(k)));
+      if(!so.length){const l=i3T(g('loc'));if(l)cur.locExtra.push(l);continue;}
+      const ini=i3Data(g('ini')),ter=i3Data(g('ter'));
+      cur.pedidos.push({prop:i3T(g('prop')),objeto:i3T(g('obj')).slice(0,200),valor:i3Num(g('valor')),ini:ini.iso,fim:ter.iso,acv:i3T(g('acv')),loc:i3T(g('loc'))});continue;}
+    const raw=typeof nraw==='number'?String(nraw):String(nraw).trim();
+    const st=i3N(g('st')),prop=i3T(g('prop')),acv=i3AcvCod(g('acv')),vl=g('valor'),ini=i3Data(g('ini')),ter=i3Data(g('ter')),conc=i3Data(g('conc'));
+    const datasInv=[['Início',ini.inv],['Término',ter.inv],['Conclusão',conc.inv]].filter(x=>x[1]&&!/^cancelad/i.test(x[1]));
+    cur={linha:i+1,num:n,raw,numProp:i3PropOk(prop)?i3NumProp(prop):'',numPropTxt:prop&&!i3PropOk(prop)?prop:'',
+      status:st==='v'?'ativo':st==='e'||/^canc/.test(st)?'concluido':'',cancelado:/^canc/.test(st)||/^cancelad/i.test(conc.inv),stTxt:i3T(g('st')),
+      objeto:i3TL(g('obj')),acvSit:acv.sit,acvTxt:acv.txt,acvData:acv.data,acvRaw:i3T(g('acv')),contratante:i3T(g('cont')),
+      valor:i3Num(vl),valorTxt:i3Num(vl)==null?i3T(vl):'',fat:i3Num(g('fat')),saldo:i3Num(g('saldo')),fatTxt:i3Num(g('fat'))==null?i3T(g('fat')):'',
+      inicio:ini.iso,termino:ter.iso,conclusao:conc.iso,datasInv,loc:i3T(g('loc')),locExtra:[],pedidos:[]};
+    if(itens.some(x=>x.num===n)){ign.push({linha:i+1,motivo:'número de projeto repetido na planilha (fica a 1ª linha)',txt:'P'+raw});cur={locExtra:[],pedidos:[]};continue;}
+    itens.push(cur);}
+  return {aba:A.nome,abaPref:A.pref,itens,ign,linhas:A.rows.length,outras:arq.nomes.filter(n=>n!==A.nome)};}
+
+/* =====================================================================================================
+   3. ACERVO (aba "Plan1"): PASTA | PJ | ACERVO (Situação, No, Data) | ATESTADO (Situação, No, Data) | ART (No, Data) |
+      Responsável Técnico | Assunto | Empresa | SITUAÇÃO DO CONTRATO
+   ===================================================================================================== */
+const I3_ACSIT=t=>/^acervad/.test(t)?'acervado':/^s\/ ?acervo/.test(t)?'sem':/exig/.test(t)?'exigencia':/camara/.test(t)?'camara':/indef/.test(t)?'indeferido':/sera acervad/.test(t)?'nao':t?'outro':'';
+const I3_ACSIT_N={acervado:'acervado',sem:'sem acervo',exigencia:'com exigência no CREA',camara:'em análise na câmara do CREA',indeferido:'indeferido pelo CREA',nao:'não será acervado',outro:''};
+function i3ParseAcv(arq){
+  const ehCab=r=>{const c=r.map(i3N);return c.includes('pj')&&c.includes('acervo')&&c.includes('atestado');};
+  const A=i3Aba(arq,['Plan1'],ehCab);if(!A)throw new Error('Não encontrei a aba "Plan1" com as colunas PASTA, PJ, ACERVO, ATESTADO e ART.');
+  const cab=A.rows[A.h],c={pasta:i3Col(cab,/^pasta/),pj:i3Col(cab,/^pj$/),ac:i3Col(cab,/^acervo/),at:i3Col(cab,/^atestado/),art:i3Col(cab,/^art$/),resp:i3Col(cab,/^respons/),ass:i3Col(cab,/^assunto/),emp:i3Col(cab,/^empresa/),sit:i3Col(cab,/situacao do contrato|^situacao/)};
+  /* a 2ª linha do cabeçalho (Situação, No, Data) começa logo abaixo */
+  const sub=(A.rows[A.h+1]||[]).map(i3N),ini=sub.some(x=>x==='situacao'||x==='no')?A.h+2:A.h+1;
+  const docs=[],linhas=[],ign=[];let soPj=0;
+  for(let i=ini;i<A.rows.length;i++){const r=A.rows[i]||[],g=(k,o)=>c[k]>=0?r[c[k]+(o||0)]:'';
+    const pjv=g('pj');if(!r.some(x=>!i3Vazio(x)))continue;
+    const pj=typeof pjv==='number'?pjv:/^\s*\d+\s*$/.test(String(pjv))?+String(pjv).trim():null;
+    const temMais=Object.keys(c).some(k=>k!=='pj'&&k!=='pasta'&&c[k]>=0&&!i3Vazio(g(k)))||[1,2].some(o=>!i3Vazio(g('ac',o))||!i3Vazio(g('at',o)))||!i3Vazio(g('art',1));
+    if(!temMais){soPj++;continue;}
+    if(pj==null){ign.push({linha:i+1,motivo:'linha sem PJ',txt:r.filter(x=>!i3Vazio(x)).join(' · ').slice(0,90)});continue;}
+    const base={linha:i+1,pj,pasta:i3T(g('pasta')),resp:i3T(g('resp')),objeto:i3TL(g('ass')),contratante:i3T(g('emp')),sitCtr:i3T(g('sit'))};
+    const acSitTxt=i3T(g('ac')),acS=I3_ACSIT(i3N(acSitTxt)),acNo=i3NumDoc(g('ac',1)),acDt=i3Data(g('ac',2));
+    const atSitTxt=i3TL(g('at')),atSitN=i3N(atSitTxt),atNoRaw=g('at',1),atNo=i3NumDoc(atNoRaw),atSn=/^\s*s\s*\/\s*n/i.test(String(atNoRaw||'')),atDt=i3Data(g('at',2));
+    const artNo=i3NumDoc(g('art')),artDt=i3Data(g('art',1));
+    const lin={linha:i+1,pj,docs:[]},inv=[];
+    [['acervo',acDt],['atestado',atDt],['ART',artDt]].forEach(x=>{if(x[1].inv)inv.push(x[0]+': '+x[1].inv);});
+    const add=d=>{const o=Object.assign({},base,d,{dataInv:inv.join('; ')});lin.docs.push(o);docs.push(o);};
+    /* ART */
+    if(artNo.t||artDt.iso)add({tipo:'art',numero:artNo.t,numImp:artNo.imp,emissao:artDt.iso,situacao:'emitido'});
+    /* atestado: com nº ou data = emitido; texto de pedido sem nº/data = pedido */
+    const pedidoTxt=atSitTxt&&!/^sem atestado$/.test(atSitN)?atSitTxt:'';
+    if(atNo.t||atDt.iso||(atSn&&atDt.iso))add({tipo:'atestado',numero:atNo.t,numImp:atNo.imp,emissao:atDt.iso,situacao:'emitido',creaReg:acS==='acervado',acervoSit:I3_ACSIT_N[acS]||'',txt:pedidoTxt});
+    else if(pedidoTxt&&/acervad/.test(atSitN))add({tipo:'atestado',numero:'',emissao:'',situacao:'emitido',creaReg:true,acervoSit:'acervado',txt:pedidoTxt});
+    else if(pedidoTxt)add({tipo:'atestado',numero:'',emissao:'',situacao:'pedido',pedidoEm:i3DataTxt(pedidoTxt),acervoSit:I3_ACSIT_N[acS]||'',txt:pedidoTxt});
+    /* acervo (CAT): acervado; em andamento no CREA (câmara, exigência) ou indeferido também viram documento, com a situação */
+    if(acS==='acervado'||(!acS&&acNo.t))add({tipo:'cat',numero:acNo.t,numImp:acNo.imp,emissao:acDt.iso,situacao:'acervado',creaReg:true});
+    else if(['exigencia','camara','indeferido'].includes(acS))add({tipo:'cat',numero:acNo.t,numImp:acNo.imp,emissao:acDt.iso,situacao:acS==='indeferido'?'indeferido':'andamento',acervoSit:I3_ACSIT_N[acS],txt:acSitTxt});
+    if(!lin.docs.length){ign.push({linha:i+1,motivo:'sem ART, atestado ou acervo',txt:('PJ '+pj+' · '+base.objeto).slice(0,90),lin:Object.assign({},base,{acervoSit:I3_ACSIT_N[acS]||acSitTxt})});continue;}
+    linhas.push(lin);}
+  /* chave: projeto + tipo + número; sem número, projeto + tipo + assunto */
+  /* mesmo projeto + tipo + número em mais de uma linha (uma ART ou atestado para vários serviços): é um documento só, com os serviços juntos */
+  const porK=new Map(),uni=[];let junt=0;docs.forEach(d=>{const nk=i3N(d.numero).replace(/[^a-z0-9]/g,'');d.chave='PJ'+d.pj+'|'+d.tipo+'|'+(nk?'n:'+nk:'a:'+i3N(d.objeto).replace(/[^a-z0-9 ]/g,'').slice(0,80));
+    const o=porK.get(d.chave);if(o){junt++;if(d.objeto&&!o.objeto.includes(d.objeto))o.objeto=o.objeto+' / '+d.objeto;o.linhas.push(d.linha);if(!o.emissao&&d.emissao)o.emissao=d.emissao;if(!o.resp&&d.resp)o.resp=d.resp;return;}
+    d.linhas=[d.linha];porK.set(d.chave,d);uni.push(d);});
+  return {aba:A.nome,abaPref:A.pref,docs:uni,juntados:junt,linhas,ign,soPj,linhasPlan:A.rows.length,plan2:arq.nomes.some(n=>i3N(n)==='plan2')};}
+/* ---- FIM DO LEITOR (o resto usa o sistema) ---- */
+
+/* =====================================================================================================
+   Plano: compara com o que o sistema tem e monta, para cada linha, o registro final e o antes → depois
+   ===================================================================================================== */
+const i3Eq=(a,b)=>{const va=a==null||a===''||a===false,vb=b==null||b===''||b===false;if(va||vb)return va&&vb;if(typeof a==='number'||typeof b==='number')return Math.abs((+a)-(+b))<0.005;if(typeof a==='object'||typeof b==='object')return JSON.stringify(a)===JSON.stringify(b);return String(a)===String(b);};
+/* acrescenta um texto às observações sem apagar o que já está lá (e sem repetir) */
+const i3Junta=(atual,novo)=>{const a=String(atual||'').trim(),n=String(novo||'').trim();if(!n)return a;if(!a)return n;if(a.includes(n))return a;return a+'\n'+n;};
+function i3ParcMapa(){const m=new Map();S.parc.forEach(p=>{const k=i3N(p.nome).replace(/[^a-z0-9 ]/g,'').trim();if(!k)return;m.set(k,m.has(k)?null:p.id);});return m;}
+const i3Parc=(mp,nome)=>{const k=i3N(nome).replace(/[^a-z0-9 ]/g,'').trim();return k?mp.get(k)||'':'';};
+function i3ProjMapa(){const m=new Map();S.proj.forEach(p=>{const n=i3ProjN(p.codigo);if(n==null)return;m.set(n,m.has(n)?null:p);});return m;}
+/* formato do código dos projetos novos: o mais usado no sistema ("P490" ou "P-490") */
+function i3ProjFmt(){let a=0,b=0;S.proj.forEach(p=>{const c=String(p.codigo||'');if(/^P-\d+$/i.test(c))b++;else if(/^P\d+$/i.test(c))a++;});return b>a?'P-':'P';}
+const I3_PROJ_CAMPOS=[['codigo','Código'],['nome','Nome'],['status','Situação'],['cancelado','Cancelado'],['parcId','Cliente'],['contratante','Contratante (planilha)'],['valorContrato','Valor do contrato + aditivos'],['faturadoPlan','Faturado (planilha)'],['saldoPlan','Saldo a faturar (planilha)'],['inicio','Início'],['fim','Término'],['conclusao','Conclusão'],['numProp','Nº da proposta'],['oppId','Oportunidade'],['acvSit','Acervo (planilha)'],['acvTxt','Acervo: observação'],['acvData','Acervo: data'],['arquivoFisico','Arquivo físico'],['pedidosPlan','Pedidos da planilha'],['obs','Observações']];
+const I3_OPP_CAMPOS=[['numero','Nº da proposta'],['titulo','Objeto'],['cliente','Cliente / licitante'],['parcId','Cliente cadastrado'],['resp','Responsável'],['valor','Valor'],['dataApres','Data de apresentação'],['prev','Previsão'],['etapa','Etapa'],['prob','Chance'],['resultadoEm','Data do resultado'],['historico','Histórico'],['semResultado','Sem resultado'],['vencedor','Vencedor'],['motivoPerda','Motivo da perda'],['motivoDesist','Motivo da desistência'],['projId','Projeto'],['projCodPlan','Projeto citado'],['arquivoFisico','Arquivo físico'],['origem','Origem'],['obs','Observações']];
+const I3_ACV_CAMPOS=[['tipo','Documento'],['numero','Número'],['emissao','Emissão'],['situacao','Situação'],['pedidoEm','Pedido em'],['contratante','Contratante'],['objeto','Obra / objeto'],['resp','Responsável técnico'],['projId','Projeto'],['projCodPlan','Projeto (PJ)'],['pasta','Pasta'],['sitCtr','Situação do contrato'],['acervoSit','Acervo no CREA'],['creaReg','Registrado no CREA'],['obs','Observações'],['impChave','Chave da importação']];
+const I3_ST_P={ativo:'Ativo',pausado:'Pausado',concluido:'Concluído (encerrado)'};
+const I3_SIT_D={emitido:'emitido',pedido:'pedido',acervado:'acervado',andamento:'em análise no CREA',indeferido:'indeferido'};
+function i3Fmt(k,v){if(v==null||v===''||v===false)return '—';if(v===true)return 'sim';
+  if(/^(inicio|fim|conclusao|dataApres|prev|resultadoEm|emissao|pedidoEm|acvData)$/.test(k))return fmtDate(v);
+  if(/^(valorContrato|faturadoPlan|saldoPlan|valor)$/.test(k))return money(v);
+  if(k==='prob')return v+'%';if(k==='parcId')return parcNome(v);if(k==='projId')return (get('proj',v)||{}).codigo||projNome(v);if(k==='oppId'){const o=get('opp',v);return o?(o.numero||o.titulo):'—';}
+  if(k==='etapa')return oppEtN(v);if(k==='status')return I3_ST_P[v]||v;if(k==='acvSit')return acvEtN(v);if(k==='situacao')return I3_SIT_D[v]||v;
+  if(k==='tipo')return (FZ_AC_T.find(x=>x[0]===v)||[0,v])[1];if(k==='pedidosPlan')return (v.length||0)+' item(ns)';
+  if(k==='motivoPerda')return ({outro:'Outro',desistencia_cliente:'Cliente desistiu',preco:'Preço'}[v]||v);
+  const s=String(v);return s.length>90?s.slice(0,90)+'…':s;}
+const i3Mud=(ex,rec,campos)=>campos.filter(([k])=>!i3Eq(ex?ex[k]:undefined,rec[k])).map(([k,l])=>({k,l,a:ex?ex[k]:undefined,d:rec[k]}));
+
+/* ---------- plano: projetos ---------- */
+function i3PlanoProj(d,op){op=op||{};const pm=i3ProjMapa(),parc=i3ParcMapa(),fmt=i3ProjFmt(),oppK=new Map();S.opp.forEach(o=>{if(o.numero)oppK.set(i3PropK(o.numero),oppK.has(i3PropK(o.numero))?null:o.id);});
+  const regs=d.itens.map(it=>{const ex=pm.get(it.num);const k='P'+it.num;
+    if(ex===null)return {k,it,st:'ign',motivo:'há mais de um projeto com este número no sistema',mud:[]};
+    const r=ex?cl(ex):{id:uid(),codigo:fmt+it.raw,status:'ativo'};
+    const notas=[];if(it.valorTxt)notas.push('Valor do contrato na planilha (texto, não convertido): '+it.valorTxt);if(it.fatTxt)notas.push('Faturado na planilha: '+it.fatTxt);
+    if(it.datasInv.length)notas.push('Datas inválidas na planilha: '+it.datasInv.map(x=>x[0]+' "'+x[1]+'"').join(', '));if(it.numPropTxt)notas.push('Nº da proposta na planilha: '+it.numPropTxt);
+    if(it.stTxt&&!it.status)notas.push('Situação na planilha: '+it.stTxt);
+    if(!ex||!r.nome||r.nome===r.codigo||op.nome==='planilha')r.nome=String(it.objeto||'').replace(/\s*\n\s*/g,' ')||r.nome||r.codigo;
+    if(it.status==='concluido')r.status='concluido';else if(it.status==='ativo'&&(!ex||r.status==='concluido'))r.status='ativo';
+    if(it.cancelado)r.cancelado=true;
+    if(it.contratante)r.contratante=it.contratante;
+    if(!r.parcId&&it.contratante){const p=i3Parc(parc,it.contratante);if(p)r.parcId=p;}
+    if(it.valor!=null)r.valorContrato=it.valor;if(it.fat!=null)r.faturadoPlan=it.fat;if(it.saldo!=null)r.saldoPlan=it.saldo;
+    if(it.inicio)r.inicio=it.inicio;if(it.termino)r.fim=it.termino;if(it.conclusao)r.conclusao=it.conclusao;
+    if(it.numProp){r.numProp=it.numProp;const o=oppK.get(i3PropK(it.numProp));if(o&&!r.oppId)r.oppId=o;}
+    if(it.acvSit)r.acvSit=it.acvSit;if(it.acvTxt)r.acvTxt=it.acvTxt;if(it.acvData)r.acvData=it.acvData;
+    const loc=[it.loc].concat(it.locExtra).filter(Boolean).join(' · ');if(loc)r.arquivoFisico=loc;
+    if(it.pedidos.length)r.pedidosPlan=it.pedidos;
+    notas.forEach(n=>{r.obs=i3Junta(r.obs,n);});
+    const mud=i3Mud(ex,r,I3_PROJ_CAMPOS);
+    const ctrs=ex?S.ctr.filter(c=>c.projId===ex.id):[];
+    return {k,it,ex:ex||null,rec:r,st:!ex?'novo':mud.length?'atu':'igual',mud,ctrs,avisos:notas};});
+  const n=f=>regs.filter(f).length;
+  return {regs,st:{itens:regs.length,novos:n(r=>r.st==='novo'),atu:n(r=>r.st==='atu'),igual:n(r=>r.st==='igual'),ign:n(r=>r.st==='ign')+d.ign.length,
+    vig:n(r=>r.rec&&r.rec.status==='ativo'),enc:n(r=>r.rec&&r.rec.status==='concluido'&&!r.rec.cancelado),canc:n(r=>r.rec&&r.rec.cancelado),
+    acv:ACV_ET.map(([k])=>[k,n(r=>r.it.acvSit===k)]).concat([['',n(r=>!r.it.acvSit)]]),textoVal:n(r=>r.it.valorTxt),ctr:n(r=>r.ctrs&&r.ctrs.length),fmt}};}
+
+/* ---------- plano: propostas ---------- */
+const I3_ETAPA_CAT={ganha:'ganha',perdida:'perdida',vencedor:'perdida',cancelada:'perdida',desistencia:'desistencia',adiada:'enviada',elaboracao:'elaboracao',enviada:'enviada',outro:'enviada',vazio:'enviada'};
+const OPP_FECH3=['ganha','perdida','desistencia'];
+function i3PlanoProp(d,op){op=Object.assign({titulo:'manter',vencedor:true},op||{});
+  const hoje=todayStr(),lim12=addDays(hoje,-365),anoHoje=+hoje.slice(0,4),parc=i3ParcMapa(),pm=i3ProjMapa();
+  const porK=new Map(),porPref=new Map();S.opp.forEach(o=>{if(o.numero){const k=i3PropK(o.numero);porK.set(k,porK.has(k)?null:o);}else{const m=String(o.titulo||'').match(/^\s*(\d+)\s*P\s*[-–—]\s*/i);if(m){const k=(+m[1])+'P';porPref.set(k,porPref.has(k)?null:o);}}});
+  const projPorProp=new Map();S.proj.forEach(p=>{if(p.numProp){const k=i3PropK(p.numProp);projPorProp.set(k,projPorProp.has(k)?null:p);}});
+  const regs=d.itens.map(it=>{
+    let ex=porK.has(it.chave)?porK.get(it.chave):undefined,como='numero';
+    if(ex===undefined&&!it.dup){ex=porPref.has(it.chave)?porPref.get(it.chave):undefined;como='titulo';}
+    if(ex===null)return {k:it.chave,it,st:'ign',motivo:'há mais de uma oportunidade com este número no sistema',mud:[]};
+    ex=ex||null;
+    const viva=ex&&!ex.historico;
+    let cat=it.res.cat;if(cat==='vencedor'&&!op.vencedor)cat='outro';
+    let etapa=I3_ETAPA_CAT[cat]||'enviada';
+    const aberta=!OPP_FECH3.includes(etapa);
+    /* em aberto há mais de 12 meses (ou sem data e de ano anterior): sem resultado (histórico) */
+    const velha=it.data?it.data<lim12:(it.ano&&it.ano<anoHoje);
+    const semRes=aberta&&velha;
+    /* projeto: LOCALIZAÇÃO "Proj. P452"; senão o projeto que cita este nº de proposta */
+    let proj=null,projCod='';if(it.projNums.length){const n=it.projNums[0];projCod='P'+n;proj=pm.get(n)||null;}
+    if(!proj){const p=projPorProp.get(it.chave);if(p)proj=p;}
+    const r=ex?cl(ex):Object.assign(MODS2.opp.blank(),{id:uid(),tipo:'',area:'',prob:20,prev:'',origem:'Planilha de propostas (importação)'});
+    if(!ex||!r.numero)r.numero=it.numero;
+    if(ex&&como==='titulo'){const m=String(r.titulo||'').match(/^\s*\d+\s*P\s*[-–—]\s*([\s\S]*)$/i);if(m)r.titulo=m[1].trim();}
+    if(!ex||!r.titulo||op.titulo==='planilha')r.titulo=it.objeto||r.titulo||('Proposta '+it.numero);
+    if(it.licitante)r.cliente=it.licitante;
+    if(!r.parcId&&it.licitante){const p=i3Parc(parc,it.licitante);if(p)r.parcId=p;}
+    if(it.resp)r.resp=it.resp;
+    if(it.valor!=null)r.valor=it.valor;
+    if(it.data)r.dataApres=it.data;if(it.data&&(!ex||!r.prev||!viva))r.prev=it.data;
+    /* etapa: numa oportunidade viva (não histórica) só muda se a planilha diz ganha/perdida e o sistema está em aberto */
+    let etapaMuda=true;
+    if(viva){etapaMuda=(etapa==='ganha'||etapa==='perdida')&&!OPP_FECH3.includes(ex.etapa);if(!etapaMuda)etapa=ex.etapa;}
+    if(etapaMuda){r.etapa=etapa;
+      if(etapa==='ganha')r.prob=100;else if(etapa==='perdida'||etapa==='desistencia')r.prob=0;else if(!viva)r.prob=semRes?0:(ex&&ex.prob!=null&&ex.prob!==''?ex.prob:20);
+      if(etapa==='perdida'){const v=(it.res.vencedor||'').slice(0,80);if(v&&cat!=='cancelada')r.vencedor=v;if(!r.motivoPerda)r.motivoPerda=cat==='cancelada'?'desistencia_cliente':'outro';}
+      if(etapa==='desistencia'&&!r.motivoDesist&&it.obsTxt)r.motivoDesist=it.obsTxt.replace(/\s+/g,' ').slice(0,200);
+      if(!viva){r.semResultado=!!semRes;if(!semRes)delete r.semResultado;}
+      /* data do resultado: a de apresentação; sem ela, o início do projeto ganho; nunca a data de hoje */
+      if(OPP_FECH3.includes(etapa)){if(!r.resultadoEm||!viva){let rd=it.data;if(!rd&&etapa==='ganha'&&proj&&proj.inicio&&proj.inicio<=hoje)rd=proj.inicio;r.resultadoEm=rd||'';}}
+      else if(!viva)r.resultadoEm='';}
+    /* histórico: apresentada antes de 2026 ou sem data; ficam vivas as em aberto recentes (data nos últimos 12 meses ou, sem
+       data, numeradas no ano corrente). Uma oportunidade que já estava no sistema e não é histórica continua não histórica. */
+    if(!viva){const hist=it.data?(it.data<'2026-01-01'&&!(aberta&&!velha)):!(aberta&&!velha);if(hist)r.historico=true;else delete r.historico;}
+    if(proj&&!r.projId)r.projId=proj.id;
+    if(projCod&&!proj)r.projCodPlan=projCod;else if(r.projCodPlan&&r.projId)delete r.projCodPlan;
+    if(it.arqFis)r.arquivoFisico=it.arqFis;
+    const notas=[];if(it.observacao)notas.push('Observação (planilha): '+it.observacao);if(it.obsTxt)notas.push('Resultado (planilha): '+it.obsTxt);
+    if(it.valorTxt)notas.push('Valor na planilha: '+it.valorTxt);if(it.dataInv)notas.push('Data de apresentação inválida na planilha: "'+it.dataInv+'"');
+    if(it.projNums.length>1)notas.push('Outros projetos citados: '+it.projNums.slice(1).map(n=>'P'+n).join(', '));if(it.dup)notas.push('Número repetido na planilha (linha '+it.linha+')');
+    notas.forEach(n=>{r.obs=i3Junta(r.obs,n);});
+    const mud=i3Mud(ex,r,I3_OPP_CAMPOS);
+    return {k:it.chave,it,ex,como:ex?como:'',rec:r,cat,etapaMuda,semRes:!!r.semResultado,projFalta:!!(projCod&&!proj),st:!ex?'novo':mud.length?'atu':'igual',mud};});
+  const n=f=>regs.filter(f).length;
+  return {regs,st:{itens:regs.length,novos:n(r=>r.st==='novo'),atu:n(r=>r.st==='atu'),igual:n(r=>r.st==='igual'),ign:n(r=>r.st==='ign')+d.ign.length,
+    projFalta:n(r=>r.projFalta),projFaltaEx:[...new Set(regs.filter(r=>r.projFalta).map(r=>r.rec.projCodPlan))].slice(0,6),dups:n(r=>r.it.dup),
+    etapaVivaMuda:n(r=>r.ex&&!r.ex.historico&&r.etapaMuda&&r.ex.etapa!==r.rec.etapa),hist:n(r=>r.rec&&r.rec.historico),histSemData:n(r=>r.rec&&r.rec.historico&&!r.rec.resultadoEm)}};}
+/* quadro por ano: planilha (aba Análise) x o que vai ficar no sistema */
+function i3QuadroAno(d,p,off){const by=new Map();
+  p.regs.forEach(r=>{if(!r.rec||(off&&off[r.k]))return;const a=r.it.ano||0;if(!by.has(a))by.set(a,{ano:a,n:0,part:0,g:0,gn:0,pn:0,dn:0,an:0,sn:0,kpi:0});const x=by.get(a),o=r.rec,v=+o.valor||0;
+    x.n++;x.part+=v;if(o.etapa==='ganha'){x.g+=v;x.gn++;}else if(o.etapa==='perdida')x.pn++;else if(o.etapa==='desistencia')x.dn++;else if(o.semResultado)x.sn++;else x.an++;
+    if(!(o.historico&&!o.resultadoEm))x.kpi++;});
+  const anos=[...new Set(d.analise.map(x=>x.ano).concat([...by.keys()].filter(a=>a>=2015)))].sort((a,b)=>a-b);
+  return anos.map(a=>({ano:a,plan:d.analise.find(x=>x.ano===a)||null,imp:by.get(a)||{ano:a,n:0,part:0,g:0,gn:0,pn:0,dn:0,an:0,sn:0,kpi:0}})).concat(by.has(0)||[...by.keys()].some(a=>a&&a<2015)?[{ano:'antes',plan:null,imp:[...by.values()].filter(x=>!x.ano||x.ano<2015).reduce((s,x)=>{Object.keys(s).forEach(k=>{if(k!=='ano')s[k]+=x[k];});return s;},{ano:'antes',n:0,part:0,g:0,gn:0,pn:0,dn:0,an:0,sn:0,kpi:0})}]:[]);}
+
+/* ---------- plano: acervo ---------- */
+function i3PlanoAcv(d){const pm=i3ProjMapa(),porChave=new Map();S.acervo.forEach(a=>{if(a.impChave)porChave.set(a.impChave,a);});
+  const regs=d.docs.map(it=>{const proj=pm.get(it.pj)||null;
+    let ex=porChave.get(it.chave)||null;
+    if(!ex&&proj&&it.numero){const nk=i3N(it.numero).replace(/[^a-z0-9]/g,'');ex=S.acervo.find(a=>!a.impChave&&a.projId===proj.id&&a.tipo===it.tipo&&i3N(a.numero).replace(/[^a-z0-9]/g,'')===nk)||null;}
+    const r=ex?cl(ex):Object.assign(MODS2.acervo.blank(),{id:uid(),area:'',tipo:it.tipo});
+    r.impChave=it.chave;r.tipo=it.tipo;
+    if(it.numero)r.numero=it.numero;if(it.emissao)r.emissao=it.emissao;
+    if(it.situacao)r.situacao=it.situacao;if(it.pedidoEm)r.pedidoEm=it.pedidoEm;
+    if(it.contratante)r.contratante=it.contratante;if(it.objeto)r.objeto=it.objeto;if(it.resp)r.resp=it.resp;
+    if(proj)r.projId=proj.id;else if(!r.projId)r.projCodPlan=it.pj?'P'+it.pj:'PJ 0 (sem projeto)';
+    if(proj&&r.projCodPlan)delete r.projCodPlan;
+    if(it.pasta)r.pasta=it.pasta;if(it.sitCtr)r.sitCtr=it.sitCtr;if(it.acervoSit)r.acervoSit=it.acervoSit;if(it.creaReg)r.creaReg=true;
+    const notas=[];if(it.txt)notas.push('Planilha: '+it.txt);if(it.numImp)notas.push('Nº veio do Excel como número com mais de 15 dígitos: os últimos dígitos podem estar errados. Confira no documento.');if(it.dataInv)notas.push('Datas inválidas na planilha: '+it.dataInv);
+    notas.forEach(n=>{r.obs=i3Junta(r.obs,n);});
+    const mud=i3Mud(ex,r,I3_ACV_CAMPOS);
+    const semAnexo=it.situacao!=='pedido'&&!(r.arqs&&r.arqs.length)&&!r.link;
+    return {k:it.chave,it,ex,rec:r,proj,semAnexo,st:!ex?'novo':mud.length?'atu':'igual',mud};});
+  const n=f=>regs.filter(f).length;
+  return {regs,st:{itens:regs.length,novos:n(r=>r.st==='novo'),atu:n(r=>r.st==='atu'),igual:n(r=>r.st==='igual'),ign:d.ign.length,soPj:d.soPj,
+    art:n(r=>r.it.tipo==='art'),at:n(r=>r.it.tipo==='atestado'&&r.it.situacao==='emitido'),ped:n(r=>r.it.tipo==='atestado'&&r.it.situacao==='pedido'),cat:n(r=>r.it.tipo==='cat'&&r.it.situacao==='acervado'),catAnd:n(r=>r.it.tipo==='cat'&&r.it.situacao!=='acervado'),
+    semProj:n(r=>!r.proj),semProjEx:[...new Set(regs.filter(r=>!r.proj).map(r=>r.it.pj?'P'+r.it.pj:'PJ 0'))].slice(0,6),juntados:d.juntados||0,semAnexo:n(r=>r.semAnexo),imp:n(r=>r.it.numImp),linhas:d.linhas.length}};}
+
+/* =====================================================================================================
+   Gravar e desfazer
+   ===================================================================================================== */
+const I3_TIPOS={i3proj:{t:'Projetos',col:'proj',grupo:'proj',un:'projeto(s)',parse:i3ParseProj,plano:(d,op)=>i3PlanoProj(d,op)},
+  i3opp:{t:'Propostas',col:'opp',grupo:'ctr',un:'proposta(s)',parse:i3ParseProp,plano:(d,op)=>i3PlanoProp(d,op)},
+  i3acv:{t:'Acervo',col:'acervo',grupo:'ctr',un:'documento(s)',parse:i3ParseAcv,plano:d=>i3PlanoAcv(d)}};
+/* grava as linhas marcadas; guarda no histórico só os campos que mudaram (para desfazer) */
+function i3Aplicar(tipo,p,off,lote){const T=I3_TIPOS[tipo],col=T.col,recs=[],criados=[],antes={},aus={};
+  p.regs.forEach(r=>{if(!(r.st==='novo'||r.st==='atu')||(off&&off[r.k]))return;
+    const rec=Object.assign({},r.rec,{imp3Lote:lote});
+    if(r.st==='novo')criados.push(rec.id);
+    else{const a={},z=[];r.mud.concat([{k:'imp3Lote'}]).forEach(m=>{const k=m.k;if(r.ex[k]===undefined)z.push(k);else a[k]=r.ex[k];});antes[rec.id]=a;if(z.length)aus[rec.id]=z;}
+    recs.push(rec);});
+  if(recs.length)bulkPut(col,recs);
+  return {log:{criados,antes,aus},res:{novos:criados.length,atualizados:recs.length-criados.length}};}
+/* desfazer: volta os campos dos atualizados e exclui os criados (só os que não foram mexidos depois, por outra importação) */
+function i3Desfazer(l){const T=I3_TIPOS[l.tipo];if(!T)return {n:0,mantidos:0};const col=T.col,muda=[];let n=0,mant=0;
+  Object.keys(l.antes||{}).forEach(id=>{const cur=get(col,id);if(!cur||cur.imp3Lote!==l.id)return;const r=cl(cur);Object.assign(r,l.antes[id]);((l.aus||{})[id]||[]).forEach(k=>{delete r[k];});muda.push(r);n++;});
+  if(muda.length)bulkPut(col,muda);
+  (l.criados||[]).forEach(id=>{const cur=get(col,id);if(!cur||cur.imp3Lote!==l.id)return;
+    /* projeto com lançamentos, notas, contratos ou movimentos fica (só perde a marca da importação) */
+    if(col==='proj'&&(S.lanc.some(x=>x.projId===id)||S.ctr.some(x=>x.projId===id)||S.mov.some(x=>x.projId===id)||(S.notas||[]).some(x=>x.projId===id))){mant++;return;}
+    if(col==='opp'&&cur.ctrId){mant++;return;}
+    del(col,id,{semLixo:true});n++;});
+  put('implog',Object.assign(cl(l),{desfeito:Date.now(),desfeitoPor:actorId()}));return {n,mantidos:mant};}
+
+/* =====================================================================================================
+   Tela (Sistema › Importar cadastros)
+   ===================================================================================================== */
+let I3={tipo:'',fase:'arquivo',arq:'',dados:null,plano:null,res:null,filtro:'',lim:300,op:{nome:'manter',titulo:'manter',vencedor:true},off:{}};
+ui.imp3=ui.imp3||{q:''};
+Object.assign(ACT_GROUP,{i3Escolher:null,i3Confirmar:null,i3Filtro:null,i3Novo:null,i3Marca:null,i3MarcaTodos:null,i3Op:null,i3Mais:null,i3Csv:null});
+const i3Pode=tipo=>mayW(I3_TIPOS[tipo].grupo);
+A.i3Escolher=()=>{const tipo=IMP.tipo;if(!I3_TIPOS[tipo])return;if(!i3Pode(tipo)){toast('Seu perfil não pode gravar '+I3_TIPOS[tipo].t.toLowerCase()+'.','neg');return;}
+  let i=document.getElementById('i3File__b');if(!i){document.body.insertAdjacentHTML('beforeend','<input type="file" id="i3File__b" accept=".xlsx,.xls,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden>');i=document.getElementById('i3File__b');i.addEventListener('change',()=>{const f=i.files&&i.files[0];i.value='';if(f)i3Ler(f);});}i.click();};
+async function i3Ler(file){const tipo=IMP.tipo;I3=Object.assign(I3,{tipo,fase:'lendo',arq:file.name,dados:null,plano:null,res:null,filtro:'',lim:300,off:{}});render();
+  try{if(file.size>40e6)throw new Error('Arquivo grande demais (máximo 40 MB).');const arq=await i3LerArquivo(file);i3Carregar(tipo,arq,file.name);}
+  catch(e){I3.fase='arquivo';toast(e&&e.message?e.message:'Não foi possível ler a planilha.','neg');}
+  render();}
+/* também usado pelos testes: monta a conferência a partir das abas já lidas */
+function i3Carregar(tipo,arq,nome){const T=I3_TIPOS[tipo],d=T.parse(arq);
+  if(!(d.itens||d.docs||[]).length)throw new Error('Nenhuma linha reconhecida na aba '+d.aba+'.');
+  I3=Object.assign(I3,{tipo,arq:nome||I3.arq,dados:d,plano:T.plano(d,I3.op),fase:'previa',res:null,filtro:'',lim:300,off:{}});return I3.plano;}
+A.i3Filtro=d=>{I3.filtro=d.v||'';I3.lim=300;render();};
+A.i3Mais=()=>{I3.lim+=300;render();};
+A.i3Novo=()=>{I3=Object.assign(I3,{fase:'arquivo',dados:null,plano:null,res:null,filtro:'',off:{}});render();};
+A.i3Op=d=>{I3.op[d.k]=d.v==='1'?true:d.v==='0'?false:d.v;if(I3.dados)I3.plano=I3_TIPOS[I3.tipo].plano(I3.dados,I3.op);render();};
+A.i3Marca=(d,el)=>{const k=d.k;if(I3.off[k])delete I3.off[k];else I3.off[k]=true;render();};
+A.i3MarcaTodos=d=>{const fil=i3Filtrados();fil.forEach(r=>{if(d.v==='1')delete I3.off[r.k];else I3.off[r.k]=true;});render();};
+function i3Conta(p){let n=0;p.regs.forEach(r=>{if((r.st==='novo'||r.st==='atu')&&!I3.off[r.k])n++;});return n;}
+A.i3Confirmar=()=>{const p=I3.plano,tipo=I3.tipo,T=I3_TIPOS[tipo];if(!p)return;if(!i3Pode(tipo)){toast('Seu perfil não pode gravar '+T.t.toLowerCase()+'.','neg');return;}
+  const n=i3Conta(p),nov=p.regs.filter(r=>r.st==='novo'&&!I3.off[r.k]).length;
+  if(!n){toast('Nada para gravar: nenhuma linha nova ou com mudança está marcada.','neg');return;}
+  confirmBox('Gravar '+n+' '+T.un+' ('+nov+' novo(s) e '+(n-nov)+' atualizado(s))? Dá para desfazer pelo histórico desta tela.',()=>{
+    const lote='i3_'+tipo.slice(2)+'_'+Date.now().toString(36),r=i3Aplicar(tipo,p,I3.off,lote);
+    put('implog',Object.assign({id:lote,tipo,em:Date.now(),por:actorId(),arquivo:String(I3.arq||'').slice(0,120),aba:I3.dados.aba,res:r.res},r.log));
+    I3.res=r.res;I3.fase='fim';render();toast(T.t+': importação gravada.','pos');},'Gravar');};
+{const d0=A.impDesfazer;A.impDesfazer=d=>{const l=get('implog',d.id);if(!l||!I3_TIPOS[l.tipo])return d0(d);const T=I3_TIPOS[l.tipo];
+  confirmBox('Desfazer a importação de '+T.t.toLowerCase()+' de '+fmtDT(l.em)+'? Os cadastros atualizados voltam aos valores de antes e os criados por ela são excluídos (menos os que já foram usados em outro lugar ou mudados por outra importação).',()=>{const r=i3Desfazer(l);toast('Importação desfeita ('+r.n+' cadastro(s))'+(r.mantidos?'; '+r.mantidos+' mantido(s) porque já têm lançamentos ou contratos':'')+'.','pos');},'Desfazer',true);};}
+A.i3Csv=()=>{const p=I3.plano;if(!p)return;const rows=[['Chave','Situação','Linha da planilha','Descrição','Mudanças']];
+  p.regs.forEach(r=>rows.push([r.k,{novo:'Novo',atu:'Atualiza',igual:'Sem mudança',ign:'Ignorado'}[r.st]+(I3.off[r.k]?' (desmarcado)':''),r.it.linha,i3Desc(r).replace(/<[^>]+>/g,''),r.st==='ign'?r.motivo:r.mud.map(m=>m.l+': '+i3Fmt(m.k,m.a)+' -> '+i3Fmt(m.k,m.d)).join(' | ')]));
+  saveFile('conferencia-'+I3.tipo.slice(2)+'-'+todayStr()+'.csv',csv(rows));};
+const i3Desc=r=>{const it=r.it;if(I3.tipo==='i3proj')return esc((r.rec?r.rec.codigo:'P'+it.raw)+' · '+String(it.objeto||'').slice(0,110));
+  if(I3.tipo==='i3opp')return esc(it.numero+' · '+String(it.objeto||'').slice(0,110))+'<div class="sub">'+esc((it.licitante||'')+(it.data?' · '+fmtDate(it.data):it.ano?' · '+it.ano+(it.anoEst?' (estimado)':''):''))+'</div>';
+  return esc('PJ '+it.pj+' · '+(FZ_AC_T.find(x=>x[0]===it.tipo)||[0,it.tipo])[1]+(it.numero?' nº '+it.numero:''))+'<div class="sub">'+esc(String(it.objeto||'').slice(0,110))+'</div>';};
+function i3Filtrados(){const p=I3.plano,f=I3.filtro,q=i3N(ui.imp3.q||'');if(!p)return [];
+  return p.regs.filter(r=>{if(f==='novo'&&r.st!=='novo')return false;if(f==='atu'&&r.st!=='atu')return false;if(f==='igual'&&r.st!=='igual')return false;if(f==='ign'&&r.st!=='ign')return false;if(f==='off'&&!I3.off[r.k])return false;
+    if(f.startsWith('et:')&&!(r.rec&&r.rec.etapa===f.slice(3)&&!r.rec.semResultado))return false;if(f==='semres'&&!(r.rec&&r.rec.semResultado))return false;if(f==='hist'&&!(r.rec&&r.rec.historico))return false;
+    if(f==='projfalta'&&!r.projFalta&&!(I3.tipo==='i3acv'&&!r.proj))return false;if(f==='vivamuda'&&!(r.ex&&!r.ex.historico&&r.etapaMuda&&r.ex.etapa!==r.rec.etapa))return false;
+    if(f.startsWith('acv:')&&r.it.acvSit!==f.slice(4))return false;if(f==='textoval'&&!r.it.valorTxt)return false;if(f==='ctr'&&!(r.ctrs&&r.ctrs.length))return false;if(f==='canc'&&!(r.rec&&r.rec.cancelado))return false;
+    if(f.startsWith('doc:')){const [t,s]=f.slice(4).split('.');if(r.it.tipo!==t||(s&&r.it.situacao!==s))return false;}if(f==='semanexo'&&!r.semAnexo)return false;if(f==='impreciso'&&!r.it.numImp)return false;
+    if(q&&!i3N(r.k+' '+JSON.stringify(r.it)).includes(q))return false;return true;});}
+function i3Hist(tipo){const w=i3Pode(tipo),hist=S.implog.filter(l=>l.tipo===tipo).sort((a,b)=>b.em-a.em);
+  return hist.length?'<div class="card"><h2>Importações anteriores</h2><div class="tw" style="border:0"><table style="min-width:560px"><tbody>'+hist.map(l=>'<tr><td class="mono">'+fmtDT(l.em)+'</td><td>'+esc(l.arquivo||'')+(l.aba?' <span class="sub">aba '+esc(l.aba)+'</span>':'')+'</td><td class="sub">'+(l.res?(l.res.novos||0)+' novo(s), '+(l.res.atualizados||0)+' atualizado(s)':'')+'</td><td class="act">'+(l.desfeito?pill('desfeita',''):(w?'<button class="btn sm dng" data-act="impDesfazer" data-id="'+esc(l.id)+'">Desfazer</button>':''))+'</td></tr>').join('')+'</tbody></table></div></div>':'';}
+const I3_ARQ={i3proj:['Projetos','planilha de projetos (Excel), aba <b>Indice</b>: N° PROJ, N°. Prop, Vigente/Encerrado, OBJETO, ART/acervo (NC, A, B, C), CONTRATANTE, VALOR, Faturado, Saldo a faturar, datas e LOCALIZAÇÃO. As outras abas são ignoradas.'],
+  i3opp:['Propostas','planilha de propostas (Excel), aba <b>Índice</b>: NO, Data Apres., Observação, OBJETO, LICITANTE, RESPONSÁVEL, VALOR, OBS e LOCALIZAÇÃO. As abas por ano e "antigo" são cópias e são ignoradas; a aba "Análise" é usada só para comparar os totais por ano.'],
+  i3acv:['Acervo','planilha "Controle de ART, Atestado e Acervo" (Excel), aba <b>Plan1</b>: PASTA, PJ, ACERVO, ATESTADO, ART, Responsável Técnico, Assunto, Empresa e Situação do contrato. A aba "Plan2" (controle antigo de 2015) é ignorada.']};
+function i3Ordem(tipo){if(tipo==='i3proj')return '';const imp=S.implog.some(l=>l.tipo==='i3proj'&&!l.desfeito);
+  return imp?'':'<div class="note"><b>Importe os Projetos antes.</b> '+(tipo==='i3opp'?'As propostas':'Os documentos do acervo')+' se ligam aos projetos pelo número (ex.: P452). Sem os projetos no sistema, a ligação fica pendente e é feita quando você importar esta planilha de novo, depois dos projetos.</div>';}
+function i3View(topo){const tipo=IMP.tipo,T=I3_TIPOS[tipo];if(I3.tipo!==tipo){I3=Object.assign(I3,{tipo,fase:'arquivo',dados:null,plano:null,res:null,filtro:'',off:{}});}
+  if(!mayR(T.grupo))return topo+'<div class="card"><p>Seu perfil não tem acesso a '+esc(T.t.toLowerCase())+'.</p></div>';
+  const w=i3Pode(tipo),histH=i3Hist(tipo);
+  if(I3.fase==='lendo')return topo+'<div class="card"><p style="margin:0">Lendo '+esc(I3.arq)+'…</p><p class="sub">Uma planilha com 2.000 linhas leva alguns segundos.</p></div>';
+  if(I3.fase==='arquivo')return topo+'<div class="stack"><div class="card"><h2>1. Escolha a planilha de '+esc(T.t.toLowerCase())+'</h2><p class="sub" style="margin:0 0 10px">'+I3_ARQ[tipo][1]+'</p>'+(w?'<button class="btn pri" data-act="i3Escolher">Escolher planilha</button>':'<p class="sub">Seu perfil só consulta.</p>')+'</div>'+i3Ordem(tipo)+
+    '<div class="note">Nada é gravado antes da conferência. O que já existe no sistema é <b>atualizado</b> com o que veio da planilha (campos que a planilha não traz ficam como estão) e o que não existe é <b>criado</b>. Na conferência aparece o antes → depois de cada campo e você pode desmarcar linhas. Importar de novo o mesmo arquivo não cria nem muda nada. Ordem recomendada: Projetos, depois Propostas, depois Acervo.</div>'+histH+'</div>';
+  if(I3.fase==='fim'){const r=I3.res;return topo+'<div class="stack"><div class="card"><h2>'+esc(T.t)+' importados</h2><ul style="margin:0;padding-left:20px"><li>'+r.novos+' novo(s)</li><li>'+r.atualizados+' atualizado(s)</li></ul><div class="acts" style="margin-top:10px">'+
+    (tipo==='i3proj'?'<button class="btn" data-act="impTipo" data-v="i3opp">Importar propostas</button>':tipo==='i3opp'?'<button class="btn" data-act="nav" data-tab="opp">Abrir Oportunidades</button><button class="btn" data-act="impTipo" data-v="i3acv">Importar acervo</button>':'<button class="btn" data-act="acvAbrir">Abrir Controle de acervo</button>')+
+    '<button class="btn" data-act="i3Novo">Importar outro arquivo</button></div></div>'+histH+'</div>';}
+  const d=I3.dados,p=I3.plano,st=p.st,f=I3.filtro,nGravar=i3Conta(p);
+  const fb=(v,l,n)=>'<button class="btn sm'+(f===v?' pri':'')+'" data-act="i3Filtro" data-v="'+esc(v)+'">'+esc(l)+(n!=null?' ('+n+')':'')+'</button>';
+  const ob=(k,v,l)=>'<button class="btn sm'+(String(I3.op[k])===String(v)?' pri':'')+'" data-act="i3Op" data-k="'+k+'" data-v="'+(v===true?1:v===false?0:v)+'">'+l+'</button>';
+  let extra='',filtros=[fb('','Todos',p.regs.length),fb('novo','Novos',st.novos),fb('atu','Atualizados',st.atu),fb('igual','Sem mudança',st.igual),fb('ign','Ignorados',p.regs.filter(r=>r.st==='ign').length),fb('off','Desmarcados',Object.keys(I3.off).length)];
+  const ignH=d.ign.length?'<details style="margin-top:8px"><summary class="sub">'+d.ign.length+' linha(s) da planilha ignorada(s) (totais, sem número, sem dados)</summary><ul class="sub" style="margin:6px 0 0;padding-left:18px">'+d.ign.slice(0,60).map(x=>'<li>linha '+x.linha+': '+esc(x.motivo)+(x.txt?' · '+esc(x.txt):'')+'</li>').join('')+(d.ign.length>60?'<li>…</li>':'')+'</ul></details>':'';
+  if(tipo==='i3opp'){
+    const et=e=>p.regs.filter(r=>r.rec&&r.rec.etapa===e&&!r.rec.semResultado).length,sr=p.regs.filter(r=>r.rec&&r.rec.semResultado).length;
+    filtros=filtros.concat([fb('et:ganha','Ganhas',et('ganha')),fb('et:perdida','Perdidas',et('perdida')),fb('et:desistencia','Desistência',et('desistencia')),fb('et:enviada','Em aberto: enviada',et('enviada')),fb('et:elaboracao','Em elaboração',et('elaboracao')),fb('semres','Sem resultado (histórico)',sr),fb('hist','Histórico',st.hist),fb('projfalta','Projeto não encontrado',st.projFalta),fb('vivamuda','Etapa de oportunidade viva muda',st.etapaVivaMuda)]);
+    const cats={};p.regs.forEach(r=>{if(r.cat)cats[r.cat]=(cats[r.cat]||0)+1;});
+    const Q=i3QuadroAno(d,p,I3.off),mf=v=>v==null?'—':money(v),df=(a,b)=>a==null||b==null?'':'<div class="sub '+(Math.abs(a-b)>1?'warn':'')+'">'+(Math.abs(a-b)<=1?'igual':'dif. '+money(a-b))+'</div>';
+    extra='<div class="card"><h2>Resultado lido na coluna OBS</h2><div class="kpis">'+Object.keys(I3_CAT).filter(k=>cats[k]).map(k=>kpi(I3_CAT[k],String(cats[k]),{ganha:'etapa Ganha',perdida:'etapa Perdida',vencedor:I3.op.vencedor?'etapa Perdida (vencedor)':'tratado como sem resultado',cancelada:'etapa Perdida, motivo "cliente desistiu"',desistencia:'etapa Desistência',adiada:'em aberto, com observação',elaboracao:'em elaboração',enviada:'em aberto (velhas: sem resultado)',outro:'pela data',vazio:'pela data'}[k]||'')).join('')+'</div>'+
+      '<p class="sub" style="margin:8px 0 0">Sem resultado na planilha: em aberto se a apresentação foi nos últimos 12 meses (sem data: se a numeração é do ano atual); senão "sem resultado (histórico)", que não entra nos indicadores. Histórico = apresentada antes de 2026 ou sem data (menos as em aberto recentes). Data do resultado = data de apresentação (sem ela, o início do projeto ganho); nunca a data de hoje.</p>'+
+      '<p style="margin:8px 0 0">OBS só com o nome de outra empresa (ex.: "Esmero", "M THOMAZ"): '+ob('vencedor',true,'Tratar como perdida (é a vencedora)')+' '+ob('vencedor',false,'Tratar como sem resultado')+'</p>'+
+      '<p style="margin:6px 0 0">Objeto de oportunidade que já existe: '+ob('titulo','manter','Manter o do sistema')+' '+ob('titulo','planilha','Usar o da planilha')+'</p></div>'+
+      '<div class="card"><h2>Totais por ano: planilha (aba Análise) x o que vai para o sistema</h2><p class="sub" style="margin:0 0 8px">Ano = data de apresentação; sem data, o ano da proposta anterior na numeração. A aba Análise soma as abas de cada ano (montadas à mão) e chama de "Perdemos" tudo o que não foi ganho. Confira as diferenças antes de gravar.</p>'+
+      '<div class="tw" style="border:0"><table style="min-width:980px"><thead><tr><th>Ano</th><th class="num">Quantidade</th><th class="num">Participação</th><th class="num">Ganhamos</th><th class="num">Perdemos (não ganhas)</th><th>Como ficam no sistema</th></tr></thead><tbody>'+
+      Q.map(x=>{const pl=x.plan||{},im=x.imp,cel=(a,b,ehN)=>'<td class="num"><div>'+(a==null?'—':ehN?a:mf(a))+'</div><div class="sub">importado: <b>'+(ehN?b:money(b))+'</b></div>'+(ehN?'':df(b,a))+'</td>';
+        return '<tr><td class="mono"><b>'+esc(String(x.ano==='antes'?'até 2014 / sem ano':x.ano))+'</b></td>'+cel(pl.qtde,im.n,true)+cel(pl.part,im.part)+cel(pl.ganh,im.g)+cel(pl.perd,im.part-im.g)+'<td class="sub">'+im.gn+' ganha(s), '+im.pn+' perdida(s), '+im.dn+' desistência(s), '+im.an+' em aberto, '+im.sn+' sem resultado<br>'+im.kpi+' entram nos indicadores</td></tr>';}).join('')+'</tbody></table></div><p class="sub" style="margin:6px 0 0">Em cada célula: em cima o número da planilha (aba Análise), embaixo o que vai para o sistema.</p></div>';
+    extra+=(st.projFalta?'<div class="note">'+st.projFalta+' proposta(s) citam projetos que ainda não estão no sistema (ex.: '+esc(st.projFaltaEx.join(', '))+'). '+(S.implog.some(l=>l.tipo==='i3proj'&&!l.desfeito)?'Confira o número na LOCALIZAÇÃO.':'Importe os Projetos antes; a ligação é feita quando esta planilha for importada de novo.')+'</div>':'')+
+      (st.dups?'<div class="note">'+st.dups+' número(s) repetido(s) na planilha: a 2ª ocorrência entra como "-2" (ex.: 1354P-2).</div>':'')+
+      (st.etapaVivaMuda?'<div class="note warn">'+st.etapaVivaMuda+' oportunidade(s) em aberto no sistema passam para ganha ou perdida porque a planilha diz isso. Confira no filtro "Etapa de oportunidade viva muda".</div>':'');}
+  if(tipo==='i3proj'){const acv=p.st.acv;
+    filtros=filtros.concat(acv.filter(x=>x[1]).map(x=>fb('acv:'+x[0],x[0]?acvEtN(x[0]):'Acervo sem código',x[1]))).concat([fb('textoval','Valor em texto',st.textoVal),fb('canc','Cancelados',st.canc),fb('ctr','Com contrato no sistema',st.ctr)]);
+    extra='<div class="card"><h2>Situação na planilha</h2><div class="kpis">'+kpi('Vigentes (V)',String(st.vig),'ficam ativos')+kpi('Encerrados (E)',String(st.enc),'ficam concluídos e entram no Controle de acervo')+kpi('Cancelados',String(st.canc),'concluídos, marcados como cancelados')+kpi('Valor em texto',String(st.textoVal),'moeda antiga: vai para as observações',st.textoVal?'warn':'')+kpi('Com contrato no sistema',String(st.ctr),'contratos não são criados nem mudados')+'</div>'+
+      '<p class="sub" style="margin:8px 0 0">Código dos projetos novos: <b>'+esc(st.fmt)+'490</b> (o formato mais usado no sistema). Os já cadastrados são encontrados como P490, P-490 ou 490. Nunca são mexidos o orçamento, o rateio e os lançamentos; Valor, Faturado e Saldo da planilha ficam em campos próprios do projeto, só para consulta.</p>'+
+      '<p style="margin:6px 0 0">Nome de projeto que já existe: '+ob('nome','manter','Manter o do sistema')+' '+ob('nome','planilha','Usar o OBJETO da planilha')+'</p></div>';}
+  if(tipo==='i3acv'){
+    filtros=filtros.concat([fb('doc:art','ART',st.art),fb('doc:atestado.emitido','Atestados emitidos',st.at),fb('doc:atestado.pedido','Atestados pedidos',st.ped),fb('doc:cat.acervado','CAT',st.cat),fb('doc:cat','CAT em análise / indeferida',st.catAnd),fb('projfalta','Projeto não encontrado',st.semProj),fb('semanexo','Faltam anexar',st.semAnexo),fb('impreciso','Nº possivelmente incompleto',st.imp)]);
+    extra='<div class="card"><h2>Documentos lidos</h2><div class="kpis">'+kpi('Linhas com dados',String(st.linhas),st.soPj+' linha(s) só com o PJ ignoradas')+kpi('ART',String(st.art),'')+kpi('Atestados emitidos',String(st.at),st.ped+' pedido(s) ainda sem atestado')+kpi('CAT (acervados)',String(st.cat),st.catAnd?st.catAnd+' em análise no CREA ou indeferida(s)':'')+kpi('Faltam anexar',String(st.semAnexo),'sem o PDF: anexe depois no Acervo técnico',st.semAnexo?'warn':'')+'</div>'+
+      '<p class="sub" style="margin:8px 0 0">Cada linha da planilha vira até 3 documentos do Acervo técnico (ART, atestado e CAT), ligados ao projeto do PJ: é o mesmo modelo que o sistema já usa (um documento por tipo, com o próprio número, data e PDF). Chave para atualizar: projeto + tipo + número (sem número, projeto + tipo + assunto).'+(st.juntados?' '+st.juntados+' linha(s) repetem o mesmo documento (mesmo PJ, tipo e número, com outro serviço) e foram juntadas num documento só.':'')+(d.plan2?' A aba "Plan2" (controle antigo de 2015) foi ignorada.':'')+'</p></div>'+
+      (st.semProj?'<div class="note">'+st.semProj+' documento(s) de projetos que ainda não estão no sistema (ex.: '+esc(st.semProjEx.join(', '))+'). Eles ficam guardados com o número do PJ e a ligação é feita quando esta planilha for importada de novo, depois dos projetos.</div>':'')+
+      (st.imp?'<div class="note warn">'+st.imp+' número(s) de ART vieram do Excel como número com mais de 15 dígitos: o Excel já perdeu os últimos dígitos. Confira esses números no documento (filtro "Nº possivelmente incompleto").</div>':'');}
+  const fil=i3Filtrados(),vis=fil.slice(0,I3.lim);
+  const stP=r=>r.st==='novo'?pill('Novo','pos'):r.st==='atu'?pill('Atualiza','acc'):r.st==='igual'?pill('Sem mudança',''):pill('Ignorado','warn');
+  const mudH=r=>{if(r.st==='ign')return '<span class="sub">'+esc(r.motivo||'')+'</span>';if(r.st==='igual')return '<span class="sub">nada muda</span>';
+    if(r.st==='novo'){const rc=r.rec;if(tipo==='i3proj')return '<span class="sub">'+esc([I3_ST_P[rc.status],rc.valorContrato!=null?money(rc.valorContrato):'',rc.acvSit?'acervo: '+acvEtN(rc.acvSit):'',rc.inicio?'início '+fmtDate(rc.inicio):''].filter(Boolean).join(' · '))+'</span>';
+      if(tipo==='i3opp')return '<span class="sub">'+esc([rc.semResultado?'Sem resultado (histórico)':oppEtN(rc.etapa),rc.valor?money(rc.valor):'',rc.resultadoEm?'resultado '+fmtDate(rc.resultadoEm):'',rc.projId?'projeto '+((get('proj',rc.projId)||{}).codigo||''):rc.projCodPlan?'projeto '+rc.projCodPlan+' (não encontrado)':'',rc.historico?'histórico':''].filter(Boolean).join(' · '))+'</span>';
+      return '<span class="sub">'+esc([I3_SIT_D[rc.situacao]||'',rc.emissao?fmtDate(rc.emissao):'',rc.resp,r.proj?'projeto '+(r.proj.codigo||''):'PJ '+r.it.pj+' (não encontrado)',r.semAnexo?'falta anexar':''].filter(Boolean).join(' · '))+'</span>';}
+    return r.mud.slice(0,8).map(m=>'<div><span class="sub">'+esc(m.l)+':</span> '+esc(i3Fmt(m.k,m.a))+' → <b>'+esc(i3Fmt(m.k,m.d))+'</b></div>').join('')+(r.mud.length>8?'<div class="sub">e mais '+(r.mud.length-8)+'</div>':'');};
+  const tabela='<div class="tw" style="max-height:560px;overflow:auto"><table style="min-width:980px"><thead><tr><th style="width:34px"></th><th style="width:110px">Situação</th><th>'+(tipo==='i3proj'?'Projeto':tipo==='i3opp'?'Proposta':'Documento')+'</th><th>O que muda (antes → depois)</th></tr></thead><tbody>'+
+    (vis.length?vis.map(r=>'<tr><td>'+((r.st==='novo'||r.st==='atu')?'<input type="checkbox" data-act="i3Marca" data-k="'+esc(r.k)+'" aria-label="Gravar '+esc(r.k)+'"'+(I3.off[r.k]?'':' checked')+'>':'')+'</td><td>'+stP(r)+(r.como==='titulo'?'<div class="sub">achada pelo nº no título</div>':'')+(r.ctrs&&r.ctrs.length?'<div class="sub">contrato '+esc(r.ctrs.map(c=>c.numero||'').join(', '))+'</div>':'')+'</td><td>'+i3Desc(r)+'<div class="sub">linha '+r.it.linha+'</div></td><td>'+mudH(r)+'</td></tr>').join(''):emptyRow(4,'Nada neste filtro.'))+'</tbody></table></div>'+
+    (fil.length>vis.length?'<div class="acts" style="margin-top:8px"><span class="sub">Mostrando '+vis.length+' de '+fil.length+'.</span><button class="btn sm" data-act="i3Mais">Mostrar mais</button></div>':'');
+  return topo+'<div class="stack"><div class="kpis">'+kpi('Linhas lidas',String(st.itens),esc(I3.arq)+' · aba '+esc(d.aba))+kpi('Novos',String(st.novos),'serão criados','pos')+kpi('Atualizados',String(st.atu),'mudam campos (veja antes → depois)')+kpi('Sem mudança',String(st.igual),'já estão iguais no sistema')+kpi('Ignorados',String(st.ign),tipo==='i3acv'?'linhas sem ART, atestado ou acervo':tipo==='i3opp'?'linhas de totais ou sem número':'linhas sem número ou repetidas',st.ign?'warn':'')+'</div>'+
+    (d.abaPref?'':'<div class="note warn">A aba esperada não foi encontrada: usei a aba "'+esc(d.aba)+'", que tem o mesmo cabeçalho.</div>')+i3Ordem(tipo)+extra+
+    '<div class="card"><h2>Confira</h2><div class="acts" style="margin-bottom:8px;flex-wrap:wrap">'+filtros.join('')+'</div>'+
+    '<div class="bar" style="margin-bottom:8px"><label class="f grow"><span>Buscar na conferência</span><input id="i3q" data-filter="imp3.q" value="'+esc(ui.imp3.q||'')+'" placeholder="Número, objeto, cliente…"></label><div class="acts" style="align-self:end"><button class="btn sm" data-act="i3MarcaTodos" data-v="1">Marcar os do filtro</button><button class="btn sm" data-act="i3MarcaTodos" data-v="0">Desmarcar os do filtro</button></div></div>'+
+    tabela+ignH+
+    '<div class="acts" style="margin-top:12px"><button class="btn" data-act="i3Novo">Escolher outro arquivo</button><button class="btn" data-act="i3Csv">Baixar conferência (CSV)</button><button class="btn pri" data-act="i3Confirmar"'+(nGravar&&w?'':' disabled')+'>Gravar '+nGravar+' '+esc(T.un)+'</button></div></div>'+histH+'</div>';}
+/* cartões na escolha do tipo (ordem: Projetos, Propostas, Acervo) */
+{const t0=impTopo;impTopo=function(sel){let h=t0(sel);
+  const card=(k,tit,para,bt)=>'<div class="card imp-op'+(sel===k?' on':'')+'"><div class="imp-op-h"><h2 style="margin:0">'+tit+'</h2>'+(sel===k?pill('selecionado','acc'):'')+'</div><p style="margin:6px 0 4px"><b>Para que serve:</b> '+para+'</p><p class="sub" style="margin:0 0 10px"><b>Arquivo:</b> '+I3_ARQ[k][1]+'</p><button class="btn'+(sel===k?'':' pri')+'" data-act="impTipo" data-v="'+k+'">'+bt+'</button></div>';
+  const cs=card('i3proj','Projetos (índice de projetos)','cadastra e atualiza os projetos (código P490, situação vigente/encerrado, contratante, datas, valor do contrato e situação do acervo). Importe primeiro: propostas e acervo se ligam aos projetos.','Importar projetos')+
+    card('i3opp','Propostas (índice de propostas)','cadastra e atualiza as oportunidades pelo nº da proposta (1462P), com objeto, licitante, valor, resultado (ganha, perdida, desistência), data e projeto ligado. O histórico antigo fica fora dos indicadores.','Importar propostas')+
+    card('i3acv','Acervo (ART, atestados e CAT)','cadastra e atualiza o Acervo técnico (Comercial › Habilitação): ART, atestados e CAT de cada projeto, com número, data e responsável técnico. Alimenta o Controle de acervo.','Importar acervo');
+  const i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+cs+h.slice(i):h;};}
+{const vi=V.imp;V.imp=function(){if(I3_TIPOS[IMP.tipo])return i3View(impTopo(IMP.tipo));
+  /* o histórico geral não descreve estas importações: cada uma tem o próprio histórico */
+  const keep=S.implog;S.implog=keep.filter(l=>!I3_TIPOS[l.tipo]);try{return vi.apply(this,arguments);}finally{S.implog=keep;}};}
+DBW_TABCOLS.imp=[...new Set((DBW_TABCOLS.imp||[]).concat(['implog','proj','opp','acervo','parc','ctr']))];
+
+/* ===== v126: Controle de acervo (Comercial › Habilitação › Controle de acervo) e ajustes das telas para o histórico importado =====
+   Pedido do dono: "para projetos encerrados o próximo passo é fazer o acervo técnico". Fica em Habilitação, ao lado do Acervo
+   técnico, porque usa os mesmos documentos (ART, atestado, CAT) e o mesmo grupo de permissão (Comercial/Contratos); quem
+   encerra a obra (Obras) não é quem pede o atestado e registra no CREA.
+   Lista os projetos ENCERRADOS (situação Concluído, menos os cancelados) com a etapa do acervo:
+   A iniciar → Sem ART (NC) → ART registrada → Atestado pedido (A) → Atestado emitido (B) → Acervado / CAT emitida (C).
+   A etapa vem do que estiver mais adiantado entre: os documentos do Acervo técnico ligados ao projeto, o código da planilha
+   de projetos (NC/A/B/C) e os registros feitos nesta tela (coleção acvc, um por projeto, com os passos registrados). Projeto encerrado
+   no sistema entra sozinho como "A iniciar". */
+if(!COLS.includes('acvc')){COLS.push('acvc');S.acvc=S.acvc||[];IDX.acvc=new Map();}
+COL_NOME.acvc='Controle de acervo';
+Object.assign(GROUP_OF_TAB,{acvc:'ctr'});TAB_COLS.acvc=['acvc'];
+DBW_TABCOLS.hab=[...new Set((DBW_TABCOLS.hab||[]).concat(['acervo','acvc','proj','ctr']))];
+Object.assign(ACT_GROUP,{acvRegistrar:'ctr',acvAbrir:null,acvMais:null,acvCfgSalvar:'ctr'});
+ui.acvc=ui.acvc||{et:'',resp:'',q:'',par:'',ano:''};
+ui.fzv=ui.fzv||{};
+const acvDiasLim=()=>{const n=+(cfg().acvDias);return n>0?n:60;};
+const ACV_DOC_OK=a=>a&&(fzAcArqs(a).length||(a.link&&/^https?:\/\//i.test(a.link)));
+/* projeto encerrado no sistema: guarda a data (o controle conta os dias a partir dela) */
+{const p0=put;put=function(col,rec){if(col==='proj'&&rec&&rec.status==='concluido'&&!rec.encerradaEm&&!rec.conclusao){const o=get('proj',rec.id);if(!o||o.status!=='concluido')rec.encerradaEm=todayStr();}return p0.apply(this,arguments);};}
+
+/* etapa do acervo de um projeto */
+function acvInfo(p){const docs=S.acervo.filter(a=>a.projId===p.id),c=get('acvc','acvc_'+p.id)||null,cand=[];
+  const art=docs.filter(a=>a.tipo==='art'),at=docs.filter(a=>a.tipo==='atestado'),cat=docs.filter(a=>a.tipo==='cat'&&(a.situacao||'acervado')==='acervado'),catAnd=docs.filter(a=>a.tipo==='cat'&&a.situacao&&a.situacao!=='acervado');
+  const atEm=at.filter(a=>a.situacao!=='pedido'),atPed=at.filter(a=>a.situacao==='pedido');
+  art.forEach(a=>cand.push({et:'art',data:a.emissao||''}));atPed.forEach(a=>cand.push({et:'pedido',data:a.pedidoEm||''}));atEm.forEach(a=>cand.push({et:'emitido',data:a.emissao||''}));
+  cat.forEach(a=>cand.push({et:'acervado',data:a.emissao||''}));atEm.filter(a=>a.creaReg||a.acervoSit==='acervado').forEach(a=>cand.push({et:'acervado',data:''}));
+  if(p.acvSit)cand.push({et:p.acvSit,data:p.acvData||'',plan:true});
+  if(c&&c.etapa&&c.etapa!=='dispensado')cand.push({et:c.etapa,data:c.em||''});
+  let b=null;cand.forEach(x=>{const i=acvEtI(x.et);if(i<0)return;if(!b||i>acvEtI(b.et)||(i===acvEtI(b.et)&&String(x.data)>String(b.data)))b=x;});
+  const enc=p.conclusao||p.encerradaEm||p.fim||'';
+  let et=b?b.et:'inicio',data=b&&b.data?b.data:'';
+  if(c&&c.etapa==='dispensado'&&et!=='acervado'){et='dispensado';data=c.em||'';}
+  const desde=data||enc,dias=desde?Math.max(0,-dTo(desde)):null;
+  const ult=arr=>arr.slice().sort((x,y)=>String(y.emissao||y.pedidoEm||'').localeCompare(String(x.emissao||x.pedidoEm||'')))[0]||null;
+  const resp=(c&&c.resp)||(docs.find(a=>a.resp)||{}).resp||'';
+  const semAnexo=docs.filter(a=>(a.tipo==='atestado'&&a.situacao!=='pedido')||(a.tipo==='cat'&&(a.situacao||'acervado')==='acervado')).filter(a=>!ACV_DOC_OK(a));
+  return {p,et,data,desde,dias,enc,docs,c,art:ult(art),at:ult(atEm),ped:ult(atPed),cat:ult(cat),catAnd:ult(catAnd),resp,semAnexo,soPlan:!!(b&&b.plan&&!docs.length)};}
+const acvEncerrados=()=>S.proj.filter(p=>p.status==='concluido'&&!p.cancelado);
+function acvLista(){return acvEncerrados().map(acvInfo);}
+const ACV_COR={inicio:'warn',nc:'',art:'acc',pedido:'warn',emitido:'acc',acervado:'pos',dispensado:''};
+
+A.acvAbrir=d=>{const ja=ui.tab==='hab'&&ui.fzv.hab==='acvc';ui.fzv.hab='acvc';ui.tab='hab';if(d&&d.et!=null)ui.acvc.et=d.et;try{history.replaceState(null,'','#hab');}catch(_){}render();if(!ja)try{window.scrollTo(0,0);}catch(_){}};
+A.acvMais=()=>{ui.acvc.lim=(+ui.acvc.lim||200)+200;render();};
+A.acvCfgSalvar=()=>{const el=document.getElementById('acvDias'),n=Math.round(+((el&&el.value)||0));if(!(n>=1&&n<=999)){toast('Informe um número de dias entre 1 e 999.','neg');return;}put('cfg',Object.assign({},cfg(),{id:'empresa',acvDias:n}));toast('Prazo salvo.','pos');};
+/* registrar o próximo passo (ou qualquer etapa): cria/atualiza o documento no Acervo técnico e guarda o histórico em acvc */
+A.acvRegistrar=d=>{const p=get('proj',d.id);if(!p)return;const x=acvInfo(p),i=acvEtI(x.et);
+  const prox=ACV_ET.filter(e=>e[0]!=='inicio'&&acvEtI(e[0])>Math.max(i,acvEtI('nc'))),sug=(prox[0]||['acervado'])[0];
+  const opts=ACV_ET.filter(e=>e[0]!=='inicio').map(e=>[e[0],e[1]+(acvEtI(e[0])<=i&&x.et!=='dispensado'?' (já passou)':'')]).concat([['dispensado','Não terá acervo (dispensar)']]);
+  const resp0=x.resp||'';
+  modal({title:'Acervo · '+projNome(p.id),body:'<p class="sub" style="margin:0 0 10px">Etapa atual: <b>'+esc(acvEtN(x.et))+'</b>'+(x.desde?' desde '+fmtDate(x.desde):'')+'. Registre o que aconteceu: o documento entra no Acervo técnico (Comercial › Habilitação) ligado a este projeto.</p><div class="fg">'+
+    field('Etapa','etapa','select',sug,{opts})+field('Data','data','date',todayStr())+field('Nº do documento (ART, atestado ou CAT)','numero','text','')+field('Responsável técnico','resp','text',resp0)+field('Registro do profissional (CREA/CAU)','respReg','text','')+field('Observação (para "Não terá acervo", o motivo)','obs','text','',{full:true})+'</div>',
+    saveLabel:'Registrar',save:root=>{const v=readForm(root),et=v.etapa,dt=v.data||'';
+      if(!dt||dt>todayStr()){toast('Informe a data (não pode ser futura).','neg');return false;}
+      if(et==='dispensado'&&!String(v.obs||'').trim()){toast('Informe o motivo para não fazer o acervo.','neg');return false;}
+      const base={projId:p.id,contratante:p.contratante||(p.parcId?parcNome(p.parcId):''),objeto:p.nome||p.codigo||'',resp:v.resp||'',respReg:v.respReg||'',area:'',obs:v.obs||''};
+      const novoDoc=o=>{const r=Object.assign(MODS2.acervo.blank(),base,{id:uid()},o);put('acervo',r);return r;};
+      if(et==='art')novoDoc({tipo:'art',numero:v.numero||'',emissao:dt,situacao:'emitido'});
+      else if(et==='pedido'){if(x.ped)put('acervo',Object.assign(cl(x.ped),{pedidoEm:dt,obs:i3Junta(x.ped.obs,v.obs)}));else novoDoc({tipo:'atestado',numero:'',emissao:'',situacao:'pedido',pedidoEm:dt});}
+      else if(et==='emitido'){if(x.ped)put('acervo',Object.assign(cl(x.ped),{situacao:'emitido',numero:v.numero||x.ped.numero||'',emissao:dt,resp:v.resp||x.ped.resp||'',respReg:v.respReg||x.ped.respReg||'',obs:i3Junta(x.ped.obs,v.obs)}));else novoDoc({tipo:'atestado',numero:v.numero||'',emissao:dt,situacao:'emitido'});}
+      else if(et==='acervado'){novoDoc({tipo:'cat',numero:v.numero||'',emissao:dt,situacao:'acervado',creaReg:true});x.docs.filter(a=>a.tipo==='atestado'&&a.situacao!=='pedido'&&!a.creaReg).forEach(a=>put('acervo',Object.assign(cl(a),{creaReg:true})));}
+      const c=x.c?cl(x.c):{id:'acvc_'+p.id,projId:p.id,passos:[]};
+      c.etapa=et;c.em=dt;if(v.resp)c.resp=v.resp;c.passos=(c.passos||[]).concat([{etapa:et,em:dt,num:v.numero||'',obs:String(v.obs||'').slice(0,300),por:actorId(),ts:Date.now()}]).slice(-40);
+      put('acvc',c);toast('Registrado: '+acvEtN(et)+'.','pos');}});};
+
+function acvFiltrados(L){const f=ui.acvc,q=i3N(f.q),lim=acvDiasLim();
+  return L.filter(x=>{if(f.et==='aberto'){if(x.et==='acervado'||x.et==='dispensado')return false;}else if(f.et&&x.et!==f.et)return false;
+    if(f.resp&&x.resp!==f.resp)return false;if(f.par==='1'&&!(x.et==='pedido'&&x.dias!=null&&x.dias>lim))return false;if(f.par==='anexo'&&!x.semAnexo.length)return false;
+    if(f.ano&&String(x.enc).slice(0,4)!==f.ano)return false;
+    if(q&&!i3N([x.p.codigo,x.p.nome,x.p.contratante,x.p.parcId?parcNome(x.p.parcId):'',x.resp].concat(x.docs.map(a=>a.numero)).join(' ')).includes(q))return false;return true;});}
+V.acvc=()=>{
+  if(!mayR('ctr'))return '<div class="card"><p>Seu perfil não tem acesso ao Comercial.</p></div>';
+  const L=acvLista(),lim=acvDiasLim(),ano=todayStr().slice(0,4),w=mayW('ctr');
+  const semAc=L.filter(x=>x.et!=='acervado'&&x.et!=='dispensado'),ped=L.filter(x=>x.et==='pedido'&&x.dias!=null&&x.dias>lim),acAno=L.filter(x=>x.et==='acervado'&&String(x.data).slice(0,4)===ano),ini=L.filter(x=>x.et==='inicio');
+  const faltam=S.acervo.filter(a=>((a.tipo==='atestado'&&a.situacao!=='pedido')||(a.tipo==='cat'&&(a.situacao||'acervado')==='acervado'))&&!ACV_DOC_OK(a));
+  const fil=acvFiltrados(L).sort((a,b)=>{const fa=a.et==='acervado'||a.et==='dispensado'?1:0,fb=b.et==='acervado'||b.et==='dispensado'?1:0;return fa-fb||String(b.enc||'').localeCompare(String(a.enc||''))||(b.dias||0)-(a.dias||0)||String(a.p.codigo).localeCompare(String(b.p.codigo));});
+  const lm=+ui.acvc.lim||200,vis=fil.slice(0,lm),f=ui.acvc;
+  const resps=[...new Set(L.map(x=>x.resp).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const anos=[...new Set(L.map(x=>String(x.enc).slice(0,4)).filter(a=>/^\d{4}$/.test(a)))].sort().reverse();
+  const doc=(a,ped)=>a?'<span class="mono">'+esc(a.numero||'s/n')+'</span><div class="sub">'+(a.emissao?fmtDate(a.emissao):ped&&a.pedidoEm?'pedido '+fmtDate(a.pedidoEm):'sem data')+'</div>':'<span class="mut">—</span>';
+  const contagem=ACV_ET.map(e=>[e[0],L.filter(x=>x.et===e[0]).length]).concat([['dispensado',L.filter(x=>x.et==='dispensado').length]]);
+  return pageHead('Controle de acervo','Projetos encerrados e o caminho até o acervo técnico: ART, pedido do atestado ao cliente, atestado emitido e registro no CREA (CAT). Projeto encerrado no sistema entra aqui sozinho como "A iniciar".','')+
+  '<div class="stack"><div class="kpis">'+kpi('Encerrados sem acervo',String(semAc.length),'de '+L.length+' projeto(s) encerrado(s)',semAc.length?'warn':'')+kpi('Atestados pedidos há mais de '+lim+' dias',String(ped.length),'cobrar do cliente',ped.length?'neg':'')+kpi('Acervados em '+ano,String(acAno.length),'CAT emitida no ano','pos')+kpi('A iniciar',String(ini.length),'encerrados sem nenhum passo')+kpi('Faltam anexar',String(faltam.length),'atestados e CAT sem o PDF',faltam.length?'warn':'')+'</div>'+
+  '<div class="acts" style="flex-wrap:wrap">'+contagem.map(([k,n])=>'<button class="btn sm'+(f.et===k?' pri':'')+'" data-act="acvAbrir" data-et="'+(f.et===k?'':k)+'">'+esc(acvEtN(k))+' ('+n+')</button>').join('')+'</div>'+
+  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="acv_q" data-filter="acvc.q" value="'+esc(f.q||'')+'" placeholder="Projeto, contratante, nº do documento"></label>'+
+    '<label class="f"><span>Etapa</span><select id="acv_et" data-filter="acvc.et">'+opt([['aberto','Sem acervo (todas em aberto)']].concat(ACV_ET).concat([['dispensado','Não terá acervo']]),f.et,'Todas')+'</select></label>'+
+    '<label class="f"><span>Responsável técnico</span><select id="acv_resp" data-filter="acvc.resp">'+opt(resps.map(x=>[x,x]),f.resp,'Todos')+'</select></label>'+
+    '<label class="f"><span>Encerrado em</span><select id="acv_ano" data-filter="acvc.ano">'+opt(anos.map(a=>[a,a]),f.ano,'Todos os anos')+'</select></label>'+
+    '<label class="f"><span>Mostrar</span><select id="acv_par" data-filter="acvc.par">'+opt([['1','Atestado pedido há mais de '+lim+' dias'],['anexo','Faltam anexar']],f.par,'Todos')+'</select></label></div>'+
+  '<div class="tw"><table style="min-width:1180px"><thead><tr><th>Projeto</th><th>Encerrado</th><th>Etapa</th><th>ART</th><th>Atestado</th><th>CAT (acervo)</th><th>Responsável técnico</th><th class="num">Dias na etapa</th><th></th></tr></thead><tbody>'+
+  (vis.length?vis.map(x=>{const p=x.p,par=x.et==='pedido'&&x.dias>lim;return '<tr><td><b class="mono">'+esc(p.codigo||'—')+'</b> '+esc(String(p.nome||'').slice(0,90))+'<div class="sub">'+esc(p.contratante||(p.parcId?parcNome(p.parcId):''))+(p.numProp?' · proposta '+esc(p.numProp):'')+'</div></td>'+
+    '<td class="mono">'+(x.enc?fmtDate(x.enc):'—')+'</td>'+
+    '<td>'+pill(acvEtN(x.et),ACV_COR[x.et]||'')+(x.data?'<div class="sub">desde '+fmtDate(x.data)+'</div>':x.soPlan?'<div class="sub">pela planilha de projetos</div>':'')+(x.catAnd?'<div class="sub">CAT '+esc(I3_SIT_D[x.catAnd.situacao]||'')+'</div>':'')+(x.p.acvTxt?'<div class="sub" title="'+esc(x.p.acvTxt)+'">'+esc(String(x.p.acvTxt).slice(0,40))+'</div>':'')+'</td>'+
+    '<td>'+doc(x.art)+'</td><td>'+(x.at?doc(x.at):x.ped?'<span class="pill warn">pedido</span><div class="sub">'+(x.ped.pedidoEm?fmtDate(x.ped.pedidoEm):'sem data')+'</div>':'<span class="mut">—</span>')+'</td><td>'+doc(x.cat)+'</td>'+
+    '<td>'+esc(x.resp||'—')+'</td><td class="num"><b class="'+(par?'neg':'')+'">'+(x.dias==null?'—':x.dias)+'</b></td>'+
+    '<td class="act">'+(w&&x.et!=='acervado'?'<button class="btn sm pri" data-act="acvRegistrar" data-id="'+esc(p.id)+'">'+(x.et==='dispensado'?'Reabrir':'Avançar')+'</button>':w?'<button class="btn sm" data-act="acvRegistrar" data-id="'+esc(p.id)+'">Registrar</button>':'')+(x.semAnexo.length&&w?'<button class="btn sm" data-act="fzAcAnexo" data-id="'+esc(x.semAnexo[0].id)+'" title="Anexar o PDF do '+esc((FZ_AC_T.find(t=>t[0]===x.semAnexo[0].tipo)||[0,''])[1])+'">Anexar PDF</button>':'')+'</td></tr>';}).join(''):emptyRow(9,L.length?'Nenhum projeto neste filtro.':'Nenhum projeto encerrado ainda. Projetos com situação Concluído aparecem aqui.'))+'</tbody></table></div>'+
+  (fil.length>vis.length?'<div class="acts"><span class="sub">Mostrando '+vis.length+' de '+fil.length+'.</span><button class="btn sm" data-act="acvMais">Mostrar mais</button></div>':'')+
+  (faltam.length?'<div class="card"><h2>Faltam anexar ('+faltam.length+')</h2><p class="sub" style="margin:0 0 8px">Atestados e CAT cadastrados sem o PDF. Com o PDF anexado eles entram no pacote ZIP da habilitação.</p><div class="tw" style="border:0;max-height:320px;overflow:auto"><table style="min-width:760px"><tbody>'+
+    faltam.slice().sort((a,b)=>String(b.emissao||'').localeCompare(String(a.emissao||''))).slice(0,150).map(a=>{const pj=a.projId?get('proj',a.projId):null;return '<tr><td>'+esc((FZ_AC_T.find(t=>t[0]===a.tipo)||[0,a.tipo])[1])+' <span class="mono">'+esc(a.numero||'s/n')+'</span></td><td class="mono">'+fmtDate(a.emissao)+'</td><td>'+esc(pj?pj.codigo:a.projCodPlan||'—')+'</td><td class="sub">'+esc(String(a.objeto||'').slice(0,80))+'</td><td class="act">'+(w?'<button class="btn sm" data-act="fzAcAnexo" data-id="'+esc(a.id)+'">Anexar PDF</button>':'')+'</td></tr>';}).join('')+'</tbody></table></div>'+(faltam.length>150?'<p class="sub">Mostrando 150 de '+faltam.length+'. Os demais estão no Acervo técnico (filtro "Faltam anexar").</p>':'')+'</div>':'')+
+  (w?'<div class="card"><h2>Prazo do atestado</h2><div class="bar"><label class="f"><span>Avisar atestado pedido há mais de (dias)</span><input type="number" id="acvDias" min="1" max="999" value="'+lim+'"></label><div class="acts" style="align-self:end"><button class="btn" data-act="acvCfgSalvar">Salvar</button></div></div></div>':'')+
+  '<div class="note">A etapa é a mais adiantada entre: os documentos do Acervo técnico ligados ao projeto (ART, atestado pedido ou emitido, CAT), o código da planilha de projetos (NC, A, B, C) e o que foi registrado aqui. "Dias na etapa" conta desde a data da etapa (sem data, desde o encerramento do projeto). Projetos cancelados ficam de fora.</div></div>';};
+/* aba dentro de Habilitação */
+{const v0=V.hab;V.hab=function(){const on=ui.fzv&&ui.fzv.hab==='acvc';
+  if(on)return fzAbas('hab','acvc',[['','Documentos de habilitação'],['acervo','Acervo técnico (atestados, CAT e ART)'],['acvc','Controle de acervo']])+V.acvc();
+  const h=v0.apply(this,arguments),bt='<button class="btn sm" role="tab" aria-selected="false" data-act="fzVista" data-k="hab" data-v="acvc">Controle de acervo</button>';
+  const i=h.indexOf('data-k="hab" data-v="acervo"');if(i<0)return h;const j=h.indexOf('</button>',i);return j<0?h:h.slice(0,j+9)+bt+h.slice(j+9);};}
+/* alerta para quem cuida do comercial: atestados pedidos há mais de N dias */
+{const am=alertasModulos;alertasModulos=function(){const it=am.apply(this,arguments);try{if(!mayR('ctr')||(typeof isColab==='function'&&isColab()))return it;const lim=acvDiasLim(),n=acvLista().filter(x=>x.et==='pedido'&&x.dias!=null&&x.dias>lim).length;return n?it.concat([['hab',n+' atestado(s) pedido(s) há mais de '+lim+' dias (Controle de acervo)',String(n)]]):it;}catch(e){return it;}};}
+
+/* ---------- Acervo técnico: situação do documento, projeto e "Faltam anexar" ---------- */
+{const d=MODS2.acervo;if(d){
+  d.cols=d.cols.map(c=>c[0]==='Documento'?[c[0],r=>c[1](r)+((r.tipo==='atestado'&&r.situacao==='pedido')?pill('pedido'+(r.pedidoEm?' em '+fmtDate(r.pedidoEm):''),'warn'):(r.tipo==='cat'&&r.situacao&&r.situacao!=='acervado')?pill(I3_SIT_D[r.situacao]||r.situacao,'warn'):'')+
+    ((r.tipo==='atestado'&&r.situacao!=='pedido')||(r.tipo==='cat'&&(r.situacao||'acervado')==='acervado')?(ACV_DOC_OK(r)?'':' '+pill('falta anexar','')):'')+
+    (r.projId&&get('proj',r.projId)?'<div class="sub">projeto '+esc(get('proj',r.projId).codigo||'')+'</div>':r.projCodPlan?'<div class="sub">'+esc(r.projCodPlan)+' (projeto não cadastrado)</div>':'')].concat(c.slice(2)):c);
+  d.filters=(d.filters||[]).concat([{k:'anexo',l:'Anexo',opts:()=>[['falta','Faltam anexar'],['ok','Com PDF ou link']],match:(r,v)=>{const pode=(r.tipo==='atestado'&&r.situacao!=='pedido')||(r.tipo==='cat'&&(r.situacao||'acervado')==='acervado');return v==='falta'?pode&&!ACV_DOC_OK(r):!!ACV_DOC_OK(r);}},
+    {k:'sit',l:'Situação',opts:()=>[['pedido','Atestado pedido'],['emitido','Emitido'],['acervado','Acervado (CAT)'],['andamento','Em análise no CREA'],['indeferido','Indeferido']],match:(r,v)=>(r.situacao||(r.tipo==='cat'?'acervado':'emitido'))===v}]);
+  if(ui.acervo){if(ui.acervo.anexo===undefined)ui.acervo.anexo='';if(ui.acervo.sit===undefined)ui.acervo.sit='';}
+  const s0=d.search;d.search=r=>s0(r)+' '+(r.projId&&get('proj',r.projId)?get('proj',r.projId).codigo:'')+' '+(r.projCodPlan||'');
+  /* o formulário exige serviço e responsável; documentos importados podem não ter: preenchidos depois, ao editar */
+  const f0=d.fields;d.fields=r=>f0(r).concat([F('projId','Projeto','select',{o:()=>S.proj.slice().sort((a,b)=>String(a.codigo||'').localeCompare(String(b.codigo||''),'pt-BR',{numeric:true})).map(p=>[p.id,projNome(p.id)]),blank:'—'}),F('situacao','Situação','select',{o:[['emitido','Emitido'],['pedido','Atestado pedido'],['acervado','Acervado (CAT)'],['andamento','Em análise no CREA'],['indeferido','Indeferido']],blank:'—'}),F('pedidoEm','Pedido em','date')]);}}
+
+/* ---------- Oportunidades: histórico importado no fim da lista, "sem resultado" e botões ---------- */
+{const d=MODS2.opp;if(d){
+  const so=d.sort;d.sort=(a,b)=>{const ha=a.historico?1:0,hb=b.historico?1:0;if(ha!==hb)return ha-hb;if(ha)return String(b.dataApres||b.resultadoEm||b.prev||'').localeCompare(String(a.dataApres||a.resultadoEm||a.prev||''))||String(b.numero||'').localeCompare(String(a.numero||''),'pt-BR',{numeric:true});return so(a,b);};
+  d.cols=d.cols.map(c=>c[0]==='Etapa'?[c[0],r=>r.semResultado&&!OPP_FECH3.includes(r.etapa)?pill('Sem resultado (histórico)','')+'<div class="sub">'+esc(oppEtN(r.etapa))+'</div>':c[1](r)].concat(c.slice(2)):c[0]==='Data'?[c[0],r=>r.historico&&r.dataApres?'Apresentada '+fmtDate(r.dataApres)+(r.resultadoEm&&r.resultadoEm!==r.dataApres?'<div class="sub">resultado '+fmtDate(r.resultadoEm)+'</div>':''):c[1](r)].concat(c.slice(2)):c);
+  const ra=d.rowActs;d.rowActs=r=>{let h=ra?ra(r):'';if(r.historico&&r.semResultado)h=h.replace(/<button[^>]*data-act="(?:oppParticipar|oppDesistir|fzGo)"[^>]*>[^<]*<\/button>/g,'');return h;};
+  d.filters=(d.filters||[]).concat([{k:'orig',l:'Origem',opts:()=>[['sis','Cadastradas no sistema'],['hist','Histórico importado'],['semres','Sem resultado (histórico)']],match:(r,v)=>v==='sis'?!r.historico:v==='hist'?!!r.historico:!!r.semResultado}]);
+  if(ui.opp&&ui.opp.orig===undefined)ui.opp.orig='';
+  const s0=d.search;d.search=r=>s0(r)+' '+(r.arquivoFisico||'')+' '+(r.projCodPlan||'');}}
+/* indicadores que leem S.opp direto (Painel do comercial e Indicadores por área): histórico sem data de resultado fica de fora,
+   como já acontece na lista e nos Indicadores comerciais */
+const oppSemHist=fn=>function(){const sv=S.opp;if(!sv.some(o=>o.historico&&!o.resultadoEm))return fn.apply(this,arguments);S.opp=sv.filter(o=>!(o.historico&&!o.resultadoEm));try{return fn.apply(this,arguments);}finally{S.opp=sv;}};
+if(typeof V.pnCom==='function')V.pnCom=oppSemHist(V.pnCom);
+if(typeof indLista==='function')indLista=oppSemHist(indLista);
+
+/* ---------- Projeto: dados vindos da planilha (só consulta) ---------- */
+{const f0=projForm;projForm=function(p){f0.apply(this,arguments);try{if(!p||!(p.numProp||p.valorContrato!=null||p.acvSit||p.arquivoFisico||p.contratante))return;const mb=$('#mb');if(!mb||!mb.querySelector)return;const fg=mb.querySelector('.fg');if(!fg||!fg.insertAdjacentHTML)return;
+  const it=(l,v)=>v==null||v===''?'':'<div><span class="sub">'+esc(l)+'</span><div>'+v+'</div></div>';
+  fg.insertAdjacentHTML('beforeend','<div class="sect" style="grid-column:1/-1">Planilha de projetos (consulta)</div><div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">'+
+    it('Nº da proposta',esc(p.numProp||''))+it('Contratante',esc(p.contratante||''))+it('Valor do contrato + aditivos',p.valorContrato!=null?money(p.valorContrato):'')+it('Faturado',p.faturadoPlan!=null?money(p.faturadoPlan):'')+it('Saldo a faturar',p.saldoPlan!=null?money(p.saldoPlan):'')+
+    it('Conclusão',p.conclusao?fmtDate(p.conclusao):'')+it('Acervo',p.acvSit?esc(acvEtN(p.acvSit)):'')+it('Arquivo físico',esc(p.arquivoFisico||''))+(p.cancelado?it('Situação','Cancelado'):'')+'</div>'+
+    ((p.pedidosPlan||[]).length?'<details style="grid-column:1/-1"><summary class="sub">'+p.pedidosPlan.length+' pedido(s) / item(ns) da planilha</summary><ul class="sub" style="margin:4px 0 0;padding-left:18px">'+p.pedidosPlan.slice(0,40).map(x=>'<li>'+esc([x.prop,x.objeto,x.valor!=null?money(x.valor):'',x.ini?fmtDate(x.ini):''].filter(Boolean).join(' · '))+'</li>').join('')+'</ul></details>':'')+
+    '<p class="sub" style="grid-column:1/-1;margin:0">Valores só informativos: não entram no financeiro nem no orçamento.</p>');}catch(e){}};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='125',APP_DATA='2026-10-28';
+const APP_VER='126',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['126','2026-10-28',['Importar cadastros › Projetos, Propostas e Acervo técnico (planilhas Índice e Controle da INA): atualizam o que já existe e criam o que falta, com conferência (antes → depois), quadro por ano planilha x importado e Desfazer. Propostas antigas entram como histórico, sem distorcer os indicadores; valores em moeda antiga vão para observações.', 'Comercial › Habilitação › Controle de acervo: projetos encerrados por etapa do acervo (A iniciar, sem ART, ART, atestado pedido, atestado emitido, acervado/CAT), dias parado, indicadores e alerta de atestado pedido há mais de 60 dias. Projeto encerrado entra sozinho no controle.']],
   ['125','2026-10-28',['Obras › Ordens de fabricação (fábrica de Tuiuti): OS ligada ao projeto com numeração geral da fábrica (P412-95, P412-96…), itens com peso, acabamento, lista de materiais que gera a solicitação de compra, aprovação no sistema e anexos em PDF. Gerar PDF monta a OS no padrão atual seguida dos anexos; Enviar por e-mail manda para a fábrica (endereço em Configurações).', 'Etapas: Aguardando aprovação, Aguardando compra de material, Em produção, Galvanização (notas de remessa e retorno, pesos e alerta de atraso), Pintura, Inspeção de qualidade, Separação e embalagem, Enviado e Entregue (com assinatura de quem recebeu).', 'Obras › Painel de produção: quadro por etapa, cronograma previsto x realizado, OS em atraso, entregas da semana, aguardando material e galvanização parada. Novo perfil Encarregado da fábrica: só OS e painel.']],
   ['124','2026-10-28',['Conciliação bancária: a lista não volta mais sozinha para o topo enquanto você rola; a tela ficou muito mais rápida (redesenho de cerca de 4 s para menos de 0,1 s com 10 mil linhas de extrato), o que também evita a aba recarregar no Safari.', 'Buscar contas para esta linha: caixa de seleção maior e a linha inteira clicável (também no toque). Caixas de seleção de todo o sistema ficaram com tamanho legível.']],
   ['123','2026-10-28',['Sistema › Configurações › Notas fiscais: ambiente e busca na SEFAZ. Troca entre Homologação e Produção (com confirmação e senha), liga e desliga a busca automática, escolhe quem consulta as NF-e recebidas (Omie ou Central, com o aviso da regra de um só sistema) e a busca de NFS-e no Ambiente Nacional. Só Administrador e dono alteram; toda mudança vai para a auditoria.', 'Cada ambiente guarda a própria sequência de notas da SEFAZ; o rascunho de XML de NF-e sai no ambiente escolhido. A emissão continua no Omie (NF-e) e no portal da prefeitura (NFS-e).']],

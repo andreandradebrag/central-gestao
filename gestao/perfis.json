@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-28T14:18:08.519Z",
+ "gerado": "2026-10-28T15:13:47.391Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -923,6 +923,9 @@
   "osf": [
    "fab"
   ],
+  "acvc": [
+   "ctr"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -1390,6 +1393,9 @@
   ],
   "osf": [
    "fab"
+  ],
+  "acvc": [
+   "ctr"
   ],
   "ctremp": [
    "proj",
