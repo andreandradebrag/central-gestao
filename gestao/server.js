@@ -44,7 +44,23 @@ CREATE TABLE IF NOT EXISTS perm_log(dia TEXT, conta TEXT, perfil TEXT, col TEXT,
 CREATE TABLE IF NOT EXISTS tokens_senha(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, tipo TEXT, expira INTEGER);
 CREATE TABLE IF NOT EXISTS login2f(hash TEXT PRIMARY KEY, conta TEXT NOT NULL, expira INTEGER, n INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS totp_novo(conta TEXT PRIMARY KEY, segredo TEXT, expira INTEGER);`);
-for (const s of ['ALTER TABLE contas ADD COLUMN totp TEXT', 'ALTER TABLE contas ADD COLUMN totp_ult INTEGER', 'ALTER TABLE contas ADD COLUMN rec TEXT', 'ALTER TABLE sessoes ADD COLUMN ua TEXT', 'ALTER TABLE sessoes ADD COLUMN ip TEXT', 'ALTER TABLE sessoes ADD COLUMN visto INTEGER']) { try { db.exec(s); } catch (e) { } }
+for (const s of ['ALTER TABLE contas ADD COLUMN totp TEXT', 'ALTER TABLE contas ADD COLUMN totp_ult INTEGER', 'ALTER TABLE contas ADD COLUMN rec TEXT', 'ALTER TABLE sessoes ADD COLUMN ua TEXT', 'ALTER TABLE sessoes ADD COLUMN ip TEXT', 'ALTER TABLE sessoes ADD COLUMN visto INTEGER', 'ALTER TABLE contas ADD COLUMN trocar_senha INTEGER DEFAULT 0']) { try { db.exec(s); } catch (e) { } }
+/* v130.1: registro de falhas de entrada por conta (só leitura para Administrador e dono, em Sistema › Usuários).
+   Guarda data/hora, motivo interno e o IP (para "Desbloquear" limpar o bloqueio certo). Nunca a senha digitada.
+   E-mail que não é de nenhuma conta: só a contagem do dia (o e-mail digitado não é guardado). Tudo some depois de 30 dias. */
+db.exec(`CREATE TABLE IF NOT EXISTS login_falhas(id INTEGER PRIMARY KEY AUTOINCREMENT, conta TEXT NOT NULL, em INTEGER NOT NULL, motivo TEXT NOT NULL, ip TEXT);
+CREATE INDEX IF NOT EXISTS login_falhas_conta ON login_falhas(conta, em);
+CREATE TABLE IF NOT EXISTS login_falhas_dia(dia TEXT PRIMARY KEY, n INTEGER NOT NULL);`);
+const FALHA_MOTIVOS = new Set(['sem_senha', 'desativada', 'senha_errada', 'bloqueio_ip', 'bloqueio_email']);
+const diaSP = t => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+function falhaLogin(c, motivo, ip) {
+  try {
+    if (c && FALHA_MOTIVOS.has(motivo)) db.prepare('INSERT INTO login_falhas(conta,em,motivo,ip) VALUES(?,?,?,?)').run(c.id, Date.now(), motivo, String(ip || '').slice(0, 64));
+    else if (!c) db.prepare('INSERT INTO login_falhas_dia(dia,n) VALUES(?,1) ON CONFLICT(dia) DO UPDATE SET n=n+1').run(diaSP(Date.now()));
+  } catch (e) { console.error('[login_falhas]', e.message); }
+}
+function falhasLimpar() { try { const t = Date.now() - 30 * 864e5; db.prepare('DELETE FROM login_falhas WHERE em<?').run(t); db.prepare('DELETE FROM login_falhas_dia WHERE dia<?').run(diaSP(t)); } catch (e) { } }
+falhasLimpar();
 /* sessões: o banco passa a guardar só o hash do token (o cookie continua o mesmo; ninguém precisa entrar de novo) */
 if (!db.prepare("SELECT v FROM cfg WHERE k='sess_hash'").get()) {
   db.exec('BEGIN'); try { for (const r of db.prepare('SELECT token FROM sessoes').all()) db.prepare('UPDATE sessoes SET token=? WHERE token=?').run(SEG.sha(r.token), r.token); db.prepare("INSERT INTO cfg(k,v) VALUES('sess_hash','1')").run(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -58,7 +74,7 @@ const q = {
   colGet: db.prepare('SELECT id, data, ts FROM docs WHERE parent=?'),
   contaPorEmail: db.prepare('SELECT * FROM contas WHERE lower(email)=lower(?)'),
   contaPorId: db.prepare('SELECT * FROM contas WHERE id=?'),
-  contas: db.prepare('SELECT id,nome,email,nivel,ativo,criado,importado,cor,(hash IS NOT NULL) AS temSenha,(totp IS NOT NULL) AS dois FROM contas ORDER BY nome'),
+  contas: db.prepare('SELECT id,nome,email,nivel,ativo,criado,importado,cor,(hash IS NOT NULL) AS temSenha,(totp IS NOT NULL) AS dois,coalesce(trocar_senha,0) AS trocar FROM contas ORDER BY nome'),
   contaNova: db.prepare('INSERT INTO contas(id,nome,email,hash,nivel,ativo,criado,importado,cor) VALUES(?,?,?,?,?,?,?,?,?)'),
   contaN: db.prepare('SELECT count(*) AS n FROM contas'),
   sessNova: db.prepare('INSERT INTO sessoes(token,conta,criado,expira,ua,ip,visto) VALUES(?,?,?,?,?,?,?)'),
@@ -331,7 +347,7 @@ const tentativas = new Map(), limitePub = new Map(), usoIa = new Map();
 const ipDe = req => { const x = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean); return x.length ? x[x.length - 1] : (req.socket.remoteAddress || ''); };
 setInterval(() => { const t = Date.now(); for (const [k, v] of tentativas) if ((v.ate || 0) < t && t - (v.em || 0) > 3600e3) tentativas.delete(k); for (const [k, v] of limitePub) if (t - v.ini > 3600e3) limitePub.delete(k); for (const [k, v] of usoIa) if (t - v.ini > 3600e3) usoIa.delete(k);
   for (const [k, v] of limiteEsqueci) if (t - v.ini > 3600e3) limiteEsqueci.delete(k); for (const [k, v] of cacheCnpj) if (t - v.em > 864e5) cacheCnpj.delete(k); for (const [k, v] of blobMemo) if (t - v.em > 300000) blobMemo.delete(k);
-  try { db.prepare('DELETE FROM sessoes WHERE expira<?').run(t); db.prepare('DELETE FROM tokens_senha WHERE expira<?').run(t); } catch (e) { } }, 600e3).unref();
+  try { db.prepare('DELETE FROM sessoes WHERE expira<?').run(t); db.prepare('DELETE FROM tokens_senha WHERE expira<?').run(t); } catch (e) { } falhasLimpar(); }, 600e3).unref();
 /* links de criar/redefinir senha: o banco guarda só o hash do token; valem uma vez */
 const sha = t => crypto.createHash('sha256').update(String(t)).digest('hex');
 function criarLink(contaId, tipo, horas) {
@@ -396,8 +412,8 @@ function pagSeguranca(eu, req, msg, erro, extra) {
 function pagCodigosRec(eu, req, cods) {
   return pagSeguranca(eu, req, '', false, '<div class="card" style="border-color:#b54708"><h2>Guarde seus códigos de recuperação</h2><p class="sub" style="margin:0 0 10px">Cada código entra uma vez, se você perder o celular. Anote ou imprima e guarde em lugar seguro: eles <b>não aparecem de novo</b>.</p><div style="font-family:monospace;font-size:16px;columns:2;max-width:360px;line-height:1.9">' + cods.map(esc).join('<br>') + '</div></div>');
 }
-function pagLogin(msg, setup) {
-  return pag(setup ? 'Primeiro acesso' : 'Entrar', '<div class="card" style="max-width:420px;margin:40px auto"><h1>' + (setup ? 'Primeiro acesso' : 'Central de Gestão') + '</h1><p class="sub">' + (setup ? 'Crie a conta do dono do sistema. Ela pode criar as contas das outras pessoas depois.' : 'Entre com seu e-mail e senha.') + '</p>' + (msg ? '<div class="msg err">' + esc(msg) + '</div>' : '') +
+function pagLogin(msg, setup, dica) {
+  return pag(setup ? 'Primeiro acesso' : 'Entrar', '<div class="card" style="max-width:420px;margin:40px auto"><h1>' + (setup ? 'Primeiro acesso' : 'Central de Gestão') + '</h1><p class="sub">' + (setup ? 'Crie a conta do dono do sistema. Ela pode criar as contas das outras pessoas depois.' : 'Entre com seu e-mail e senha.') + '</p>' + (msg ? '<div class="msg err">' + esc(msg) + (dica ? '<div id="dicaSenha" style="margin-top:6px;font-weight:400">Ainda não criou sua senha ou esqueceu? Clique em <a href="/esqueci">Esqueci minha senha</a>.</div>' : '') + '</div>' : '') +
     '<form method="post" action="' + (setup ? '/setup' : '/login') + '">' + (setup ? '<label>Seu nome<input name="nome" required autocomplete="name"></label>' : '') + '<label>E-mail<input name="email" type="email" required autocomplete="username"></label><label>Senha<input name="senha" type="password" required minlength="' + (setup ? 8 : 1) + '" autocomplete="' + (setup ? 'new-password' : 'current-password') + '"></label><button class="pri" type="submit" style="width:100%">' + (setup ? 'Criar e entrar' : 'Entrar') + '</button></form>' + (setup ? '' : '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/esqueci">Esqueci minha senha</a></p>') + '</div>');
 }
 const NIV_NOME = { owner: 'Dono', admin: 'Equipe (usa os módulos do perfil em Usuários)', interact: 'Só ponto, Minha área e chat', view: 'Somente leitura (sem acesso aos dados)' };
@@ -516,11 +532,16 @@ async function rotear(req, res) {
     if (m === 'GET') return html(res, 200, pagLogin(''));
     const ip = ipDe(req);
     const f = form(await lerCorpo(req, 10000)), em = 'e:' + String(f.email || '').trim().toLowerCase().slice(0, 254);
-    { const lim = END.loginAntes(ip); if (lim) return html(res, 429, pagLogin(lim)); }
-    if (!(await END.loginEspera(em))) return html(res, 429, pagLogin('Muitas tentativas para este e-mail. Tente de novo em 1 minuto.'));
     const c = q.contaPorEmail.get(String(f.email || '').trim().slice(0, 254));
-    if (!c || !c.hash) confere(String(f.senha || ''), HASH_FALSO);
-    if (!c || !c.ativo || !confere(f.senha, c.hash)) { await END.loginFalhou(ip, em); return html(res, 401, pagLogin('E-mail ou senha incorretos.')); }
+    /* v130.1: cada falha com e-mail de uma conta existente vai para login_falhas com o motivo interno; a resposta continua
+       a mesma para todos os casos (não revela se o e-mail existe) e o tempo de resposta também (a senha é sempre conferida) */
+    { const lim = END.loginAntes(ip); if (lim) { falhaLogin(c, 'bloqueio_ip', ip); return html(res, 429, pagLogin(lim)); } }
+    if (!(await END.loginEspera(em))) { falhaLogin(c, 'bloqueio_email', ip); return html(res, 429, pagLogin('Muitas tentativas para este e-mail. Tente de novo em 1 minuto.')); }
+    const senhaOk = confere(String(f.senha || ''), c && c.hash ? c.hash : HASH_FALSO);
+    if (!c || !c.hash || !c.ativo || !senhaOk) {
+      falhaLogin(c, !c ? '' : !c.hash ? 'sem_senha' : !c.ativo ? 'desativada' : 'senha_errada', ip);
+      await END.loginFalhou(ip, em); return html(res, 401, pagLogin('E-mail ou senha incorretos.', false, true));
+    }
     END.loginOk(ip, em);
     if (SEG.precisaRefazer(c.hash)) try { db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.senha), c.id); } catch (e) { }
     if (c.totp) {
@@ -592,16 +613,16 @@ async function rotear(req, res) {
   if (p === '/esqueci') {
     const caixa = (corpo) => html(res, 200, pag('Esqueci minha senha', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Esqueci minha senha</h1>' + corpo + '<p class="sub" style="margin:14px 0 0;text-align:center"><a href="/login">Voltar para o login</a></p></div>'));
     if (m === 'GET') return caixa(EMAIL.configurado()
-      ? '<p class="sub">Digite o e-mail que você usa para entrar. Enviaremos um link para criar uma senha nova.</p><form method="post" action="/esqueci"><label>E-mail<input name="email" type="email" required autocomplete="username"></label><button class="pri" type="submit" style="width:100%">Enviar link</button></form>'
+      ? '<p class="sub">Digite o e-mail que você usa para entrar. Enviaremos um link para criar uma senha nova (ou a sua primeira senha, se ainda não criou).</p><form method="post" action="/esqueci"><label>E-mail<input name="email" type="email" required autocomplete="username"></label><button class="pri" type="submit" style="width:100%">Enviar link</button></form>'
       : '<div class="msg err">O envio de e-mail ainda não foi configurado neste sistema. Peça a um administrador para definir uma senha nova para você em Usuários › Editar.</div>');
     if (m !== 'POST') return json(res, 405, { erro: 'Método não permitido.' });
     const f = form(await lerCorpo(req, 10000)), email = String(f.email || '').trim().toLowerCase().slice(0, 254), ip = ipDe(req);
     const lim = limiteEsqueci.get(ip) || { n: 0, ini: Date.now() }; if (Date.now() - lim.ini > 3600e3) { lim.n = 0; lim.ini = Date.now(); } lim.n++; limiteEsqueci.set(ip, lim);
     const le = limiteEsqueci.get('e:' + email) || { n: 0, ini: Date.now() }; if (Date.now() - le.ini > 3600e3) { le.n = 0; le.ini = Date.now(); } le.n++; limiteEsqueci.set('e:' + email, le);
     const c = email ? q.contaPorEmail.get(email) : null;
-    if (c && c.ativo && c.email && lim.n <= 10 && le.n <= 3 && EMAIL.configurado()) enviarLink(c, 'redefinir').catch(e => console.error('[email] esqueci:', e.message));
+    if (c && c.ativo && c.email && lim.n <= 10 && le.n <= 3 && EMAIL.configurado()) enviarLink(c, c.hash ? 'redefinir' : 'convite').catch(e => console.error('[email] esqueci:', e.message)); /* v130.1: conta sem senha recebe o convite (criar senha) */
     await new Promise(r => setTimeout(r, 500));
-    return caixa('<div class="msg">Se este e-mail estiver cadastrado, você vai receber em alguns minutos um link para criar uma senha nova. Confira também a caixa de spam.</div>');
+    return caixa('<div class="msg">Se este e-mail estiver cadastrado, você vai receber em alguns minutos um link para criar a sua senha. Confira também a caixa de spam.</div>');
   }
   const mSenha = p.match(/^\/senha\/([A-Za-z0-9_-]{20,80})$/);
   if (mSenha) {
@@ -614,14 +635,33 @@ async function rotear(req, res) {
     const f = form(await lerCorpo(req, 10000));
     { const fr = SEG.senhaFraca(f.senha, c.email, c.nome); if (fr) return formH(fr); }
     if (f.senha !== f.senha2) return formH('As duas senhas não são iguais.');
-    db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.senha), c.id);
+    db.prepare('UPDATE contas SET hash=?, trocar_senha=0 WHERE id=?').run(hashSenha(f.senha), c.id);
     db.prepare('DELETE FROM tokens_senha WHERE conta=?').run(c.id); db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); derrubarConexoes(c.id); END.aparelhosRevogarTodos(c.id);
-    tentativas.delete('e:' + String(c.email || '').toLowerCase());
+    tentativas.delete('e:' + String(c.email || '').toLowerCase()); END.loginDesbloquear(c.email, []); /* v130.1: senha nova zera o atraso do e-mail */
     return html(res, 200, pag('Senha criada', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Senha salva</h1><div class="msg">Pronto. Agora entre com o seu e-mail e a senha nova.</div><a class="btn pri" href="/login" style="display:block;text-align:center">Ir para o login</a></div>'));
   }
   if (await REG.rotaPublica(p, m, req, res)) return; /* v111: pesquisa de satisfação respondida pelo cliente (link de uso único) */
   const conta = contaDa(req);
   if (!conta) { if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 401, { erro: 'Entre novamente.' }); return redir(res, semContas ? '/setup' : '/login'); }
+  /* v130.1: senha provisória (definida por um administrador em Sistema › Usuários): até trocar, só a página de troca */
+  if (conta.trocar_senha) {
+    if (p === '/conta/trocar-senha') {
+      const tela = erro => html(res, erro ? 400 : 200, pag('Trocar a senha', '<div class="card" style="max-width:440px;margin:40px auto"><h1>Crie a sua senha</h1><p class="sub">Você entrou com uma senha provisória. Para continuar, crie agora uma senha só sua (mínimo ' + END.minSenha(conta) + ' caracteres). Dica: junte 3 ou 4 palavras.</p>' + (erro ? '<div class="msg err">' + esc(erro) + '</div>' : '') +
+        '<form method="post" action="/conta/trocar-senha"><label>Nova senha<input name="nova" type="password" required minlength="8" autocomplete="new-password" autofocus></label><label>Repita a nova senha<input name="nova2" type="password" required minlength="8" autocomplete="new-password"></label><button class="pri" type="submit" style="width:100%">Salvar e entrar</button></form><p class="sub" style="margin:14px 0 0;text-align:center"><a href="/sair">Sair</a></p></div>'));
+      if (m === 'GET') return tela('');
+      if (m !== 'POST') return json(res, 405, { erro: 'Método não permitido.' });
+      const f = form(await lerCorpo(req, 10000));
+      { const fr = SEG.senhaFraca(f.nova, conta.email, conta.nome); if (fr) return tela(fr); }
+      if (f.nova !== f.nova2) return tela('As duas senhas não são iguais.');
+      if (confere(String(f.nova || ''), conta.hash)) return tela('A senha nova precisa ser diferente da senha provisória.');
+      db.prepare('UPDATE contas SET hash=?, trocar_senha=0 WHERE id=?').run(hashSenha(f.nova), conta.id);
+      db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(conta.id, SEG.sha(cookies(req).sid || '')); derrubarOutras(conta.id, req);
+      REG.auditar(conta, req, 'SENHA_PROVISORIA_TROCADA', 'contas/' + conta.id, null, null);
+      return redir(res, '/');
+    }
+    if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 403, { code: 'senha_trocar', erro: 'Crie a sua senha antes de continuar.', url: '/conta/trocar-senha' });
+    return redir(res, '/conta/trocar-senha');
+  }
   if (await END.antes(req, res, conta, p, m, u)) return; /* 2FA obrigatória, reautenticação, bibliotecas locais, cota de anexos */
 
   /* ---- segurança da própria conta: duas etapas, aparelhos, senha ---- */
@@ -713,10 +753,56 @@ async function rotear(req, res) {
     const volta = f.volta === 'seg' ? '/conta/seguranca' : '/contas';
     if (!confere(f.atual, c.hash)) return redir(res, volta + '?e=1&m=' + encodeURIComponent('Senha atual incorreta.'));
     { const fr = SEG.senhaFraca(f.nova, c.email, c.nome); if (fr) return redir(res, volta + '?e=1&m=' + encodeURIComponent(fr)); }
-    db.prepare('UPDATE contas SET hash=? WHERE id=?').run(hashSenha(f.nova), c.id); db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || '')); derrubarOutras(c.id, req); END.aparelhosRevogarTodos(c.id); return redir(res, volta + '?m=' + encodeURIComponent('Senha trocada. Os outros aparelhos foram desconectados.'));
+    db.prepare('UPDATE contas SET hash=?, trocar_senha=0 WHERE id=?').run(hashSenha(f.nova), c.id); db.prepare('DELETE FROM sessoes WHERE conta=? AND token<>?').run(c.id, SEG.sha(cookies(req).sid || '')); derrubarOutras(c.id, req); END.aparelhosRevogarTodos(c.id); return redir(res, volta + '?m=' + encodeURIComponent('Senha trocada. Os outros aparelhos foram desconectados.'));
   }
   if (p === '/migrar' && m === 'GET') { if (conta.nivel !== 'owner') return redir(res, '/'); return html(res, 200, pagMigrar(conta)); }
 
+  /* ---- v130.1: situação de acesso de cada conta e ações de socorro (Sistema › Usuários, só quem gerencia contas) ---- */
+  if (p === '/api/contas-acesso' || p.startsWith('/api/contas-acesso/')) {
+    if (!gestorContas(conta)) { REG.auditar(conta, req, 'CONTA_ACESSO_NEGADO', p, null, null); return json(res, 403, { erro: 'Apenas administradores.' }); }
+    const agora = Date.now(), d24 = agora - 864e5;
+    const ipsDe = id => db.prepare("SELECT DISTINCT ip FROM login_falhas WHERE conta=? AND em>? AND coalesce(ip,'')<>''").all(id, d24).map(r => r.ip);
+    if (p === '/api/contas-acesso' && m === 'GET') {
+      const ult = db.prepare('SELECT em, motivo FROM login_falhas WHERE conta=? ORDER BY em DESC, id DESC LIMIT 1'), n24 = db.prepare('SELECT count(*) AS n FROM login_falhas WHERE conta=? AND em>?');
+      const contas = q.contas.all().map(c => { const e = END.loginEstado(c.email, ipsDe(c.id)), u = ult.get(c.id);
+        return { id: c.id, nome: c.nome || '', email: c.email || '', nivel: c.nivel, ativo: !!c.ativo, temSenha: !!c.temSenha, importado: !!c.importado, dois: !!c.dois, trocarSenha: !!c.trocar,
+          protegida: protegida(conta, c) || (c.nivel === 'owner' && c.id !== conta.id), bloqueadoAte: e.ate || 0, bloqueio: e.ate ? (e.ipAte >= e.emailAte ? 'ip' : 'email') : '',
+          ultFalha: u ? { em: u.em, motivo: u.motivo } : null, falhas24h: n24.get(c.id, d24).n }; });
+      const inexistentes = db.prepare('SELECT dia, n FROM login_falhas_dia ORDER BY dia DESC LIMIT 30').all();
+      return json(res, 200, { smtp: EMAIL.configurado(), contas, inexistentes });
+    }
+    if (p === '/api/contas-acesso/convite-todos' && m === 'POST') {
+      if (!EMAIL.configurado()) return json(res, 400, { semSmtp: true, erro: 'O envio de e-mail não está configurado no servidor (SMTP). Use "Definir senha provisória" em cada pessoa ou peça ao dono para configurar o e-mail.' });
+      const alvo = q.contas.all().filter(c => c.importado && c.ativo && !c.temSenha && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(c.email || '')) && !protegida(conta, c) && c.nivel !== 'owner');
+      let enviados = 0; const falhas = [];
+      for (const c of alvo) { try { await enviarLink(q.contaPorId.get(c.id), 'convite'); enviados++; } catch (e) { falhas.push({ id: c.id, erro: String(e.message || e).slice(0, 200) }); } }
+      REG.auditar(conta, req, 'CONTA_CONVITE_TODOS', 'contas', null, { enviados, falhas: falhas.length, contas: alvo.map(c => c.id) });
+      return json(res, 200, { ok: true, enviados, falhas });
+    }
+    const ma = p.match(/^\/api\/contas-acesso\/([A-Za-z0-9_-]{1,60})\/(link|provisoria|reativar|desbloquear|marcar-troca)$/);
+    if (!ma || m !== 'POST') return json(res, 404, { erro: 'Não encontrado.' });
+    const c = q.contaPorId.get(ma[1]), acao = ma[2]; if (!c) return json(res, 404, { erro: 'Conta não encontrada.' });
+    const aud = (det) => REG.auditar(conta, req, 'CONTA_' + acao.toUpperCase().replace('-', '_'), 'contas/' + c.id, null, det || null);
+    if (acao === 'desbloquear') { const ips = ipsDe(c.id); END.loginDesbloquear(c.email, ips); ips.forEach(ip => tentativas.delete(ip)); aud({ ips: ips.length }); return json(res, 200, { ok: true }); }
+    if (c.nivel === 'owner' && c.id !== conta.id) return json(res, 403, { erro: 'Só o dono altera a própria conta.' });
+    if (protegida(conta, c)) return json(res, 403, { erro: 'Só o dono altera contas de nível Equipe.' });
+    if (acao === 'link') {
+      if (!c.email) return json(res, 400, { erro: 'Esta conta não tem e-mail.' });
+      if (!c.ativo) return json(res, 400, { erro: 'A conta está desativada: reative antes de enviar o link.' });
+      if (!EMAIL.configurado()) return json(res, 400, { semSmtp: true, erro: 'O envio de e-mail não está configurado no servidor (SMTP): o link não foi enviado. Use "Definir senha provisória" e passe a senha à pessoa por um canal seguro.' });
+      const tipo = c.hash ? 'redefinir' : 'convite';
+      try { await enviarLink(c, tipo); aud({ tipo }); return json(res, 200, { ok: true, tipo }); } catch (e) { aud({ tipo, erro: String(e.message || e).slice(0, 200) }); return json(res, 502, { erro: 'O e-mail não saiu: ' + e.message }); }
+    }
+    if (acao === 'provisoria') {
+      const A2 = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', b = crypto.randomBytes(16); let s = ''; for (const x of b) s += A2[x % A2.length];
+      const senha = s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8, 12) + '-' + s.slice(12, 16);
+      db.prepare('UPDATE contas SET hash=?, trocar_senha=1 WHERE id=?').run(hashSenha(senha), c.id);
+      db.prepare('DELETE FROM sessoes WHERE conta=?').run(c.id); db.prepare('DELETE FROM tokens_senha WHERE conta=?').run(c.id); derrubarConexoes(c.id); END.aparelhosRevogarTodos(c.id);
+      END.loginDesbloquear(c.email, []); aud(null); return json(res, 200, { ok: true, senha, ativo: !!c.ativo });
+    }
+    if (acao === 'marcar-troca') { if (!c.hash) return json(res, 400, { erro: 'A conta ainda não tem senha.' }); db.prepare('UPDATE contas SET trocar_senha=1 WHERE id=?').run(c.id); aud(null); return json(res, 200, { ok: true }); }
+    if (acao === 'reativar') { db.prepare('UPDATE contas SET ativo=1 WHERE id=?').run(c.id); aud(null); return json(res, 200, { ok: true }); }
+  }
   /* ---- edição de contas pela tela Usuários (JSON, só administradores) ---- */
   if (p === '/api/contas' && m === 'POST') {
     if (!gestorContas(conta)) return json(res, 403, { erro: 'Apenas administradores.' });

@@ -132,7 +132,8 @@ module.exports = function criar(o) {
     ['POST', /^\/contas\/(salvar|editar)$/, 'gestor', '/contas'], ['POST', /^\/contas\/backup-agora$/, 'dono', '/contas'],
     ['GET', /^\/contas\/backups\/[^/]+$/, 'dono', null], ['GET', /^\/migrar$/, 'dono', null],
     ['POST', /^\/api\/admin\/importar$/, 'dono'], ['GET', /^\/api\/admin\/exportar$/, 'dono'],
-    ['POST', /^\/api\/contas$/, 'gestor'], ['POST', /^\/api\/contas\/[A-Za-z0-9_-]{1,60}$/, 'gestor']
+    ['POST', /^\/api\/contas$/, 'gestor'], ['POST', /^\/api\/contas\/[A-Za-z0-9_-]{1,60}$/, 'gestor'],
+    ['POST', /^\/api\/contas-acesso\/([A-Za-z0-9_-]{1,60}\/(provisoria|reativar)|convite-todos)$/, 'gestor'] /* v130.1 */
   ];
 
   /* ---------------- v111: aparelho confiável por 30 dias (verificação em duas etapas) ----------------
@@ -212,10 +213,29 @@ module.exports = function criar(o) {
 
   /* ---------------- login: atraso progressivo por e-mail (sem travar a conta) ---------------- */
   const LOGIN = new Map();
+  /* v130.1: limite por endereço (IP) mais tolerante para escritórios. Na empresa todos saem para a internet pelo MESMO IP;
+     com 8 erros somados de todas as pessoas o escritório inteiro ficava 10 minutos sem entrar. Agora:
+     - por IP: LOGIN_IP_FALHAS (padrão 30) erros dentro de uma janela de LOGIN_IP_JANELA_MIN (padrão 15) minutos bloqueiam o IP
+       por LOGIN_IP_BLOQUEIO_MIN (padrão 15) minutos. É a barreira contra quem testa MUITOS e-mails do mesmo lugar;
+     - por e-mail (protege cada conta): continua o atraso progressivo abaixo (depois de 3 erros, 1, 2, 4... até 15 s por tentativa);
+     - um login certo zera só o contador do PRÓPRIO e-mail: não apaga os erros que outras pessoas do mesmo IP fizeram
+       (antes, um acerto de qualquer pessoa zerava o IP, o que também deixava um atacante "limpar" o contador com uma conta dele). */
+  const IP_LIM = () => Math.max(5, +env.LOGIN_IP_FALHAS || 30), IP_JAN = () => Math.max(1, +env.LOGIN_IP_JANELA_MIN || 15) * 60000, IP_BLQ = () => Math.max(1, +env.LOGIN_IP_BLOQUEIO_MIN || 15) * 60000;
   function loginAntes(ip) {
     const t = LOGIN.get('ip:' + ip); if (t && t.ate > Date.now()) return 'Muitas tentativas deste endereço. Aguarde alguns minutos.';
     return '';
   }
+  /* situação de bloqueio (para Sistema › Usuários): até quando o e-mail ou algum dos IPs informados está bloqueado */
+  /* a rota de login guarda o e-mail como 'e:<email>' e o contador fica em LOGIN['e:' + isso] */
+  const chaveEmail = email => 'e:e:' + String(email || '').trim().toLowerCase().slice(0, 254);
+  function loginEstado(email, ips) {
+    const agora = Date.now(), e = LOGIN.get(chaveEmail(email));
+    let ipAte = 0; for (const ip of ips || []) { const t = LOGIN.get('ip:' + ip); if (t && t.ate > agora) ipAte = Math.max(ipAte, t.ate); }
+    const emailAte = e && e.n > 3 && agora - (e.em || 0) <= 15 * 60000 ? (e.em || 0) + 15 * 60000 : 0;
+    return { ipAte, emailAte, ate: Math.max(ipAte, emailAte), falhasEmail: e && agora - (e.em || 0) <= 15 * 60000 ? e.n : 0 };
+  }
+  /* Desbloquear (Sistema › Usuários): limpa o atraso do e-mail e o bloqueio dos IPs de onde vieram os erros dessa conta */
+  function loginDesbloquear(email, ips) { LOGIN.delete(chaveEmail(email)); for (const ip of ips || []) LOGIN.delete('ip:' + ip); }
   /* depois de 3 erros seguidos no mesmo e-mail, cada nova tentativa nesse e-mail espera a sua vez: 1, 2, 4, 8... até 15 s
      entre uma e outra. A conta não é travada: com a senha certa a pessoa entra (no máximo espera um pouco).
      Se a fila passar de 1 minuto, responde "tente em 1 minuto" sem contar como erro. */
@@ -226,11 +246,12 @@ module.exports = function criar(o) {
     e.prox = vez + atraso; await new Promise(r => setTimeout(r, vez - agora)); return true;
   }
   async function loginFalhou(ip, email) {
-    const t = LOGIN.get('ip:' + ip) || { n: 0, ate: 0 }; t.n++; t.em = Date.now(); if (t.n >= 8) { t.ate = Date.now() + 10 * 60000; t.n = 0; } LOGIN.set('ip:' + ip, t);
+    const t = LOGIN.get('ip:' + ip) || { n: 0, ate: 0, ini: Date.now() }; if (Date.now() - (t.ini || 0) > IP_JAN()) { t.n = 0; t.ini = Date.now(); }
+    t.n++; t.em = Date.now(); if (t.n >= IP_LIM()) { t.ate = Date.now() + IP_BLQ(); t.n = 0; t.ini = Date.now(); } LOGIN.set('ip:' + ip, t);
     const e = LOGIN.get('e:' + email) || { n: 0 }; if (Date.now() - (e.em || 0) > 15 * 60000) { e.n = 0; e.prox = 0; } e.n++; e.em = Date.now(); LOGIN.set('e:' + email, e);
     await new Promise(r => setTimeout(r, 600));
   }
-  function loginOk(ip, email) { LOGIN.delete('ip:' + ip); LOGIN.delete('e:' + email); }
+  function loginOk(ip, email) { LOGIN.delete('e:' + email); } /* v130.1: não zera o IP (os erros de outras pessoas continuam contando) */
 
   /* ---------------- /setup com SETUP_TOKEN ---------------- */
   const LIM_SETUP = new Map();
@@ -419,6 +440,6 @@ module.exports = function criar(o) {
   function lerCorpo(req, max) { return new Promise((ok, err) => { const ch = []; let n = 0; req.on('data', d => { n += d.length; if (n > max) { err({ st: 413, msg: 'Conteúdo grande demais.' }); req.destroy(); } else ch.push(d); }); req.on('end', () => ok(Buffer.concat(ch))); req.on('error', err); }); }
 
   return { antes, redir, msg, pagina, cspApp, sessaoInativa, exigirReauth, reautenticado, situacao2f, exige2f, minSenha, minNivel, setupBarrado,
-    loginAntes, loginFalhou, loginOk, loginEspera, leituraPropria, cartaoServidor, vendor, cifrarTotps,
+    loginAntes, loginFalhou, loginOk, loginEspera, loginEstado, loginDesbloquear, leituraPropria, cartaoServidor, vendor, cifrarTotps,
     aparelhoElegivel, aparelhoEmitir, aparelhoValido, aparelhosDe, aparelhoRevogar, aparelhosRevogarTodos, cartaoAparelhos };
 };

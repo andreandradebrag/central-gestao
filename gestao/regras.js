@@ -118,7 +118,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       }
       let conta = contaDaSessao(req, res), metodo = m;
       const loc = String(res.getHeader && res.getHeader('location') || ''), falhou = res.statusCode >= 400 || /[?&]e=1/.test(loc);
-      if (p === '/login') { metodo = res.statusCode === 303 ? 'LOGIN' : res.statusCode === 200 ? 'LOGIN_SENHA_OK_PEDE_CODIGO' : 'LOGIN_FALHA'; if (!conta && campos && campos.email) { const c = q.contaPorEmail.get(String(campos.email).trim().slice(0, 254)); if (c) conta = c.id; } }
+      if (p === '/login') { metodo = res.statusCode === 303 ? 'LOGIN' : res.statusCode === 200 ? 'LOGIN_SENHA_OK_PEDE_CODIGO' : 'LOGIN_FALHA'; if (!conta && campos && campos.email) { const c = q.contaPorEmail.get(String(campos.email).trim().slice(0, 254)); if (c) conta = c.id; else campos = null; /* v130.1: e-mail que não é de nenhuma conta não é guardado */ } }
+      else if (p === '/esqueci' && campos && campos.email && !q.contaPorEmail.get(String(campos.email).trim().slice(0, 254))) campos = null; /* v130.1 */
       else if (p === '/login/codigo') metodo = res.statusCode === 303 ? 'LOGIN_2FA' : 'LOGIN_2FA_FALHA';
       else if (p.startsWith('/conta/seguranca/')) metodo = '2FA_' + p.slice(17).toUpperCase() + (falhou ? '_FALHA' : '');
       else if (p === '/sair') metodo = 'SAIR';

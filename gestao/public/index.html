@@ -24951,9 +24951,138 @@ Object.assign(ACT_GROUP,{mailRecarregar:null,mailLer:null,mailLancar:null,mailDi
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{mailLer:'Lê agora a caixa nfe@ (o servidor também lê sozinho, no intervalo configurado).',mailLancar:'Leva o XML recebido por e-mail para "Notas para lançar" (validação, estoque e conta a pagar).',
   mailDispensar:'Tira o e-mail da lista "PDF sem XML" quando o XML já chegou por outro caminho.',mailAbrir:'Abre Recebimento de notas na aba Caixa nfe@.'});
 
+/* ===== v130.1: Sistema › Usuários — situação de acesso de cada pessoa ("não consigo entrar") =====
+   Pedido: pessoas reais não conseguiam entrar e o login só dizia "E-mail ou senha incorretos." (conta sem senha, convite
+   pendente, conta importada da página antiga, conta desativada, bloqueio por tentativas ou senha errada).
+   1. Coluna "Acesso" na tabela de Usuários (só Administrador e dono, servidor próprio): Ativo · Sem senha (convite pendente /
+      importado) · Desativado · Bloqueado por tentativas até HH:MM · com 2 etapas · troca a senha no próximo acesso; e
+      "Última falha de entrada: data, motivo" (servidor: login_falhas, rota GET /api/contas-acesso).
+   2. Botões por pessoa: Enviar link de senha (convite para quem não tem senha; redefinir para quem tem; aviso claro sem SMTP),
+      Senha provisória (aparece uma vez; a pessoa cria a própria senha ao entrar), Reativar login e Desbloquear.
+      O servidor pede a senha de novo (reautenticação) para a senha provisória, reativar e convite a todos, e registra tudo
+      na auditoria.
+   3. No topo: "N pessoas sem senha" com filtro; para o dono, aviso das contas importadas sem senha com "Enviar convite a todos".
+   4. Novo usuário com senha provisória: a pessoa também cria a própria senha no primeiro acesso. */
+const U4={dados:null,em:0,carregando:false,erro:'',filtro:'',fetch:null};
+const u4Fetch=(url,o)=>(U4.fetch||U3.fetch||fetch)(url,Object.assign({credentials:'same-origin'},o||{}));
+const u4Pode=()=>u3Self()&&(me.owner||mayW('usr'));
+const U4_MOTIVO={senha_errada:'senha errada',sem_senha:'ainda não criou a senha',desativada:'conta desativada',bloqueio_ip:'bloqueio de muitas tentativas',bloqueio_email:'bloqueio de muitas tentativas'};
+const u4Hora=t=>{const d=new Date(+t);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');};
+const u4DataHora=t=>{const d=new Date(+t);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()+' '+u4Hora(t);};
+const u4Conta=id=>U4.dados&&(U4.dados.contas||[]).find(c=>c.id===id)||null;
+const u4SemSenha=c=>!!c&&c.ativo&&!c.temSenha;
+const u4Bloq=c=>!!c&&c.bloqueadoAte>Date.now();
+function u4Carregar(forcar){if(!u4Pode()||U4.carregando)return Promise.resolve(U4.dados);if(!forcar&&U4.dados&&Date.now()-U4.em<60000)return Promise.resolve(U4.dados);
+  U4.carregando=true;
+  return u4Fetch('/api/contas-acesso').then(r=>r.json().catch(()=>({})).then(j=>{if(!r.ok)throw new Error(j.erro||('erro '+r.status));return j;}))
+    .then(j=>{U4.dados=j;U4.em=Date.now();U4.erro='';},e=>{U4.erro=String(e&&e.message||e);U4.em=Date.now();})
+    .then(()=>{U4.carregando=false;if(ui.tab==='usr')render();return U4.dados;});}
+/* situação de acesso (texto) e a célula da tabela */
+function u4Situacao(c){if(!c)return [];const s=[];
+  if(!c.ativo)s.push(['Desativado','neg','O login está desativado: a pessoa não entra até alguém reativar.']);
+  else if(!c.temSenha)s.push([c.importado?'Sem senha (importado)':'Sem senha (convite pendente)','warn',c.importado?'Conta trazida da página antiga: a pessoa nunca criou a senha neste servidor. Envie o convite.':'O convite foi criado, mas a pessoa ainda não criou a senha pelo link.']);
+  else s.push(['Ativo','pos','']);
+  if(u4Bloq(c))s.push(['Bloqueado por tentativas até '+u4Hora(c.bloqueadoAte),'neg',c.bloqueio==='ip'?'Muitas tentativas erradas do mesmo endereço de internet (ex.: o escritório). Use Desbloquear.':'Muitas tentativas erradas neste e-mail: cada nova tentativa espera alguns segundos. Use Desbloquear.']);
+  if(c.trocarSenha)s.push(['Cria a senha no próximo acesso','acc','Recebeu uma senha provisória: ao entrar, o sistema pede uma senha nova.']);
+  if(c.dois)s.push(['com 2 etapas','acc','Verificação em duas etapas ligada (código do aplicativo).']);
+  return s;}
+function u4Falha(c){if(!c||!c.ultFalha)return '';const f=c.ultFalha;
+  return 'Última falha de entrada: '+u4DataHora(f.em)+', '+(U4_MOTIVO[f.motivo]||f.motivo)+(c.falhas24h>1?' · '+c.falhas24h+' nas últimas 24 h':'');}
+function u4Botoes(c){if(!c)return '';const tr=c.protegida?' disabled title="Só o dono altera contas de nível Equipe"':'';const b=[];
+  if(c.ativo)b.push('<button class="btn sm" data-act="u4Link" data-id="'+esc(c.id)+'"'+tr+'>'+(c.temSenha?'Enviar link de senha':'Enviar convite')+'</button>');
+  if(c.id!==me.uid)b.push('<button class="btn sm" data-act="u4Prov" data-id="'+esc(c.id)+'"'+tr+'>Senha provisória</button>');
+  if(!c.ativo)b.push('<button class="btn sm pri" data-act="u4Reativar" data-id="'+esc(c.id)+'"'+tr+'>Reativar login</button>');
+  if(u4Bloq(c))b.push('<button class="btn sm pri" data-act="u4Desbloq" data-id="'+esc(c.id)+'">Desbloquear</button>');
+  return '<div class="u4-bts">'+b.join('')+'</div>';}
+function u4Celula(c){if(!U4.dados)return '<span class="sub">'+(U4.erro?'não carregou':'carregando…')+'</span>';
+  if(!c)return '<span class="sub">sem login no servidor</span>';
+  const f=u4Falha(c);
+  return '<div class="u4-st">'+u4Situacao(c).map(([t,k,ti])=>'<span class="pill '+k+'"'+(ti?' title="'+esc(ti)+'"':'')+'>'+esc(t)+'</span>').join(' ')+'</div>'+(f?'<div class="sub u4-f">'+esc(f)+'</div>':'')+u4Botoes(c);}
+let u4Css=false;
+function u4Estilo(){if(u4Css||typeof document==='undefined'||!document.createElement||!document.head)return;u4Css=true;try{const st=document.createElement('style');st.textContent=
+  '.u4-st{display:flex;flex-wrap:wrap;gap:4px}.u4-f{margin-top:4px;max-width:300px}.u4-bts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.u4-bts .btn{white-space:nowrap}'+
+  'td.u4-ac{min-width:220px}.u4-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.u4-top .grow{flex:1;min-width:200px}'+
+  '@media (max-width:600px){td.u4-ac{min-width:190px}.u4-f{max-width:220px}}';document.head.appendChild(st);}catch(e){}}
+/* linha de uma pessoa na tabela: do <tr> até o </tr> que contém o seletor de perfil dela */
+function u4Linha(h,usrId){const k='data-usr-perfil="'+usrId+'"',i=h.indexOf(k);if(i<0)return null;const a=h.lastIndexOf('<tr>',i),b=h.indexOf('</tr>',i);if(a<0||b<0)return null;return [a,b+5];}
+function u4Topo(){if(!U4.dados)return '<div class="note" id="u4Topo" style="margin:0">'+(U4.erro?'Não consegui ler a situação de acesso das contas ('+esc(U4.erro)+'). <button class="btn sm" data-act="u4Atualizar">Tentar de novo</button>':'Conferindo a situação de acesso das contas…')+'</div>';
+  const cs=U4.dados.contas||[],sem=cs.filter(u4SemSenha),bl=cs.filter(u4Bloq),des=cs.filter(c=>!c.ativo);
+  const inex=(U4.dados.inexistentes||[]).filter(d=>d.dia>=addDays(todayStr(),-6)).reduce((s,d)=>s+(+d.n||0),0);
+  let h='<div class="card" id="u4Topo"><div class="u4-top"><div class="grow"><b>Acesso ao sistema</b><div class="sub">Coluna <b>Acesso</b> na tabela: se a pessoa tem senha, se está bloqueada e a última falha de entrada. O login mostra a mesma mensagem para todos os casos (não revela se o e-mail existe); o motivo real aparece só aqui.</div></div>'+
+    (sem.length?'<button class="btn sm'+(U4.filtro==='sem'?' pri':'')+'" data-act="u4Filtro" data-v="sem">'+sem.length+(sem.length===1?' pessoa sem senha':' pessoas sem senha')+'</button>':pill('Todas as contas ativas têm senha','pos'))+
+    (bl.length?'<button class="btn sm'+(U4.filtro==='bloq'?' pri':'')+'" data-act="u4Filtro" data-v="bloq">'+bl.length+' bloqueada(s) por tentativas</button>':'')+
+    (des.length?'<button class="btn sm'+(U4.filtro==='des'?' pri':'')+'" data-act="u4Filtro" data-v="des">'+des.length+' desativada(s)</button>':'')+
+    (U4.filtro?'<button class="btn sm" data-act="u4Filtro" data-v="">Mostrar todos</button>':'')+
+    '<button class="btn sm" data-act="u4Atualizar" title="Lê de novo a situação das contas no servidor">Atualizar</button></div>'+
+    (!U4.dados.smtp?'<p class="sub" style="margin:8px 0 0"><b>O envio de e-mail (SMTP) não está configurado no servidor:</b> convites e links de senha não saem. Use "Senha provisória" e passe a senha à pessoa por um canal seguro.</p>':'')+
+    (inex?'<p class="sub" style="margin:6px 0 0">Tentativas com e-mail que não é de nenhuma conta nos últimos 7 dias: '+inex+' (o e-mail digitado não é guardado). Se alguém diz que não consegue entrar, confira se usa o e-mail certo.</p>':'')+'</div>';
+  /* lista das contas do filtro (inclui logins que ainda não têm cadastro em Usuários) */
+  const lista=U4.filtro==='sem'?sem:U4.filtro==='bloq'?bl:U4.filtro==='des'?des:[];
+  const semUsr=lista.filter(c=>!(S.usr||[]).some(u=>u.uid===c.id));
+  if(semUsr.length)h+='<div class="card"><h2>Logins sem cadastro em Usuários ('+semUsr.length+')</h2><div class="tw" style="border:0"><table><thead><tr><th>Login</th><th>Acesso</th></tr></thead><tbody>'+semUsr.map(c=>'<tr><td><b>'+esc(c.nome||'—')+'</b><div class="sub">'+esc(c.email||'sem e-mail')+'</div></td><td class="u4-ac">'+u4Celula(c)+'</td></tr>').join('')+'</tbody></table></div></div>';
+  /* diagnóstico para o dono: contas importadas da página antiga sem senha */
+  if(me.owner){const imp=cs.filter(c=>c.importado&&c.ativo&&!c.temSenha),comEmail=imp.filter(c=>u3EmailOk(c.email));
+    if(imp.length)h+='<div class="note" id="u4Imp" style="margin:0"><b>'+imp.length+(imp.length===1?' conta importada da página antiga ainda não tem senha.':' contas importadas da página antiga ainda não têm senha.')+'</b> Essas pessoas veem "E-mail ou senha incorretos." ao tentar entrar. Envie o convite para criarem a senha.'+
+      '<ul style="margin:6px 0;padding-left:18px">'+imp.map(c=>'<li>'+esc(c.nome||'—')+' · '+esc(c.email||'sem e-mail')+(u3EmailOk(c.email)?'':' <b>(e-mail inválido: corrija em Editar ou use Senha provisória)</b>')+'</li>').join('')+'</ul>'+
+      (comEmail.length?'<button class="btn sm pri" data-act="u4ConviteTodos">Enviar convite a todos ('+comEmail.length+')</button>':'')+'</div>';}
+  return h;}
+{const vu=V.usr;V.usr=function(){let h=vu.apply(this,arguments);if(store.mode!=='db'||!u4Pode())return h;
+  u4Estilo();if(!U4.carregando&&(!U4.dados||Date.now()-U4.em>60000))setTimeout(()=>u4Carregar(),0);
+  /* coluna Acesso na tabela principal */
+  h=h.replace('<th>Pessoa</th><th>Perfil</th><th>Situação</th><th></th>','<th>Pessoa</th><th>Perfil</th><th>Situação</th><th>Acesso</th><th></th>').replace(/<td colspan="4"><div class="empty">/,'<td colspan="5"><div class="empty">');
+  (S.usr||[]).forEach(u=>{const lr=u4Linha(h,u.id);if(!lr)return;let row=h.slice(lr[0],lr[1]);const c=u4Conta(u.uid);
+    if(U4.filtro&&U4.dados){const ok=U4.filtro==='sem'?u4SemSenha(c):U4.filtro==='bloq'?u4Bloq(c):U4.filtro==='des'?!!c&&!c.ativo:true;if(!ok){h=h.slice(0,lr[0])+h.slice(lr[1]);return;}}
+    const i=row.lastIndexOf('<td class="act">');const cel='<td class="u4-ac">'+u4Celula(c)+'</td>';
+    row=i>=0?row.slice(0,i)+cel+row.slice(i):row.replace(/<\/tr>$/,cel+'</tr>');h=h.slice(0,lr[0])+row+h.slice(lr[1]);});
+  const t=h.indexOf('<div class="note" id="u3UsrTopo"');
+  if(t>=0){const f=h.indexOf('</div>',t)+6;h=h.slice(0,f)+u4Topo()+h.slice(f);}else h=h.replace('<div class="stack">','<div class="stack">'+u4Topo());
+  return h;};}
+/* ações */
+function u4Post(url){return u4Fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(r=>r.json().catch(()=>({})).then(j=>({ok:r.ok,st:r.status,j})),()=>({ok:false,st:0,j:{erro:'Sem conexão com o servidor.'}}));}
+const u4Nome=c=>c?(c.nome||c.email||'esta pessoa'):'esta pessoa';
+function u4SemSmtpAviso(c,txt){modal({title:'E-mail não configurado',wide:true,nofocus:true,body:'<p class="note" style="margin:0 0 8px">'+esc(txt||'O envio de e-mail (SMTP) não está configurado no servidor: o link não foi enviado.')+'</p><p class="sub" style="margin:0">Alternativa: "Senha provisória" gera uma senha que aparece uma vez para você passar a '+esc(u4Nome(c))+' por um canal seguro (pessoalmente ou mensagem privada). Ao entrar, a pessoa cria a própria senha. O dono configura o e-mail no serviço gestao do Easypanel (SMTP_HOST, SMTP_PORT, SMTP_USUARIO, SMTP_SENHA e SMTP_REMETENTE).</p>',
+  foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(c&&!c.protegida?'<button class="btn pri" data-act="u4Prov" data-id="'+esc(c.id)+'">Senha provisória</button>':'')});}
+A.u4Link=async d=>{const c=u4Conta(d.id);if(!c)return;if(U4.dados&&!U4.dados.smtp){u4SemSmtpAviso(c);return;}
+  const r=await u4Post('/api/contas-acesso/'+encodeURIComponent(c.id)+'/link');
+  if(r.ok){toast(r.j.tipo==='convite'?'Convite enviado para '+c.email+': a pessoa cria a senha pelo link (vale 72 horas).':'Link para criar uma senha nova enviado para '+c.email+' (vale 1 hora).','pos');u4Carregar(true);return;}
+  if(r.j.semSmtp){u4SemSmtpAviso(c,r.j.erro);return;}toast('O link não foi enviado: '+(r.j.erro||('erro '+r.st)),'neg');};
+A.u4Prov=d=>{const c=u4Conta(d.id);if(!c)return;
+  confirmBox('Definir uma senha provisória para <b>'+esc(u4Nome(c))+'</b>? '+(c.temSenha?'A senha atual deixa de valer e a pessoa sai dos aparelhos conectados. ':'')+'A senha aparece uma vez, para você passar à pessoa; ao entrar, ela cria a própria senha. Pede a sua senha de novo e fica na auditoria.',async()=>{
+    const r=await u4Post('/api/contas-acesso/'+encodeURIComponent(c.id)+'/provisoria');
+    if(!r.ok){toast('A senha provisória não foi definida: '+(r.j.erro||('erro '+r.st)),'neg');return;}
+    modal({title:'Senha provisória',wide:true,nofocus:true,body:'<p style="margin:0 0 8px"><b>'+esc(u4Nome(c))+'</b> · '+esc(c.email||'')+'</p>'+
+      '<label class="f"><span>Senha provisória (aparece só agora)</span><input id="u3Senha" readonly value="'+esc(r.j.senha||'')+'" style="font-family:var(--font-mono);font-size:16px"></label>'+
+      '<p class="sub" style="margin:6px 0 0">Passe a senha à pessoa por um canal seguro (pessoalmente ou por mensagem privada). Ela entra com o e-mail e esta senha e o sistema pede que crie a própria senha na hora.'+(r.j.ativo===false?' <b>O login está desativado: use Reativar login para a pessoa conseguir entrar.</b>':'')+'</p>',
+      foot:'<button class="btn" data-act="u3CopiarSenha">Copiar senha</button><button class="btn pri" data-act="closeModal">Concluir</button>'});
+    u4Carregar(true);},'Definir senha provisória');};
+A.u4Reativar=d=>{const c=u4Conta(d.id);if(!c)return;
+  confirmBox('Reativar o login de <b>'+esc(u4Nome(c))+'</b>? A pessoa volta a entrar com o e-mail e a senha dela'+(c.temSenha?'':' (ela ainda não tem senha: envie o convite ou defina uma senha provisória)')+'. Pede a sua senha de novo e fica na auditoria.',async()=>{
+    const r=await u4Post('/api/contas-acesso/'+encodeURIComponent(c.id)+'/reativar');
+    if(!r.ok){toast('O login não foi reativado: '+(r.j.erro||('erro '+r.st)),'neg');return;}
+    const u=(S.usr||[]).find(x=>x.uid===c.id);if(u&&u.ativo===false)put('usr',Object.assign(cl(u),{ativo:true}));
+    toast('Login reativado.','pos');u4Carregar(true);},'Reativar login');};
+A.u4Desbloq=async d=>{const c=u4Conta(d.id);if(!c)return;const r=await u4Post('/api/contas-acesso/'+encodeURIComponent(c.id)+'/desbloquear');
+  if(!r.ok){toast('Não desbloqueou: '+(r.j.erro||('erro '+r.st)),'neg');return;}toast('Desbloqueado: '+u4Nome(c)+' já pode tentar entrar de novo.','pos');u4Carregar(true);};
+A.u4Filtro=d=>{U4.filtro=U4.filtro===d.v?'':(d.v||'');render();};
+A.u4Atualizar=()=>{u4Carregar(true);};
+A.u4ConviteTodos=()=>{const cs=(U4.dados&&U4.dados.contas||[]).filter(c=>c.importado&&c.ativo&&!c.temSenha&&u3EmailOk(c.email));if(!cs.length){toast('Nenhuma conta importada sem senha com e-mail válido.');return;}
+  if(U4.dados&&!U4.dados.smtp){u4SemSmtpAviso(null,'O envio de e-mail (SMTP) não está configurado no servidor: os convites não podem ser enviados.');return;}
+  confirmBox('Enviar o convite para criar a senha a <b>'+cs.length+'</b> pessoa(s) importada(s) da página antiga? Cada uma recebe um link que vale 72 horas: '+cs.map(c=>esc(c.nome||c.email)).join(', ')+'. Contas sem e-mail válido ficam de fora. Pede a sua senha de novo e fica na auditoria.',async()=>{
+    const r=await u4Post('/api/contas-acesso/convite-todos');
+    if(!r.ok){if(r.j.semSmtp)u4SemSmtpAviso(null,r.j.erro);else toast('Os convites não foram enviados: '+(r.j.erro||('erro '+r.st)),'neg');return;}
+    const nf=(r.j.falhas||[]).length;toast(r.j.enviados+' convite(s) enviado(s)'+(nf?'; '+nf+' falharam no envio (confira o e-mail do servidor)':'')+'.',nf?'neg':'pos');u4Carregar(true);},'Enviar convites');};
+Object.assign(ACT_GROUP,{u4Link:'usr',u4Prov:'usr',u4Reativar:'usr',u4Desbloq:'usr',u4ConviteTodos:'usr',u4Filtro:null,u4Atualizar:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{u4Link:'Envia por e-mail o link para a pessoa criar a senha (convite) ou uma senha nova.',u4Prov:'Gera uma senha que aparece uma vez; a pessoa cria a própria ao entrar.',u4Reativar:'Volta a permitir a entrada deste login.',u4Desbloq:'Limpa o bloqueio por tentativas erradas (do e-mail e do endereço de onde vieram).',u4ConviteTodos:'Envia o convite às contas importadas que ainda não têm senha.'});
+/* Novo usuário com senha provisória: a pessoa também cria a própria senha no primeiro acesso */
+{const r0=u3Resultado;u3Resultado=function(v,email,senha,msg){const out=r0.apply(this,arguments);
+  if(senha&&u3Self())u4Carregar(true).then(dd=>{const c=dd&&(dd.contas||[]).find(x=>String(x.email||'').toLowerCase()===String(email||'').toLowerCase());if(!c)return;
+    return u4Post('/api/contas-acesso/'+encodeURIComponent(c.id)+'/marcar-troca').then(r=>{if(!r.ok)return;try{const i=$('#u3Senha'),p=i&&i.closest('label')&&i.closest('label').nextElementSibling;if(p)p.textContent='Passe a senha à pessoa por um canal seguro (pessoalmente ou por mensagem privada). Ela entra com o e-mail e esta senha e o sistema pede que crie a própria senha na hora.';}catch(e){}});}).catch(()=>{});
+  return out;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='130',APP_DATA='2026-10-28';
+const APP_VER='130.1',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['130.1','2026-10-28',['Sistema › Usuários: coluna Acesso com a situação de cada pessoa (ativo, sem senha, desativado, bloqueado por tentativas, cria a senha no próximo acesso) e a última falha de entrada com o motivo; botões Enviar convite/link de senha, Senha provisória (troca obrigatória no primeiro acesso), Reativar e Desbloquear; aviso das contas importadas sem senha com Enviar convite a todos.', 'Login: dica para usar Esqueci minha senha; Esqueci minha senha envia o convite para quem ainda não criou a senha; bloqueio por tentativas mais tolerante para quem usa a mesma internet no escritório (o limite por e-mail continua protegendo cada conta).']],
   ['130','2026-10-28',['Recebimento de notas › Caixa nfe@: leitura da caixa nfe@inaservicos.com.br (Microsoft 365) de hora em hora. Os XML anexados vão para o Arquivo fiscal e os e-mails lidos para a pasta Processadas. Quatro listas: notas recebidas só por e-mail (lançar ou ligar), Não pagar (cancelada ou inexistente na SEFAZ), notas captadas sem XML por e-mail e e-mails com PDF sem XML (pedir o XML).', 'Arquivo fiscal: cada nota mostra todas as origens (importação, upload, SEFAZ, e-mail) e as situações Não encontrada na SEFAZ e Denegada.']],
   ['129','2026-10-28',['Recebimento de notas (antes NFs recebidas): abas Notas para lançar, Pendentes de ligação, Ligadas, Arquivo fiscal e Saídas emitidas. O XML original de cada NF-e fica guardado no servidor pelo prazo legal (5 anos a partir do ano seguinte), com busca, DANFE, download do XML e ZIP para o contador; exclusão bloqueada dentro do prazo.', 'Importar histórico (ZIP): guarda as NF-e de entrada e de saída e liga cada uma à conta a pagar ou a receber pelo CNPJ, número, valor e data — sem criar contas, sem estoque e sem lançamentos. XML do Omie com acentos corrompidos são restaurados quando possível; os demais ficam como cópia alterada.', 'Contas a pagar e a receber: botão DANFE em todo título ligado a nota, Anexar sempre visível, filtro Nota fiscal (sem, com, cancelada) e aviso de nota cancelada.']],
   ['128','2026-10-28',['Obras › Obras e rateio: filtros por situação (ativas, concluídas, canceladas) e por período; botão Excluir obra (com vínculos, oferece Encerrar ou Cancelar; sem vínculos, vai para a Lixeira com senha; protegido também no servidor).', 'Painel de Obras e Painel da obra ajustados para centenas de obras: nomes em até 2 linhas, as 15 obras com mais pendências com Ver todas, seletor só com obras em andamento e sem rolagem lateral.']],
