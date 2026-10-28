@@ -611,6 +611,21 @@ function renderMenu(){
   sub.hidden=items.length<2;
   sub.innerHTML=items.length<2?'':items.map(i=>'<button class="sub-b" data-act="nav" data-mod="'+cur[0]+'" data-tab="'+i[0]+'"'+(i[2]!=null?' data-nftipo="'+i[2]+'"':'')+(itemOn(i)?' aria-current="page"':'')+'>'+esc(i[1])+'</button>').join('');
 }
+/* v124: a tela é redesenhada a cada mudança vinda de outra pessoa (sincronização) ou de presença; a rolagem
+   da janela e das listas com rolagem própria era perdida (a lista voltava para o topo). Agora é guardada antes e
+   devolvida depois, na mesma tela. ROL.pular=true (ex.: troca de aba da lista) deixa as listas voltarem ao topo. */
+const ROL={els:new Set(),pular:false};
+try{if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('scroll',e=>{const t=e.target;if(t&&t.nodeType===1&&t.closest&&t.closest('#view'))ROL.els.add(t);},true);}catch(e){}
+function rolGuardar(){const v=$('#view');if(!v||!v.contains||typeof window==='undefined')return null;
+  const o={chave:(ui.mod||'')+'|'+ui.tab,x:window.scrollX||0,y:window.scrollY||0,els:[]};
+  ROL.els.forEach(el=>{if(!el.isConnected||!v.contains(el)){ROL.els.delete(el);return;}if(!(el.scrollTop>0||el.scrollLeft>0))return;
+    const p=[];let n=el;while(n&&n!==v){const par=n.parentElement;if(!par)return;p.unshift(Array.prototype.indexOf.call(par.children,n));n=par;}
+    o.els.push({p,tag:el.tagName,id:el.id||'',t:el.scrollTop,l:el.scrollLeft});});
+  return o;}
+function rolRestaurar(o){const pular=ROL.pular;ROL.pular=false;if(!o||o.chave!==(ui.mod||'')+'|'+ui.tab)return;const v=$('#view');
+  if(!pular)o.els.forEach(s=>{let n=s.id?document.getElementById(s.id):null;if(!n||!v.contains(n)){n=v;for(const i of s.p){n=n&&n.children?n.children[i]:null;if(!n)break;}}
+    if(!n||n===v||n.tagName!==s.tag)return;if(s.t)n.scrollTop=s.t;if(s.l)n.scrollLeft=s.l;ROL.els.add(n);});
+  try{if((window.scrollY||0)!==o.y||(window.scrollX||0)!==o.x)window.scrollTo(o.x,o.y);}catch(e){}}
 function render(){
   RH_PRE.forEach(f=>{try{f();}catch(e){}});
   const ae=document.activeElement;
@@ -632,10 +647,12 @@ function render(){
   if(!store.ready)html='<div class="empty">Carregando dados…</div>';
   else if(!nav.length)html=acessoScreen();
   else html=(V[ui.tab]||V.painel)();
+  const rolAnt=rolGuardar();
   $('#view').innerHTML=addVendaBtns(addAnexBtns(addHistBtns(html,ui.tab),ui.tab),ui.tab);
+  rolRestaurar(rolAnt);
   $$('#view [data-act]').forEach(b=>{const g=ACT_GROUP[b.dataset.act];if(g&&!mayW(g))b.remove();});
   const rc=$('#s_rcrit');if(rc&&!mayW('proj'))rc.disabled=true;
-  if(aid){const n=document.getElementById(aid);if(n){n.focus();try{if(ss!=null)n.setSelectionRange(ss,se);}catch(e){}}}
+  if(aid){const n=document.getElementById(aid);if(n){try{n.focus({preventScroll:true});}catch(e){n.focus();}try{if(ss!=null)n.setSelectionRange(ss,se);}catch(e){}}}
   RH_POST.forEach(f=>{try{f();}catch(e){}});
 }
 
@@ -5464,7 +5481,7 @@ function chSync(){
       dbWatch('cm:'+u,db.collection('cm').doc(u),s=>{const d=s&&s.exists?(typeof s.data==='function'?s.data():s.data):null;if(u===chMe()){CH.st=Object.assign({},d||{});if(!CH.st.desde&&s&&!(s.metadata&&s.metadata.fromCache))chStSave({desde:Date.now()});}else CH.sts.set(u,d||{});schedule();},{live:true,prio:u===chMe(),every:45000});
     }catch(e){}
   });
-  if(!CH.room&&CH.room!==false){CH.room=false;(async()=>{try{const r=window.claude&&window.claude.use?await window.claude.use('room'):null;if(!r)return;CH.room=r;r.onPeers(c=>{CH.peers=c.peers;schedule();},()=>{});}catch(e){}})();}
+  if(!CH.room&&CH.room!==false){CH.room=false;(async()=>{try{const r=window.claude&&window.claude.use?await window.claude.use('room'):null;if(!r)return;CH.room=r;r.onPeers(c=>{const ant=CH.peers;CH.peers=c.peers;if(peersMudou(ant,c.peers))schedule();},()=>{});}catch(e){}})();}
 }
 RH_PRE.push(chSync);
 /* ---------- conversas ---------- */
@@ -5538,6 +5555,9 @@ function chTexto(m){
 }
 const chHora=ts=>{const d=new Date(ts);return pad(d.getHours())+':'+pad(d.getMinutes());};
 const chDia=ts=>{const d=new Date(ts),s=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()),h=todayStr();return s===h?'Hoje':s===addDays(h,-1)?'Ontem':fmtDate(s);};
+/* v124: presença só redesenha a tela quando muda quem está on-line, chamada/toque ou (no chat) quem está digitando */
+function peersSig(ps,chat){return (ps||[]).map(p=>{const pr=(p&&p.presence)||{};let t='';try{t=JSON.stringify([pr.ring||null,pr.jring||null,pr.call||null]);}catch(e){t=String(Math.random());}return [p&&p.by,p&&p.kind,p&&p.isMe?1:0,t,chat?(pr.tp||''):''].join('~');}).sort().join('|');}
+function peersMudou(a,b){const chat=ui.tab==='chat'||(typeof document!=='undefined'&&document.getElementById&&!!document.getElementById('chMsgs'));return chat||peersSig(a,false)!==peersSig(b,false);}
 function chOnline(){const s=new Set();(CH.peers||[]).forEach(p=>{if(p.by&&p.kind==='viewer')s.add(p.by);});return s;}
 function chDigitando(k){const now=Date.now();return (CH.peers||[]).filter(p=>!p.isMe&&p.by&&p.presence&&p.presence.tp===k&&now-(p.updatedAt||0)<7000).map(p=>nameOf(p.by));}
 function chMsgHtml(m,prev,c){
@@ -9139,7 +9159,7 @@ boot=async function(){
     dbWatch('col:'+c,db.collection(c),snap=>{
       const novo=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));
       /* consulta periódica sem mudança: não redesenha a tela */
-      let j='';try{j=JSON.stringify(novo);}catch(e){j=String(Math.random());}
+      let j='';try{j=assinaTexto(JSON.stringify(novo));}catch(e){j=String(Math.random());}
       if(!first&&j===ultimo)return;ultimo=j;
       S[c]=pkMerge(c,novo);
       applyPending(c);S[c]=S[c].filter(r=>!r._del);reindex();
@@ -14556,66 +14576,8 @@ A.emContrato=d=>{const e=get('emprest',d.xid||d.id);if(!e)return;const c=cfg(),f
 /* ---------- alertas ---------- */
 {const af=alertasDp;alertasDp=function(){const it=af();if(!mayR('rh'))return it;const mes=todayStr().slice(0,7);let n=0;S.emprest.forEach(e=>{if(e.status!=='ativo'||e.forma==='folha')return;emAbertas(e).forEach(p=>{if(p.comp<mes)n++;});});if(n)it.push(['emprest',n+' parcela(s) de empréstimo a colaborador em atraso',String(n)]);return it;};}
 
-/* ===== v84: Novo usuário em uma tela só (sistema na VPS) =====
-   Em Sistema › Usuários o botão "Novo usuário" cria o login no servidor (nome, e-mail, senha provisória)
-   e o perfil dentro do sistema de uma vez, sem passar por Contas de acesso. O nível do login sai do perfil:
-   Colaborador entra como Colaborador; os demais perfis entram como Equipe. */
-ACT_GROUP.usrNovo='usr';ACT_GROUP.usrLinkSenha='usr';
-/* o servidor sabe enviar e-mail? (convite e "esqueci minha senha") */
-const EMS={ok:null,em:0};
-function emailSondar(){if(!window.__SELFHOST||Date.now()-EMS.em<60000)return Promise.resolve(EMS.ok);EMS.em=Date.now();
-  return fetch('/api/email/status',{credentials:'same-origin'}).then(r=>r.ok?r.json():{}).then(j=>{EMS.ok=!!j.configurado;return EMS.ok;}).catch(()=>{EMS.ok=false;return false;});}
-const usrNivelDe=perfil=>perfil==='colaborador'?'interact':'admin';
-{const vu=V.usr;V.usr=()=>{let h=vu();if(!window.__SELFHOST||store.mode!=='db'||!mayW('usr'))return h;
-  h=h.replace('<button class="btn pri" data-act="usrAdd">Adicionar pessoa</button>','<button class="btn" data-act="usrAdd">Ligar login existente</button><button class="btn pri" data-act="usrNovo">Novo usuário</button>');
-  /* na VPS não há compartilhamento do Claude: some a Conferência de acesso e a nota passa a explicar o login próprio */
-  const i=h.indexOf('<div class="card"><h2>Conferência de acesso');
-  if(i>=0){const fins=['<div class="note"><b>Controle ainda desligado','<div class="note"><b>','<div class="tw"><table><thead><tr><th>Pessoa</th><th>Perfil</th>'].map(m=>h.indexOf(m,i+10)).filter(k=>k>i);if(fins.length)h=h.slice(0,i)+h.slice(Math.min.apply(null,fins));}
-  h=h.replace(/<div class="note"><b>Como o acesso funciona\.<\/b>[\s\S]*?<\/div>/,'<div class="note"><b>Como o acesso funciona.</b> Cada pessoa entra em app.inaservicos.com.br com o próprio e-mail e senha. O perfil escolhido aqui define o que ela vê e altera. Para criar alguém, use <b>Novo usuário</b>; para tirar o acesso, <b>Suspender</b> (pode voltar depois) ou, em Contas de acesso, <b>Excluir</b> o login.</div>');
-  return h;};}
-A.usrNovo=async()=>{
-  if(!mayW('usr')){toast('Seu perfil não permite cadastrar usuários.','neg');return;}
-  const comEmail=await emailSondar();
-  const perfOpts=Object.keys(PERFIS).filter(k=>k!=='pendente'&&!PERFIS[k].interno).map(k=>[k,PERFIS[k].nome]);
-  const livres=S.func.filter(f=>f.status!=='desligado'&&!f.usrId).slice().sort(byNome).map(f=>[f.id,f.nome]);
-  modal({title:'Novo usuário',wide:true,body:
-    '<div class="fg">'+field('Nome','nome','text','')+field('E-mail de login','email','email','')+
-    (comEmail?field('Enviar convite por e-mail (a pessoa cria a própria senha)','convite','checkbox',true,{full:true}):'')+
-    '<div id="usrSenhaBox"'+(comEmail?' hidden':'')+'>'+field('Senha provisória (mínimo 8)','senha','text',Math.random().toString(36).slice(2,6)+'-'+Math.random().toString(36).slice(2,8))+'</div>'+
-    field('Perfil no sistema','perfil','select',perfOpts.some(o=>o[0]==='colaborador')?'colaborador':perfOpts[0][0],{opts:perfOpts})+
-    field('Colaborador ligado (ponto e Minha área)','funcId','select','',{opts:livres,blank:'Nenhum'})+'</div>'+
-    '<p class="sub" style="margin:10px 0 0">'+(comEmail?'Com o convite, a pessoa recebe um link (válido por 72 horas) para criar a senha. Sem o convite, anote a senha provisória e passe para ela pessoalmente. ':'Anote o e-mail e a senha provisória e passe para a pessoa pessoalmente (o envio por e-mail ainda não foi configurado no servidor). ')+'Perfil <b>Só ponto e Minha área</b> vê só ponto, Minha área e chat; os outros perfis usam os módulos indicados na tabela abaixo.</p>',
-    onOpen:mb=>{const ck=$('#f_convite',mb);if(ck)ck.addEventListener('change',()=>{$('#usrSenhaBox',mb).hidden=ck.checked;});},
-    saveLabel:'Criar usuário',save:root=>{
-      const v=readForm(root),nome=String(v.nome||'').trim(),email=String(v.email||'').trim().toLowerCase(),senha=String(v.senha||'');
-      if(!nome){toast('Informe o nome.','neg');return false;}
-      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){toast('E-mail inválido.','neg');return false;}
-      const convite=!!v.convite;
-      if(!convite&&senha.length<8){toast('A senha precisa ter pelo menos 8 caracteres.','neg');return false;}
-      const btn=$('#mf .btn.pri');if(btn)btn.disabled=true;
-      fetch('/api/contas',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({nome,email,senha:convite?'':senha,convite,nivel:usrNivelDe(v.perfil)})})
-        .then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok||!j.id)throw new Error(j.erro||('Erro '+r.status));
-          put('usr',{id:uid(),uid:j.id,perfil:v.perfil,apelido:nome,ativo:true});
-          if(v.funcId){const f=get('func',v.funcId);if(f&&!f.usrId)put('func',Object.assign(cl(f),{usrId:j.id}));}
-          closeModal();try{loadProfiles([j.id]);}catch(e){}
-          if(!convite)toast('Usuário criado. Login: '+email+' · senha provisória: '+senha,'pos');
-          else if(j.convite==='enviado')toast('Usuário criado. Convite enviado para '+email+'.','pos');
-          else toast('Usuário criado, mas o e-mail não saiu ('+(j.erroEmail||'erro')+'). Use Editar › Enviar link de senha para tentar de novo, ou defina uma senha.','neg');
-          render();})
-        .catch(e=>{if(btn)btn.disabled=false;toast('Não criei o usuário: '+e.message,'neg');});
-      return false;
-    }});
-};
-/* botão Sair no topo (sistema na VPS): todo mundo, inclusive Colaborador, consegue sair da conta */
-{const w1=whoHtml;whoHtml=function(){const h=w1();if(!window.__SELFHOST)return h;
-  return h+'<button class="btn sm" data-act="sairConta" title="Sair da conta neste aparelho" style="margin-left:8px;align-self:center">Sair</button>';};}
-/* Editar acesso: botão para mandar por e-mail o link de criar/redefinir senha */
-{const e0=A.usrEdit;A.usrEdit=async d=>{await e0(d);if(!window.__SELFHOST||!$('#f_cEmail'))return;if(!(await emailSondar()))return;
-  const u=get('usr',d.id);if(!u||!$('#mf')||$('#mf [data-act=usrLinkSenha]'))return;
-  $('#mf').insertAdjacentHTML('afterbegin','<button class="btn" data-act="usrLinkSenha" data-id="'+esc(u.uid)+'" style="margin-right:auto">Enviar link de senha por e-mail</button>');};}
-A.usrLinkSenha=d=>{const b=$('#mf [data-act=usrLinkSenha]');if(b)b.disabled=true;
-  fetch('/api/contas/'+encodeURIComponent(d.id)+'/link',{method:'POST',credentials:'same-origin'}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.erro||('Erro '+r.status));toast('Link enviado para o e-mail da pessoa (vale por 1 hora; 72 horas se ela ainda não tem senha).','pos');})
-    .catch(e=>toast('O e-mail não saiu: '+e.message,'neg')).finally(()=>{if(b)b.disabled=false;});};
+/* ===== v124: caixas de seleção e botões de opção legíveis em todo o sistema (a regra geral input{width:100%} as esmagava) ===== */
+try{const st=document.createElement('style');st.textContent='input[type=checkbox],input[type=radio]{width:18px;height:18px;min-width:18px;min-height:18px;flex:none;padding:0;cursor:pointer;accent-color:var(--accent,#2457d6)}input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--accent,#2457d6);outline-offset:2px}';document.head.appendChild(st);}catch(e){}
 
 /* ===== v86: ler a cotação do fornecedor em PDF (ou foto) com IA =====
    Em Cotações › mapa › Importar resposta: escolha o fornecedor e o PDF do orçamento no formato dele.
@@ -22742,9 +22704,77 @@ if(typeof buildXml==='function'){const b0=buildXml;buildXml=function(){
 /* lê o ambiente uma vez ao abrir (servidor próprio), para o rascunho de NF-e sair certo mesmo sem abrir as configurações */
 if(fambSelf())setTimeout(()=>{try{fambCarregar(false);}catch(e){}},2500);
 
+/* ===== v124: conciliação bancária rápida com extratos grandes e caixa de seleção maior na busca de títulos =====
+   Causa da lentidão (medida com 10.241 linhas de extrato e ~20.800 títulos): cada render calculava as sugestões
+   de TODAS as linhas pendentes da conta (o contador do botão "Conciliar todos os encontrados"), ~1.600 chamadas
+   por render, e cada chamada percorria o extrato inteiro (para saber quais títulos já estão vinculados) e todos
+   os títulos. ~4 s por render, repetido a cada evento de sincronização: a aba travava e o Safari a recarregava.
+   Agora os títulos ficam num índice por tipo e mês de vencimento e os vínculos num contador, refeitos só quando
+   os dados mudam (put/del/sincronização passam por reindex); as sugestões, a situação de cada linha e o contador
+   de prontas ficam guardados até a próxima mudança. As regras de sugestão são exatamente as mesmas. */
+const CONC2={idx:null,res:new Map(),cls:new Map(),seg:new Map(),orig:conciliaCandidatos,clsOrig:concCls,segOrig:concSeguras,n:0};
+function conc2Limpa(){CONC2.idx=null;CONC2.res.clear();CONC2.cls.clear();CONC2.seg.clear();}
+{const r0=reindex;reindex=function(){const r=r0.apply(this,arguments);conc2Limpa();return r;};}
+function conc2Idx(){const E=S.extrato,L=S.lanc,o=CONC2.idx;
+  if(o&&o.E===E&&o.L===L&&o.nE===E.length&&o.nL===L.length)return o;
+  const lk=new Map(),bk=new Map();
+  for(const e of E){const a=e.lancId,b=e.lancIds;
+    if(b&&b.length){const s=new Set(b);if(a)s.add(a);s.forEach(i=>{if(i)lk.set(i,(lk.get(i)||0)+1);});}
+    else if(a)lk.set(a,(lk.get(a)||0)+1);}
+  for(const l of L){if(l.status==='cancelado'||l.transf)continue;const k=l.tipo+'|'+String(l.venc||'').slice(0,7);let a=bk.get(k);if(!a){a=[];bk.set(k,a);}a.push(l);}
+  CONC2.n++;return CONC2.idx={E,L,nE:E.length,nL:L.length,lk,bk};}
+/* mesma regra de conciliaCandidatos (v54/v61), só que olhando apenas os títulos do mesmo tipo e mês de vencimento */
+function conc2Cand(x){const I=conc2Idx(),tipo=x.valor>0?'receber':'pagar',abs=Math.abs(x.valor),out=[],w=gsNorm(x.desc||''),mx=String(x.data).slice(0,7);
+  const meus=new Set();if(x.lancId)meus.add(x.lancId);(x.lancIds||[]).forEach(i=>meus.add(i));
+  for(const l of (I.bk.get(tipo+'|'+mx)||[])){
+    if(((I.lk.get(l.id)||0)-(meus.has(l.id)?1:0))>0)continue;
+    const mesmoMes=!!l.pago&&String(l.pago).slice(0,7)===mx,outra=!!(l.pago&&l.contaId&&l.contaId!==x.contaId);
+    if(outra&&!mesmoMes)continue;
+    const v=l.pago?lancVal(l):(+l.valor||0);const dv=r2(abs-v),rel=v?Math.abs(dv)/v:1;
+    if(Math.abs(dv)>0.009&&(l.pago||rel>0.15))continue;
+    const d=l.pago||l.venc,diff=Math.abs(Math.round((Date.parse(x.data+'T12:00:00')-Date.parse(d+'T12:00:00'))/864e5));
+    let score=100-Math.min(diff,20)*2-(diff>20?10:0)-(l.pago?5:0)-(outra?15:0)-(Math.abs(dv)>0.009?25+rel*100:0);
+    const pn=gsNorm(l.parcId?parcNome(l.parcId):'').split(' ').filter(t=>t.length>3);if(pn.some(t=>w.includes(t)))score+=15;
+    const nd=digits(l.nf||'')||digits(String(l.desc||'').match(/\d{4,}/)||'');if(nd&&nd.length>=4&&digits(x.desc||'').includes(nd.replace(/^0+/,'')))score+=20;
+    out.push({l,diff,score,dv,mesmoMes,outra});}
+  return out.sort((a,b)=>b.score-a.score).slice(0,6);}
+const conc2Chave=x=>x.id+'|'+x.status+'|'+x.valor+'|'+x.data+'|'+(x.lancId||'')+'|'+(x.lancIds||[]).join(',')+'|'+(x.semRegra?1:0)+'|'+(x.desc||'');
+conciliaCandidatos=function(x){const k=conc2Chave(x);let r=CONC2.res.get(k);if(!r){r=conc2Cand(x);CONC2.res.set(k,r);}return r;};
+concCls=function(x){const k=conc2Chave(x);let r=CONC2.cls.get(k);if(r===undefined){r=CONC2.clsOrig(x);CONC2.cls.set(k,r);}return r;};
+concSeguras=function(contaId){let r=CONC2.seg.get(contaId);if(!r){r=CONC2.segOrig(contaId);CONC2.seg.set(contaId,r);}return r;};
+/* as regras automáticas ficam no cfg: mudou o cfg, recalcula */
+{const p0=put;put=function(col,rec){const r=p0(col,rec);if(col==='cfg')conc2Limpa();return r;};}
+/* trocar de aba (Pendentes, Encontrados...) ou de conta volta a lista para o topo */
+{['concAba','concImpConta'].forEach(a=>{const o=A[a];if(o)A[a]=d=>{if(typeof ROL!=='undefined')ROL.pular=true;return o(d);};});}
+
+/* ---------- busca de títulos para a linha: caixa de seleção de 20×20 e linha inteira clicável ---------- */
+(function(){try{if(typeof document==='undefined'||!document.createElement||document.getElementById('conc2Css'))return;const st=document.createElement('style');st.id='conc2Css';
+  st.textContent='#cbL td.cb2-ck{width:44px;min-width:44px;text-align:center;padding:0}'+
+  '#cbL td.cb2-ck input[type=checkbox]{width:20px;height:20px;min-width:20px;min-height:20px;padding:0;margin:0;vertical-align:middle;cursor:pointer;accent-color:var(--accent,#2457d6)}'+
+  '#cbL td.cb2-ck input[type=checkbox]:focus-visible{outline:3px solid var(--accent,#2457d6);outline-offset:2px}'+
+  '#ov #cbTodos{width:20px;height:20px;min-width:20px;padding:0;margin:0 6px 0 0;flex:none;cursor:pointer;accent-color:var(--accent,#2457d6)}'+
+  '#cbL tr.cb2-row{cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}#cbL tr.cb2-row>td{padding-top:10px;padding-bottom:10px}'+
+  '#cbL tr.cb2-row:hover>td{background:var(--hover,#f6f8fc)}#cbL tr.cb2-on>td{background:var(--accent-soft,#e8f0ff)}#cbL tr.cb2-row:focus-within>td{box-shadow:inset 0 1px 0 var(--accent,#2457d6),inset 0 -1px 0 var(--accent,#2457d6)}';
+  (document.head||document.body).appendChild(st);}catch(e){}})();
+{const f0=concBuscaLista;concBuscaLista=function(){const h=f0.apply(this,arguments);
+  return h.replace(/<tr><td><input type="checkbox" data-cbl="([^"]+)"( checked)? aria-label="Selecionar">/g,(m,id,ck)=>{const l=get('lanc',id);
+    return '<tr class="cb2-row'+(ck?' cb2-on':'')+'" data-cbrow="'+id+'"><td class="cb2-ck"><input type="checkbox" data-cbl="'+id+'"'+(ck||'')+' aria-label="Selecionar '+esc(l?(l.desc||'título')+' · '+money(l.pago?lancVal(l):l.valor):'título')+'">';});};}
+/* clique em qualquer parte da linha marca/desmarca (mouse e toque); a lista não volta para o topo ao marcar */
+const CB2={top:null};
+if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('click',e=>{const t=e.target;if(!t||!t.closest)return;const tr=t.closest('#cbL tr[data-cbrow]');if(!tr)return;
+    if(t.closest('input,button,a,select,textarea,label'))return;const cb=tr.querySelector('input[type=checkbox][data-cbl]');if(!cb||cb.disabled)return;
+    cb.checked=!cb.checked;cb.dispatchEvent(new Event('change',{bubbles:true}));const n=document.querySelector('#cbL input[data-cbl="'+cb.dataset.cbl+'"]');if(n)try{n.focus({preventScroll:true});}catch(x){}});
+  document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||!t.dataset.cbl)return;const tw=document.querySelector('#cbL .tw');CB2.top=tw?tw.scrollTop:null;},true);
+  document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||!t.dataset.cbl||CB2.top==null)return;const tw=document.querySelector('#cbL .tw');if(tw)tw.scrollTop=CB2.top;CB2.top=null;});}
+
+/* ===== v124: caixas de seleção e botões de opção legíveis em todo o sistema (a regra geral input{width:100%} as esmagava) ===== */
+try{const st=document.createElement('style');st.textContent='input[type=checkbox],input[type=radio]{width:18px;height:18px;min-width:18px;min-height:18px;flex:none;padding:0;cursor:pointer;accent-color:var(--accent,#2457d6)}input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--accent,#2457d6);outline-offset:2px}';document.head.appendChild(st);}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='123',APP_DATA='2026-10-28';
+const APP_VER='124',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['124','2026-10-28',['Conciliação bancária: a lista não volta mais sozinha para o topo enquanto você rola; a tela ficou muito mais rápida (redesenho de cerca de 4 s para menos de 0,1 s com 10 mil linhas de extrato), o que também evita a aba recarregar no Safari.', 'Buscar contas para esta linha: caixa de seleção maior e a linha inteira clicável (também no toque). Caixas de seleção de todo o sistema ficaram com tamanho legível.']],
   ['123','2026-10-28',['Sistema › Configurações › Notas fiscais: ambiente e busca na SEFAZ. Troca entre Homologação e Produção (com confirmação e senha), liga e desliga a busca automática, escolhe quem consulta as NF-e recebidas (Omie ou Central, com o aviso da regra de um só sistema) e a busca de NFS-e no Ambiente Nacional. Só Administrador e dono alteram; toda mudança vai para a auditoria.', 'Cada ambiente guarda a própria sequência de notas da SEFAZ; o rascunho de XML de NF-e sai no ambiente escolhido. A emissão continua no Omie (NF-e) e no portal da prefeitura (NFS-e).']],
   ['122','2026-10-28',['Importar cadastros › Banco de horas (relatório do ponto): lê o PDF "Relatório Banco de Horas Colaboradores" (um colaborador por página) e grava, por competência, as horas por tipo de dia, quitações, validade e saldos do período e acumulado. Conferência antes de gravar, ligação pelo nome (os não encontrados são escolhidos e lembrados) e Desfazer.', 'Pessoal › Banco de horas: coluna Saldo no relatório com a diferença para o saldo do sistema, indicadores de saldos negativos e a tabela da competência no extrato do colaborador. Só RH e Administrador veem.']],
   ['121','2026-10-27',['Cores por setor: cada aba do menu superior tem a cor do seu setor e o fundo da página fica com a cor do setor aberto, bem clara. Para desligar neste navegador: Sistema › Configurações › Cores por setor.']],
@@ -23085,6 +23115,7 @@ $('#fileOfx').addEventListener('change',async e=>{
 /* ===== início ===== */
 const _modal=modal;
 modal=function(o){nfActive=false;pedActive=false;psvActive=false;scActive=false;cqActive=false;const r_=_modal(o);resolveNames();return r_;};
+function assinaTexto(t){let a=0x811c9dc5,b=0;for(let i=0;i<t.length;i++){const c=t.charCodeAt(i);a=Math.imul(a^c,16777619);b=(Math.imul(b,31)+c)|0;}return t.length+':'+(a>>>0).toString(36)+':'+(b>>>0).toString(36);}
 async function boot(){
   const t=todayStr(),cur=ym(t);
   ui.fluxo.from=addMonths(cur,-1);ui.rel.from=cur.slice(0,4)+'-01';ui.rel.to=cur;ui.dre.from=ui.rel.from;ui.dre.to=cur;
