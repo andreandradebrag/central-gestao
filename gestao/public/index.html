@@ -25554,9 +25554,251 @@ try{const st=document.createElement('style');st.textContent=
 '.irp-vz{padding:16px;color:var(--muted);font-size:13.5px}.irp-ft{padding:8px 16px;border-top:1px solid var(--line)}';
 document.head.appendChild(st);}catch(e){}
 
+/* ===== v132: cabeçalho fixo na tabela de perfis, contratos (descrição, novo projeto, vigência e valor atualizados),
+   datas DD/MM/AAAA em todo o sistema e filtros de data nas oportunidades =====
+   1. Sistema › Usuários: a linha dos módulos da tabela "O que cada perfil pode fazer" (e o cabeçalho da lista de pessoas)
+      fica presa logo abaixo do topo fixo ao rolar a página; a coluna Perfil fica presa ao rolar para o lado.
+   2. Comercial › Contratos com clientes: Projeto e Contrato com largura mínima, até 2 linhas com reticências (texto inteiro
+      no title), alertas quebrando linha; sem rolagem lateral em 1366 px.
+   3. Edição de contrato: "+ Criar novo projeto" no seletor de projeto (mini-formulário; liga o contrato ao salvar).
+   4. Datas AAAA-MM-DD exibidas como DD/MM/AAAA (telas, janelas, documentos/PDF, avisos e CSV); competência AAAA-MM
+      como MM/AAAA. Campos de data, atributos e arquivos técnicos (XML, AFD, remessa, JSON) continuam como estão.
+   5. Contrato: vigência atualizada e valor atualizado (original + aditivos) na lista, no detalhe e na ficha (PDF).
+   6. Oportunidades e licitações: filtro de data (referência, período De/até, ano e mês), lembrado na sessão. */
+const V132={ult:null,lastModal:null,css:false};
+
+/* ---------------- 4. datas ---------------- */
+const V132_RX_DT=/(^|[^\w\-\/.])(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+\-]\d{2}:?\d{2})?)?(?![\w\-\/])/g;
+const V132_RX_COMP=/(compet[êe]ncia|comp\.|m[êe]s|refer[êe]ncia|ref\.|folha de)(:?\s+(?:de\s+)?)((?:19|20)\d{2})-(0[1-9]|1[0-2])(?![\w\-\/])/gi;
+const V132_RX_YM=/^(\s*)((?:19|20)\d{2})-(0[1-9]|1[0-2])(\s*)$/;
+function v132DtOk(a,m,d){return +m>=1&&+m<=12&&+d>=1&&+d<=31&&+a>=1900&&+a<=2199;}
+/* texto simples (sem HTML) */
+function v132Txt(s){if(V132.off||typeof s!=='string'||!/\d{4}-\d{2}/.test(s))return s;
+  let t=s.replace(V132_RX_DT,(m0,pre,a,m,d,hh,mi)=>v132DtOk(a,m,d)?pre+d+'/'+m+'/'+a+(hh!=null?' '+hh+':'+mi:''):m0);
+  t=t.replace(V132_RX_COMP,(m0,k,sep,a,m)=>k+sep+m+'/'+a);
+  const y=t.match(V132_RX_YM);if(y)t=y[1]+y[3]+'/'+y[2]+y[4];
+  return t;}
+/* HTML: só o texto visível e o title; não mexe em textarea, pre, code, script, style, nem em value/data-* */
+const V132_RX_HTML=/<(textarea|pre|code|script|style)\b[\s\S]*?<\/\1\s*>|<[^>]*>|[^<]+/gi;
+function v132Html(h){if(V132.off||typeof h!=='string'||!/\d{4}-\d{2}/.test(h))return h;
+  return h.replace(V132_RX_HTML,(m0,prot)=>{if(prot)return m0;
+    if(m0.charCodeAt(0)===60){if(m0.indexOf('title="')<0||!/\d{4}-\d{2}/.test(m0))return m0;
+      return m0.replace(/(\stitle=")([^"]*)"/g,(x,a,b)=>a+v132Txt(b)+'"');}
+    return /\d{4}-\d{2}/.test(m0)?v132Txt(m0):m0;});}
+/* telas: embrulha todas as V.* (as que surgirem depois também, a cada render) */
+function v132EmbrulhaV(){Object.keys(V).forEach(k=>{const f=V[k];if(typeof f!=='function'||f.__v132)return;
+  const g=function(){return v132Html(f.apply(this,arguments));};g.__v132=true;g.__v132orig=f;V[k]=g;});}
+RH_PRE.push(v132EmbrulhaV);
+/* janelas (modal, confirmações, visualização de documentos) */
+{const m0=modal;modal=function(o){if(o&&typeof o==='object'){o=Object.assign({},o);if(typeof o.body==='string')o.body=v132Html(o.body);if(typeof o.title==='string')o.title=v132Txt(o.title);}
+  V132.lastModal=o;return m0.apply(this,[o].concat([].slice.call(arguments,1)));};}
+/* documentos (PDF, impressão, HTML baixado) */
+{const d0=docHtml;docHtml=function(){return v132Html(d0.apply(this,arguments));};}
+/* avisos */
+{const t0=toast;toast=function(msg){const a=[].slice.call(arguments);a[0]=v132Txt(msg);V132.ultToast=a[0];return t0.apply(this,a);};}
+/* CSV para o usuário (Excel em pt-BR entende DD/MM/AAAA); arquivos técnicos (XML, AFD, remessa CNAB, JSON) não passam por aqui */
+function v132CsvCel(v){if(typeof v!=='string')return v;
+  let m=v.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z)?)?$/);if(m&&v132DtOk(m[1],m[2],m[3]))return m[3]+'/'+m[2]+'/'+m[1]+(m[4]!=null?' '+m[4]+':'+m[5]:'');
+  m=v.match(/^((?:19|20)\d{2})-(0[1-9]|1[0-2])$/);if(m)return m[2]+'/'+m[1];
+  return /\d{4}-\d{2}-\d{2}/.test(v)?v132Txt(v):v;}
+{const c0=csv;csv=function(rows){return c0.call(this,(rows||[]).map(r=>Array.isArray(r)?r.map(v132CsvCel):r));};}
+
+/* ---------------- 1. cabeçalho fixo ao rolar ---------------- */
+function v132Estilo(){if(V132.css||typeof document==='undefined'||!document.createElement||!document.head)return;V132.css=true;
+  try{const st=document.createElement('style');st.textContent=
+  'table.v132-stk thead{position:relative;z-index:3;will-change:transform}table.v132-stk thead th{background:var(--surface,var(--card,#fff))}'+
+  'table.v132-stk.v132-on thead th{box-shadow:0 1px 0 var(--line),0 4px 6px -4px rgba(0,0,0,.25)}table.v132-stk.v132-on thead th.u3-p{box-shadow:1px 1px 0 var(--line),0 4px 6px -4px rgba(0,0,0,.25)}'+
+  'table.u3-mx.v132-stk thead th.u3-p{z-index:4}'+
+  /* 2. contratos */
+  '.v132-ctrT td.v132-pj,.v132-ctrT td.v132-ct{min-width:170px;max-width:260px;white-space:normal;overflow-wrap:normal;word-break:normal}'+
+  '.v132-ctrT .v132-cl2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;white-space:normal;word-break:normal;overflow-wrap:anywhere;hyphens:none}'+
+  '.v132-ctrT td.v132-al{min-width:150px;max-width:230px;white-space:normal}.v132-ctrT td.v132-al .pill{white-space:normal;line-height:1.25;margin:0 3px 3px 0;display:inline-block}'+
+  '.v132-ctrT td.act{white-space:normal;min-width:96px}.v132-ctrT td.act .btn{margin:0 3px 3px 0}.v132-ctrT td.v132-cli{min-width:120px;max-width:200px;white-space:normal}'+
+  '.v132-ctrT td.v132-vg .sub,.v132-ctrT td.v132-va .sub{white-space:normal;min-width:120px}'+
+  /* 3. novo projeto no contrato */
+  '.v132-np{grid-column:1/-1;border:1px dashed var(--accent,#2457d6);border-radius:10px;padding:10px 12px;margin:4px 0;background:color-mix(in srgb,var(--accent,#2457d6) 5%,transparent)}'+
+  '.v132-np .fg{margin-top:6px}'+
+  /* 6. filtro de data nas oportunidades */
+  '.v132-od{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}.v132-od .f{min-width:0}.v132-od input[type=date]{min-width:0;width:150px}';
+  document.head.appendChild(st);}catch(e){}}
+v132Estilo();
+/* altura real do que fica preso no topo (barra superior, submenu e as opções de menu da v131) */
+function v132TopoAlt(){if(typeof document==='undefined'||!document.querySelectorAll||typeof getComputedStyle==='undefined')return 0;let b=0;
+  const vw=window.innerWidth||1366,vh=window.innerHeight||900,cand=new Set();
+  try{const t=document.querySelector('.top');if(t)cand.add(t);Array.prototype.forEach.call(document.body.children,e=>cand.add(e));
+    const app=document.getElementById('app');if(app)Array.prototype.forEach.call(app.children,e=>cand.add(e));}catch(e){}
+  cand.forEach(e=>{try{const cs=getComputedStyle(e);if(cs.position!=='sticky'&&cs.position!=='fixed')return;if(cs.display==='none'||cs.visibility==='hidden')return;
+    const r=e.getBoundingClientRect();if(r.height<=0||r.top>1||r.bottom<=0||r.width<vw*0.5||r.height>vh*0.5)return;if(r.bottom>b)b=r.bottom;}catch(x){}});
+  return Math.max(0,Math.round(b));}
+V132.topo=v132TopoAlt;
+function v132StkAplica(){if(typeof document==='undefined'||!document.querySelectorAll)return;const ts=document.querySelectorAll('#view table.v132-stk');if(!ts.length)return;
+  const topo=v132TopoAlt();
+  Array.prototype.forEach.call(ts,tb=>{const th=tb.tHead;if(!th)return;const r=tb.getBoundingClientRect(),hh=th.offsetHeight||0;
+    let off=Math.round(topo-r.top);const max=Math.max(0,Math.round(r.height-hh-(tb.tBodies[0]&&tb.tBodies[0].rows.length?Math.min(40,tb.tBodies[0].rows[tb.tBodies[0].rows.length-1].offsetHeight):0)));
+    if(off<0)off=0;if(off>max)off=max;
+    const v=off?'translateY('+off+'px)':'';if(th.style.transform!==v)th.style.transform=v;tb.classList.toggle('v132-on',off>0);});}
+{let pend=false;const agenda=()=>{if(pend)return;pend=true;const f=()=>{pend=false;v132StkAplica();};try{(window.requestAnimationFrame||setTimeout)(f);}catch(e){pend=false;}};
+  try{window.addEventListener('scroll',agenda,{passive:true});window.addEventListener('resize',agenda);}catch(e){}
+  RH_POST.push(()=>{agenda();setTimeout(agenda,60);});V132.stk=v132StkAplica;}
+function v132MarcaStk(h){
+  /* tabela de perfis: sem a rolagem própria (a página rola); só a rolagem lateral quando precisar */
+  h=h.replace('<div class="tw" style="border:0;max-height:70vh;overflow:auto"><table class="u3-mx">','<div class="tw v132-tw" style="border:0"><table class="u3-mx v132-stk">');
+  /* lista de pessoas */
+  h=h.replace(/<table((?:\s[^>]*)?)>((?:<colgroup>[\s\S]*?<\/colgroup>)?<thead><tr><th>Pessoa<\/th><th>Perfil)/,(m0,at,rest)=>{
+    if(/class="/.test(at||''))return '<table'+at.replace('class="','class="v132-stk ')+'>'+rest;return '<table class="v132-stk"'+(at||'')+'>'+rest;});
+  return h;}
+{const v0=V.usr;V.usr=function(){return v132MarcaStk(v0.apply(this,arguments));};}
+
+/* ---------------- 5. vigência e valor atualizados ---------------- */
+const v132Dias=(a,b)=>Math.round((new Date(b+'T12:00:00')-new Date(a+'T12:00:00'))/864e5);
+const V132_ISO=/^\d{4}-\d{2}-\d{2}$/;
+function v132Vig(c){c=c||{};const orig=V132_ISO.test(c.vigFim||'')?c.vigFim:'';
+  const ads=(c.aditivos||[]).filter(a=>a&&V132_ISO.test(a.novoFim||''));
+  const atual=ctrFim(c)||orig,dias=orig&&atual&&atual>orig?v132Dias(orig,atual):0;
+  return {orig,atual,dias,n:ads.length,mudou:!!(orig&&atual&&atual!==orig)};}
+function v132Val(c){c=c||{};const ini=ctrIni(c),at=ctrAtual(c),ads=(c.aditivos||[]).filter(a=>a&&['acrescimo','supressao','reajuste'].includes(a.tipo)&&+a.valor);
+  return {ini,atual:at,dif:r2(at-ini),n:ads.length,acr:ctrAcr(c),sup:ctrSup(c),reaj:ctrReaj(c)};}
+const v132Pl=(n,s,p)=>n+' '+(n===1?s:p);
+function v132VigTxt(c){const v=v132Vig(c);if(!v.atual)return '—';
+  if(!v.mudou)return fmtDate(v.atual)+(v.n?' (sem mudança de prazo)':'');
+  return fmtDate(v.atual)+' (original '+fmtDate(v.orig)+(v.dias?', +'+v.dias+' dias':'')+' em '+v132Pl(v.n,'aditivo','aditivos')+')';}
+function v132ValTxt(c){const v=v132Val(c);if(!v.n)return money(v.atual);
+  return money(v.atual)+' (original '+money(v.ini)+', '+(v.dif>=0?'+':'−')+money(Math.abs(v.dif))+' em '+v132Pl(v.n,'aditivo','aditivos')+')';}
+Object.assign(V132,{vig:v132Vig,val:v132Val,vigTxt:v132VigTxt,valTxt:v132ValTxt});
+
+/* ---------------- 2 e 5. lista de contratos ---------------- */
+{const v0=V.ctr;V.ctr=function(){let h=v0.apply(this,arguments);
+  const ih=h.indexOf('<th>Projeto</th><th>Contrato</th>');if(ih<0)return h;const it=h.lastIndexOf('<table',ih),fimT=h.indexOf('</table>',ih);if(it<0||fimT<0)return h;
+  let tb=h.slice(it,fimT);
+  tb=tb.replace(/^<table([^>]*)>/,(m0,at)=>{at=(at||'').replace(/style="min-width:\d+px"/,'style="min-width:0;width:100%"');return /class="/.test(at)?'<table'+at.replace('class="','class="v132-ctrT ')+'>':'<table class="v132-ctrT"'+at+'>';})
+    .replace('<th>Vigência</th>','<th>Vigência até</th>');
+  tb=tb.replace(/<tr>(?:(?!<\/tr>)[\s\S])*<\/tr>/g,tr=>{const m=tr.match(/data-act="ctrVer" data-id="([^"]+)"/);const c=m?get('ctr',m[1]):null;if(!c)return tr;
+    const tds=[];const rx=/<td\b[^>]*>(?:(?!<\/td>)[\s\S])*<\/td>/g;let x;while((x=rx.exec(tr)))tds.push({s:x[0],i:x.index});
+    if(tds.length<8)return tr;
+    const p=c.projId?get('proj',c.projId):null,vg=v132Vig(c),va=v132Val(c);
+    const novo=tds.map((t,k)=>{let s=t.s;
+      if(k===0){if(p){const nm=p.nome&&p.nome!==p.codigo?p.nome:'';s='<td class="v132-pj" title="'+esc((p.codigo||'')+(nm?' · '+nm:''))+'"><b class="mono">'+esc(p.codigo||'—')+'</b>'+(nm?'<div class="sub v132-cl2">'+esc(nm)+'</div>':'')+'</td>';}
+        else s=s.replace('<td>','<td class="v132-pj">');}
+      else if(k===1){s='<td class="v132-ct" title="'+esc((c.numero||'')+' · '+(c.objeto||''))+'"><b>'+esc(c.numero)+'</b><div class="sub v132-cl2">'+esc(String(c.objeto||''))+'</div></td>';}
+      else if(k===2)s=s.replace(/^<td>/,'<td class="v132-cli">');
+      else if(k===3){s='<td class="num v132-va">'+money(va.atual)+(va.n?'<div class="sub">original '+money(va.ini)+'<br>'+(va.dif>=0?'+':'−')+money(Math.abs(va.dif))+' em '+v132Pl(va.n,'aditivo','aditivos')+'</div>':'')+'</td>';}
+      else if(/^<td class="mono">/.test(s)&&k>=6&&k<=7){s='<td class="v132-vg"><span class="mono">'+(vg.atual?fmtDate(vg.atual):'—')+'</span>'+(vg.mudou?'<div class="sub">original '+fmtDate(vg.orig)+(vg.dias?'<br>+'+vg.dias+' dias':'')+' em '+v132Pl(vg.n,'aditivo','aditivos')+'</div>':'')+(c.vigIni?'<div class="sub">início '+fmtDate(c.vigIni)+'</div>':'')+'</td>';}
+      else if(k===tds.length-2&&!/class="/.test(s.slice(0,12)))s=s.replace(/^<td>/,'<td class="v132-al">');
+      return s;});
+    let out='',pos=0;tds.forEach((t,k)=>{out+=tr.slice(pos,t.i)+novo[k];pos=t.i+t.s.length;});return out+tr.slice(pos);});
+  return h.slice(0,it)+tb+h.slice(fimT);};}
+/* detalhe do contrato: vigência e valor atualizados, e a ficha em PDF */
+{const v0=A.ctrVer;A.ctrVer=function(d){const c=get('ctr',d&&d.id);if(!c)return v0.apply(this,arguments);const m0=modal;
+  modal=function(o){if(o&&typeof o.body==='string'&&o.body.indexOf('<div class="kpis">')>=0&&/^Contrato /.test(o.title||'')){
+      const vg=v132Vig(c),va=v132Val(c);o=Object.assign({},o);
+      o.body=o.body.replace('<div class="kpis">','<div class="kpis">'+kpi('Vigência atualizada',vg.atual?fmtDate(vg.atual):'—',vg.mudou?'original '+fmtDate(vg.orig)+(vg.dias?', +'+vg.dias+' dias':'')+' em '+v132Pl(vg.n,'aditivo','aditivos'):(vg.orig?'sem aditivo de prazo':''),''))
+        .replace(/(<div class="kl">Valor atual<\/div><div class="kv mono [^"]*">[^<]*<\/div>)<div class="ks">[^<]*<\/div>/,'$1<div class="ks">'+esc(va.n?'original '+money(va.ini)+', '+(va.dif>=0?'+':'−')+money(Math.abs(va.dif))+' em '+v132Pl(va.n,'aditivo','aditivos'):'original '+money(va.ini)+', sem aditivo de valor')+'</div>');
+      if(typeof o.foot==='string')o.foot='<button class="btn" data-act="v132CtrFicha" data-id="'+esc(c.id)+'">Ficha do contrato (PDF)</button>'+o.foot;}
+    return m0.apply(this,[o].concat([].slice.call(arguments,1)));};
+  try{return v0.apply(this,arguments);}finally{modal=m0;}};}
+const V132_AD_T={acrescimo:'Acréscimo de valor',supressao:'Supressão de valor',prazo:'Prorrogação de prazo',reajuste:'Reajuste'};
+A.v132CtrFicha=d=>{const c=get('ctr',d&&d.id);if(!c)return;const vg=v132Vig(c),va=v132Val(c),md=ctrMedido(c),p=c.projId?get('proj',c.projId):null;
+  const ads=(c.aditivos||[]).slice().sort((a,b)=>String(a.data||'').localeCompare(String(b.data||'')));
+  showDoc({tipo:'Ficha do contrato',numero:c.numero,situacao:(CTR_ST[c.status||'vigente']||['—'])[0],
+    meta:[['Contratante',parcNome(c.parcId)],['Projeto',p?(p.codigo||'')+(p.nome&&p.nome!==p.codigo?' · '+p.nome:''):'—'],['Objeto',c.objeto||''],['Processo / edital',c.processo||''],['Assinatura',c.assinatura?fmtDate(c.assinatura):''],
+      ['Início da vigência',c.vigIni?fmtDate(c.vigIni):''],['Vigência atualizada',v132VigTxt(c)],['Valor atualizado',v132ValTxt(c)],['Medido',money(md)],['Saldo a executar',money(va.atual-md)]],
+    tables:[{title:'Aditivos',head:['Nº','Data','Tipo','Valor','Nova vigência','Justificativa'],num:[3],rows:ads.length?ads.map(a=>[a.num||'',a.data?fmtDate(a.data):'',V132_AD_T[a.tipo]||a.tipo||'',+a.valor?money(a.valor):'',a.novoFim?fmtDate(a.novoFim):'',a.obs||'']):[['','','Nenhum aditivo','','','']]}],
+    totals:[['Valor original',money(va.ini)],['Acréscimos',money(va.acr)],['Supressões',money(va.sup)],['Reajustes',money(va.reaj)],['Valor atualizado',money(va.atual),true]]},'ficha-contrato-'+slug(String(c.numero||'contrato')));};
+ACT_GROUP.v132CtrFicha=null;
+
+/* ---------------- 3. contrato: + Criar novo projeto ---------------- */
+const V132_NOVO='__v132novo';
+const v132ProjN=cod=>{const m=String(cod||'').trim().match(/^P\s*-?\s*0*(\d+)$/i);return m?+m[1]:null;};
+/* próximo P### livre; segue o jeito de escrever que a empresa já usa (P491 ou P-491) */
+function v132ProxCod(){let mx=0,hif=0,sem=0;S.proj.forEach(p=>{const n=v132ProjN(p.codigo);if(n==null)return;if(/^P\s*-/i.test(String(p.codigo).trim()))hif++;else sem++;if(n>mx&&n<100000)mx=n;});let n=mx+1;
+  const usados=new Set(S.proj.map(p=>v132ProjN(p.codigo)).filter(x=>x!=null));while(usados.has(n))n++;return (hif>sem?'P-':'P')+String(n).padStart(3,'0');}
+function v132CodRepetido(cod,ignId){const n=v132ProjN(cod),u=String(cod||'').trim().toUpperCase();
+  return S.proj.some(p=>p.id!==ignId&&((n!=null&&v132ProjN(p.codigo)===n)||String(p.codigo||'').trim().toUpperCase()===u));}
+function v132QuemCriaProj(){const ns=Object.keys(PERFIS).filter(k=>{const p=PERFIS[k];return p&&!p.interno&&!p.inativo&&k!=='pendente'&&(p.w==='*'||(Array.isArray(p.w)&&p.w.includes('proj')));}).map(k=>PERFIS[k].nome||k);
+  return ns.length?ns.join(', '):'Administrador';}
+function v132NpPainel(r){const np=r._np||{};const cli=S.parc.filter(x=>x.tipo!=='fornecedor').sort(byNome).map(x=>[x.id,x.nome]);
+  return '<div class="v132-np" id="v132Np"><b>Novo projeto</b> <span class="sub">(será criado e ligado a este contrato ao salvar; situação: ativo)</span>'+
+    '<div class="fg">'+field('Código do projeto *','np_codigo','text',np.codigo!=null?np.codigo:v132ProxCod())+field('Nome do projeto *','np_nome','text',np.nome!=null?np.nome:String(r.objeto||'').slice(0,120))+
+    field('Cliente','np_parcId','select',np.parcId!=null?np.parcId:(r.parcId||''),{opts:cli,blank:'—'})+field('Início','np_inicio','date',np.inicio!=null?np.inicio:(r.vigIni||todayStr()))+'</div>'+
+    '<div class="acts" style="margin-top:6px;justify-content:flex-start"><button class="btn sm" data-act="v132NpCancela">Não criar projeto</button></div></div>';}
+function v132CtrBody(h,r){const i=h.indexOf('id="f_projId"');if(i<0)return h;const fim=h.indexOf('</select>',i);if(fim<0)return h;
+  const pode=mayW('proj'),novo=!!r._np;
+  let opc=pode?'<option value="'+V132_NOVO+'"'+(novo?' selected':'')+'>+ Criar novo projeto</option>':'<option value="" disabled>+ Criar novo projeto (só quem grava Obras)</option>';
+  let sel=h.slice(i,fim);if(novo)sel=sel.replace(/ selected(?=>)/g,'');
+  h=h.slice(0,i)+sel+opc+h.slice(fim);
+  const lab=h.indexOf('</label>',h.indexOf('</select>',i));if(lab<0)return h;
+  const extra=novo&&pode?v132NpPainel(r):(!pode&&!r.projId?'<div class="sub" style="grid-column:1/-1;margin:-4px 0 4px">Sem o projeto certo na lista? Projetos novos são criados por quem grava Obras/Projetos ('+esc(v132QuemCriaProj())+'). Peça a essa pessoa ou ao administrador.</div>':'');
+  return h.slice(0,lab+8)+extra+h.slice(lab+8);}
+function v132IsoDe(s){s=String(s||'').trim();if(V132_ISO.test(s))return s;const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):s;}
+{const cf0=ctrForm;ctrForm=function(c){cf0.apply(this,arguments);if(!EDC||EDC.rec!==c)return;const b0=EDC.body,s0=EDC.save;
+  EDC.body=r=>v132CtrBody(b0(r),r);
+  EDC.save=r=>{/* datas dos aditivos digitadas como DD/MM/AAAA viram AAAA-MM-DD (o cálculo da vigência usa esse formato) */
+    (r.aditivos||[]).forEach(a=>{if(a){if(a.data)a.data=v132IsoDe(a.data);if(a.novoFim)a.novoFim=v132IsoDe(a.novoFim);}});
+    const np={codigo:String(r.np_codigo==null?'':r.np_codigo).trim(),nome:String(r.np_nome==null?'':r.np_nome).trim(),parcId:r.np_parcId||r.parcId||'',inicio:r.np_inicio||r.vigIni||todayStr()};
+    const limpa=()=>{['np_codigo','np_nome','np_parcId','np_inicio'].forEach(k=>delete r[k]);};
+    if(r.projId!==V132_NOVO){limpa();delete r._np;return s0(r);}
+    if(!mayW('proj')){toast('Seu perfil não cria projetos. Peça a quem grava Obras/Projetos ('+v132QuemCriaProj()+').','neg');return false;}
+    if(!np.codigo||!np.nome){toast('Informe o código e o nome do novo projeto.','neg');return false;}
+    if(v132CodRepetido(np.codigo)){toast('Já existe um projeto com o código '+np.codigo+'. Sugestão livre: '+v132ProxCod()+'.','neg');return false;}
+    const p={id:uid(),codigo:np.codigo,nome:np.nome,parcId:np.parcId,status:'ativo',orcamento:0,pctRateio:0,inicio:np.inicio,fim:ctrFim(r)||'',ctrId:r.id,oppId:r.oppId||'',valorVenda:ctrAtual(r)||0,
+      obs:'Criado na edição do contrato '+(r.numero||'')+(r.processo?' · processo '+r.processo:'')+' · '+parcNome(r.parcId)};
+    const bak=r._np;limpa();delete r._np;r.projId=p.id;
+    const res=s0(r);
+    if(res===false){r.projId=V132_NOVO;r._np=bak||np;return false;}
+    put('proj',p);const o=r.oppId?get('opp',r.oppId):null;if(o&&!o.projId)put('opp',Object.assign(cl(o),{projId:p.id}));
+    toast('Projeto '+p.codigo+' criado e ligado ao contrato.','pos');return res;};
+  edRender();};}
+A.v132NpAbre=()=>{if(!EDC)return;try{edRead();}catch(e){}if(!mayW('proj')){toast('Projetos novos são criados por quem grava Obras/Projetos ('+v132QuemCriaProj()+').','neg');EDC.rec.projId='';edRender();return;}
+  EDC.rec.projId=V132_NOVO;EDC.rec._np={codigo:v132ProxCod(),nome:String(EDC.rec.objeto||'').slice(0,120),parcId:EDC.rec.parcId||'',inicio:EDC.rec.vigIni||todayStr()};edRender();
+  try{const e=document.getElementById('f_np_codigo');if(e&&e.focus)e.focus();}catch(e){}};
+A.v132NpCancela=()=>{if(!EDC)return;try{edRead();}catch(e){}delete EDC.rec._np;['np_codigo','np_nome','np_parcId','np_inicio'].forEach(k=>delete EDC.rec[k]);EDC.rec.projId='';edRender();};
+Object.assign(ACT_GROUP,{v132NpAbre:null,v132NpCancela:null});
+try{document.addEventListener('change',e=>{const t=e.target;if(!t||t.id!=='f_projId'||!EDC)return;
+  if(t.value===V132_NOVO&&!(EDC.rec&&EDC.rec._np))A.v132NpAbre();else if(t.value!==V132_NOVO&&EDC.rec&&EDC.rec._np){A.v132NpCancela();const s=document.getElementById('f_projId');if(s&&t.value)s.value=t.value;if(EDC.rec)EDC.rec.projId=t.value;}});}catch(e){}
+
+/* ---------------- 6. oportunidades: filtro de data ---------------- */
+const V132_OREF=[['','Apresentação / sessão'],['prev','Previsão de decisão'],['res','Data do resultado']];
+const V132_MES=[['01','Janeiro'],['02','Fevereiro'],['03','Março'],['04','Abril'],['05','Maio'],['06','Junho'],['07','Julho'],['08','Agosto'],['09','Setembro'],['10','Outubro'],['11','Novembro'],['12','Dezembro']];
+const V132_OK=['dref','dde','date','dano','dmes'];
+function v132OppData(o,ref){ref=ref==null?(ui.opp&&ui.opp.dref)||'':ref;const iso=x=>{x=String(x||'').slice(0,10);return V132_ISO.test(x)?x:'';};
+  let d=ref==='prev'?iso(o.prev):ref==='res'?iso(o.resultadoEm):iso(o.dataSessao)||iso(o.dataApres);
+  if(!d&&o.historico)d=iso(o.dataSessao)||iso(o.dataApres)||iso(o.prev)||iso(o.resultadoEm);
+  return d;}
+{const d=MODS2.opp;if(d){const f=ui.opp;V132_OK.forEach(k=>{if(f[k]==null)f[k]='';});
+  try{const s=JSON.parse(sessionStorage.getItem('cg.v132.oppData')||'null');if(s&&typeof s==='object')V132_OK.forEach(k=>{if(typeof s[k]==='string')f[k]=s[k];});}catch(e){}
+  d.filters=(d.filters||[]).concat([
+    {k:'dde',l:'De',opts:()=>[],match:(r,v)=>{const x=v132OppData(r);return !!x&&x>=v;}},
+    {k:'date',l:'Até',opts:()=>[],match:(r,v)=>{const x=v132OppData(r);return !!x&&x<=v;}},
+    {k:'dano',l:'Ano',opts:()=>{const ys=new Set();S.opp.forEach(o=>{const x=v132OppData(o);if(x)ys.add(x.slice(0,4));});if(ui.opp.dano)ys.add(ui.opp.dano);return Array.from(ys).sort().reverse().map(y=>[y,y]);},match:(r,v)=>{const x=v132OppData(r);return !!x&&x.slice(0,4)===v;}},
+    {k:'dmes',l:'Mês',opts:()=>V132_MES,match:(r,v)=>{const x=v132OppData(r);return !!x&&x.slice(5,7)===v;}}]);}}
+function v132OppBarra(h){const f=ui.opp;
+  const lab=(k,inner)=>'<label class="f"><span>'+inner[0]+'</span>'+inner[1]+'</label>';
+  const tira=k=>{const rx=new RegExp('<label class="f"><span>[^<]*</span><select id="s_opp_'+k+'"[\\s\\S]*?</select></label>');const m=h.match(rx);if(m)h=h.replace(m[0],'');return !!m;};
+  const temAno=h.indexOf('id="s_opp_dano"')>=0;if(!temAno)return h;
+  const anoSel=(h.match(/<label class="f"><span>Ano<\/span><select id="s_opp_dano"[\s\S]*?<\/select><\/label>/)||[''])[0];
+  const mesSel=(h.match(/<label class="f"><span>Mês<\/span><select id="s_opp_dmes"[\s\S]*?<\/select><\/label>/)||[''])[0];
+  tira('dde');tira('date');tira('dano');tira('dmes');
+  const ativo=V132_OK.some(k=>k!=='dref'&&f[k]);
+  const bloco='<div class="bar v132-od" id="v132OppData" role="group" aria-label="Filtro por data">'+
+    lab('dref',['Data de referência','<select id="s_opp_dref" data-filter="opp.dref">'+opt(V132_OREF,f.dref||'')+'</select>'])+
+    lab('dde',['De','<input type="date" id="s_opp_dde" data-filter="opp.dde" value="'+esc(f.dde||'')+'">'])+
+    lab('date',['Até','<input type="date" id="s_opp_date" data-filter="opp.date" value="'+esc(f.date||'')+'">'])+anoSel+mesSel.replace('>Todos<','>Todos os meses<')+
+    (ativo?'<button class="btn sm" data-act="v132OppLimpa" style="margin-bottom:2px">Limpar datas</button>':'')+
+    '<span class="sub" style="flex-basis:100%;margin-top:-2px">Sem data no campo escolhido, a oportunidade fica fora quando há filtro de data'+(S.opp.some(o=>o.historico)?' (o histórico importado usa a data que tiver)':'')+'.</span></div>';
+  const ib=h.indexOf('<div class="bar">');if(ib<0)return h;const fb=h.indexOf('</div>',ib);
+  return h.slice(0,fb+6)+bloco+h.slice(fb+6);}
+{const v0=V.opp;if(v0){V.opp=function(){const f=ui.opp;if(f.dde&&f.date&&f.dde>f.date){const t=f.dde;f.dde=f.date;f.date=t;}
+  try{const o={};V132_OK.forEach(k=>{o[k]=f[k]||'';});sessionStorage.setItem('cg.v132.oppData',JSON.stringify(o));}catch(e){}
+  return v132OppBarra(v0.apply(this,arguments));};}}
+A.v132OppLimpa=()=>{['dde','date','dano','dmes'].forEach(k=>{ui.opp[k]='';});render();};
+ACT_GROUP.v132OppLimpa=null;
+Object.assign(V132,{edc:()=>EDC,oppData:v132OppData,proxCod:v132ProxCod,html:v132Html,txt:v132Txt,csvCel:v132CsvCel});
+v132EmbrulhaV();
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='131',APP_DATA='2026-10-28';
+const APP_VER='132',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['132','2026-10-28',['Datas em DD/MM/AAAA em todo o sistema (telas, janelas, PDF, avisos, histórico e planilhas CSV); competências como MM/AAAA.', 'Contratos com clientes: descrição do projeto e objeto na horizontal (até 2 linhas, texto inteiro ao passar o mouse); Vigência atualizada e Valor atualizado com os aditivos, com o original ao lado, na lista, no detalhe e na ficha em PDF; botão + Criar novo projeto na edição do contrato.', 'Usuários: cabeçalho da tabela O que cada perfil pode fazer fixo ao rolar e coluna de perfil fixa ao rolar para o lado.', 'Oportunidades e licitações: filtros por data (apresentação/sessão, previsão ou resultado) com período, ano e mês.']],
   ['131','2026-10-28',['Aparência do menu (para teste, escolha de cada pessoa) em Sistema › Configurações ou no menu da conta: Atual, F1 (três linhas, módulos rolando para os lados), F2 (duas linhas com menu da conta), C (barra lateral de ícones com painel de telas) e D (mega-menu com Favoritas e recentes).', 'Busca rápida Ir para… (Ctrl+K ou Cmd+K, e o botão de busca do topo): encontra telas, ações Novo… e registros (clientes, fornecedores, colaboradores, obras, propostas, contas), só o que o perfil pode ver.']],
   ['130.2','2026-10-28',['Botão Sair (e Enviar link de senha em Usuários › Editar) de volta: tinham sumido desde a versão 124 por um arquivo do sistema sobrescrito por engano.', 'Fábrica virou módulo próprio no menu superior, ao lado de Qualidade, com Painel de produção e Ordens de fabricação (saiu de Obras).']],
   ['130.1','2026-10-28',['Sistema › Usuários: coluna Acesso com a situação de cada pessoa (ativo, sem senha, desativado, bloqueado por tentativas, cria a senha no próximo acesso) e a última falha de entrada com o motivo; botões Enviar convite/link de senha, Senha provisória (troca obrigatória no primeiro acesso), Reativar e Desbloquear; aviso das contas importadas sem senha com Enviar convite a todos.', 'Login: dica para usar Esqueci minha senha; Esqueci minha senha envia o convite para quem ainda não criou a senha; bloqueio por tentativas mais tolerante para quem usa a mesma internet no escritório (o limite por e-mail continua protegendo cada conta).']],
