@@ -24385,7 +24385,7 @@ function nfrAcesso(){
 const nfrGuarda=em=>{const a=parseInt(String(em||'').slice(0,4),10);return a>1900?(a+5)+'-12-31':'';};
 const nfrDentroPrazo=em=>{const g=nfrGuarda(em);return !g||todayStr()<=g;};
 const nfrDocFmt=d=>{d=String(d||'');return /^\d{14}$|^\d{11}$/.test(d)?fmtDoc(d):d;};
-const nfrSitPill=r=>r.situacao==='cancelada'?pill('Cancelada','neg'):r.situacao==='desconhecida'?pill('Situação desconhecida','warn'):pill('Autorizada','pos');
+const nfrSitPill=r=>r.situacao==='cancelada'?pill('Cancelada','neg'):r.situacao==='inexistente'?pill('Não encontrada na SEFAZ','neg'):r.situacao==='denegada'?pill('Denegada','neg'):r.situacao==='desconhecida'?pill('Situação desconhecida','warn'):pill('Autorizada','pos');
 const NFR_ORIG={historico:'Histórico (Omie)',upload:'XML enviado',sefaz:'Conector (SEFAZ)'};
 
 /* ---------- conversa com o servidor ---------- */
@@ -24435,7 +24435,7 @@ function nfrFiltros(){
   return '<div class="bar">'+
     '<label class="f grow"><span>Buscar</span><input id="q_nfr" data-filter="nfr.q" value="'+esc(f.q)+'" placeholder="Chave, número, fornecedor/cliente ou CNPJ"></label>'+tipoSel+
     lab('Emissão de','<input type="date" id="d_nfrde" data-filter="nfr.de" value="'+esc(f.de)+'">')+lab('até','<input type="date" id="d_nfrate" data-filter="nfr.ate" value="'+esc(f.ate)+'">')+
-    lab('Situação','<select id="s_nfrsit" data-filter="nfr.sit">'+opt([['autorizada','Autorizada'],['cancelada','Cancelada']],f.sit,'Todas')+'</select>')+vincSel+
+    lab('Situação','<select id="s_nfrsit" data-filter="nfr.sit">'+opt([['autorizada','Autorizada'],['cancelada','Cancelada'],['inexistente','Não encontrada na SEFAZ'],['denegada','Denegada']],f.sit,'Todas')+'</select>')+vincSel+
     lab('Valor de','<input type="number" step="0.01" min="0" id="v_nfrmin" data-filter="nfr.vmin" value="'+esc(f.vmin)+'" style="width:110px">')+lab('até','<input type="number" step="0.01" min="0" id="v_nfrmax" data-filter="nfr.vmax" value="'+esc(f.vmax)+'" style="width:110px">')+
     lab('Origem','<select id="s_nfrorig" data-filter="nfr.origem">'+opt(Object.entries(NFR_ORIG),f.origem,'Todas')+'</select>')+'</div>';
 }
@@ -24711,10 +24711,10 @@ async function nfrArquivar(items,origem){
 /* ---------- Contas a pagar e a receber: DANFE, Anexar, filtro "Nota fiscal" e marca da nota ---------- */
 const nfrTemNota=l=>!!(l.arqf&&l.arqf.ch)||!!l.notaId||(l.anexos||[]).some(a=>a.tipo==='danfe');
 {const r0=titulosRows;titulosRows=function(tipo){const f=ui[tipo==='receber'?'rec':'pag']||{},v=f.nfs||'';let rs=r0.apply(this,arguments);
-  if(v==='sem')rs=rs.filter(l=>!nfrTemNota(l)&&!l.guia&&!l.transf);else if(v==='com')rs=rs.filter(nfrTemNota);else if(v==='canc')rs=rs.filter(l=>l.arqf&&l.arqf.sit==='cancelada');
+  if(v==='sem')rs=rs.filter(l=>!nfrTemNota(l)&&!l.guia&&!l.transf);else if(v==='com')rs=rs.filter(nfrTemNota);else if(v==='canc')rs=rs.filter(l=>l.arqf&&['cancelada','inexistente','denegada'].includes(l.arqf.sit));
   return rs;};}
 function nfrMarca(l){
-  if(l.arqf&&l.arqf.ch)return l.arqf.sit==='cancelada'?' <span class="pill neg" title="A nota fiscal ligada foi CANCELADA">NF '+esc(l.arqf.n||'')+' cancelada</span>':' <span class="pill pos" title="Nota fiscal ligada (chave '+esc(l.arqf.ch)+')">NF '+esc(l.arqf.n||'')+'</span>';
+  if(l.arqf&&l.arqf.ch)return (l.arqf.sit==='inexistente'||l.arqf.sit==='denegada')?' <span class="pill neg" title="A SEFAZ não confirma esta nota: não pague antes de conferir com o fornecedor">NF '+esc(l.arqf.n||'')+(l.arqf.sit==='denegada'?' denegada':' não encontrada na SEFAZ')+'</span>':l.arqf.sit==='cancelada'?' <span class="pill neg" title="A nota fiscal ligada foi CANCELADA">NF '+esc(l.arqf.n||'')+' cancelada</span>':' <span class="pill pos" title="Nota fiscal ligada (chave '+esc(l.arqf.ch)+')">NF '+esc(l.arqf.n||'')+'</span>';
   if(l.notaId){const n=get('notas',l.notaId);return ' <span class="pill pos" title="Nota fiscal lançada no sistema">NF '+esc(n?(n.numero||'s/n'):'')+'</span>';}
   if((l.anexos||[]).some(a=>a.tipo==='danfe'))return ' <span class="pill" title="DANFE anexado">DANFE</span>';
   return '';
@@ -24725,8 +24725,8 @@ function nfrMarca(l){
   /* marca da nota na coluna Descrição (3ª célula) */
   h=h.replace(/<tr><td class="mono">((?:(?!<\/tr>)[\s\S])*?)<\/tr>/g,tr=>{const m=/data-act="(?:editLanc|baixar|estornar)" data-id="([^"]+)"/.exec(tr);if(!m)return tr;const l=get('lanc',m[1]);if(!l)return tr;const mk=nfrMarca(l);if(!mk)return tr;
     let k=-1;for(let c=0;c<3;c++){k=tr.indexOf('</td>',k+1);if(k<0)return tr;}return tr.slice(0,k)+mk+tr.slice(k);});
-  const canc=S.lanc.filter(l=>l.tipo===tipo&&l.status!=='cancelado'&&l.arqf&&l.arqf.sit==='cancelada');
-  if(canc.length&&f.nfs!=='canc'){const k='<div class="stack">',p=h.indexOf(k);const av='<div class="note" style="border-color:var(--neg)"><b>Nota fiscal cancelada:</b> '+canc.length+' título(s) estão ligados a nota cancelada na SEFAZ. Confira antes de '+(rec?'receber':'pagar')+'. <button class="btn sm" data-act="nfrFiltroCanc" data-k="'+key+'">Ver</button></div>';if(p>=0)h=h.slice(0,p+k.length)+av+h.slice(p+k.length);}
+  const canc=S.lanc.filter(l=>l.tipo===tipo&&l.status!=='cancelado'&&l.arqf&&['cancelada','inexistente','denegada'].includes(l.arqf.sit));
+  if(canc.length&&f.nfs!=='canc'){const k='<div class="stack">',p=h.indexOf(k);const av='<div class="note" style="border-color:var(--neg)"><b>Nota fiscal cancelada:</b> '+canc.length+' título(s) estão ligados a nota cancelada ou não encontrada na SEFAZ. Confira antes de '+(rec?'receber':'pagar')+'. <button class="btn sm" data-act="nfrFiltroCanc" data-k="'+key+'">Ver</button></div>';if(p>=0)h=h.slice(0,p+k.length)+av+h.slice(p+k.length);}
   return h;};}
 A.nfrFiltroCanc=d=>{const f=ui[d.k];if(!f)return;f.nfs='canc';f.sit='todos';render();};
 {const b0=addAnexBtns;addAnexBtns=function(html,tab){let h=b0.apply(this,arguments);if(!['pag','rec','fin'].includes(tab)||typeof h!=='string')return h;
@@ -24755,9 +24755,206 @@ if(typeof fisCarregar==='function'){const c0=fisCarregar;fisCarregar=async funct
   if(!forca&&FIS.erro&&FIS.erroEm&&Date.now()-FIS.erroEm<60000)return;
   const r=await c0.apply(this,arguments);FIS.erroEm=FIS.erro?Date.now():0;return r;};}
 
+/* ===== v130: Caixa nfe@ — NF-e que chegam por e-mail (Microsoft 365) =====
+   O servidor (deploy/gestao/caixanfe.js) lê a caixa nfe@inaservicos.com.br pelo Microsoft Graph, guarda os XML no Arquivo fiscal
+   (origem "email"), confere cada nota (destinatário é a empresa, já estava no arquivo?, situação na SEFAZ pela fila de consulta
+   por chave) e move a mensagem para a pasta "Processadas". Aqui fica a tela:
+   - Suprimentos › Recebimento de notas › aba "Caixa nfe@": estado da conexão, última e próxima leitura, "Ler agora", contadores e
+     quatro listas (a) só por e-mail, (b) cancelada/inexistente na SEFAZ (não pagar), (c) captada sem XML por e-mail (cobrar o
+     fornecedor), (d) e-mails com PDF sem XML (pedir o XML), mais o histórico das leituras;
+   - Sistema › Configurações: cartão com o estado, a caixa, a pasta, o intervalo e o aviso de vencimento do segredo;
+   - Arquivo fiscal: origem "E-mail (nfe@)" no filtro e a marca "também por e-mail" na nota.
+   Acesso (igual ao servidor): Fiscal, Financeiro, Administrador e Diretoria (e o dono). */
+const MAIL={d:null,carregando:false,erro:'',em:0,poll:0};
+const mailSelf=()=>!!(typeof window!=='undefined'&&window.__SELFHOST);
+function mailAcesso(){
+  if(me.owner)return true;
+  const pf=me.perfil,p=PERFIS[pf]||{},pp=(p&&!p.custom&&p.papel)||pf;
+  return ['admin','financeiro','fiscal','diretoria'].includes(pp);
+}
+const mailDiasPadrao=()=>{const v=+cfg().caixaCobrarDias;return v>=1&&v<=365?v:30;};
+if(!('mailDias' in ui.nfr))ui.nfr.mailDias='';
+NFR_ORIG.email='E-mail (nfe@)';
+if(!NFR_ABAS.some(a=>a[0]==='mail'))NFR_ABAS.splice(1,0,['mail','Caixa nfe@']);
+
+/* ---------- conversa com o servidor ---------- */
+function mailCarregar(forca){
+  if(!mailSelf()||!mailAcesso())return;
+  if(MAIL.carregando)return;
+  const dias=ui.nfr.mailDias||mailDiasPadrao();if(MAIL.d&&MAIL.dias!==String(dias))forca=true; /* mudou o período da lista (c) */
+  if(!forca&&MAIL.d&&Date.now()-MAIL.em<60000)return;
+  if(!forca&&MAIL.erro&&Date.now()-MAIL.em<60000)return;
+  MAIL.carregando=true;MAIL.dias=String(dias);
+  nfrApi('/api/caixanfe?dias='+encodeURIComponent(dias)).then(j=>{MAIL.d=j;MAIL.erro='';
+    (j.a||[]).concat(j.b||[],j.c||[]).forEach(r=>{NFR.det[r.id]=r;});
+    if(j.estado==='lendo')mailAcompanhar();})
+    .catch(e=>{MAIL.erro=e.message;})
+    .finally(()=>{MAIL.carregando=false;MAIL.em=Date.now();if((ui.tab==='nfrec'||ui.tab==='arqf')&&ui.nfr.aba==='mail'||ui.tab==='cfg')render();});
+}
+/* durante a leitura, consulta o estado a cada 2 s (leve) e recarrega as listas no fim */
+function mailAcompanhar(){
+  clearTimeout(MAIL.poll);
+  MAIL.poll=setTimeout(async()=>{
+    try{const j=await nfrApi('/api/caixanfe/estado');if(MAIL.d)Object.assign(MAIL.d,j);
+      if(j.estado==='lendo')return mailAcompanhar();
+      const u=j.ultima||{},r=u.rel||{};
+      toast(u.estado==='erro'?'Leitura da caixa com erro: '+(u.erro||''):'Caixa lida: '+(r.mensagens||0)+' mensagem(ns), '+(r.novas||0)+' nota(s) nova(s), '+(r.existentes||0)+' já no arquivo'+(r.ignoradas?', '+r.ignoradas+' ignorada(s)':'')+'.',u.estado==='erro'?'neg':'pos');
+      NFR.chave='';mailCarregar(true);
+    }catch(e){MAIL.erro=e.message;render();}
+  },2000);
+}
+
+/* ---------- pedaços da tela ---------- */
+const MAIL_EST={desligado:['Desligado',''],aguardando:['Aguardando a 1ª leitura','warn'],lendo:['Lendo agora…','warn'],ok:['Conectado','pos'],parcial:['Conectado, com falha em alguma mensagem','warn'],erro:['Erro','neg']};
+function mailEstadoPill(d){const e=MAIL_EST[d.estado]||[d.estado||'—',''];return pill(e[0],e[1]);}
+function mailSitPill(r){const s=r.situacao;return s==='cancelada'?pill('Cancelada na SEFAZ','neg'):s==='inexistente'?pill('Não encontrada na SEFAZ','neg'):s==='denegada'?pill('Denegada','neg'):r.fila?pill('Consulta na SEFAZ agendada','warn'):r.sitFonte==='conector fiscal'?pill('Autorizada (SEFAZ)','pos'):pill('Autorizada (protocolo do XML)','');}
+function mailSegredoAviso(d,curto){
+  const s=d&&d.segredo;if(!s||!s.vence)return '';
+  if(s.vencido)return '<div class="note" style="border-color:var(--neg)"><b>O segredo do aplicativo do Microsoft 365 venceu em '+fmtDate(s.vence)+'.</b> A leitura da caixa para de funcionar. Crie um segredo novo no Entra (Registros de aplicativo › Certificados e segredos) e atualize M365_CLIENT_SECRET e M365_SECRET_VENCE no Easypanel.</div>';
+  if(s.aviso)return '<div class="note" style="border-color:var(--warn)"><b>O segredo do aplicativo do Microsoft 365 vence em '+fmtDate(s.vence)+' ('+s.dias+' dia'+(s.dias===1?'':'s')+').</b>'+(curto?'':' Crie um segredo novo no Entra antes disso e atualize M365_CLIENT_SECRET e M365_SECRET_VENCE no Easypanel (LEIA-ME, seção Microsoft 365).')+'</div>';
+  return '';
+}
+function mailComoConfigurar(d){
+  return '<div class="note"><b>A leitura da caixa '+esc((d&&d.email)||'nfe@inaservicos.com.br')+' está desligada.</b> Para ligar, o responsável pelo servidor registra um aplicativo no Microsoft Entra, dá a ele acesso só a esta caixa e informa no Easypanel as variáveis '+
+    '<span class="mono">M365_TENANT_ID</span>, <span class="mono">M365_CLIENT_ID</span>, <span class="mono">M365_CLIENT_SECRET</span> e <span class="mono">M365_SECRET_VENCE</span> (data em que o segredo vence). '+
+    'O passo a passo está no LEIA-ME do servidor, seção "Microsoft 365: caixa nfe@".'+((d&&d.faltam&&d.faltam.length)?' <br>Falta: <span class="mono">'+esc(d.faltam.join(', '))+'</span>.':'')+((d&&d.problemas&&d.problemas.length)?' <br>Corrigir: '+esc(d.problemas.join('; '))+'.':'')+'</div>';
+}
+function mailCartaoEstado(d){
+  const u=d.ultima,r=(u&&u.rel)||{};
+  const linhas=[
+    ['Caixa','<span class="mono">'+esc(d.email||'')+'</span> · depois de lida, a mensagem vai para a pasta <b>'+esc(d.pasta||'')+'</b>'],
+    ['Última leitura',u?fmtDT(u.ini)+' ('+(u.gatilho==='manual'?'Ler agora':'automática')+') · '+(r.mensagens||0)+' mensagem(ns), '+(r.novas||0)+' nota(s) nova(s), '+(r.existentes||0)+' já no arquivo, '+(r.ignoradas||0)+' ignorada(s)':'ainda não houve'],
+    ['Próxima',d.ligado&&d.proxima?fmtDT(d.proxima)+' · a cada '+d.intervaloMin+' min':'—'],
+    ['Situação na SEFAZ',d.conector?'conferida pela consulta por chave do conector fiscal (com limite por hora; nunca por NSU)':'sem o conector fiscal neste servidor: vale só o protocolo do XML']];
+  const erro=u&&u.erro&&(d.estado==='erro'||d.estado==='parcial')?'<div class="note" style="border-color:var(--'+(d.estado==='erro'?'neg':'warn')+')"><b>'+(d.estado==='erro'?'A última leitura falhou':'Alguma mensagem não foi lida')+':</b> '+esc(u.erro)+'</div>':'';
+  return '<div class="card"><h2 style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Caixa de notas por e-mail '+mailEstadoPill(d)+'</h2>'+
+    '<div class="stack" style="gap:4px">'+linhas.map(l=>'<div><span class="sub">'+l[0]+':</span> '+l[1]+'</div>').join('')+'</div>'+erro+mailSegredoAviso(d)+
+    (d.ligado?'<div class="acts" style="justify-content:flex-start;margin-top:10px"><button class="btn pri" data-act="mailLer"'+(d.estado==='lendo'?' disabled':'')+'>'+(d.estado==='lendo'?'Lendo…':'Ler agora')+'</button><button class="btn" data-act="mailRecarregar">Atualizar a tela</button></div>':mailComoConfigurar(d))+'</div>';
+}
+const mailEmailTxt=r=>r.email?'<div class="sub">'+esc(r.email.nome||r.email.de||'')+(r.email.nome&&r.email.de?' &lt;'+esc(r.email.de)+'&gt;':'')+'</div><div class="sub">'+esc(r.email.assunto||'(sem assunto)')+'</div>':'<span class="sub">—</span>';
+const mailNf=r=>'<span class="mono" title="Chave '+esc(r.chave)+'">'+esc(r.numero||'s/n')+'/'+esc(r.serie||'1')+'</span>';
+const mailParc=r=>esc(r.parcNome||'—')+'<div class="sub mono">'+esc(nfrDocFmt(r.parcDoc))+'</div>';
+function mailBtn(a,l,id,c){return '<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+esc(id)+'">'+l+'</button>';}
+function mailDanfeLinks(r){return (r.danfes||[]).map(p=>'<a class="btn sm" href="/api/caixanfe/pdf/'+encodeURIComponent(p.id)+'" download title="PDF que veio no e-mail (arquivo de fora: abra com cuidado)">PDF do e-mail</a>').join('');}
+function mailListaA(d){
+  const podeLancar=mayW(GROUP_OF_TAB.nfrec||'comp');
+  const rows=(d.a||[]).map(r=>'<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td>'+mailNf(r)+'</td><td>'+mailParc(r)+'</td><td class="num">'+money(r.valor)+'</td><td>'+mailSitPill(r)+(r.sitMsg?'<div class="sub">'+esc(r.sitMsg)+'</div>':'')+'</td><td>'+mailEmailTxt(r)+'</td><td>'+nfrVincTxt(r)+'</td>'+
+    '<td class="act">'+(podeLancar?mailBtn('mailLancar','Lançar',r.id,'pri'):'')+mailBtn('nfrLigar',r.vinc&&r.vinc.length?'Ligação':'Ligar',r.id)+mailBtn('nfrDanfe','DANFE',r.id)+mailDanfeLinks(r)+'</td></tr>').join('');
+  return '<div class="card"><h2>Recebidas só por e-mail ('+(d.a||[]).length+')</h2><p class="sub" style="margin:0 0 8px">Notas autorizadas que chegaram pela caixa e <b>não</b> vieram da SEFAZ (conector), do histórico do Omie nem do envio manual. Lance a nota (validação, estoque e conta a pagar, como sempre) ou ligue a uma conta que já existe.</p>'+
+    '<div class="tw"><table><thead><tr><th>Emissão</th><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Situação</th><th>E-mail</th><th>Ligação</th><th></th></tr></thead><tbody>'+(rows||emptyRow(8,'Nenhuma nota só por e-mail.'))+'</tbody></table></div></div>';
+}
+function mailListaB(d){
+  const b=d.b||[];if(!b.length)return '<div class="card"><h2>Canceladas ou não encontradas na SEFAZ</h2><p class="sub" style="margin:0">Nenhuma nota recebida por e-mail está cancelada ou sem registro na SEFAZ.</p></div>';
+  const rows=b.map(r=>'<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td>'+mailNf(r)+'</td><td>'+mailParc(r)+'</td><td class="num">'+money(r.valor)+'</td><td>'+mailSitPill(r)+(r.sitMsg?'<div class="sub">'+esc(r.sitMsg)+'</div>':'')+'</td><td>'+mailEmailTxt(r)+'</td><td>'+(r.vinc&&r.vinc.length?'<b class="neg">Ligada a '+r.vinc.length+' título(s): não pague</b>':'<span class="sub">sem título</span>')+'</td>'+
+    '<td class="act">'+mailBtn('nfrDanfe','DANFE',r.id)+mailBtn('nfrXml','XML',r.id)+mailBtn('nfrSituacao','Consultar de novo',r.id)+'</td></tr>').join('');
+  return '<div class="card" style="border-color:var(--neg)"><h2 class="neg">Não pagar: cancelada ou não encontrada na SEFAZ ('+b.length+')</h2><p style="margin:0 0 8px"><b>Estas notas chegaram por e-mail, mas a SEFAZ diz que foram canceladas, denegadas ou não as encontra para o CNPJ da empresa.</b> Não pague nem lance sem confirmar com o fornecedor e conferir a chave no portal da NF-e. Pode ser golpe (XML falso) ou nota cancelada depois do envio.</p>'+
+    '<div class="tw"><table><thead><tr><th>Emissão</th><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Situação</th><th>E-mail</th><th>Título</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+function mailListaC(d){
+  const dias=ui.nfr.mailDias||mailDiasPadrao(),orig=r=>(r.origens||[{origem:r.origem}]).map(o=>NFR_ORIG[o.origem]||o.origem).join(', ');
+  const rows=(d.c||[]).map(r=>'<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td>'+mailNf(r)+'</td><td>'+mailParc(r)+'</td><td class="num">'+money(r.valor)+'</td><td>'+esc(orig(r))+'</td><td class="act">'+mailBtn('nfrDanfe','DANFE',r.id)+'</td></tr>').join('');
+  const sel='<label class="f" style="display:inline-flex;margin:0 0 8px"><span>Emitidas nos últimos</span><select id="s_mailDias" data-filter="nfr.mailDias">'+opt([7,15,30,60,90].map(x=>[String(x),x+' dias']),String(dias))+'</select></label>';
+  return '<div class="card"><h2>Captadas sem XML por e-mail ('+(d.cTotal||0)+')</h2><p class="sub" style="margin:0 0 8px">Notas de entrada que o sistema já tem (SEFAZ, histórico do Omie ou envio manual) mas cujo XML o fornecedor não mandou para '+esc(d.email||'nfe@')+'. Só informativo: serve para pedir ao fornecedor que envie o XML para a caixa.</p>'+sel+
+    '<div class="tw"><table><thead><tr><th>Emissão</th><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Veio por</th><th></th></tr></thead><tbody>'+(rows||emptyRow(6,d.ultima?'Nenhuma nota sem XML por e-mail neste período.':'A lista aparece depois da 1ª leitura da caixa.'))+'</tbody>'+
+    ((d.cTotal||0)>(d.c||[]).length?'<tfoot><tr><td colspan="6">Mostrando '+(d.c||[]).length+' de '+d.cTotal+'.</td></tr></tfoot>':'')+'</table></div></div>';
+}
+function mailPedido(m){
+  const sub='Pedido do XML da nota fiscal'+(m.chaves&&m.chaves.length?' (chave '+m.chaves[0]+')':''),
+    corpo='Olá,\n\nRecebemos o PDF da nota fiscal ('+(m.assunto||'sem assunto')+'), mas falta o arquivo XML da NF-e. Por favor, envie o XML para '+((MAIL.d&&MAIL.d.email)||'nfe@inaservicos.com.br')+'.\n\nObrigado.';
+  return 'mailto:'+encodeURIComponent(m.de||'')+'?subject='+encodeURIComponent(sub)+'&body='+encodeURIComponent(corpo);
+}
+function mailListaD(d){
+  const rows=(d.d||[]).map(m=>'<tr><td class="mono">'+fmtDT(m.recebido||m.em)+'</td><td>'+esc(m.nome||'')+'<div class="sub">'+esc(m.de||'')+'</div></td><td>'+esc(m.assunto||'(sem assunto)')+'</td>'+
+    '<td>'+(m.pdfs||[]).map(p=>esc(p.nome)+(p.chave?'<div class="sub mono" title="Chave achada no PDF">'+esc(p.chave)+'</div>':'<div class="sub">sem chave de acesso</div>')).join('')+'</td>'+
+    '<td class="act">'+(m.de?'<a class="btn sm" href="'+esc(mailPedido(m))+'">Pedir o XML</a>':'')+mailBtn('mailDispensar','Já resolvido',m.id)+'</td></tr>').join('');
+  return '<div class="card"><h2>E-mails com PDF sem XML ('+(d.d||[]).length+')</h2><p class="sub" style="margin:0 0 8px">O PDF (DANFE) não vale como nota: peça o XML ao fornecedor. Quando o XML da mesma chave chegar, a linha sai sozinha.</p>'+
+    '<div class="tw"><table><thead><tr><th>Recebido</th><th>Remetente</th><th>Assunto</th><th>PDF</th><th></th></tr></thead><tbody>'+(rows||emptyRow(5,'Nenhum e-mail só com PDF.'))+'</tbody></table></div></div>';
+}
+function mailLeituras(d){
+  const ls=d.leituras||[];if(!ls.length)return '';
+  const est={ok:pill('ok','pos'),parcial:pill('parcial','warn'),erro:pill('erro','neg')};
+  return '<details class="card"><summary><b>Leituras recentes ('+ls.length+')</b></summary><div class="tw" style="margin-top:8px"><table><thead><tr><th>Início</th><th>Como</th><th>Resultado</th><th class="num">Mensagens</th><th class="num">Novas</th><th class="num">Já no arquivo</th><th class="num">Ignoradas</th><th class="num">PDF sem XML</th><th>Observação</th></tr></thead><tbody>'+
+    ls.map(l=>'<tr><td class="mono">'+fmtDT(l.ini)+'</td><td>'+(l.gatilho==='manual'?'Ler agora'+(l.por?' · '+esc(nameOf(l.por)):''):'automática')+'</td><td>'+(est[l.estado]||esc(l.estado||''))+'</td><td class="num">'+(l.mensagens||0)+'</td><td class="num">'+(l.novas||0)+'</td><td class="num">'+(l.existentes||0)+'</td><td class="num">'+(l.ignoradas||0)+'</td><td class="num">'+(l.pdfSemXml||0)+'</td><td>'+esc(l.erro||'')+'</td></tr>').join('')+'</tbody></table></div></details>';
+}
+function mailView(){
+  if(!mailSelf())return '<div class="note">A caixa de notas por e-mail é lida pelo servidor próprio da empresa (VPS). Abra o sistema pelo endereço da empresa.</div>';
+  if(!mailAcesso())return '<div class="note">Seu perfil não tem acesso à caixa de notas por e-mail. Quem usa: Fiscal, Financeiro, Administrador e Diretoria.</div>';
+  mailCarregar(false);
+  const d=MAIL.d;
+  if(!d)return '<p class="sub">'+(MAIL.erro?esc(MAIL.erro)+' <button class="btn sm" data-act="mailRecarregar">Tentar de novo</button>':'Carregando a caixa de notas por e-mail…')+'</p>';
+  const c=d.contadores||{};
+  const kp='<div class="kpis">'+kpi('Mensagens lidas',String(c.mensagens||0),'com anexo, desde o início')+kpi('Notas por e-mail',String(c.notasEmail||0),'no arquivo fiscal')+
+    kpi('Só por e-mail',String(c.a||0),'lançar ou ligar',c.a?'warn':'')+kpi('Não pagar',String(c.b||0),'cancelada ou não encontrada na SEFAZ',c.b?'neg':'')+
+    kpi('Sem XML por e-mail',String(c.c||0),'últimos '+(d.dias||30)+' dias')+kpi('PDF sem XML',String(c.d||0),'pedir o XML',c.d?'warn':'')+'</div>';
+  return '<div class="stack">'+mailCartaoEstado(d)+kp+mailListaB(d)+mailListaA(d)+mailListaD(d)+mailListaC(d)+mailLeituras(d)+'</div>';
+}
+
+/* ---------- encaixe na tela Recebimento de notas ---------- */
+{const a0=nfrAbas;nfrAbas=function(){let h=a0.apply(this,arguments);
+  if(!mailAcesso())return h.replace(/<button[^>]*data-v="mail"[^>]*>[\s\S]*?<\/button>/,'');
+  const n=MAIL.d&&MAIL.d.contadores?(MAIL.d.contadores.b||0):0;
+  return n?h.replace('>Caixa nfe@</button>','>Caixa nfe@ <span class="pill neg" title="Notas recebidas por e-mail canceladas ou não encontradas na SEFAZ">'+n+'</span></button>'):h;};}
+{const v0=V.nfrec;V.nfrec=function(){
+  if(ui.nfr.aba!=='mail')return v0.apply(this,arguments);
+  if(!mailAcesso()){ui.nfr.aba='lancar';return v0.apply(this,arguments);}
+  return pageHead('Recebimento de notas','Notas fiscais que chegam por e-mail na caixa '+((MAIL.d&&MAIL.d.email)||'nfe@inaservicos.com.br')+': o XML vai para o arquivo fiscal e é comparado com o que veio da SEFAZ, do Omie e do envio manual.',
+    '<button class="btn pri" data-act="importXml">Receber XML do fornecedor</button>'+nfrBotoes())+nfrAbas()+mailView();};}
+/* arquivo fiscal: marca "também por e-mail" (e as outras origens) ao lado do número da nota */
+{const t0=nfrTabela;nfrTabela=function(){let h=t0.apply(this,arguments);const L=NFR.lista;if(!L||!L.itens)return h;
+  for(const r of L.itens){const os=(r.origens||[]).map(o=>o.origem);if(os.length<2&&!(os.length===1&&os[0]==='email'&&r.origem!=='email'))continue;
+    const extra=os.filter(o=>o!==r.origem);if(!extra.length)continue;
+    const k='title="Chave '+esc(r.chave)+'">',i=h.indexOf(k);if(i<0)continue;const j=h.indexOf('</td>',i);if(j<0)continue;
+    h=h.slice(0,j)+'<div class="sub" title="Também chegou por: '+esc(extra.map(o=>NFR_ORIG[o]||o).join(', '))+'">'+(extra.includes('email')?'também por e-mail':'+ '+esc(extra.map(o=>NFR_ORIG[o]||o).join(', ')))+'</div>'+h.slice(j);}
+  return h;};}
+{const r0=A.nfrRecarregar;A.nfrRecarregar=function(){const x=r0.apply(this,arguments);if(ui.nfr.aba==='mail')mailCarregar(true);return x;};}
+
+/* ---------- ações ---------- */
+A.mailRecarregar=()=>{MAIL.erro='';mailCarregar(true);};
+A.mailLer=async()=>{
+  try{await nfrApi('/api/caixanfe/ler',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+    if(MAIL.d)MAIL.d.estado='lendo';toast('Lendo a caixa '+((MAIL.d&&MAIL.d.email)||'nfe@')+'…');render();mailAcompanhar();}
+  catch(e){toast(e.message,'neg');}
+};
+A.mailLancar=async d=>{
+  const row=NFR.det[d.id];if(!row)return;
+  try{const t=await nfrXmlTexto(d.id);importarXmls([{name:(row.chave||'nota')+'-nfe.xml',text:t}]);ui.nfr.aba='lancar';render();setTimeout(()=>{MAIL.em=0;mailCarregar(true);},2500);}
+  catch(e){toast(e.message,'neg');}
+};
+A.mailDispensar=d=>confirmBox('Tirar este e-mail da lista "PDF sem XML"? Use quando o XML já foi recebido por outro caminho ou a nota não interessa.',async()=>{
+  try{await nfrApi('/api/caixanfe/msg/'+encodeURIComponent(d.id)+'/dispensar',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});toast('E-mail tirado da lista.','pos');mailCarregar(true);}catch(e){toast(e.message,'neg');}},'Tirar da lista');
+A.mailAbrir=()=>{ui.nfr.aba='mail';if(typeof document!=='undefined'&&document.createElement&&document.body){const b=document.createElement('button');b.dataset.act='nav';b.dataset.tab='nfrec';document.body.appendChild(b);b.click();b.remove();}};
+A.mailCfgSalvar=()=>{const el=document.getElementById?document.getElementById('cfgCaixaDias'):null,v=Math.round(+(el&&el.value));
+  if(!(v>=1&&v<=365)){toast('Informe de 1 a 365 dias.','neg');return;}
+  put('cfg',Object.assign(cl(cfg()),{caixaCobrarDias:v}));ui.nfr.mailDias='';toast('Período salvo.','pos');mailCarregar(true);};
+if(typeof setInterval==='function'&&mailSelf())setInterval(()=>{if(ui.tab==='nfrec'&&ui.nfr.aba==='mail'&&MAIL.d&&MAIL.d.estado!=='lendo'&&Date.now()-MAIL.em>120000)mailCarregar(true);},30000);
+
+/* ---------- Configurações: cartão da caixa ---------- */
+function mailCfgCard(){
+  if(!mailSelf()||!mailAcesso())return '';
+  mailCarregar(false);
+  const d=MAIL.d,w=mayW('cfg');
+  if(!d)return '<div class="card"><h2>Caixa de notas por e-mail</h2><p class="sub" style="margin:0">'+(MAIL.erro?esc(MAIL.erro):'Verificando…')+'</p></div>';
+  return '<div class="card"><h2 style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Caixa de notas por e-mail '+mailEstadoPill(d)+'</h2>'+
+    (d.ligado?'<p class="sub" style="margin:0 0 6px">Caixa <span class="mono">'+esc(d.email)+'</span> · pasta das lidas: <b>'+esc(d.pasta)+'</b> · leitura a cada <b>'+d.intervaloMin+' min</b>'+(d.proxima?' · próxima '+fmtDT(d.proxima):'')+'.'+
+      (d.segredo&&d.segredo.vence?' Segredo do aplicativo vence em '+fmtDate(d.segredo.vence)+'.':' <b>Informe M365_SECRET_VENCE</b> (data em que o segredo vence) para receber o aviso 30 dias antes.')+'</p>':mailComoConfigurar(d))+
+    mailSegredoAviso(d)+
+    '<div class="fg"><label class="f"><span>Lista "sem XML por e-mail": notas emitidas nos últimos (dias)</span><input type="number" min="1" max="365" step="1" id="cfgCaixaDias" value="'+esc(mailDiasPadrao())+'"'+(w?'':' disabled')+'></label></div>'+
+    '<div class="acts" style="justify-content:flex-start;margin-top:8px">'+(w?'<button class="btn" data-act="mailCfgSalvar">Salvar período</button>':'')+'<button class="btn" data-act="mailAbrir">Abrir a caixa</button></div></div>';
+}
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments),card=mailCfgCard();if(!card)return h;const i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+card+h.slice(i):h+card;};}
+
+/* aviso do segredo na tela inicial do Fiscal/Financeiro: uma vez por sessão, em segundo plano */
+if(mailSelf()&&typeof setTimeout==='function')setTimeout(()=>{if(!mailAcesso())return;nfrApi('/api/caixanfe/estado').then(j=>{if(!MAIL.d)MAIL.d=Object.assign({},j);
+  const s=j.segredo;if(s&&s.vence&&(s.aviso||s.vencido))toast(s.vencido?'O segredo do Microsoft 365 (caixa nfe@) venceu: a leitura parou. Veja Sistema › Configurações.':'O segredo do Microsoft 365 (caixa nfe@) vence em '+s.dias+' dia(s). Veja Sistema › Configurações.','neg');}).catch(()=>{});},6000);
+
+Object.assign(ACT_GROUP,{mailRecarregar:null,mailLer:null,mailLancar:null,mailDispensar:null,mailAbrir:null,mailCfgSalvar:'cfg'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{mailLer:'Lê agora a caixa nfe@ (o servidor também lê sozinho, no intervalo configurado).',mailLancar:'Leva o XML recebido por e-mail para "Notas para lançar" (validação, estoque e conta a pagar).',
+  mailDispensar:'Tira o e-mail da lista "PDF sem XML" quando o XML já chegou por outro caminho.',mailAbrir:'Abre Recebimento de notas na aba Caixa nfe@.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='129',APP_DATA='2026-10-28';
+const APP_VER='130',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['130','2026-10-28',['Recebimento de notas › Caixa nfe@: leitura da caixa nfe@inaservicos.com.br (Microsoft 365) de hora em hora. Os XML anexados vão para o Arquivo fiscal e os e-mails lidos para a pasta Processadas. Quatro listas: notas recebidas só por e-mail (lançar ou ligar), Não pagar (cancelada ou inexistente na SEFAZ), notas captadas sem XML por e-mail e e-mails com PDF sem XML (pedir o XML).', 'Arquivo fiscal: cada nota mostra todas as origens (importação, upload, SEFAZ, e-mail) e as situações Não encontrada na SEFAZ e Denegada.']],
   ['129','2026-10-28',['Recebimento de notas (antes NFs recebidas): abas Notas para lançar, Pendentes de ligação, Ligadas, Arquivo fiscal e Saídas emitidas. O XML original de cada NF-e fica guardado no servidor pelo prazo legal (5 anos a partir do ano seguinte), com busca, DANFE, download do XML e ZIP para o contador; exclusão bloqueada dentro do prazo.', 'Importar histórico (ZIP): guarda as NF-e de entrada e de saída e liga cada uma à conta a pagar ou a receber pelo CNPJ, número, valor e data — sem criar contas, sem estoque e sem lançamentos. XML do Omie com acentos corrompidos são restaurados quando possível; os demais ficam como cópia alterada.', 'Contas a pagar e a receber: botão DANFE em todo título ligado a nota, Anexar sempre visível, filtro Nota fiscal (sem, com, cancelada) e aviso de nota cancelada.']],
   ['128','2026-10-28',['Obras › Obras e rateio: filtros por situação (ativas, concluídas, canceladas) e por período; botão Excluir obra (com vínculos, oferece Encerrar ou Cancelar; sem vínculos, vai para a Lixeira com senha; protegido também no servidor).', 'Painel de Obras e Painel da obra ajustados para centenas de obras: nomes em até 2 linhas, as 15 obras com mais pendências com Ver todas, seletor só com obras em andamento e sem rolagem lateral.']],
   ['127','2026-10-28',['Safari: importadores de PDF (banco de horas, escala de férias, CRLV, orçamentos) voltam a funcionar; e o sistema volta a abrir em versões mais antigas do Safari.', 'Ordem de fabricação: PDF com o logo da INA cadastrado em Configurações (qualquer formato de imagem).', 'Contas a pagar e a receber: filtro De … até por vencimento, emissão ou pagamento/recebimento.', 'Sistema › Usuários: botão Novo usuário com formulário único que cria o acesso e envia o convite; tabela do que cada perfil pode fazer com todos os perfis, quantas pessoas usam e botão para editar. Contas de acesso fica só para o dono.', 'Perfis de acesso: perfis padrão podem ser ajustados (e voltar ao padrão), valendo também no servidor; na Segregação de funções, cada conflito tem o botão Ajustar perfil.']],

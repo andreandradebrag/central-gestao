@@ -189,6 +189,61 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 **Variáveis (opcionais, serviço `gestao`)**: `ARQF_CNPJ` (CNPJs da empresa, separados por vírgula, além do de Configurações), `ARQF_MAX_ZIP_MB` (padrão 300), `ARQF_SIT_HORA` (consultas automáticas por hora, padrão 10; 0 desliga), `ARQF_SIT_INTERVALO_S` (padrão 300), `ARQF_CONFERIR_ASSINATURA=0` (desliga a conferência do conteúdo assinado; o resumo do protocolo continua sendo conferido. Use só se notas legítimas forem recusadas por "assinatura não confere").
 
+## 6.2. Microsoft 365: caixa nfe@ (notas que chegam por e-mail, v130)
+
+**O que faz.** O serviço `gestao` lê a caixa **nfe@inaservicos.com.br** pelo Microsoft Graph (de hora em hora, e pelo botão "Ler agora"). Os XML de NF-e anexados (soltos ou dentro de ZIP) vão para o Arquivo fiscal com origem **e-mail**; o PDF (DANFE) só é guardado se tiver a chave de acesso no nome ou no texto. Cada mensagem lida vai para a pasta **Processadas** (criada sozinha). Do e-mail ficam só remetente, assunto e data; o corpo nunca é guardado. A tela fica em **Suprimentos › Recebimento de notas › Caixa nfe@** e o estado aparece em **Sistema › Configurações**. Quem usa: Fiscal, Financeiro, Administrador e Diretoria. Código: `gestao/caixanfe.js`; tabelas `caixa_msg`, `caixa_pdf`, `caixa_leitura` e `arqf_origem` no `gestao.db`.
+
+**Conferências.** (1) a nota precisa ter a INA como destinatária (CNPJ de Configurações); (2) se a nota já estava no arquivo (SEFAZ, Omie, envio manual), ela é marcada "também recebida por e-mail" (todas as origens ficam guardadas, com a data); (3) a situação na SEFAZ é conferida pela **fila de consulta por chave** do conector fiscal (seção 6.1, mesmos limites por hora e bloqueio 656). **Nunca há consulta por NSU** (o Omie é o dono da sequência). Nota cancelada, denegada ou não encontrada na SEFAZ aparece em vermelho: **não pagar**.
+
+**Segurança dos anexos.** Só `.xml`, `.zip` (com até 50 XML, sem caminhos, até 20 MB descomprimidos) e `.pdf`; até 5 MB por anexo, 25 MB e 30 anexos por mensagem. Outros tipos (exe, imagens, itens do Outlook) são ignorados e listados. O PDF baixado pela tela sai sempre como arquivo (nunca abre como página do sistema).
+
+### Passo a passo (feito uma vez, por quem administra o Microsoft 365)
+
+1. **Registrar o aplicativo no Entra.** Em [entra.microsoft.com](https://entra.microsoft.com) › Identidade › Aplicativos › **Registros de aplicativo** › Novo registro. Nome: "Central de Gestão - caixa nfe". Tipo de conta: "Somente contas deste diretório". Sem URI de redirecionamento. Anote o **ID do aplicativo (cliente)** e o **ID do diretório (locatário)**.
+2. **Criar o segredo.** No aplicativo › Certificados e segredos › Novo segredo do cliente. Escolha a validade (por exemplo 12 meses) e **copie o valor na hora** (ele só aparece uma vez). Anote a **data de vencimento**.
+3. **Permissão: dar acesso SÓ à caixa nfe@ (RBAC para aplicativos do Exchange Online).** A permissão de aplicativo `Mail.ReadWrite` dada no Entra com "consentimento do administrador" vale para **todas as caixas da empresa**. A Microsoft explica que as permissões do Entra e as do Exchange se **somam**: se o `Mail.ReadWrite` do Entra estiver consentido, a restrição do Exchange não tem efeito. Por isso:
+   - **não** adicione (ou **remova**, se já adicionou) a permissão `Mail.ReadWrite` em "Permissões de API" do aplicativo, e revogue o consentimento do administrador dela;
+   - dê a permissão pelo Exchange Online, restrita à caixa, com os comandos abaixo (PowerShell, como administrador do Exchange):
+
+   ```powershell
+   Install-Module ExchangeOnlineManagement          # só na primeira vez
+   Connect-ExchangeOnline -UserPrincipalName admin@inaservicos.com.br
+   # IDs do "Aplicativo empresarial" (Entra › Aplicativos empresariais › o aplicativo), NÃO os da tela Registros de aplicativo:
+   #   AppId = ID do aplicativo (cliente); ObjectId = ID do objeto do aplicativo empresarial (service principal)
+   New-ServicePrincipal -AppId <ID do aplicativo> -ObjectId <ID do objeto do aplicativo empresarial> -DisplayName "Central de Gestão - caixa nfe"
+   New-ManagementScope -Name "Caixa nfe" -RecipientRestrictionFilter "PrimarySmtpAddress -eq 'nfe@inaservicos.com.br'"
+   New-ManagementRoleAssignment -App <ID do aplicativo> -Role "Application Mail.ReadWrite" -CustomResourceScope "Caixa nfe"
+   # Conferir: a caixa nfe@ deve dar InScope = True; outra caixa qualquer, False
+   Test-ServicePrincipalAuthorization -Identity <ID do aplicativo> -Resource nfe@inaservicos.com.br
+   Test-ServicePrincipalAuthorization -Identity <ID do aplicativo> -Resource outra.pessoa@inaservicos.com.br
+   ```
+
+   A função "Application Mail.ReadWrite" lê, move e cria pastas, mas **não envia e-mail**. A Microsoft avisa que a mudança pode levar de **30 minutos a 2 horas** para valer nas chamadas reais (o `Test-ServicePrincipalAuthorization` responde na hora).
+4. **Variáveis no Easypanel** (serviço `gestao` › Environment), depois **Deploy**:
+
+   | Variável | Valor |
+   |---|---|
+   | `M365_TENANT_ID` | ID do diretório (locatário) |
+   | `M365_CLIENT_ID` | ID do aplicativo (cliente) |
+   | `M365_CLIENT_SECRET` | o valor do segredo (passo 2) |
+   | `M365_SECRET_VENCE` | data de vencimento do segredo, `AAAA-MM-DD` (o sistema avisa 30 dias antes; o Graph não deixa este aplicativo ler essa data sozinho) |
+   | `NFE_EMAIL` | opcional; padrão `nfe@inaservicos.com.br` |
+   | `NFE_EMAIL_PASTA_OK` | opcional; padrão `Processadas` |
+   | `NFE_EMAIL_INTERVALO_MIN` | opcional; padrão 60, mínimo 15 |
+
+   Sem `M365_TENANT_ID`, `M365_CLIENT_ID` e `M365_CLIENT_SECRET`, o leitor fica **desligado** e a tela explica o que falta. A VPS precisa sair na porta 443 para `login.microsoftonline.com` e `graph.microsoft.com`.
+5. **Conferir.** Em Recebimento de notas › Caixa nfe@, clique **Ler agora**. O estado deve ficar "Conectado". Erros comuns: "credencial recusada" (ID ou segredo errado, ou segredo vencido); "403: o aplicativo não tem acesso a esta caixa" (passo 3 ainda não valeu, espere até 2 horas, ou faltou a função); "caixa não encontrada" (confira `NFE_EMAIL`).
+6. **Antes de o segredo vencer**, crie um novo (passo 2), troque `M365_CLIENT_SECRET` e `M365_SECRET_VENCE` no Easypanel e faça o Deploy; depois apague o segredo antigo no Entra.
+
+**Sigilo.** O segredo e o token nunca vão para o log, a auditoria, o banco ou a tela. Cada leitura fica na auditoria (`CAIXA_NFE_LEITURA`: mensagens, notas novas, já existentes, ignoradas, PDF sem XML) e no quadro "Leituras recentes".
+
+**Fontes (Microsoft Learn):**
+- RBAC para aplicativos no Exchange Online (comandos `New-ServicePrincipal`, `New-ManagementScope`, `New-ManagementRoleAssignment`, `Test-ServicePrincipalAuthorization`, função "Application Mail.ReadWrite", soma com as permissões do Entra, prazo de 30 min a 2 h): https://learn.microsoft.com/exchange/permissions-exo/application-rbac
+- Limitar o acesso do aplicativo a caixas específicas (remover o consentimento sem restrição do Entra): https://learn.microsoft.com/graph/auth-limit-mailbox-access
+- Mover mensagem (`POST /users/{id}/messages/{id}/move`): https://learn.microsoft.com/graph/api/message-move
+- Credencial de aplicativo (client credentials, escopo `https://graph.microsoft.com/.default`): https://learn.microsoft.com/entra/identity-platform/v2-oauth2-client-creds-grant-flow
+- Limites do Graph (429 e `Retry-After`): https://learn.microsoft.com/graph/throttling
+
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
 - Cada fornecedor convidado recebe um link próprio, `https://seu-dominio/cotacao/<código>`, que abre **sem login**. Ele vê só os itens do pedido, o prazo e o local de entrega, nunca os preços dos outros, e informa preço, marca, frete, prazo, pagamento e validade.

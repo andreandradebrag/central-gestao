@@ -916,6 +916,7 @@ async function rotear(req, res) {
   if (await solidesRota(p, m, req, res, conta, u)) return;
   if (await bancosRota(p, m, req, res, conta, u)) return;
   if (await ARQF.rota(p, m, req, res, conta, u)) return; /* v129: arquivo fiscal (arquivofiscal.js) */
+  if (await CAIXA.rota(p, m, req, res, conta, u)) return; /* v130: caixa nfe@ (caixanfe.js) */
   /* ---- arquivos do sistema ---- */
   if (m === 'GET') {
     if (p === '/' || p === '/index.html') return estatico(req, res, 'index.html');
@@ -937,7 +938,10 @@ const bancosRota = require('./bancos.js')({ q, db, avisarDoc, json, lerJson, NIV
 /* ===== v129: arquivo fiscal (XML das NF-e guardado no servidor, prazo de guarda, ligação com contas a pagar/receber) ===== */
 const ARQF = require('./arquivofiscal.js')({ db, q, json, lerCorpo, avisarDoc, perfilDe, papelDe, PERM, END, DATA, uid, FISCAL_URL, FISCAL_TOKEN, auditar: (...a) => REG.auditar(...a) });
 /* ===== fim v129 ===== */
+/* ===== v130: leitura da caixa nfe@ (Microsoft 365 / Graph): NF-e anexadas vão para o arquivo fiscal (origem "email") ===== */
+const CAIXA = require('./caixanfe.js')({ db, json, lerCorpo, perfilDe, papelDe, uid, ARQF, auditar: (...a) => REG.auditar(...a) });
+/* ===== fim v130 ===== */
 const srv = http.createServer((req, res) => { rotear(req, res).catch(e => { if (!res.headersSent) json(res, e.st || 500, { erro: e.msg || 'Erro interno.' }); else try { res.end(); } catch (x) { } if (!e.st) console.error(e); }); });
 srv.requestTimeout = 600000; srv.headersTimeout = 65000; srv.keepAliveTimeout = 61000;
-srv.listen(PORT, () => console.log('Central de Gestão no ar na porta ' + PORT + ' · dados em ' + DATA + (FISCAL_URL ? ' · conector fiscal ' + FISCAL_URL : '') + (AI_KEY ? ' · IA ligada' : '') + (process.env.SOLIDES_TOKEN ? ' · Sólides ligada' : '')));
+srv.listen(PORT, () => console.log('Central de Gestão no ar na porta ' + PORT + ' · dados em ' + DATA + (FISCAL_URL ? ' · conector fiscal ' + FISCAL_URL : '') + (AI_KEY ? ' · IA ligada' : '') + (process.env.SOLIDES_TOKEN ? ' · Sólides ligada' : '') + (process.env.M365_CLIENT_ID ? ' · caixa nfe@ ligada' : '')));
 module.exports = { srv, db };

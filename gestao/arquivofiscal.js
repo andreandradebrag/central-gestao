@@ -199,6 +199,12 @@ module.exports = function (ctx) {
   CREATE TRIGGER IF NOT EXISTS arqf_guarda BEFORE DELETE ON arqf
     WHEN NOT (length(old.emissao) >= 4 AND CAST(substr(old.emissao,1,4) AS INTEGER) + 6 <= CAST(strftime('%Y','now','-3 hours') AS INTEGER))
     BEGIN SELECT RAISE(ABORT, 'arquivo fiscal: XML dentro do prazo de guarda'); END;`);
+  /* v130: todas as origens de cada nota (historico, upload, sefaz, email), com a data em que chegou por cada uma.
+     A coluna arqf.origem continua sendo a PRIMEIRA origem; esta tabela guarda todas. */
+  db.exec(`CREATE TABLE IF NOT EXISTS arqf_origem(chave TEXT NOT NULL, origem TEXT NOT NULL, em INTEGER, ref TEXT, PRIMARY KEY(chave, origem));
+    INSERT OR IGNORE INTO arqf_origem(chave, origem, em) SELECT chave, origem, em FROM arqf WHERE origem IS NOT NULL;`);
+  const stOrig = db.prepare('INSERT OR IGNORE INTO arqf_origem(chave, origem, em, ref) VALUES(?,?,?,?)');
+  const regOrigem = (ch, origem, ref) => { try { if (ch && origem) stOrig.run(ch, origem, Date.now(), ref || null); } catch (e) { } };
   const st = {
     porChave: db.prepare('SELECT id, chave, situacao, vinc, tipo FROM arqf WHERE chave=?'),
     porId: db.prepare('SELECT id, chave, tipo, numero, serie, emissao, valor, situacao, sit_fonte, sit_em, sit_msg, parc_doc, parc_nome, emit_doc, emit_nome, dest_doc, dest_nome, origem, vinc, vinc_conf, sugest, parcelas, em, por, arquivo, ass, prot, fin, tpnf FROM arqf WHERE id=?'),
@@ -332,8 +338,9 @@ module.exports = function (ctx) {
       if (ass.st !== 'divergente') { const a0 = db.prepare('SELECT ass FROM arqf WHERE id=?').get(ja.id); if (a0 && a0.ass === 'divergente') {
         db.prepare("UPDATE arqf SET xml=?, tam=?, sha=?, ass=?, sit_msg=COALESCE(REPLACE(sit_msg,' · cópia alterada pelo sistema de origem (acentos); baixe o original na SEFAZ pela chave',''),'') || ' · original recebido depois' WHERE id=?")
           .run(zlib.gzipSync(buf, { level: 9 }), buf.length, crypto.createHash('sha256').update(buf).digest('hex'), ass.st, ja.id);
-        return { r: 'existente', id: ja.id, chave: d.chave, trocada: true }; } }
-      return { r: 'existente', id: ja.id, chave: d.chave };
+        regOrigem(d.chave, origem, c.ref); return { r: 'existente', id: ja.id, chave: d.chave, trocada: true, tipo: ja.tipo, situacao: ja.situacao }; } }
+      regOrigem(d.chave, origem, c.ref); /* v130: guarda mais esta origem (ex.: "também recebida por e-mail") */
+      return { r: 'existente', id: ja.id, chave: d.chave, tipo: ja.tipo, situacao: ja.situacao };
     }
     const id = uid(16), ts = Date.now(), gz = zlib.gzipSync(buf, { level: 9 });
     const parc = tipo === 'entrada' ? [d.emitDoc, d.emitNome] : [d.destDoc, d.destNome];
@@ -343,6 +350,7 @@ module.exports = function (ctx) {
     st.novo.run(id, d.chave, d.modelo || '55', tipo, d.tpNF, d.finNFe, d.emitDoc, d.emitNome, d.destDoc, d.destNome, parc[0], parc[1], d.numero, d.serie, d.emissao, d.valor,
       row.situacao, (canc ? 'evento de cancelamento no arquivo' : 'protocolo ' + d.cStat + ' no XML (' + (d.nProt || 's/ nº') + ')') + (ass.st === 'divergente' ? ' · cópia alterada pelo sistema de origem (acentos); baixe o original na SEFAZ pela chave' : ass.st === 'ok_restaurada' ? ' · acentos restaurados; assinatura confere' : ''), ts, novaOp && FISCAL_URL && !canc ? 1 : 0, d.nProt, ass.st,
       crypto.createHash('sha256').update(buf).digest('hex'), gz, buf.length, origem, String(nome || '').slice(0, 200), ts, conta ? conta.id : null, JSON.stringify(d.parcelas || []), null, null, null);
+    regOrigem(d.chave, origem, c.ref); /* v130 */
     /* ligação com o título */
     let lig = 'sem';
     if (c.ix) {
@@ -432,6 +440,11 @@ module.exports = function (ctx) {
       SIT.hora.push(t);
       try { baixou = await conectorTool('baixar', { chave: row.chave }); } catch (e) { return { ok: false, msg: e.msg || 'Falha ao consultar.' }; }
       if (baixou && (baixou.bloqueado || baixou.limite)) return { ok: false, adiar: baixou.bloqueado ? 'bloqueio' : 'cota', msg: baixou.msg };
+      /* v130: respostas da consulta por chave (Distribuição DF-e) que já dizem a situação da nota */
+      const cs = String((baixou && baixou.cStat) || '');
+      if (cs === '653') return fimSit(row, 'cancelada', 'SEFAZ (consulta por chave): NF-e cancelada (cStat 653).', conta, req);
+      if (cs === '654') return fimSit(row, 'denegada', 'SEFAZ (consulta por chave): NF-e denegada (cStat 654).', conta, req);
+      if (['137', '217', '640'].includes(cs) && diasEntre(row.emissao, hojeBr()) >= 2) return fimSit(row, 'inexistente', 'SEFAZ (consulta por chave): nota não encontrada para o CNPJ da empresa (cStat ' + cs + '). Confira a chave no portal da NF-e antes de pagar.', conta, req);
       try { doc = await achar(); } catch (e) { }
     }
     const evs = doc && Array.isArray(doc.eventos) ? doc.eventos : [];
@@ -441,7 +454,7 @@ module.exports = function (ctx) {
   }
   function fimSit(row, sit, msg, conta, req) {
     const avisos = [];
-    if (sit) { st.sit.run(sit, 'conector fiscal', Date.now(), msg, row.id); if (sit === 'cancelada') { const r = st.porChave.get(row.chave); marcarSitNosTitulos(r, 'cancelada', avisos); } }
+    if (sit) { st.sit.run(sit, 'conector fiscal', Date.now(), msg, row.id); if (['cancelada', 'inexistente', 'denegada'].includes(sit)) { const r = st.porChave.get(row.chave); marcarSitNosTitulos(r, sit, avisos); } }
     else st.sitMsg.run(msg, Date.now(), 0, row.id);
     soltar(avisos); auditar(conta, req, 'ARQF_SITUACAO', 'arqfiscal/' + row.chave, null, { situacao: sit || '(sem mudança)', msg });
     return { ok: true, situacao: sit || row.situacao, msg };
@@ -479,10 +492,11 @@ module.exports = function (ctx) {
     let tipo = g('tipo'); if (acc === 'entradas') tipo = 'entrada';
     if (tipo === 'entrada' || tipo === 'saida') { w.push('tipo=?'); a.push(tipo); }
     const de = g('de'), ate = g('ate'); if (/^\d{4}-\d{2}-\d{2}$/.test(de)) { w.push('emissao>=?'); a.push(de); } if (/^\d{4}-\d{2}-\d{2}$/.test(ate)) { w.push('emissao<=?'); a.push(ate); }
-    const sit = g('sit'); if (['autorizada', 'cancelada', 'desconhecida'].includes(sit)) { w.push('situacao=?'); a.push(sit); }
+    const sit = g('sit'); if (['autorizada', 'cancelada', 'desconhecida', 'inexistente', 'denegada'].includes(sit)) { w.push('situacao=?'); a.push(sit); }
     const v = g('vinc'); if (v === 'ligada') w.push('vinc IS NOT NULL'); else if (v === 'pendente') w.push('vinc IS NULL'); else if (v === 'sugestao') w.push('vinc IS NULL AND sugest IS NOT NULL'); else if (v === 'sem') w.push('vinc IS NULL AND sugest IS NULL');
     else if (v === 'cancligada') w.push("vinc IS NOT NULL AND situacao='cancelada'");
     const org = g('origem'); if (['historico', 'upload', 'sefaz'].includes(org)) { w.push('origem=?'); a.push(org); }
+    else if (org === 'email') w.push("chave IN (SELECT chave FROM arqf_origem WHERE origem='email')"); /* v130: recebida (também) por e-mail */
     const vmin = parseFloat(g('vmin').replace(',', '.')), vmax = parseFloat(g('vmax').replace(',', '.'));
     if (isFinite(vmin)) { w.push('valor>=?'); a.push(vmin); } if (isFinite(vmax)) { w.push('valor<=?'); a.push(vmax); }
     const qq = g('q'); if (qq) {
@@ -505,7 +519,10 @@ module.exports = function (ctx) {
     const tp = acc === 'entradas' ? " WHERE tipo='entrada'" : '';
     const res = db.prepare("SELECT count(*) AS total, sum(tipo='entrada') AS entradas, sum(tipo='saida') AS saidas, sum(vinc IS NOT NULL) AS ligadas, sum(vinc IS NULL) AS pendentes, sum(vinc IS NULL AND sugest IS NOT NULL) AS sugestoes, sum(situacao='cancelada') AS canceladas, sum(situacao='cancelada' AND vinc IS NOT NULL) AS cancLigadas, min(emissao) AS primeira, max(emissao) AS ultima FROM arqf" + tp).get();
     for (const k of Object.keys(res)) if (res[k] == null && k !== 'primeira' && k !== 'ultima') res[k] = 0;
-    return { itens: ls.map(linha), total: total.n, soma: r2(total.v), pg, n, resumo: res, acesso: acc, hoje: hojeBr() };
+    const itens = ls.map(linha);
+    /* v130: todas as origens de cada nota da página (uma consulta só) */
+    if (itens.length) { const og = new Map(); for (const o of db.prepare('SELECT chave, origem, em FROM arqf_origem WHERE chave IN (' + itens.map(() => '?').join(',') + ') ORDER BY em').all(...itens.map(x => x.chave))) { if (!og.has(o.chave)) og.set(o.chave, []); og.get(o.chave).push({ origem: o.origem, em: o.em }); } for (const x of itens) x.origens = og.get(x.chave) || [{ origem: x.origem, em: x.em }]; }
+    return { itens, total: total.n, soma: r2(total.v), pg, n, resumo: res, acesso: acc, hoje: hojeBr() };
   }
 
   /* ---------- rotas ---------- */
@@ -640,6 +657,17 @@ module.exports = function (ctx) {
     }
     json(res, 405, { erro: 'Método não permitido.' }); return true;
   }
-  return { rota, acesso, empresa, c14nInfNFe, conferirAssinatura, lerDoc, guardaAte, rodarFila };
+  /* v130: pôr na fila de consulta por chave (conector fiscal, com os mesmos limites) uma nota de entrada já guardada que chegou
+     de novo por outro caminho (ex.: e-mail). Só se: há conector, é entrada de até 90 dias, está autorizada, não veio do próprio
+     conector (origem sefaz) e ainda não foi conferida pelo conector. Nunca consulta por NSU. */
+  function enfileirar(chave) {
+    if (!FISCAL_URL || !SIT_HORA) return 0;
+    const lim = new Date(Date.now() - 3 * 3600e3 - 90 * 864e5).toISOString().slice(0, 10);
+    return db.prepare(`UPDATE arqf SET sit_fila=1 WHERE chave=? AND tipo='entrada' AND situacao='autorizada' AND sit_fila=0 AND emissao>=?
+      AND coalesce(sit_fonte,'')<>'conector fiscal' AND chave NOT IN (SELECT chave FROM arqf_origem WHERE origem='sefaz')`).run(normCh(chave), lim).changes;
+  }
+  return { rota, acesso, empresa, c14nInfNFe, conferirAssinatura, lerDoc, guardaAte, rodarFila,
+    /* v130: usados pela leitura da caixa nfe@ (caixanfe.js) */
+    processar, evento, indice, novoRel, conta1, linha, enfileirar, soltar, regOrigem, normCh, hojeBr, diasEntre, temConector: !!FISCAL_URL };
 };
 module.exports.util = { c14nInfNFe, conferirAssinatura, lerDoc, guardaAte, textoXml };
