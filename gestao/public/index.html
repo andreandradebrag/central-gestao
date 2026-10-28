@@ -22382,9 +22382,223 @@ A.coresSetor=()=>{try{localStorage.setItem('cg.coresSetor',coresLigadas()?'0':'1
 {const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);
   return h+'<div class="card" style="margin-top:14px"><h2>Cores por setor</h2><p class="sub" style="margin:0 0 8px">Cada aba do menu tem a cor do seu setor e o fundo da página fica com a cor do setor aberto, bem clara. Vale só para este navegador.</p><button class="btn" data-act="coresSetor">'+(coresLigadas()?'Desligar as cores':'Ligar as cores')+'</button></div>';};}
 
+/* ===== v122: importar o "Relatório Banco de Horas Colaboradores" (PDF do sistema de ponto) =====
+   Sistema › Importar cadastros › Banco de horas (relatório do ponto). Uma página por colaborador: período, nome, competência,
+   linhas (Saldo Negativo, Dias Úteis, Sábados, Domingos, Feriados, Saldo de Horas...) com Primeira Fase, Hora Excedente e Horas
+   Calculadas, quitações, validade e saldos. Grava só os números (coleção bhimp, um registro por colaborador e competência; o PDF
+   não é guardado). A ligação ao cadastro é pelo nome; os vínculos escolhidos à mão ficam no mesmo mapa do importador do ponto
+   (cfg.pmFunc, chave "nome:<nome normalizado>"), valendo para as próximas importações. Banco de horas mostra o saldo do
+   relatório ao lado do saldo calculado pelo sistema, e o extrato do colaborador mostra a tabela da competência. */
+if(!COLS.includes('bhimp')){COLS.push('bhimp');S.bhimp=S.bhimp||[];IDX.bhimp=new Map();}
+COL_NOME.bhimp='Banco de horas do relatório do ponto';
+TAB_COLS.bh=(TAB_COLS.bh||[]).concat(TAB_COLS.bh&&TAB_COLS.bh.includes('bhimp')?[]:['bhimp']);
+DBW_TABCOLS.bh=(DBW_TABCOLS.bh||[]).concat(['bhimp']);
+DBW_TABCOLS.imp=(DBW_TABCOLS.imp||[]).concat(['bhimp','implog','func']);
+Object.assign(ACT_GROUP,{bhiEscolher:'rh',bhiConfirmar:'rh',bhiFiltro:null,bhiNovo:null,bhiVer:null});
+ui.bhimp=ui.bhimp||{};
+
+/* ---------- leitor (só texto: itens {str,x,y} de cada página, como o pdf.js entrega) ---------- */
+const BHI_HM=/^-?\d+:\d{2}$/;
+const bhiMin=s=>{const m=/^(-)?(\d+):(\d{2})$/.exec(String(s==null?'':s).trim());if(!m)return null;const v=(+m[2])*60+(+m[3]);return m[1]?-v:v;};
+const bhiDt=s=>{const m=String(s||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);return m?m[3]+'-'+m[2]+'-'+m[1]:'';};
+const bhiHm=m=>m==null?'—':minHm(m);
+/* linhas em ordem visual (de cima para baixo), cada uma com os itens da esquerda para a direita */
+function bhiLinhas(itens){const ls=[];(itens||[]).forEach(t=>{const s=String(t.str==null?'':t.str).trim();if(!s)return;const y=+t.y||0;
+    let l=ls.find(z=>Math.abs(z.y-y)<=2.5);if(!l){l={y,it:[]};ls.push(l);}l.it.push({s,x:+t.x||0});});
+  ls.sort((a,b)=>b.y-a.y);ls.forEach(l=>{l.it.sort((a,b)=>a.x-b.x);l.txt=l.it.map(t=>t.s).join(' ').replace(/\s+/g,' ').trim();});return ls;}
+const BHI_VAL=s=>BHI_HM.test(s)||/^\d+(?:[.,]\d+)?\s*%?$/.test(s)||s==='-'||s==='%';
+const bhiPct=s=>{const m=String(s||'').match(/^(\d+(?:[.,]\d+)?)/);return m?+m[1].replace(',','.'):null;};
+/* uma página do relatório → registro, ou null quando a página não é de um colaborador */
+function bhiParsePagina(itens){
+  const L=bhiLinhas(itens);if(!L.length)return null;
+  const tudo=L.map(l=>l.txt);
+  const acha=rx=>{for(const t of tudo){const m=t.match(rx);if(m)return m;}return null;};
+  const hm=rx=>{const m=acha(new RegExp(rx+'\\s*:?\\s*(-?\\d+:\\d{2})','i'));return m?bhiMin(m[1]):null;};
+  const r={nome:'',periodo:{ini:'',fim:''},comp:'',linhas:[],quitHE:null,quitBH:null,saldoPraticado:null,saldo:null,totPrim:null,totExc:null,saldoPeriodo:null,saldoAcum:null,acumAte:'',validade:''};
+  const mp=acha(/de\s*(\d{2}\/\d{2}\/\d{4})\s*a\s*(\d{2}\/\d{2}\/\d{4})/i);if(mp)r.periodo={ini:bhiDt(mp[1]),fim:bhiDt(mp[2])};
+  const iComp=L.findIndex(l=>/Compet[eê]ncia/i.test(l.txt));
+  if(iComp>=0){const m=L[iComp].txt.match(/Compet[eê]ncia\s*:?\s*(\d{2})\/(\d{4})/i);if(m)r.comp=m[2]+'-'+m[1];}
+  const mv=acha(/Validade\s*:?\s*(\d{2})\/(\d{4})/i);if(mv)r.validade=mv[2]+'-'+mv[1];
+  /* nome (faixa laranja): primeira linha só de letras depois do cabeçalho da empresa (CPF/CNPJ) e antes da competência;
+     vem em maiúsculas ou não, conforme o cadastro do sistema de ponto */
+  const ehNome=t=>t.length>=3&&!/\d/.test(t)&&!/:/.test(t)&&/[A-Za-zÀ-ÿ]{2}/.test(t)&&!/^(Primeira Fase|Hora Excedente|Horas Praticadas|Horas Calculadas|Percentual)\b/i.test(t)&&!/Relat[oó]rio Banco de Horas/i.test(t);
+  let iCnpj=-1;L.forEach((l,i)=>{if(i<(iComp>=0?iComp:L.length)&&/CPF\/CNPJ|Empregador/i.test(l.txt))iCnpj=i;});
+  for(let i=Math.max(0,iCnpj+1);i<(iComp>=0?iComp:L.length);i++){if(ehNome(L[i].txt)){r.nome=L[i].txt;break;}}
+  /* tabela: colunas pela posição dos títulos (Horas Praticadas, Percentual, Horas Calculadas) */
+  const iCab=L.findIndex(l=>/Horas Praticadas/i.test(l.txt)&&/Percentual/i.test(l.txt));
+  if(iCab>=0){
+    const cab=L[iCab].it,hp=cab.filter(t=>/Horas Praticadas/i.test(t.s)).map(t=>t.x),pc=cab.filter(t=>/Percentual/i.test(t.s)).map(t=>t.x);
+    let xc=null;for(let i=Math.max(0,iCab-2);i<=iCab;i++){const t=L[i].it.find(t=>/Horas Calculadas/i.test(t.s));if(t)xc=t.x;}
+    const cols=hp.length>=2&&pc.length>=2&&xc!=null?[['prim',hp[0]],['pctPrim',pc[0]],['exc',hp[1]],['pctExc',pc[1]],['calc',xc]]:null;
+    for(let i=iCab+1;i<L.length;i++){const l=L[i];if(/Quita[cç][aã]o|Validade|Saldo horas|Total Praticado|Saldo do Per|Saldo Acumulado/i.test(l.txt))break;
+      const rot=l.it.filter(t=>!BHI_VAL(t.s)).map(t=>t.s).join(' ').trim(),vals=l.it.filter(t=>BHI_VAL(t.s)&&t.s!=='%');
+      if(!rot||!vals.length)continue;
+      const o={tipo:rot,prim:null,pctPrim:null,exc:null,pctExc:null,calc:null};
+      if(cols){vals.forEach(v=>{let k=null,bd=1e9;cols.forEach(([kk,x])=>{const d=Math.abs(v.x-x);if(d<bd){bd=d;k=kk;}});if(!k)return;
+          if(/^pct/.test(k))o[k]=v.s==='-'?null:bhiPct(v.s);else o[k]=bhiMin(v.s);});}
+      else{const vs=vals.map(v=>v.s);o.prim=bhiMin(vs[0]);o.pctPrim=bhiPct(vs[1]);o.exc=bhiMin(vs[2]);o.pctExc=bhiPct(vs[3]);o.calc=bhiMin(vs[4]);}
+      r.linhas.push(o);}}
+  r.quitHE=hm('Quita[cç][aã]o como Horas Extras');
+  r.quitBH=hm('Quita[cç][aã]o como Banco de Horas');
+  r.saldoPraticado=hm('Saldo horas praticadas');
+  r.saldo=hm('(?:^|\\s)Saldo(?=\\s*:)');
+  r.totPrim=hm('Total Praticado Primeira Fase');
+  r.totExc=hm('Total Praticado Hora Excedente');
+  r.saldoPeriodo=hm('Saldo do Per[ií]odo');
+  const ma=acha(/Saldo Acumulado at[eé]\s*(\d{2}\/\d{2}\/\d{4})\s*:?\s*(-?\d+:\d{2})/i);if(ma){r.acumAte=bhiDt(ma[1]);r.saldoAcum=bhiMin(ma[2]);}
+  if(!r.nome||!r.comp||r.saldoAcum==null)return null;
+  return r;}
+/* todas as páginas → {regs, comp, periodo, ignoradas} */
+function bhiParse(paginas){const regs=[];let ign=0;
+  (paginas||[]).forEach(p=>{const r=bhiParsePagina(p);if(r)regs.push(r);else ign++;});
+  const comps=[...new Set(regs.map(r=>r.comp))].sort();
+  return {regs,comp:comps[comps.length-1]||'',comps,periodo:regs.length?regs[0].periodo:{ini:'',fim:''},ignoradas:ign};}
+/* ---- FIM DO LEITOR ---- */
+
+/* ---------- ligação ao cadastro ---------- */
+const BHI_LIG=['de','da','do','das','dos','e'];
+const bhiColapsa=n=>String(n||'').replace(/([a-z])\1+/g,'$1');
+const bhiChave=nome=>'nome:'+pmNorm(nome);
+function bhiAchar(nome,extra){
+  const k=bhiChave(nome),mp=Object.assign({},cfg().pmFunc||{},extra||{});
+  if(mp[k]==='-')return {id:'',como:'ignorado'};
+  if(mp[k]&&get('func',mp[k]))return {id:mp[k],como:'vinculo'};
+  const um=fs=>{if(fs.length>1){const at=fs.filter(f=>f.status!=='desligado');if(at.length)fs=at;}return fs.length===1?fs[0].id:'';};
+  const n=pmNorm(nome);if(!n)return {id:'',como:''};
+  let id=um(S.func.filter(f=>pmNorm(f.nome)===n));if(id)return {id,como:'nome'};
+  const c=bhiColapsa(n).replace(/ /g,'');id=um(S.func.filter(f=>bhiColapsa(pmNorm(f.nome)).replace(/ /g,'')===c));if(id)return {id,como:'grafia'};
+  /* nome encurtado no cadastro (ou no relatório): todas as palavras do mais curto estão no mais longo, com o mesmo primeiro nome */
+  const tk=s=>bhiColapsa(pmNorm(s)).split(' ').filter(t=>t&&!BHI_LIG.includes(t)),a=tk(nome);
+  if(a.length>=2){id=um(S.func.filter(f=>{const b=tk(f.nome);if(b.length<2||b[0]!==a[0])return false;const [p,q]=a.length<=b.length?[a,b]:[b,a];return p.every(t=>q.includes(t));}));if(id)return {id,como:'parecido'};}
+  return {id:'',como:''};}
+const bhiId=(fid,comp)=>'bhi_'+fid+'_'+comp;
+function bhiPlano(d,u){u=u||{};const extra={};
+  d.regs.forEach((r,i)=>{const v=u['f'+i];if(v)extra[bhiChave(r.nome)]=v;});
+  const vistos=new Map();
+  const regs=d.regs.map((r,i)=>{const a=bhiAchar(r.nome,extra),f=a.id?get('func',a.id):null;
+    const x=Object.assign({},r,{i,funcId:a.id,como:a.como,f,ja:null,dup:false});
+    if(a.id){x.ja=get('bhimp',bhiId(a.id,r.comp))||null;const k=a.id+'|'+r.comp;if(vistos.has(k))x.dup=true;else vistos.set(k,i);}
+    return x;});
+  const n=fn=>regs.filter(fn).length,ok=r=>r.funcId&&!r.dup;
+  return {regs,st:{registros:regs.length,achados:n(ok),nao:n(r=>!r.funcId&&r.como!=='ignorado'),ignorados:n(r=>r.como==='ignorado'),dup:n(r=>r.dup),subst:n(r=>ok(r)&&r.ja),neg:n(r=>r.saldoAcum<0),soma:sum(regs,r=>r.saldoAcum||0),parecidos:n(r=>r.como==='grafia'||r.como==='parecido')}};}
+const BHI_CAMPOS=['quitHE','quitBH','saldoPraticado','saldo','totPrim','totExc','saldoPeriodo','saldoAcum'];
+function bhiAplicar(p,lote,arq){const antes={},recs=[],agora=Date.now(),por=actorId();
+  p.regs.filter(r=>r.funcId&&!r.dup).forEach(r=>{const id=bhiId(r.funcId,r.comp),old=get('bhimp',id);antes[id]=old?cl(old):null;
+    const rec={id,funcId:r.funcId,nomeRel:String(r.nome).slice(0,120),comp:r.comp,periodo:{ini:r.periodo.ini,fim:r.periodo.fim},
+      linhas:r.linhas.map(l=>({tipo:String(l.tipo).slice(0,60),prim:l.prim,pctPrim:l.pctPrim,exc:l.exc,pctExc:l.pctExc,calc:l.calc})),
+      acumAte:r.acumAte,validade:r.validade,lote,em:agora,por};
+    BHI_CAMPOS.forEach(k=>{rec[k]=r[k];});recs.push(rec);});
+  if(recs.length)bulkPut('bhimp',recs);
+  return {antes,res:{gravados:recs.length,substituidos:Object.values(antes).filter(Boolean).length,naoLigados:p.st.nao,ignorados:p.st.ignorados}};}
+/* guarda as escolhas feitas na conferência (mesmo mapa de vínculos do importador do ponto) */
+function bhiGuardarVinculos(p,u){const c=cfg(),pmFunc=Object.assign({},c.pmFunc||{});let n=0;
+  p.regs.forEach(r=>{const v=u['f'+r.i];if(v&&pmFunc[bhiChave(r.nome)]!==v){pmFunc[bhiChave(r.nome)]=v;n++;}});
+  if(n)put('cfg',Object.assign({},c,{id:'empresa',pmFunc}));return n;}
+function bhiDesfazerLote(l){let n=0;
+  Object.keys(l.antes||{}).forEach(id=>{const cur=get('bhimp',id);if(!cur||cur.lote!==l.id)return;const a=l.antes[id];if(a)put('bhimp',a);else del('bhimp',id,{semLixo:true});n++;});
+  put('implog',Object.assign(cl(l),{desfeito:Date.now(),desfeitoPor:actorId()}));return n;}
+
+/* ---------- tela de importação ---------- */
+let BHI={fase:'arquivo',arq:'',dados:null,plano:null,res:null,filtro:''};
+A.bhiEscolher=()=>{if(!mayW('rh')){toast('Só o RH importa o banco de horas.','neg');return;}
+  let i=document.getElementById('bhiFile__b');if(!i){document.body.insertAdjacentHTML('beforeend','<input type="file" id="bhiFile__b" accept=".pdf,application/pdf" hidden>');i=document.getElementById('bhiFile__b');i.addEventListener('change',()=>{const f=i.files&&i.files[0];i.value='';if(f)bhiLer(f);});}i.click();};
+async function bhiLer(file){BHI=Object.assign(BHI,{fase:'lendo',arq:file.name,dados:null,plano:null,res:null,filtro:''});Object.keys(ui.bhimp).forEach(k=>{if(/^f\d/.test(k))delete ui.bhimp[k];});render();
+  try{const buf=await file.arrayBuffer();await loadScript(PDFJS_URL,()=>!!window.pdfjsLib);try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WK;}catch(e){}
+    const doc=await window.pdfjsLib.getDocument({isEvalSupported:false,data:buf}).promise;const pags=[];
+    for(let i=1;i<=Math.min(doc.numPages,500);i++){const pg=await doc.getPage(i),tc=await pg.getTextContent();pags.push(tc.items.map(t=>({str:t.str,x:t.transform[4],y:t.transform[5]})));}
+    const d=bhiParse(pags);if(!d.regs.length)throw new Error('Não encontrei colaboradores neste PDF. Use o "Relatório Banco de Horas Colaboradores" do sistema de ponto.');
+    BHI.dados=d;BHI.fase='previa';}
+  catch(e){BHI.fase='arquivo';toast(e&&e.message?e.message:'Não foi possível ler o PDF.','neg');}
+  render();}
+A.bhiFiltro=d=>{BHI.filtro=d.v||'';render();};
+A.bhiNovo=()=>{BHI=Object.assign(BHI,{fase:'arquivo',dados:null,plano:null,res:null,filtro:''});render();};
+A.bhiConfirmar=()=>{if(!BHI.dados)return;if(!mayW('rh')){toast('Seu perfil não pode gravar o banco de horas.','neg');return;}
+  const u=ui.bhimp,p=bhiPlano(BHI.dados,u),st=p.st;
+  if(!st.achados){toast('Nenhum colaborador ligado ao cadastro. Escolha o colaborador nas linhas "Não encontrado".','neg');return;}
+  confirmBox('Gravar o banco de horas de '+st.achados+' colaborador(es) da competência '+fmtYm(BHI.dados.comp)+'?'+(st.subst?' '+st.subst+' já tinha(m) esta competência importada e será(ão) substituído(s).':'')+(st.nao?' '+st.nao+' não encontrado(s) fica(m) de fora.':'')+' Dá para desfazer pelo histórico.',()=>{
+    bhiGuardarVinculos(p,u);
+    const lote='bhl_'+Date.now().toString(36),r=bhiAplicar(p,lote,BHI.arq);
+    put('implog',{id:lote,tipo:'bhi',em:Date.now(),por:actorId(),arquivo:String(BHI.arq||'').slice(0,120),comp:BHI.dados.comp,res:r.res,antes:r.antes});
+    BHI.res=r.res;BHI.fase='fim';render();toast('Banco de horas importado.','pos');},'Gravar');};
+{const d0=A.impDesfazer;A.impDesfazer=d=>{const l=get('implog',d.id);if(!l||l.tipo!=='bhi')return d0(d);
+  confirmBox('Desfazer a importação do banco de horas de '+fmtDT(l.em)+' (competência '+fmtYm(l.comp)+')? Os colaboradores voltam aos números que estavam antes dela.',()=>{const n=bhiDesfazerLote(l);toast('Importação desfeita ('+n+' colaborador(es)).','pos');},'Desfazer',true);};}
+const bhiCls=m=>m<0?'neg':m>0?'pos':'';
+function bhiView(topo){
+  if(!mayR('rh'))return topo+'<div class="card"><p>Seu perfil não tem acesso ao RH.</p></div>';
+  const w=mayW('rh'),hist=S.implog.filter(l=>l.tipo==='bhi').sort((a,b)=>b.em-a.em);
+  const histH=hist.length?'<div class="card"><h2>Relatórios importados</h2><div class="tw" style="border:0"><table style="min-width:560px"><tbody>'+hist.map(l=>'<tr><td class="mono">'+fmtDT(l.em)+'</td><td>'+esc(l.arquivo||'')+' <span class="sub">competência '+esc(fmtYm(l.comp))+'</span></td><td class="sub">'+(l.res?l.res.gravados+' colaborador(es)'+(l.res.substituidos?', '+l.res.substituidos+' substituído(s)':''):'')+'</td><td class="act">'+(l.desfeito?pill('desfeita',''):(w?'<button class="btn sm dng" data-act="impDesfazer" data-id="'+esc(l.id)+'">Desfazer</button>':''))+'</td></tr>').join('')+'</tbody></table></div></div>':'';
+  if(BHI.fase==='lendo')return topo+'<div class="card"><p style="margin:0">Lendo '+esc(BHI.arq)+'…</p><p class="sub">Um relatório com 100 páginas leva alguns segundos.</p></div>';
+  if(BHI.fase==='arquivo')return topo+'<div class="stack"><div class="card"><h2>1. Escolha o PDF do banco de horas</h2><p class="sub" style="margin:0 0 10px">No sistema de ponto, exporte o <b>Relatório Banco de Horas Colaboradores</b> do mês (uma página por colaborador, com Primeira Fase, Hora Excedente, Horas Calculadas, quitações e Saldo Acumulado).</p>'+(w?'<button class="btn pri" data-act="bhiEscolher">Escolher PDF</button>':'<p class="sub">Só o RH importa.</p>')+'</div>'+
+    '<div class="note">O colaborador é reconhecido pelo nome (sem acento, maiúsculas ou espaços duplos; grafias como letras repetidas também). Quem não for encontrado aparece na conferência para você escolher o cadastro ou ignorar, e a escolha fica guardada para as próximas importações. Nada é gravado antes da conferência. O PDF não fica guardado: só os números de cada colaborador. Importar de novo a mesma competência substitui os números dela.</div>'+histH+'</div>';
+  if(BHI.fase==='fim'){const r=BHI.res;return topo+'<div class="stack"><div class="card"><h2>Banco de horas importado</h2><ul style="margin:0;padding-left:20px"><li>'+r.gravados+' colaborador(es) gravado(s)'+(r.substituidos?', '+r.substituidos+' substituído(s)':'')+'</li>'+(r.naoLigados?'<li>'+r.naoLigados+' não encontrado(s), ficaram de fora</li>':'')+(r.ignorados?'<li>'+r.ignorados+' ignorado(s)</li>':'')+'</ul><div class="acts" style="margin-top:10px"><button class="btn" data-act="nav" data-tab="bh">Abrir Banco de horas</button><button class="btn" data-act="bhiNovo">Importar outro relatório</button></div></div>'+histH+'</div>';}
+  const d=BHI.dados,u=ui.bhimp,p=bhiPlano(d,u),st=p.st;BHI.plano=p;
+  const fo=funcOpts(),flt=BHI.filtro;
+  const fil=p.regs.filter(r=>!flt||(flt==='nao'&&!r.funcId)||(flt==='neg'&&r.saldoAcum<0)||(flt==='par'&&(r.como==='grafia'||r.como==='parecido'||r.como==='vinculo'))||(flt==='ja'&&r.ja));
+  const como={nome:'',vinculo:pill('vínculo guardado',''),grafia:pill('grafia diferente','warn'),parecido:pill('nome parecido','warn')};
+  const linhasTxt=r=>r.linhas.map(l=>esc(l.tipo)+' '+bhiHm(l.calc)).join('<br>');
+  return topo+'<div class="stack"><div class="kpis">'+kpi('Colaboradores no relatório',String(st.registros),'competência '+fmtYm(d.comp)+(d.periodo.ini?' · '+fmtDate(d.periodo.ini)+' a '+fmtDate(d.periodo.fim):''))+kpi('Encontrados',String(st.achados),st.subst?st.subst+' substituem a importação anterior':'serão gravados')+kpi('Não encontrados',String(st.nao),'escolha o cadastro ou ignore',st.nao?'warn':'')+kpi('Saldo acumulado negativo',String(st.neg),'colaborador(es)',st.neg?'neg':'')+kpi('Soma dos saldos acumulados',minHm(st.soma,true),'até '+fmtDate((p.regs[0]||{}).acumAte||''),bhiCls(st.soma))+'</div>'+
+    (d.comps.length>1?'<div class="note">O PDF tem mais de uma competência ('+d.comps.map(fmtYm).join(', ')+'). Cada colaborador é gravado na competência da sua página.</div>':'')+
+    '<div class="card"><h2>2. Confira</h2><div class="acts" style="margin-bottom:8px">'+[['','Todos'],['nao','Não encontrados'],['par','Ligados por grafia ou vínculo'],['neg','Saldo negativo'],['ja','Já importados nesta competência']].map(x=>'<button class="btn sm'+(flt===x[0]?' pri':'')+'" data-act="bhiFiltro" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>'+
+    '<div class="tw" style="max-height:520px;overflow:auto"><table style="min-width:1020px"><thead><tr><th>Nome no relatório</th><th>Colaborador no sistema</th><th>Linhas (horas calculadas)</th><th class="num">Quitação HE</th><th class="num">Quitação BH</th><th class="num">Saldo do período</th><th class="num">Saldo acumulado</th></tr></thead><tbody>'+
+    (fil.length?fil.map(r=>'<tr><td><b>'+esc(r.nome)+'</b>'+(r.ja?'<div class="sub">já importado em '+fmtDT(r.ja.em)+': saldo '+bhiHm(r.ja.saldoAcum)+'</div>':'')+'</td><td><select data-filter="bhimp.f'+r.i+'" aria-label="Colaborador para '+esc(r.nome)+'">'+opt([['-','— ignorar —']].concat(fo),u['f'+r.i]||r.funcId||'-')+'</select> '+(r.funcId?(como[r.como]||''):pill(r.como==='ignorado'?'ignorado':'Não encontrado',r.como==='ignorado'?'':'warn'))+(r.dup?' '+pill('mesmo colaborador em outra página: fica de fora','neg'):'')+'</td><td class="sub">'+linhasTxt(r)+'</td><td class="num mono">'+bhiHm(r.quitHE)+'</td><td class="num mono">'+bhiHm(r.quitBH)+'</td><td class="num mono">'+bhiHm(r.saldoPeriodo)+'</td><td class="num mono"><b class="'+bhiCls(r.saldoAcum)+'">'+bhiHm(r.saldoAcum)+'</b></td></tr>').join(''):emptyRow(7,'Ninguém neste filtro.'))+'</tbody></table></div>'+
+    '<p class="sub" style="margin:10px 0 0">Quem ficar como "— ignorar —" não é gravado. As escolhas feitas aqui ficam guardadas para as próximas importações (também valem para a importação do ponto).</p>'+
+    '<div class="acts" style="margin-top:12px"><button class="btn" data-act="bhiNovo">Escolher outro PDF</button><button class="btn pri" data-act="bhiConfirmar"'+(st.achados&&mayW('rh')?'':' disabled')+'>Gravar '+st.achados+' colaborador(es)</button></div></div>'+histH+'</div>';}
+{const t0=impTopo;impTopo=function(sel){let h=t0(sel);const on=sel==='bhi';
+  const card='<div class="card imp-op'+(on?' on':'')+'"><div class="imp-op-h"><h2 style="margin:0">Banco de horas (relatório do ponto)</h2>'+(on?pill('selecionado','acc'):'')+'</div><p style="margin:6px 0 4px"><b>Para que serve:</b> traz o saldo do banco de horas de cada colaborador, como o sistema de ponto calculou: horas do mês, quitações, saldo do período e saldo acumulado. Aparece em Pessoal › Banco de horas, ao lado do saldo calculado aqui.</p><p class="sub" style="margin:0 0 10px"><b>Arquivo:</b> "Relatório Banco de Horas Colaboradores" do mês, em PDF (uma página por colaborador). Só os números são guardados; importar de novo o mesmo mês substitui os números dele.</p><button class="btn'+(on?'':' pri')+'" data-act="impTipo" data-v="bhi">Importar banco de horas</button></div>';
+  const i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+card+h.slice(i):h;};}
+{const vi=V.imp;V.imp=function(){if(IMP.tipo==='bhi')return bhiView(impTopo('bhi'));
+  /* o histórico geral não sabe descrever esta importação: ela tem o próprio histórico na tela dela */
+  const keep=S.implog;S.implog=keep.filter(l=>l.tipo!=='bhi');try{return vi.apply(this,arguments);}finally{S.implog=keep;}};}
+
+/* ---------- Banco de horas: saldo do relatório e diferença para o sistema ---------- */
+function bhiUltimo(fid){let u=null;(S.bhimp||[]).forEach(r=>{if(r.funcId===fid&&(!u||String(r.comp)>String(u.comp)))u=r;});return u;}
+/* saldo calculado pelo sistema na data do relatório (último movimento do extrato até essa data); null quando o colaborador
+   não está no banco do sistema ou o banco do sistema começa depois dessa data (não há o que comparar) */
+function bhiSisEm(f,data){if(!f||!f.bh)return null;const x=bhExtrato(f);if(!x.ini||x.ini>data)return null;let s=0;x.ev.forEach(e=>{if(e.data<=data)s=e.saldo;});return s;}
+function bhiTabela(r){if(!r)return '';
+  const ls=r.linhas||[],pc=v=>v==null?'—':String(v).replace('.',',')+' %';
+  const kv=(t,v,c)=>'<tr><td>'+t+'</td><td class="num mono">'+(c?'<b class="'+bhiCls(v)+'">':'')+bhiHm(v)+(c?'</b>':'')+'</td></tr>';
+  return '<div class="sect">Relatório do ponto · competência '+esc(fmtYm(r.comp))+(r.periodo&&r.periodo.ini?' <span class="sub">('+fmtDate(r.periodo.ini)+' a '+fmtDate(r.periodo.fim)+')</span>':'')+'</div>'+
+    '<div class="tw" style="border:0"><table style="min-width:620px"><thead><tr><th rowspan="2">Tipo</th><th colspan="2" style="text-align:center">Primeira fase</th><th colspan="2" style="text-align:center">Hora excedente</th><th class="num" rowspan="2">Horas calculadas</th></tr><tr><th class="num">Horas praticadas</th><th class="num">Percentual</th><th class="num">Horas praticadas</th><th class="num">Percentual</th></tr></thead><tbody>'+
+    (ls.length?ls.map(l=>'<tr><td>'+esc(l.tipo)+'</td><td class="num mono">'+bhiHm(l.prim)+'</td><td class="num">'+pc(l.pctPrim)+'</td><td class="num mono">'+bhiHm(l.exc)+'</td><td class="num">'+pc(l.pctExc)+'</td><td class="num mono">'+bhiHm(l.calc)+'</td></tr>').join(''):emptyRow(6,'Sem linhas.'))+'</tbody></table></div>'+
+    '<div class="tw" style="border:0"><table style="min-width:420px"><tbody>'+kv('Saldo quitação como horas extras',r.quitHE)+kv('Saldo quitação como banco de horas',r.quitBH)+kv('Saldo horas praticadas',r.saldoPraticado)+kv('Saldo',r.saldo)+kv('Total praticado primeira fase',r.totPrim)+kv('Total praticado hora excedente',r.totExc)+kv('Saldo do período',r.saldoPeriodo,1)+kv('Saldo acumulado até '+fmtDate(r.acumAte),r.saldoAcum,1)+
+    '<tr><td>Validade</td><td class="num mono">'+esc(r.validade?fmtYm(r.validade):'—')+'</td></tr></tbody></table></div>'+
+    '<p class="sub" style="margin:6px 0 0">Importado em '+fmtDT(r.em)+' do relatório do sistema de ponto'+(r.nomeRel?' (nome no relatório: '+esc(r.nomeRel)+')':'')+'.</p>';}
+function bhiOutras(fid,comp){const os=(S.bhimp||[]).filter(r=>r.funcId===fid&&r.comp!==comp).sort((a,b)=>String(b.comp).localeCompare(String(a.comp)));
+  return os.length?'<p class="sub" style="margin:4px 0 0">Competências anteriores: '+os.slice(0,12).map(r=>fmtYm(r.comp)+' '+bhiHm(r.saldoAcum)).join(' · ')+'</p>':'';}
+A.bhiVer=d=>{const f=get('func',d.id),r=bhiUltimo(d.id);if(!f||!r){toast('Sem relatório importado para este colaborador.','neg');return;}
+  modal({title:'Banco de horas (relatório do ponto) · '+f.nome,wide:true,nofocus:true,body:bhiTabela(r)+bhiOutras(f.id,r.comp),foot:'<button class="btn" data-act="closeModal">Fechar</button>'});};
+{const a0=A.bhExt;A.bhExt=d=>{const r=d&&bhiUltimo(d.id);if(!r)return a0(d);const m0=modal;
+  modal=function(o){if(o&&typeof o.body==='string')o=Object.assign({},o,{body:o.body+bhiTabela(r)+bhiOutras(d.id,r.comp)});return m0.call(this,o);};
+  try{return a0(d);}finally{modal=m0;}};}
+function bhiCel(f,r){if(!r)return '<td class="num sub">—</td>';
+  const sis=bhiSisEm(f,r.acumAte||fimMes(r.comp)),dif=sis==null?null:r.saldoAcum-sis;
+  return '<td class="num"><b class="'+bhiCls(r.saldoAcum)+'">'+minHm(r.saldoAcum,true)+'</b><div class="sub">'+esc(fmtYm(r.comp))+'</div>'+
+    (dif==null?(f&&f.bh?'<div class="sub" title="O banco de horas do sistema começa em '+fmtDate(bhExtrato(f).ini)+'">sistema começa depois</div>':''):dif===0?'<div class="sub" title="Saldo calculado pelo sistema em '+fmtDate(r.acumAte)+'">igual ao sistema</div>':'<div class="sub '+(Math.abs(dif)>=60?'neg':'')+'" title="Saldo calculado pelo sistema em '+fmtDate(r.acumAte)+': '+minHm(sis,true)+'">dif. '+minHm(dif,true)+' do sistema</div>')+'</td>';}
+{const v0=V.bh;V.bh=function(){let h=v0.apply(this,arguments);
+  if(!(S.bhimp||[]).length||!mayR('rh'))return h;
+  const fs=funcAtivos(),porNome=new Map();fs.forEach(f=>{const k=esc(f.nome);porNome.set(k,porNome.has(k)?null:f);});
+  const ults=fs.map(f=>({f,r:bhiUltimo(f.id)})).filter(x=>x.r),compMax=ults.reduce((m,x)=>String(x.r.comp)>m?String(x.r.comp):m,'');
+  const doMes=ults.filter(x=>x.r.comp===compMax),neg=doMes.filter(x=>x.r.saldoAcum<0),soma=sum(doMes,x=>x.r.saldoAcum||0);
+  const ks=kpi('Saldo negativo no relatório do ponto',String(neg.length),'colaborador(es) · competência '+fmtYm(compMax),neg.length?'neg':'')+kpi('Soma dos saldos do relatório',minHm(soma,true),doMes.length+' colaborador(es) · acumulado até '+fmtDate((doMes[0]||{r:{}}).r.acumAte||''),bhiCls(soma));
+  const mk='</div><div class="note"><b>Regras em uso:';h=h.indexOf(mk)>=0?h.replace(mk,ks+mk):h.replace('<div class="kpis">','<div class="kpis">'+ks);
+  /* coluna nova depois de Saldo */
+  h=h.replace('<th class="num">Saldo</th>','<th class="num">Saldo</th><th class="num" title="Saldo acumulado do Relatório Banco de Horas importado em Sistema › Importar cadastros, e a diferença para o saldo calculado pelo sistema na mesma data">Saldo no relatório</th>');
+  const a=h.indexOf('<tbody>',h.indexOf('Saldo no relatório')),b=a<0?-1:h.indexOf('</tbody>',a);if(a<0||b<0)return h;
+  let corpo=h.slice(a+7,b);
+  corpo=corpo.split('<tr>').map((seg,i)=>{if(!i||!seg)return seg;
+    if(/<td colspan="7">/.test(seg))return seg.replace('<td colspan="7">','<td colspan="8">');
+    const mi=seg.match(/data-act="bh(?:Ext|Part)" data-id="([^"]+)"/),mn=seg.match(/^<td><b>([^<]*)<\/b>/);
+    const f=mi?get('func',mi[1]):(mn?porNome.get(mn[1]):null),r=f?bhiUltimo(f.id):null,cel=bhiCel(f,r);
+    if(seg.includes('<td colspan="5" class="sub">'))return seg.replace('<td colspan="5" class="sub">','<td class="num sub">—</td>'+cel+'<td colspan="4" class="sub">').replace('<td class="act">','<td class="act">'+(r?'<button class="btn sm" data-act="bhiVer" data-id="'+f.id+'">Relatório do ponto</button>':''));
+    const p1=seg.indexOf('</td>'),p2=p1<0?-1:seg.indexOf('</td>',p1+5);if(p2<0)return seg;
+    return seg.slice(0,p2+5)+cel+seg.slice(p2+5);}).join('<tr>');
+  return h.slice(0,a+7)+corpo+h.slice(b);};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='121',APP_DATA='2026-10-27';
+const APP_VER='122',APP_DATA='2026-10-28';
 const CHANGELOG=[
+  ['122','2026-10-28',['Importar cadastros › Banco de horas (relatório do ponto): lê o PDF "Relatório Banco de Horas Colaboradores" (um colaborador por página) e grava, por competência, as horas por tipo de dia, quitações, validade e saldos do período e acumulado. Conferência antes de gravar, ligação pelo nome (os não encontrados são escolhidos e lembrados) e Desfazer.', 'Pessoal › Banco de horas: coluna Saldo no relatório com a diferença para o saldo do sistema, indicadores de saldos negativos e a tabela da competência no extrato do colaborador. Só RH e Administrador veem.']],
   ['121','2026-10-27',['Cores por setor: cada aba do menu superior tem a cor do seu setor e o fundo da página fica com a cor do setor aberto, bem clara. Para desligar neste navegador: Sistema › Configurações › Cores por setor.']],
   ['120','2026-10-27',['Comercial › Oportunidades: Nº da proposta na 1ª coluna (próximo número sugerido, editável, sem repetição; botão para separar o número que hoje está no título), coluna Projeto com link, colunas mais largas e títulos em até 3 linhas.', 'Botões Participar e Desistir no lugar do Go/no-go: Participar segue para a proposta e, com margem abaixo do mínimo, continua pedindo a aprovação do diretor; Desistir pede o motivo.', 'Valores em dinheiro em todo o sistema: digite só os números e o campo mostra R$ 2.000.000,00.', 'Habilitação: tipos de documento em ordem alfabética e filtro por documento.', 'EAP e Curva S: obras listadas pelo projeto (P490 · contrato · objeto).', 'Pessoal › Custo-hora por função: o RH calcula a média por função (com encargos e benefícios, só funções com 3 ou mais pessoas, sem expor salários) ou informa um valor de referência. Na EAP, a mão de obra recebe o valor da hora e o material o custo médio; valores gravados só mudam pelo botão Atualizar valores.']],
   ['119','2026-10-27',['Conector fiscal: fim do conflito com o Agente da NF-e do Omie. Só um sistema por CNPJ pode consultar a SEFAZ por NSU (regra da NT 2014.002); por padrão (NFE_DIST=0) quem consulta é o Omie e a Central continua buscando as NFS-e. O cartão de Fiscal › NFs recebidas mostra quem consulta, avisa se outro sistema estiver na fila e bloqueia Baixar XML durante a espera de 1 hora da SEFAZ.', 'Conector fiscal: chaves e CNPJ com letras (CNPJ alfanumérico) aceitos; ciência automática só até 10 dias da emissão e aviso dos prazos de manifestação (10 e 90 dias); NFS-e recebidas guardam os valores de IBS/CBS.']],

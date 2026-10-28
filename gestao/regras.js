@@ -28,6 +28,9 @@ const crypto = require('node:crypto');
 module.exports = function (X) {
   const { db, q, json, lerJson, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH } = X;
   const END = X.END || { reautenticado: () => true, exigirReauth: () => false };
+  /* v122: banco de horas importado do relatório do ponto (bhimp: saldos de horas por colaborador) tem a mesma proteção do
+     banco de horas (bhlanc): lê e grava só RH e Administrador (e o personalizado com dados de RH), como os outros dados de RH. */
+  if (SENS_RH && SENS_RH.add) SENS_RH.add('bhimp');
   /* v114: papel do perfil (o Gestor de SST tem o papel 'sst') e definição do perfil (inclui os personalizados) */
   const papelDe = X.papelDe || (pf => pf), defDe = conta => (conta && PERM.perfis[perfilDe(conta)]) || null;
   const papelConta = conta => !conta ? '' : conta.nivel === 'owner' ? 'admin' : papelDe(perfilDe(conta));
