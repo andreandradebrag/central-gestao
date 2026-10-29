@@ -26025,7 +26025,7 @@ const DZ_CSS=`.dz{color:#000;background:transparent;font-family:Arial,Helvetica,
 .dz *{box-sizing:border-box}
 .dz .dz-pg{position:relative;background:#fff;overflow:hidden;color:#000}
 .dz .dz-in{position:absolute}
-.dz table{border-collapse:collapse;width:100%;table-layout:fixed}
+.dz table{border-collapse:collapse;width:100%;min-width:0!important;table-layout:fixed}
 .dz td,.dz th{border:0.2mm solid #000;padding:0.35mm 0.8mm;vertical-align:top;overflow:hidden;color:#000;background:#fff}
 .dz .dz-r td{height:7mm}
 .dz td i{display:block;font-style:normal;font-size:5pt;text-transform:uppercase;line-height:1.1;white-space:nowrap;overflow:hidden}
@@ -26833,8 +26833,9 @@ Object.assign(ACT_GROUP,{scReabrir:'comp',scCompl:'comp'});
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{scReabrir:'Volta a solicitação para rascunho para alterar itens e reenviar. O comprador é avisado.',scCompl:'Abre uma nova solicitação ligada a esta, com o mesmo projeto, etapa e local de entrega.'});
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='136',APP_DATA='2026-10-29';
+const APP_VER='136.1',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['136.1','2026-10-29',['DANFE gerado: o quadro do código de barras e da chave de acesso saía cortado à direita (tela, Baixar PDF e impressão) por causa de uma largura mínima de tabelas do sistema.']],
   ['136','2026-10-29',['Solicitação de compra: botão Reabrir para editar quando está aguardando cotação ou em cotação (a cotação é mantida: item novo entra em branco, item removido sai, quantidade alterada fica marcada para conferir). Com pedidos gerados ou atendida, botão Criar SC complementar. Reabrem: quem pediu, o comprador e o administrador; fica no histórico e o comprador é avisado.']],
   ['135','2026-10-29',['Importar NFS-e emitidas (ZIP do Omie): lê o padrão da prefeitura (ABRASF) e o Padrão Nacional, guarda XML e PDF no arquivo fiscal, marca as canceladas e não duplica ao reimportar.', 'Ligação das NFS-e com Contas a receber: liga sozinha quando há um único título com o mesmo tomador, valor (bruto ou líquido) e data próxima; os demais casos vão para a lista Conferir (ligar, criar título ou ignorar). Título ligado a nota cancelada fica marcado.']],
   ['134','2026-10-29',['DANFE no padrão oficial (MOC 7.0, Anexo II) gerado a partir do XML: canhoto, código de barras da chave, protocolo, todos os quadros, IBS/CBS (NT 2026.010), várias folhas e marcas SEM VALOR FISCAL / CANCELADA.', 'PDF original do fornecedor guardado no arquivo fiscal (e-mail nfe@, anexo manual e importação em lote por ZIP de PDFs nomeados pela chave). O botão DANFE abre o PDF do fornecedor quando existe; o espelho antigo virou "Resumo".']],
