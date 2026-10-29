@@ -223,6 +223,107 @@ module.exports = function (ctx) {
     fila: db.prepare("SELECT id, chave, tipo, emissao FROM arqf WHERE sit_fila=1 ORDER BY em LIMIT ?"),
     del: db.prepare('DELETE FROM arqf WHERE id=?')
   };
+  /* ===== v134: PDF original do fornecedor (o DANFE que o emitente mandou), 1 por nota, pela chave =====
+     Origens: 'email' (caixa nfe@, copiado da tabela caixa_pdf do caixanfe.js), 'manual' (anexado na nota/título) e 'lote'
+     (ZIP de PDFs cujo nome tem a chave). O PDF não vale como nota: a nota é o XML; o PDF fica ligado a ela. */
+  const PDF_MAX = Math.round(Math.min(5, Math.max(0.1, +E.ARQF_PDF_MAX_MB || 3)) * 1048576);
+  const PDF_ZIP_MAX = Math.max(1, +E.ARQF_PDF_ZIP_MB || 200) * 1048576;
+  db.exec(`CREATE TABLE IF NOT EXISTS arqf_pdf(chave TEXT PRIMARY KEY, origem TEXT NOT NULL, nome TEXT, tam INTEGER, sha TEXT, pdf BLOB NOT NULL, em INTEGER, por TEXT, ref TEXT);
+    CREATE TABLE IF NOT EXISTS arqf_pdf_rem(chave TEXT PRIMARY KEY, em INTEGER, por TEXT);`);
+  const stPdf = {
+    info: db.prepare('SELECT chave, origem, nome, tam, sha, em, por FROM arqf_pdf WHERE chave=?'),
+    get: db.prepare('SELECT chave, origem, nome, tam, pdf FROM arqf_pdf WHERE chave=?'),
+    novo: db.prepare('INSERT OR IGNORE INTO arqf_pdf(chave, origem, nome, tam, sha, pdf, em, por, ref) VALUES(?,?,?,?,?,?,?,?,?)'),
+    troca: db.prepare('UPDATE arqf_pdf SET origem=?, nome=?, tam=?, sha=?, pdf=?, em=?, por=?, ref=NULL WHERE chave=?'),
+    del: db.prepare('DELETE FROM arqf_pdf WHERE chave=?'),
+    remNovo: db.prepare('INSERT OR REPLACE INTO arqf_pdf_rem(chave, em, por) VALUES(?,?,?)'),
+    remDel: db.prepare('DELETE FROM arqf_pdf_rem WHERE chave=?')
+  };
+  let temCaixaPdf = false;
+  const caixaPdfExiste = () => { if (!temCaixaPdf) { try { temCaixaPdf = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='caixa_pdf'").get(); } catch (e) { } } return temCaixaPdf; };
+  /* une o "DANFE do e-mail" (caixa_pdf) ao arquivo: copia o 1º PDF de cada chave que está no arquivo e ainda não tem PDF */
+  function pdfDoEmail(chaves) {
+    if (!caixaPdfExiste()) return 0;
+    const base = `INSERT OR IGNORE INTO arqf_pdf(chave, origem, nome, tam, sha, pdf, em, por, ref)
+      SELECT c.chave, 'email', c.nome, c.tam, c.sha, c.pdf, c.em, NULL, c.msg_id FROM caixa_pdf c
+      WHERE c.chave IN (SELECT chave FROM arqf) AND c.chave NOT IN (SELECT chave FROM arqf_pdf) AND c.chave NOT IN (SELECT chave FROM arqf_pdf_rem)`;
+    try {
+      if (!chaves) return db.prepare(base + ' ORDER BY c.em').run().changes;
+      const cs = [...new Set(chaves.map(normCh))].filter(x => x.length === 44).slice(0, 500); if (!cs.length) return 0;
+      return db.prepare(base + ' AND c.chave IN (' + cs.map(() => '?').join(',') + ') ORDER BY c.em').run(...cs).changes;
+    } catch (e) { return 0; }
+  }
+  setTimeout(() => { try { const n = pdfDoEmail(null); if (n) console.log('Arquivo fiscal: ' + n + ' PDF(s) do e-mail ligados às notas.'); } catch (e) { } }, 0).unref();
+  const pdfInfo = ch => { let r = stPdf.info.get(ch); if (!r && pdfDoEmail([ch])) r = stPdf.info.get(ch); return r ? { origem: r.origem, nome: r.nome, tam: r.tam, em: r.em, por: r.por || undefined } : null; };
+  /* chave de acesso válida: 44 dígitos, UF, modelo 55 e dígito verificador (módulo 11) */
+  function chaveOk(ch) {
+    if (!/^\d{44}$/.test(ch) || ch.slice(20, 22) !== '55' || !/^(1[1-7]|2[1-9]|3[1-35]|4[1-3]|5[0-3])$/.test(ch.slice(0, 2))) return false;
+    let s = 0, p = 2; for (let i = 42; i >= 0; i--) { s += (+ch[i]) * p; p = p === 9 ? 2 : p + 1; }
+    const d = s % 11; return (d < 2 ? 0 : 11 - d) === +ch[43];
+  }
+  /* chave a partir do nome do arquivo (ex.: 2124…0005.pdf, NFe3526…-danfe.pdf) */
+  function chaveDoNome(nome) {
+    const base = String(nome || '').split('/').pop(), runs = base.match(/\d{44,}/g) || [], achou = new Set();
+    for (const r of runs) for (let i = 0; i + 44 <= r.length; i++) { const c = r.slice(i, i + 44); if (chaveOk(c)) achou.add(c); }
+    if (achou.size === 1) return { ch: [...achou][0] };
+    if (achou.size > 1) return { motivo: 'o nome tem mais de uma chave de acesso' };
+    return { motivo: runs.length ? 'chave de acesso inválida no nome (dígito verificador não confere)' : 'o nome do arquivo não tem a chave de acesso de 44 dígitos' };
+  }
+  const ehPdf = b => !!b && b.length >= 5 && b.subarray(0, 5).toString('latin1') === '%PDF-';
+  const mb = n => (Math.round(n / 104857.6) / 10).toString().replace('.', ',') + ' MB';
+  /* guarda o PDF de uma nota. Já tem PDF: 'existente' (nada muda), a não ser que substituir=true (anexo manual de quem tem acesso total) */
+  function pdfGuardar(row, buf, nome, origem, conta, substituir) {
+    if (!ehPdf(buf)) return { r: 'ignorado', motivo: 'não é um PDF (o arquivo não começa com %PDF)' };
+    if (buf.length > PDF_MAX) return { r: 'ignorado', motivo: 'PDF maior que ' + mb(PDF_MAX) };
+    const sha = crypto.createHash('sha256').update(buf).digest('hex');
+    pdfDoEmail([row.chave]);
+    const ja = stPdf.info.get(row.chave);
+    if (ja) {
+      if (ja.sha === sha) return { r: 'existente', motivo: 'o mesmo PDF já está ligado a esta nota' };
+      if (!substituir) return { r: 'existente', motivo: 'a nota já tem um PDF do fornecedor (' + (ja.origem === 'email' ? 'veio por e-mail' : ja.origem === 'lote' ? 'importado em lote' : 'anexado') + ')' };
+      stPdf.troca.run(origem, String(nome || '').slice(0, 200), buf.length, sha, buf, Date.now(), conta ? conta.id : null, row.chave);
+      return { r: 'trocado', antes: { origem: ja.origem, nome: ja.nome, sha: ja.sha } };
+    }
+    stPdf.novo.run(row.chave, origem, String(nome || '').slice(0, 200), buf.length, sha, buf, Date.now(), conta ? conta.id : null, null);
+    stPdf.remDel.run(row.chave);
+    return { r: 'novo' };
+  }
+  /* ZIP de PDFs: cada PDF é ligado à nota pela chave que está no nome do arquivo */
+  async function pdfLote(arq, conta, total) {
+    const rel = { total: 0, novos: 0, existentes: 0, ignorados: 0, motivos: {}, lista: [], ligados: [] };
+    const conta1p = (nome, r, ch) => {
+      if (r.r === 'novo') { rel.novos++; if (rel.ligados.length < 2000) rel.ligados.push({ arquivo: String(nome).slice(0, 200), chave: ch }); return; }
+      const k = r.r === 'existente' ? 'existentes' : 'ignorados'; rel[k]++;
+      if (k === 'ignorados') { const mo = r.motivo.replace(/\s*\(.*$/, ''); rel.motivos[mo] = (rel.motivos[mo] || 0) + 1; }
+      if (rel.lista.length < 2000) rel.lista.push({ arquivo: String(nome).slice(0, 200), r: r.r === 'existente' ? 'existente' : 'ignorado', motivo: r.motivo, chave: ch || undefined });
+    };
+    const z = zipAbrir(arq); let lidos = 0;
+    try {
+      const ents = z.entradas.filter(e => !/\/$/.test(e.nome) && !/(^|\/)(__MACOSX|\.)/.test(e.nome)); rel.total = ents.length;
+      for (let i = 0; i < ents.length; i += 50) {
+        db.exec('BEGIN');
+        try {
+          for (const en of ents.slice(i, i + 50)) {
+            const nome = en.nome.split('/').pop();
+            if (!/\.pdf$/i.test(nome)) { conta1p(en.nome, { r: 'ignorado', motivo: 'não é arquivo .pdf' }); continue; }
+            if (en.cript) { conta1p(en.nome, { r: 'ignorado', motivo: 'arquivo protegido por senha dentro do ZIP' }); continue; }
+            if (en.orig > PDF_MAX) { conta1p(en.nome, { r: 'ignorado', motivo: 'PDF maior que ' + mb(PDF_MAX) }); continue; }
+            const c = chaveDoNome(nome); if (!c.ch) { conta1p(en.nome, { r: 'ignorado', motivo: c.motivo }); continue; }
+            const row = st.porChave.get(c.ch);
+            if (!row) { conta1p(en.nome, { r: 'ignorado', motivo: 'nota não encontrada no arquivo fiscal — importe o XML antes' }, c.ch); continue; }
+            if (!total && row.tipo !== 'entrada') { conta1p(en.nome, { r: 'ignorado', motivo: 'seu perfil envia só PDFs de notas de entrada' }, c.ch); continue; }
+            let buf; try { buf = z.ler(en); } catch (e) { conta1p(en.nome, { r: 'ignorado', motivo: 'não foi possível ler do ZIP: ' + (e.msg || e.message || 'erro') }, c.ch); continue; }
+            lidos += buf.length; if (lidos > PDF_ZIP_MAX * 3) throw { st: 413, msg: 'conteúdo do ZIP grande demais' };
+            conta1p(en.nome, pdfGuardar(row, buf, nome, 'lote', conta, false), c.ch);
+          }
+          db.exec('COMMIT');
+        } catch (e) { try { db.exec('ROLLBACK'); } catch (x) { } throw e; }
+        await new Promise(r => setImmediate(r));
+      }
+    } finally { z.fechar(); }
+    return rel;
+  }
+  /* ===== fim v134 (tabela e funções) ===== */
   const docGet = p => { const r = q.docGet.get(p); try { return r ? JSON.parse(r.data) : null; } catch (e) { return null; } };
   const col = c => q.colGet.all(c).map(r => { try { return Object.assign({ id: r.id }, JSON.parse(r.data)); } catch (e) { return null; } }).filter(r => r && !r._del);
 
@@ -522,6 +623,8 @@ module.exports = function (ctx) {
     const itens = ls.map(linha);
     /* v130: todas as origens de cada nota da página (uma consulta só) */
     if (itens.length) { const og = new Map(); for (const o of db.prepare('SELECT chave, origem, em FROM arqf_origem WHERE chave IN (' + itens.map(() => '?').join(',') + ') ORDER BY em').all(...itens.map(x => x.chave))) { if (!og.has(o.chave)) og.set(o.chave, []); og.get(o.chave).push({ origem: o.origem, em: o.em }); } for (const x of itens) x.origens = og.get(x.chave) || [{ origem: x.origem, em: x.em }]; }
+    /* v134: marca as notas da página que têm o PDF original do fornecedor (une antes o que veio por e-mail) */
+    if (itens.length) { pdfDoEmail(itens.map(x => x.chave)); const tp = new Map(db.prepare('SELECT chave, origem FROM arqf_pdf WHERE chave IN (' + itens.map(() => '?').join(',') + ')').all(...itens.map(x => x.chave)).map(r => [r.chave, r.origem])); for (const x of itens) if (tp.has(x.chave)) x.pdf = tp.get(x.chave); }
     return { itens, total: total.n, soma: r2(total.v), pg, n, resumo: res, acesso: acc, hoje: hojeBr() };
   }
 
@@ -621,12 +724,75 @@ module.exports = function (ctx) {
       auditar(conta, req, 'ARQF_RELIGAR', 'arqfiscal/religar', null, { vistas: vist, ligadas: lig, sugestoes: sug });
       json(res, 200, { vistas: vist, ligadas: lig, sugestoes: sug }); return true;
     }
+    /* ===== v134: PDF original do fornecedor ===== */
+    if (p === '/api/arqfiscal/pdf/config' && m === 'GET') { json(res, 200, { pdfMaxMb: PDF_MAX / 1048576, zipMaxMb: PDF_ZIP_MAX / 1048576, acesso: acc }); return true; }
+    /* importar DANFEs em lote: o corpo é um ZIP de PDFs; cada PDF liga à nota pela chave do nome do arquivo */
+    if (p === '/api/arqfiscal/pdf/lote' && m === 'POST') {
+      const len = +req.headers['content-length'] || 0;
+      if (len > PDF_ZIP_MAX) { auditar(conta, req, 'ARQF_PDF_LOTE_RECUSADO', p, null, { motivo: 'ZIP grande demais', bytes: len }); json(res, 413, { code: 'invalid_argument', erro: 'ZIP grande demais (limite ' + mb(PDF_ZIP_MAX) + '). Divida em arquivos menores.' }); return true; }
+      const nomeZ = String(u.searchParams.get('nome') || 'danfes.zip').slice(0, 200), tmp = path.join(DATA, 'tmp', 'arqfpdf-' + uid(16) + '.zip');
+      try { fs.mkdirSync(path.dirname(tmp), { recursive: true }); } catch (e) { }
+      try {
+        await new Promise((ok, err) => { let n = 0; const w = fs.createWriteStream(tmp); req.on('data', d => { n += d.length; if (n > PDF_ZIP_MAX) { req.unpipe(w); w.destroy(); err({ st: 413, msg: 'ZIP grande demais (limite ' + mb(PDF_ZIP_MAX) + ').' }); req.resume(); } }); req.pipe(w); w.on('finish', ok); w.on('error', err); req.on('error', err); });
+      } catch (e) { try { fs.unlinkSync(tmp); } catch (x) { } json(res, e.st || 400, { erro: e.msg || 'Falha ao receber o arquivo.' }); return true; }
+      const ini = Date.now(); let rel;
+      try { rel = await pdfLote(tmp, conta, total); }
+      catch (e) { try { fs.unlinkSync(tmp); } catch (x) { } auditar(conta, req, 'ARQF_PDF_LOTE_RECUSADO', p, null, { arquivo: nomeZ, motivo: e.msg || e.message }); json(res, e.st || 400, { erro: e.msg || 'Arquivo ZIP inválido.' }); return true; }
+      try { fs.unlinkSync(tmp); } catch (x) { }
+      rel.arquivo = nomeZ; rel.segundos = Math.round((Date.now() - ini) / 100) / 10;
+      auditar(conta, req, 'ARQF_PDF_LOTE', 'arqfiscal/pdf/lote', null, { arquivo: nomeZ, total: rel.total, novos: rel.novos, existentes: rel.existentes, ignorados: rel.ignorados, motivos: rel.motivos, chaves: rel.ligados.slice(0, 50).map(x => x.chave) });
+      json(res, 200, rel); return true;
+    }
+    /* nota pela chave (botão DANFE das telas que só conhecem a chave, ex.: Notas para lançar) */
+    const mch = p.match(/^\/api\/arqfiscal\/ch\/(\d{44})$/);
+    if (mch && m === 'GET') {
+      const r0 = st.porChave.get(mch[1]), row = r0 ? st.porId.get(r0.id) : null;
+      if (!row || (!total && row.tipo !== 'entrada')) { json(res, 404, { code: 'not_found', erro: 'Nota não encontrada no arquivo fiscal.' }); return true; }
+      json(res, 200, Object.assign(linha(row), { pdf: pdfInfo(row.chave) })); return true;
+    }
+    const mpd = p.match(/^\/api\/arqfiscal\/([A-Za-z0-9]{8,40})\/pdf$/);
+    if (mpd) {
+      const row = st.porId.get(mpd[1]);
+      if (!row || (!total && row.tipo !== 'entrada')) { json(res, 404, { code: 'not_found', erro: 'Nota não encontrada no arquivo fiscal.' }); return true; }
+      if (m === 'GET') {
+        pdfDoEmail([row.chave]); const r = stPdf.get.get(row.chave);
+        if (!r) { json(res, 404, { code: 'not_found', erro: 'Esta nota não tem o PDF do fornecedor.' }); return true; }
+        const b = Buffer.isBuffer(r.pdf) ? r.pdf : Buffer.from(r.pdf.buffer, r.pdf.byteOffset, r.pdf.byteLength);
+        const baixar = !!u.searchParams.get('baixar');
+        if (baixar) auditar(conta, req, 'ARQF_PDF_BAIXAR', 'arqfiscal/' + row.chave, null, { origem: r.origem });
+        /* arquivo vindo de fora: nunca vira página do sistema (sandbox, nosniff); o navegador mostra pelo leitor de PDF */
+        res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': b.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+          'content-disposition': (baixar ? 'attachment' : 'inline') + '; filename="danfe-' + row.chave + '.pdf"', 'content-security-policy': "default-src 'none'; sandbox" });
+        res.end(b); return true;
+      }
+      if (m === 'POST') { /* anexo manual: o corpo é o PDF */
+        const substituir = total && !!u.searchParams.get('substituir');
+        if ((+req.headers['content-length'] || 0) > PDF_MAX) { auditar(conta, req, 'ARQF_PDF_RECUSADO', 'arqfiscal/' + row.chave, null, { motivo: 'PDF maior que o limite' }); json(res, 413, { code: 'invalid_argument', erro: 'PDF maior que ' + mb(PDF_MAX) + '.' }); return true; }
+        let buf; try { buf = await lerCorpo(req, PDF_MAX + 1); } catch (e) { auditar(conta, req, 'ARQF_PDF_RECUSADO', 'arqfiscal/' + row.chave, null, { motivo: 'PDF maior que o limite' }); json(res, 413, { code: 'invalid_argument', erro: 'PDF maior que ' + mb(PDF_MAX) + '.' }); return true; }
+        if (buf.length > PDF_MAX) { json(res, 413, { code: 'invalid_argument', erro: 'PDF maior que ' + mb(PDF_MAX) + '.' }); return true; }
+        const nome = String(u.searchParams.get('nome') || 'danfe.pdf').slice(0, 200);
+        let r; db.exec('BEGIN'); try { r = pdfGuardar(row, buf, nome, 'manual', conta, substituir); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch (x) { } throw e; }
+        if (r.r === 'ignorado') { auditar(conta, req, 'ARQF_PDF_RECUSADO', 'arqfiscal/' + row.chave, null, { motivo: r.motivo, nome }); json(res, 400, { code: 'invalid_argument', erro: 'Arquivo recusado: ' + r.motivo + '.' }); return true; }
+        if (r.r === 'existente') { json(res, 409, { code: 'already_exists', erro: 'Não anexado: ' + r.motivo + '.', r: 'existente' }); return true; }
+        auditar(conta, req, r.r === 'trocado' ? 'ARQF_PDF_TROCAR' : 'ARQF_PDF_ANEXAR', 'arqfiscal/' + row.chave, r.antes || null, { nome, tam: buf.length });
+        json(res, 200, { ok: true, r: r.r, pdf: pdfInfo(row.chave) }); return true;
+      }
+      if (m === 'DELETE') {
+        if (!total) { negar(res, conta, req, p, 'Seu perfil não remove o PDF do fornecedor.'); return true; }
+        const ja = stPdf.info.get(row.chave); if (!ja) { json(res, 404, { erro: 'Esta nota não tem o PDF do fornecedor.' }); return true; }
+        db.exec('BEGIN'); try { stPdf.del.run(row.chave); stPdf.remNovo.run(row.chave, Date.now(), conta.id); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch (x) { } throw e; }
+        auditar(conta, req, 'ARQF_PDF_REMOVER', 'arqfiscal/' + row.chave, { origem: ja.origem, nome: ja.nome, sha: ja.sha }, null);
+        json(res, 200, { ok: true }); return true;
+      }
+      json(res, 405, { erro: 'Método não permitido.' }); return true;
+    }
+    /* ===== fim v134 (rotas) ===== */
     const mi = p.match(/^\/api\/arqfiscal\/([A-Za-z0-9]{8,40})(\/(xml|ligar|desligar|situacao|eventos))?$/);
     if (!mi) { json(res, 404, { erro: 'Não encontrado.' }); return true; }
     const row = st.porId.get(mi[1]);
     if (!row || (!total && row.tipo !== 'entrada')) { json(res, 404, { code: 'not_found', erro: 'Nota não encontrada no arquivo fiscal.' }); return true; }
     const acao = mi[3] || '';
-    if (!acao && m === 'GET') { json(res, 200, Object.assign(linha(row), { emitDoc: row.emit_doc, emitNome: row.emit_nome, destDoc: row.dest_doc, destNome: row.dest_nome, parcelas: JSON.parse(row.parcelas || '[]'), arquivo: row.arquivo, por: row.por, prot: row.prot, fin: row.fin, eventos: st.evDa.all(row.chave) })); return true; }
+    if (!acao && m === 'GET') { json(res, 200, Object.assign(linha(row), { emitDoc: row.emit_doc, emitNome: row.emit_nome, destDoc: row.dest_doc, destNome: row.dest_nome, parcelas: JSON.parse(row.parcelas || '[]'), arquivo: row.arquivo, por: row.por, prot: row.prot, fin: row.fin, eventos: st.evDa.all(row.chave), pdf: pdfInfo(row.chave) /* v134 */ })); return true; }
     if (acao === 'xml' && m === 'GET') {
       const x = st.xml.get(row.id), b = zlib.gunzipSync(x.xml);
       res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store', 'content-disposition': (u.searchParams.get('baixar') ? 'attachment' : 'inline') + '; filename="' + row.chave + '-nfe.xml"', 'content-security-policy': "default-src 'none'; sandbox" });
@@ -667,6 +833,7 @@ module.exports = function (ctx) {
       AND coalesce(sit_fonte,'')<>'conector fiscal' AND chave NOT IN (SELECT chave FROM arqf_origem WHERE origem='sefaz')`).run(normCh(chave), lim).changes;
   }
   return { rota, acesso, empresa, c14nInfNFe, conferirAssinatura, lerDoc, guardaAte, rodarFila,
+    /* v134 */ pdfDoEmail, pdfInfo, chaveDoNome, chaveOk,
     /* v130: usados pela leitura da caixa nfe@ (caixanfe.js) */
     processar, evento, indice, novoRel, conta1, linha, enfileirar, soltar, regOrigem, normCh, hojeBr, diasEntre, temConector: !!FISCAL_URL };
 };

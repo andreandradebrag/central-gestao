@@ -3792,7 +3792,7 @@ document.addEventListener('change',e=>{
 function anxView(a,back,nota){
   const pdf=/pdf/.test(a.ct||'')||/\.pdf$/i.test(a.nome||''),img=/^image\//.test(a.ct||'');
   modal({title:a.nome,wide:true,nofocus:true,
-    foot:'<button class="btn" data-act="'+back+'">Voltar</button>'+(nota?'<button class="btn" data-act="danfeEspelho" data-id="'+nota+'">Ver espelho da NF-e</button>':'')+'<a class="btn pri" href="'+esc(anxUrl(a))+'" target="_blank" rel="noopener">Abrir em nova aba</a>',
+    foot:'<button class="btn" data-act="'+back+'">Voltar</button>'+(nota?'<button class="btn" data-act="danfeEspelho" data-id="'+nota+'">Resumo da NF-e</button>':'')+'<a class="btn pri" href="'+esc(anxUrl(a))+'" target="_blank" rel="noopener">Abrir em nova aba</a>',
     body:pdf?'<iframe title="'+esc(a.nome)+'" src="'+esc(anxUrl(a))+'" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:6px;background:#fff"></iframe>':img?'<img alt="'+esc(a.nome)+'" src="'+esc(anxUrl(a))+'" style="max-width:100%;display:block;margin:0 auto">':'<p>Este tipo de arquivo não tem visualização aqui. Use “Abrir em nova aba”.</p>'});
 }
 A.anxVer=d=>{
@@ -12593,7 +12593,7 @@ const TIP_ACT={
   concMatch:'Liga esta linha do extrato ao título sugerido. Se o título estava em aberto, ele é baixado na data do extrato.',concBuscar:'Procura contas a pagar ou a receber para ligar a esta linha, inclusive várias de uma vez.',concCreate:'Cria um lançamento novo a partir desta linha do extrato (por exemplo, uma tarifa bancária).',concIgnore:'Marca a linha como ignorada; ela sai da lista de pendentes.',concUndo:'Desfaz a conciliação desta linha e a baixa feita por ela.',
   transfNova:'Registra uma transferência entre duas contas da empresa. Não entra no DRE.',cbValorExato:'Preenche o filtro de valor com o valor exato da linha do extrato.',concPerNav:'Avança ou volta o período mostrado.',
   loadSample:'Carrega dados de exemplo para conhecer o sistema. Eles podem ser removidos depois em Configurações.',mov:'Registra entrada, saída ou ajuste de estoque deste produto.',importXml:'Lê o XML da nota fiscal e preenche a nota, os itens e o fornecedor.',efetivarNota:'Lança a nota: dá entrada no estoque e gera as contas a pagar.',
-  anexos:'Mostra e anexa documentos (PDF, boleto, comprovante) a este registro.',verDanfe:'Mostra a nota fiscal ligada a este título.',
+  anexos:'Mostra e anexa documentos (PDF, boleto, comprovante) a este registro.',verDanfe:'Abre o DANFE da nota ligada: o PDF que o fornecedor mandou ou o DANFE oficial gerado do XML.',
   vsaiRetorno:'Registra a volta do veículo com data, hora e km.',vsaiAbast:'Abre o lançamento do abastecimento feito nesta saída.',vrotaSaida:'Cria a saída do veículo a partir desta viagem, com o km atual já preenchido.',vrotaImprimir:'Gera a rota do dia agrupada por veículo para imprimir ou mandar ao motorista.',vrotaCopiar:'Copia as viagens de um dia para outro.',vfreteEntregue:'Marca esta entrega como concluída.',
   matAprovar:'Aprova ou recusa o pedido de material. Aprovado, o que há em estoque vai para separação e o resto para compra.',rdoAddRow:'Acrescenta uma linha nesta tabela.',rdoDelRow:'Remove esta linha.',
   paIA:'Pede à IA sugestões de causas e de ações para este problema. Revise antes de salvar.',paDe:'Abre um plano de ação ligado a este registro.',paIshi:'Mostra o diagrama de Ishikawa (espinha de peixe) com as causas informadas.',paVis:'Alterna entre a lista e o quadro PDCA.',
@@ -25818,9 +25818,565 @@ v132EmbrulhaV();
     const imgs=Array.from(dc.images||[]);if(!imgs.length||imgs.every(i=>i.complete))setTimeout(ir,50);else{let n=imgs.length;const um=()=>{if(--n<=0)ir();};imgs.forEach(i=>{if(i.complete)um();else{i.onload=um;i.onerror=um;}});setTimeout(()=>{if(n>0){n=0;ir();}},3000);}
   }catch(e){p0();}};}
 
+/* ===== v134: DANFE no padrão oficial gerado do XML + PDF original do fornecedor ligado à nota =====
+   1) DANFE oficial: montado no navegador a partir do XML original que o servidor devolve (/api/arqfiscal/<id>/xml), no leiaute do
+      Manual de Orientação do Contribuinte da NF-e (MOC 7.0, Anexo II — DANFE retrato A4; paisagem quando tpImp=2): canhoto,
+      emitente, quadro DANFE (0-Entrada/1-Saída, nº, série, folha x/y), código de barras CODE-128C da chave (feito aqui, em SVG),
+      chave em grupos de 4, protocolo, destinatário/remetente, fatura/duplicatas, cálculo do imposto, total do IBS/CBS/IS
+      (NT 2026.010, quando o XML tem IBSCBSTot), transportador/volumes, produtos (várias folhas, cabeçalho repetido), ISSQN e
+      dados adicionais. Marcas d'água "SEM VALOR FISCAL" (tpAmb=2) e "CANCELADA" (situação no arquivo fiscal).
+      Saídas: na tela, Imprimir (quadro separado, como na v133.1) e Baixar PDF (html2canvas + jsPDF, com a correção de cores da
+      v133.1; o código de barras vai para o PDF em vetor, para ler bem no leitor).
+   2) PDF original do fornecedor: 1 por nota (pela chave), no servidor (arquivofiscal.js, tabela arqf_pdf): veio por e-mail,
+      anexado à mão ou importado em lote ("Importar DANFEs (ZIP de PDFs)").
+   3) Botão DANFE (Contas a pagar/receber, Recebimento de notas, Arquivo fiscal, Caixa nfe@): abre o PDF do fornecedor quando existe
+      (com "Ver DANFE gerado do XML"); senão o DANFE oficial gerado. O espelho simples antigo continua como "Resumo". */
+const DZ={cur:null,cfg:null,med:{}};
+
+/* ---------- formatos ---------- */
+const dzMil=s=>s.replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+function dzN(v,dec){dec=dec==null?2:dec;const n=+v||0,neg=n<0,t=Math.abs(n).toFixed(dec).split('.');return (neg?'-':'')+dzMil(t[0])+(dec?','+t[1]:'');}
+/* número como veio no XML (quantidade e valor unitário mantêm as casas do XML, de 2 até max) */
+function dzNx(s,min,max,corta){s=String(s==null?'':s).trim();if(!s)return '';let m=/^(-?)(\d*)(?:\.(\d*))?$/.exec(s);if(!m)return s;if((m[3]||'').length>max)m=/^(-?)(\d*)(?:\.(\d*))?$/.exec((+s).toFixed(max));let f=m[3]||'';if(corta)f=f.replace(/0+$/,'');if(f.length<min)f=f.padEnd(min,'0');return m[1]+dzMil(m[2]||'0')+(f?','+f:'');}
+const dzDoc=d=>{d=String(d||'').replace(/\D/g,'');return d.length===14?d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5'):d.length===11?d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4'):d;};
+const dzCep=c=>{c=String(c||'').replace(/\D/g,'');return c.length===8?c.slice(0,5)+'-'+c.slice(5):c;};
+const dzFone=f=>{f=String(f||'').replace(/\D/g,'');if(f.length===10)return '('+f.slice(0,2)+') '+f.slice(2,6)+'-'+f.slice(6);if(f.length===11)return '('+f.slice(0,2)+') '+f.slice(2,7)+'-'+f.slice(7);return f;};
+const dzData=s=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||''));return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
+const dzHora=s=>{const m=/T(\d{2}:\d{2}:\d{2})/.exec(String(s||''));return m?m[1]:'';};
+const dzNum9=n=>{n=String(n||'').replace(/\D/g,'');return n?n.padStart(9,'0').replace(/^(\d{3})(\d{3})(\d{3})$/,'$1.$2.$3'):'';};
+const dzChaveFmt=c=>String(c||'').replace(/(\d{4})(?=\d)/g,'$1 ');
+
+/* ---------- leitura do XML (sem DOMParser, mesmo critério do servidor) ---------- */
+const dzBloco=(x,tag)=>{if(!x)return '';const m=String(x).match(new RegExp('<(?:\\w+:)?'+tag+'(?:\\s[^>]*)?>([\\s\\S]*?)</(?:\\w+:)?'+tag+'>'));return m?m[1]:'';};
+const dzBlocos=(x,tag)=>{const out=[],re=new RegExp('<(?:\\w+:)?'+tag+'(?:\\s[^>]*)?>([\\s\\S]*?)</(?:\\w+:)?'+tag+'>','g');let m;while((m=re.exec(x||'')))out.push(m[1]);return out;};
+const dzDec=s=>String(s).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/&(#[xX][0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g,(m,e)=>e[0]==='#'?String.fromCodePoint(/^#[xX]/.test(e)?parseInt(e.slice(2),16):parseInt(e.slice(1),10)):({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"})[e]);
+const dzT=(x,tag)=>{const b=dzBloco(x,tag);return b?dzDec(b).trim():'';};
+const dzV=(x,tag)=>parseFloat(dzT(x,tag))||0;
+const dzTem=(x,tag)=>new RegExp('<(?:\\w+:)?'+tag+'[\\s>]').test(x||'');
+function dzEnd(e){return {lgr:dzT(e,'xLgr'),nro:dzT(e,'nro'),cpl:dzT(e,'xCpl'),bairro:dzT(e,'xBairro'),mun:dzT(e,'xMun'),uf:dzT(e,'UF'),cep:dzT(e,'CEP'),fone:dzT(e,'fone')};}
+function danfeLer(text){
+  const t=String(text||'');const im=t.match(/<(?:\w+:)?infNFe\s[^>]*>/);if(!im)throw new Error('O arquivo não tem uma NF-e (grupo infNFe).');
+  const inf=dzBloco(t,'infNFe'),ide=dzBloco(inf,'ide'),emit=dzBloco(inf,'emit'),dest=dzBloco(inf,'dest'),total=dzBloco(inf,'total'),tot=dzBloco(total,'ICMSTot');
+  const prot=dzBloco(t,'infProt'),transp=dzBloco(inf,'transp'),cobr=dzBloco(inf,'cobr'),infAd=dzBloco(inf,'infAdic');
+  const chave=((im[0].match(/\sId\s*=\s*["']([^"']+)/)||[])[1]||'').replace(/^NFe/i,'').replace(/\D/g,'');
+  const itens=dzBlocos(inf,'det').map((d,k)=>{
+    const p=dzBloco(d,'prod'),imp=dzBloco(d,'imposto'),ic=dzBloco(imp,'ICMS'),ipi=dzBloco(imp,'IPI'),ipt=dzBloco(ipi,'IPITrib');
+    const cst=dzT(ic,'CST'),csosn=dzT(ic,'CSOSN'),orig=dzT(ic,'orig');
+    let ibs=null;const ib=dzBloco(imp,'IBSCBS');
+    if(ib){const g=dzBloco(ib,'gIBSCBS'),gu=dzBloco(g,'gIBSUF'),gm=dzBloco(g,'gIBSMun'),gc=dzBloco(g,'gCBS');
+      const ef=(x,tag)=>{const r=dzBloco(x,'gRed');return r&&dzT(r,'pAliqEfet')?dzT(r,'pAliqEfet'):dzT(x,tag);};
+      ibs={cst:dzT(ib,'CST'),cClass:dzT(ib,'cClassTrib'),vBC:dzT(g,'vBC'),pUF:ef(gu,'pIBSUF'),vUF:dzT(gu,'vIBSUF'),pMun:ef(gm,'pIBSMun'),vMun:dzT(gm,'vIBSMun'),pCBS:ef(gc,'pCBS'),vCBS:dzT(gc,'vCBS'),tem:!!g};}
+    const is=dzBloco(imp,'IS');if(is){ibs=ibs||{};Object.assign(ibs,{vBCIS:dzT(is,'vBCIS'),pIS:dzT(is,'pIS'),vIS:dzT(is,'vIS')});}
+    return {n:k+1,cod:dzT(p,'cProd'),desc:dzT(p,'xProd'),infAd:dzT(d.replace(/<prod[\s>][\s\S]*?<\/prod>|<imposto[\s>][\s\S]*?<\/imposto>/g,''),'infAdProd'),ncm:dzT(p,'NCM'),
+      cst:csosn?orig+csosn:(cst?orig+cst:''),cfop:dzT(p,'CFOP'),un:dzT(p,'uCom'),qtd:dzT(p,'qCom'),vun:dzT(p,'vUnCom'),vtot:dzV(p,'vProd'),vDesc:dzV(p,'vDesc'),indTot:dzT(p,'indTot')||'1',
+      bc:dzV(ic,'vBC'),vicms:dzV(ic,'vICMS'),aicms:dzV(ic,'pICMS'),vipi:dzV(ipt,'vIPI'),aipi:dzV(ipt,'pIPI'),ibs};
+  });
+  const ibt=dzBloco(total,'IBSCBSTot');let ibsTot=null;
+  if(ibt){const gi=dzBloco(ibt,'gIBS'),gc=dzBloco(ibt,'gCBS'),gm=dzBloco(ibt,'gMono');
+    ibsTot={vBC:dzV(ibt,'vBCIBSCBS'),vIBSUF:dzV(dzBloco(gi,'gIBSUF'),'vIBSUF'),vIBSMun:dzV(dzBloco(gi,'gIBSMun'),'vIBSMun'),vIBS:dzV(gi,'vIBS'),vCBS:dzV(gc,'vCBS'),
+      mono:gm?{vIBSMono:dzV(gm,'vIBSMono'),vCBSMono:dzV(gm,'vCBSMono'),vIBSMonoReten:dzV(gm,'vIBSMonoReten'),vCBSMonoReten:dzV(gm,'vCBSMonoReten')}:null};}
+  const ist=dzBloco(total,'ISTot');if(ist){ibsTot=ibsTot||{vBC:0,vIBSUF:0,vIBSMun:0,vIBS:0,vCBS:0,mono:null};ibsTot.vIS=dzV(ist,'vIS');}
+  if(ibsTot&&dzTem(total,'vNFTot'))ibsTot.vNFTot=dzV(total,'vNFTot');
+  const iss=dzBloco(total,'ISSQNtot');
+  const tr=dzBloco(transp,'transporta'),vei=dzBloco(transp,'veicTransp');
+  const dhEmi=dzT(ide,'dhEmi')||dzT(ide,'dEmi'),dhSai=dzT(ide,'dhSaiEnt')||(dzT(ide,'dSaiEnt')?dzT(ide,'dSaiEnt')+(dzT(ide,'hSaiEnt')?'T'+dzT(ide,'hSaiEnt'):''):'');
+  const fat=dzBloco(cobr,'fat');
+  const ret=dzBloco(inf,'retirada'),ent=dzBloco(inf,'entrega');
+  return {chave,tpAmb:dzT(ide,'tpAmb')||dzT(prot,'tpAmb'),tpImp:dzT(ide,'tpImp')||'1',tpEmis:dzT(ide,'tpEmis')||'1',tpNF:dzT(ide,'tpNF'),nNF:dzT(ide,'nNF'),serie:dzT(ide,'serie'),natOp:dzT(ide,'natOp'),
+    mod:dzT(ide,'mod'),dhEmi,dhSai,finNFe:dzT(ide,'finNFe'),dhCont:dzT(ide,'dhCont'),xJust:dzT(ide,'xJust'),
+    emit:{nome:dzT(emit,'xNome'),fant:dzT(emit,'xFant'),doc:dzT(emit,'CNPJ')||dzT(emit,'CPF'),ie:dzT(emit,'IE'),iest:dzT(emit,'IEST'),im:dzT(emit,'IM'),crt:dzT(emit,'CRT'),end:dzEnd(dzBloco(emit,'enderEmit'))},
+    dest:dest?{nome:dzT(dest,'xNome'),doc:dzT(dest,'CNPJ')||dzT(dest,'CPF')||dzT(dest,'idEstrangeiro'),ie:dzT(dest,'IE'),end:dzEnd(dzBloco(dest,'enderDest'))}:{nome:'',doc:'',ie:'',end:dzEnd('')},
+    retirada:ret?Object.assign({doc:dzT(ret,'CNPJ')||dzT(ret,'CPF'),nome:dzT(ret,'xNome'),ie:dzT(ret,'IE')},dzEnd(ret)):null,
+    entrega:ent?Object.assign({doc:dzT(ent,'CNPJ')||dzT(ent,'CPF'),nome:dzT(ent,'xNome'),ie:dzT(ent,'IE')},dzEnd(ent)):null,
+    itens,
+    tot:{vBC:dzV(tot,'vBC'),vICMS:dzV(tot,'vICMS'),vBCST:dzV(tot,'vBCST'),vST:dzV(tot,'vST'),vII:dzV(tot,'vII'),vICMSUFRemet:dzV(tot,'vICMSUFRemet'),vFCPUFDest:dzV(tot,'vFCPUFDest'),vICMSUFDest:dzV(tot,'vICMSUFDest'),
+      vProd:dzV(tot,'vProd'),vFrete:dzV(tot,'vFrete'),vSeg:dzV(tot,'vSeg'),vDesc:dzV(tot,'vDesc'),vOutro:dzV(tot,'vOutro'),vIPI:dzV(tot,'vIPI'),vTotTrib:dzV(tot,'vTotTrib'),vNF:dzV(tot,'vNF'),vPIS:dzV(tot,'vPIS'),vCOFINS:dzV(tot,'vCOFINS')},
+    ibsTot,
+    issqn:iss?{vServ:dzV(iss,'vServ'),vBC:dzV(iss,'vBC'),vISS:dzV(iss,'vISS')}:null,
+    transp:{mod:dzT(transp,'modFrete'),nome:dzT(tr,'xNome'),doc:dzT(tr,'CNPJ')||dzT(tr,'CPF'),ie:dzT(tr,'IE'),end:dzT(tr,'xEnder'),mun:dzT(tr,'xMun'),uf:dzT(tr,'UF'),
+      placa:dzT(vei,'placa'),ufv:dzT(vei,'UF'),rntc:dzT(vei,'RNTC'),
+      vols:dzBlocos(transp,'vol').map(v=>({q:dzT(v,'qVol'),esp:dzT(v,'esp'),marca:dzT(v,'marca'),nVol:dzT(v,'nVol'),pesoB:dzT(v,'pesoB'),pesoL:dzT(v,'pesoL')}))},
+    fat:fat?{n:dzT(fat,'nFat'),vOrig:dzV(fat,'vOrig'),vDesc:dzV(fat,'vDesc'),vLiq:dzV(fat,'vLiq')}:null,
+    dups:dzBlocos(cobr,'dup').map(d=>({n:dzT(d,'nDup'),venc:dzT(d,'dVenc'),v:dzV(d,'vDup')})),
+    infCpl:dzT(infAd,'infCpl'),infAdFisco:dzT(infAd,'infAdFisco'),obsCont:dzBlocos(infAd,'obsCont').map(o=>({x:'',t:dzT(o,'xTexto')})),
+    prot:{n:dzT(prot,'nProt'),dh:dzT(prot,'dhRecbto'),cStat:dzT(prot,'cStat')}};
+}
+
+/* ---------- código de barras CODE-128 (conjunto C: 2 dígitos por símbolo) ---------- */
+const C128=('212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 '+
+  '221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 '+
+  '231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 '+
+  '314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 '+
+  '111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 '+
+  '114131 311141 411131 211412 211214 211232 2331112').split(' ');
+/* símbolos: início C (105), pares de dígitos, verificação = (105 + soma(posição × valor)) mod 103, fim (106) */
+function c128c(dig){
+  dig=String(dig||'');if(!/^\d+$/.test(dig)||dig.length%2)throw new Error('O código 128-C precisa de um número par de dígitos.');
+  const cod=[105];for(let i=0;i<dig.length;i+=2)cod.push(+dig.substr(i,2));
+  let s=105;for(let i=1;i<cod.length;i++)s+=cod[i]*i;const dv=s%103;cod.push(dv,106);
+  const larg=cod.map(c=>C128[c]).join('');let mod=0;for(const ch of larg)mod+=+ch;
+  return {cod,dv,larguras:larg,modulos:mod};
+}
+/* barras como lista [início, largura] em módulos (com zona de silêncio de 10 módulos de cada lado) */
+function c128Barras(dig){const c=c128c(dig),b=[];let x=10;for(let i=0;i<c.larguras.length;i++){const w=+c.larguras[i];if(i%2===0)b.push([x,w]);x+=w;}return {barras:b,total:x+10,dv:c.dv};}
+function c128Svg(dig){
+  const r=c128Barras(dig);
+  return '<svg class="dz-bc" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+r.total+' 40" preserveAspectRatio="none" shape-rendering="crispEdges" role="img" aria-label="Código de barras da chave de acesso" data-mod="'+r.total+'">'+
+    '<rect x="0" y="0" width="'+r.total+'" height="40" fill="#fff"/>'+r.barras.map(b=>'<rect x="'+b[0]+'" y="0" width="'+b[1]+'" height="40" fill="#000"/>').join('')+'</svg>';
+}
+
+/* ---------- leiaute (medidas em mm) ---------- */
+const DZ_G={po:{W:210,H:297,m:5},la:{W:297,H:210,m:5},canhH:21,canhW:21,cab:46,tit:3.6,lin:7,prodHead:6.5,lh:2.6};
+const DZ_COL=[['cod','CÓDIGO PRODUTO',16],['desc','DESCRIÇÃO DO PRODUTO / SERVIÇO',0],['ncm','NCM/SH',12],['cst','O/CST',7.5],['cfop','CFOP',7.5],['un','UN',7],['qtd','QUANT.',13],['vun','VALOR UNIT.',15],
+  ['vtot','VALOR TOTAL',14],['bc','B. CÁLC. ICMS',13],['vicms','VALOR ICMS',11],['vipi','VALOR IPI',10],['aicms','ALÍQ. ICMS',6.5],['aipi','ALÍQ. IPI',6.5]];
+function dzCols(larg){const fixo=DZ_COL.reduce((s,c)=>s+c[2],0);return DZ_COL.map(c=>[c[0],c[1],c[2]||Math.max(30,larg-fixo)]);}
+const dzCst=d=>d.emit.crt==='1'||d.emit.crt==='4'?'O/CSOSN':'O/CST';
+function dzItemDesc(i){return i.desc+(i.infAd?'\n'+i.infAd:'');}
+function dzIbsLinha(i){const b=i.ibs;if(!b)return '';const p=[];
+  if(b.tem!==false&&(b.cst||b.vBC)){p.push('IBS/CBS'+(b.cst?' CST '+b.cst:'')+(b.cClass?' ['+b.cClass+']':''));if(b.vBC)p.push('BC '+dzN(b.vBC));
+    p.push('IBS UF '+dzN(b.pUF,2)+'% '+dzN(b.vUF));p.push('IBS Mun. '+dzN(b.pMun,2)+'% '+dzN(b.vMun));p.push('CBS '+dzN(b.pCBS,2)+'% '+dzN(b.vCBS));}
+  if(b.vIS||b.vBCIS)p.push('IS BC '+dzN(b.vBCIS)+' '+dzN(b.pIS,2)+'% '+dzN(b.vIS));
+  return p.join(' · ');}
+/* altura estimada de um item (sem medir na tela): linhas da descrição e do código */
+function dzLinhas(txt,larg){const cpl=Math.max(4,Math.floor((larg-1)*0.82));return String(txt||'').split('\n').reduce((s,p)=>s+Math.max(1,Math.ceil(p.length/cpl)),0);}
+function dzAltEst(i,cols){const w=k=>cols.find(c=>c[0]===k)[2];
+  const l=Math.max(dzLinhas(dzItemDesc(i),w('desc')),dzLinhas(i.cod,w('cod')),dzLinhas(i.ncm,w('ncm')),1);
+  return l*DZ_G.lh+0.9+(dzIbsLinha(i)?Math.max(1,dzLinhas(dzIbsLinha(i),cols.reduce((s,c)=>s+c[2],0)-w('cod')))*DZ_G.lh*0.92+0.6:0);}
+/* medição real no navegador (mesmas larguras e fontes da folha); sem leiaute (testes), usa a estimativa */
+function dzMedir(d,larg){
+  const k=d.chave+'|'+larg+'|'+d.itens.length;if(DZ.med[k])return DZ.med[k];
+  let out=null;
+  try{
+    if(typeof document!=='undefined'&&document.body&&typeof document.createElement('div').getBoundingClientRect==='function'){
+      const host=document.createElement('div');host.style.cssText='position:absolute;left:-30000px;top:0;visibility:hidden';
+      host.innerHTML='<style>'+DZ_CSS+'</style><div class="dz"><div style="width:'+larg+'mm">'+dzTabProd(d,d.itens,dzCols(larg))+'</div></div>';
+      document.body.appendChild(host);
+      const px=host.querySelector('.dz').firstElementChild;const mmPx=(()=>{const t=document.createElement('div');t.style.cssText='width:100mm;height:1px';px.appendChild(t);const w=t.getBoundingClientRect().width/100;t.remove();return w;})();
+      if(mmPx>0){out=d.itens.map((it,ix)=>{let h=0;host.querySelectorAll('tr[data-i="'+ix+'"]').forEach(tr=>{h+=tr.getBoundingClientRect().height;});return h/mmPx+0.15;});}
+      host.remove();
+      if(out&&!out.every(h=>h>0.5))out=null;
+    }
+  }catch(e){out=null;}
+  if(!out){const cols=dzCols(larg);out=d.itens.map(i=>dzAltEst(i,cols));}
+  DZ.med[k]=out;return out;
+}
+/* texto dos dados adicionais (infCpl + observações do contribuinte) e a altura que ocupa */
+function dzAdicTexto(d){const p=[];if(d.infCpl)p.push(d.infCpl);d.obsCont.forEach(o=>{if(o.t)p.push(o.t);});
+  if(d.tpEmis&&d.tpEmis!=='1')p.push('Emitida em contingência (tpEmis '+d.tpEmis+')'+(d.dhCont?' em '+dzData(d.dhCont)+' '+dzHora(d.dhCont):'')+(d.xJust?': '+d.xJust:'')+'.');
+  return p.join('\n');}
+function dzAdicAlt(txt,larg){const cpl=Math.max(20,Math.floor(larg*0.95));const l=String(txt||'').split('\n').reduce((s,p)=>s+Math.max(1,Math.ceil(p.length/cpl)),0);return l*2.75+3.2;}
+/* corta o texto para caber em h mm (estimativa conservadora); devolve [parte, resto] */
+function dzCortar(txt,larg,h){if(dzAdicAlt(txt,larg)<=h)return [txt,''];let a=0,b=txt.length;while(a<b){const m=Math.ceil((a+b)/2);if(dzAdicAlt(txt.slice(0,m),larg)<=h)a=m;else b=m-1;}
+  let k=txt.lastIndexOf(' ',a);if(k<a*0.8)k=a;return [txt.slice(0,k).trimEnd(),txt.slice(k).trimStart()];}
+
+/* paginação: devolve as folhas com os itens de cada uma e as alturas dos quadros */
+function danfePaginas(d){
+  const la=d.tpImp==='2',G=la?DZ_G.la:DZ_G.po,inH=G.H-2*G.m,inW=G.W-2*G.m,w1=la?inW-DZ_G.canhW:inW,wN=inW;
+  const tit=DZ_G.tit,lin=DZ_G.lin;
+  const cols=la?Math.floor(w1/33):6;
+  const hFat=(d.dups.length||d.fat)?tit+(d.fat?4.2:0)+Math.ceil(d.dups.length/cols)*lin:0;
+  const hDest=tit+3*lin+(d.retirada?tit+lin:0)+(d.entrega?tit+lin:0);
+  const hImp=tit+2*lin,hIbs=d.ibsTot?tit+lin+(d.ibsTot.mono?lin:0):0,hTr=tit+(2+Math.max(1,Math.min(3,d.transp.vols.length)))*lin;
+  const hIss=d.issqn?tit+lin:0,hProd0=tit+DZ_G.prodHead;
+  const txt=dzAdicTexto(d),wAd=w1*0.68,hAdMin=26,hAdMax=58;
+  let hAd=Math.min(hAdMax,Math.max(hAdMin,dzAdicAlt(txt,wAd)));
+  let [txt1,resto]=dzCortar(txt,wAd,hAd-tit-1);
+  const P={la,G,inH,inW,w1,wN,cols,hFat,hDest,hImp,hIbs,hTr,hIss,hAd,txt1,pags:[]};
+  /* altura dos quadros fixos: medida na tela (mesmo HTML e CSS da folha); sem leiaute (testes), pela soma das alturas + folga das bordas */
+  const M=dzMedirFixos(d,P);
+  const fixo1=M?M.fixo1:(la?0:DZ_G.canhH)+DZ_G.cab+hDest+hFat+hImp+hIbs+hTr+tit+hIss+tit+hAd+4,fixoN=M?M.fixoN:DZ_G.cab+tit+1.2,th=M?M.th:DZ_G.prodHead;
+  const pb1=inH-fixo1-0.6,pbN=inH-fixoN-0.6,cap1=pb1-th-0.5;
+  const alt1=dzMedir(d,w1),altN=la?dzMedir(d,wN):alt1;
+  const pags=P.pags;let i=0;
+  /* folha 1 */
+  let usado=0,its=[];while(i<d.itens.length&&usado+alt1[i]<=cap1){usado+=alt1[i];its.push(i);i++;}
+  pags.push({its,cap:cap1,pb:pb1,w:w1});
+  /* demais folhas: itens e, se sobrar texto dos dados adicionais, a continuação */
+  let restoTxt=resto;
+  while(i<d.itens.length||restoTxt){
+    let pb=pbN,cont='',hCont=0;
+    if(restoTxt){const hc=Math.min(inH*0.6,Math.max(16,dzAdicAlt(restoTxt,wN*0.95)+tit));const c=dzCortar(restoTxt,wN*0.95,hc-tit-1);cont=c[0];restoTxt=c[1];hCont=hc;pb-=hCont+1;}
+    const cap=pb-th-0.5;
+    usado=0;its=[];while(i<d.itens.length&&usado+altN[i]<=cap){usado+=altN[i];its.push(i);i++;}
+    if(!its.length&&i<d.itens.length&&!cont){its.push(i);i++;} /* item maior que a folha: vai assim mesmo */
+    pags.push({its,cap,pb,w:wN,cont,hCont});
+    if(pags.length>400)break;
+  }
+  return Object.assign(P,{alt1,altN,medido:!!M});
+}
+/* mede, na tela, a altura dos quadros que não são de produtos (folha 1 e demais) e do cabeçalho da tabela de produtos */
+function dzMedirFixos(d,P){
+  try{
+    if(!(typeof document!=='undefined'&&document.body&&typeof document.createElement('div').getBoundingClientRect==='function'))return null;
+    const host=document.createElement('div');host.style.cssText='position:absolute;left:-30000px;top:0;visibility:hidden';
+    host.innerHTML='<style>'+DZ_CSS+'</style><div class="dz"><div class="dz-in" style="position:relative;width:'+P.w1+'mm">'+dzCorpo(d,P,{its:[],w:P.w1,pb:0},0,2)+'</div>'+
+      '<div class="dz-in" style="position:relative;width:'+P.wN+'mm">'+dzCorpo(d,P,{its:[],w:P.wN,pb:0},1,2)+'</div><div style="width:100mm;height:2px"></div></div>';
+    document.body.appendChild(host);
+    const dz=host.querySelector('.dz'),ins=dz.querySelectorAll('.dz-in'),mm=dz.lastElementChild.getBoundingClientRect().width/100;
+    const med=inn=>{const pb=inn.querySelector('.dz-pb'),t=pb&&pb.querySelector('thead');return {fixo:(inn.getBoundingClientRect().height-(pb?pb.getBoundingClientRect().height:0))/mm,th:(t?t.getBoundingClientRect().height:0)/mm};};
+    const a=med(ins[0]),b=med(ins[1]);host.remove();
+    if(!(mm>0&&a.fixo>20&&b.fixo>20))return null;
+    return {fixo1:a.fixo,fixoN:b.fixo,th:Math.max(a.th,b.th,DZ_G.prodHead)};
+  }catch(e){return null;}
+}
+
+/* ---------- HTML das folhas ---------- */
+const DZ_CSS=`.dz{color:#000;background:transparent;font-family:Arial,Helvetica,sans-serif;line-height:1.15;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.dz *{box-sizing:border-box}
+.dz .dz-pg{position:relative;background:#fff;overflow:hidden;color:#000}
+.dz .dz-in{position:absolute}
+.dz table{border-collapse:collapse;width:100%;table-layout:fixed}
+.dz td,.dz th{border:0.2mm solid #000;padding:0.35mm 0.8mm;vertical-align:top;overflow:hidden;color:#000;background:#fff}
+.dz .dz-r td{height:7mm}
+.dz td i{display:block;font-style:normal;font-size:5pt;text-transform:uppercase;line-height:1.1;white-space:nowrap;overflow:hidden}
+.dz td b{display:block;font-weight:400;font-size:7.4pt;line-height:1.15;margin-top:0.5mm;word-break:break-word}
+.dz td b.n{text-align:right}
+.dz .dz-tit{height:3.6mm;font-size:5.6pt;font-weight:700;padding:0.6mm 0 0 0.3mm;text-transform:uppercase;white-space:nowrap}
+.dz .dz-cab>tbody>tr>td,.dz .dz-cab>tr>td{height:32mm;padding:0.8mm}
+.dz .dz-cab td.dz-ch{padding:0}
+.dz td.dz-ch>table td{border-left:0;border-right:0}
+.dz td.dz-ch>table tr:first-child td{border-top:0}
+.dz td.dz-ch>table tr:last-child td{border-bottom:0}
+.dz .dz-em{text-align:center}
+.dz .dz-em .nm{font-size:9pt;font-weight:700;margin:1mm 0 1.4mm;line-height:1.15}
+.dz .dz-em .ad{font-size:7pt;line-height:1.3}
+.dz .dz-dn{text-align:center}
+.dz .dz-dn .t1{font-size:13pt;font-weight:700;margin-top:0.4mm}
+.dz .dz-dn .t2{font-size:6.2pt;line-height:1.2;margin:0.4mm 0 1.4mm}
+.dz .dz-dn .es{display:flex;align-items:center;justify-content:center;gap:2mm;font-size:6.6pt;text-align:left;line-height:1.3}
+.dz .dz-dn .es span.bx{display:inline-block;border:0.25mm solid #000;width:5.5mm;height:5.5mm;line-height:5.3mm;text-align:center;font-size:10pt;font-weight:700}
+.dz .dz-dn .nr{font-size:8.6pt;font-weight:700;margin-top:1.4mm;line-height:1.35}
+.dz .dz-dn .fl{font-size:7.2pt;font-weight:700}
+.dz .dz-bcbox{height:13mm;padding:1mm 3mm!important;text-align:center}
+.dz svg.dz-bc{display:block;width:100%;height:11mm}
+.dz .dz-chv b{font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:8pt;text-align:center;letter-spacing:0;white-space:nowrap}
+.dz .dz-cons{font-size:7pt;text-align:center;line-height:1.3;padding:0.8mm!important}
+.dz .dz-p{font-size:6pt}
+.dz .dz-p th{font-size:4.9pt;font-weight:400;text-align:center;padding:0.3mm;height:6.5mm;vertical-align:middle;line-height:1.1}
+.dz .dz-p td{border-top:0;border-bottom:0;padding:0.3mm 0.6mm;font-size:6pt;line-height:1.2;word-break:break-word;white-space:pre-line}
+.dz .dz-p td.n{text-align:right;white-space:nowrap}
+.dz .dz-p td.c{text-align:center}
+.dz .dz-p tr.i0 td{border-top:0.1mm dotted #666}
+.dz .dz-p tr.ib td{font-size:5.4pt;color:#000;padding-top:0;white-space:normal}
+.dz .dz-pb{border:0.2mm solid #000;border-top:0;overflow:hidden}
+.dz .dz-ad td{padding:0.6mm 0.8mm}
+.dz .dz-ad .tx{font-size:6.4pt;line-height:1.3;white-space:pre-line;word-break:break-word}
+.dz .dz-dup td{height:7mm;padding:0.4mm 0.8mm;font-size:6.2pt;line-height:1.25}
+.dz .dz-fat{font-size:6.2pt;padding:0.6mm 0.8mm;border:0.2mm solid #000;border-bottom:0;height:4.2mm;white-space:nowrap;overflow:hidden}
+.dz .dz-canh td{padding:0.6mm 0.8mm}
+.dz .dz-canh .rc{font-size:6.2pt;line-height:1.25}
+.dz .dz-canh .nf{text-align:center;font-size:9pt;font-weight:700;line-height:1.5;vertical-align:middle}
+.dz .dz-corte{border-top:0.3mm dashed #000;margin:1.4mm 0 1.4mm}
+.dz .dz-cv{position:absolute;overflow:hidden}
+.dz .dz-cvi{position:absolute;left:0;top:0;transform-origin:0 0}
+.dz .dz-cvc{position:absolute;border-left:0.3mm dashed #000}
+.dz .dz-wm{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30mm;pointer-events:none;z-index:5}
+.dz .dz-wm span{display:block;transform:rotate(-35deg);font:700 50pt Arial,Helvetica,sans-serif;color:rgba(0,0,0,0.16);white-space:nowrap;letter-spacing:2pt}
+.dz .dz-wm span.c{color:rgba(179,38,30,0.32)}
+.dz .dz-rod{position:absolute;font-size:5pt;color:#555;white-space:nowrap}
+.dzprev{overflow:auto;background:#dfe3ea;padding:10px;border-radius:6px;max-height:72vh}
+.dzprev .dz-pg{margin:0 auto 10px;box-shadow:0 1px 4px rgba(0,0,0,.25)}`;
+const dzC=(lab,val,w,o)=>{o=o||{};return '<td style="width:'+w+'%"'+(o.cs?' colspan="'+o.cs+'"':'')+'><i>'+esc(lab)+'</i><b'+(o.n?' class="n"':'')+(o.fs?' style="font-size:'+o.fs+'pt"':'')+'>'+(o.h!=null?o.h:esc(val==null?'':String(val)))+'</b></td>';};
+/* letra menor quando o texto não cabe (nunca abaixo de 5,4 pt) */
+const dzFs=(txt,wMm,base)=>{const n=String(txt||'').length;if(!n)return base;const cab=wMm/(0.19*base*0.95);return n<=cab?base:Math.max(5.4,Math.round(base*cab/n*10)/10);};
+const dzRow=cells=>'<table class="dz-r"><tr>'+cells.join('')+'</tr></table>';
+const dzTit=t=>'<div class="dz-tit">'+esc(t)+'</div>';
+function dzEndTxt(e){return [e.lgr+(e.nro?', '+e.nro:''),e.cpl].filter(Boolean).join(' - ');}
+function dzCanhoto(d,w){
+  const tot=dzN(d.tot.vNF);
+  const txt='RECEBEMOS DE '+(d.emit.nome||'')+' OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO. EMISSÃO: '+dzData(d.dhEmi)+' VALOR TOTAL: R$ '+tot+' DESTINATÁRIO: '+(d.dest.nome||'')+' - '+[dzEndTxt(d.dest.end),d.dest.end.bairro,d.dest.end.mun+(d.dest.end.uf?'-'+d.dest.end.uf:'')].filter(Boolean).join(' ');
+  return '<table class="dz-canh"><tr><td colspan="2" style="height:9.5mm"><div class="rc" style="font-size:'+dzFs(txt,(w-36)*2.1,6.2)+'pt">'+esc(txt)+'</div></td><td rowspan="2" class="nf" style="width:36mm">NF-e<br>Nº '+esc(dzNum9(d.nNF))+'<br>Série '+esc(String(d.serie||'').padStart(3,'0'))+'</td></tr>'+
+    '<tr><td style="width:30mm;height:8mm"><i>DATA DE RECEBIMENTO</i></td><td><i>IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR</i></td></tr></table>';
+}
+function dzCabecalho(d,w,folha,nf){
+  const e=d.emit,en=e.end;
+  const ad=[dzEndTxt(en),[en.bairro,dzCep(en.cep)?'CEP '+dzCep(en.cep):''].filter(Boolean).join(' - '),[en.mun,en.uf].filter(Boolean).join(' - '),en.fone?'Fone: '+dzFone(en.fone):''].filter(Boolean);
+  const wEm=w*0.40,nmFs=dzFs(e.nome,wEm*1.9,9);
+  const emit='<td class="dz-em" style="width:40%"><i style="text-align:left">IDENTIFICAÇÃO DO EMITENTE</i><div class="nm" style="font-size:'+nmFs+'pt">'+esc(e.nome)+'</div><div class="ad">'+ad.map(esc).join('<br>')+'</div></td>';
+  const dn='<td class="dz-dn" style="width:17%"><div class="t1">DANFE</div><div class="t2">DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRÔNICA</div>'+
+    '<div class="es"><span>0 - ENTRADA<br>1 - SAÍDA</span><span class="bx">'+esc(d.tpNF||'')+'</span></div>'+
+    '<div class="nr">Nº '+esc(dzNum9(d.nNF))+'<br>SÉRIE '+esc(String(d.serie||'').padStart(3,'0'))+'</div><div class="fl">FOLHA '+folha+'/'+nf+'</div></td>';
+  const ch='<td class="dz-ch" style="width:43%"><table><tr><td class="dz-bcbox">'+(d.chave.length===44?c128Svg(d.chave):'')+'</td></tr>'+
+    '<tr><td class="dz-chv" style="height:7.5mm"><i>CHAVE DE ACESSO</i><b>'+esc(dzChaveFmt(d.chave))+'</b></td></tr>'+
+    '<tr><td class="dz-cons" style="height:11.5mm">Consulta de autenticidade no portal nacional da NF-e www.nfe.fazenda.gov.br/portal ou no site da Sefaz Autorizadora</td></tr></table></td>';
+  const prot=d.prot.n?d.prot.n+' - '+dzData(d.prot.dh)+' '+dzHora(d.prot.dh):'';
+  const cells=[dzC('INSCRIÇÃO ESTADUAL',e.ie,d.ibsTot?25:33.3),dzC('INSCRIÇÃO ESTADUAL DO SUBST. TRIBUT.',e.iest,d.ibsTot?25:33.3),dzC('CNPJ / CPF',dzDoc(e.doc),d.ibsTot?25:33.4)];
+  if(d.ibsTot)cells.push(dzC('CÓDIGO DO REGIME TRIBUTÁRIO',{'1':'1 - Simples Nacional','2':'2 - Simples Nacional, excesso de sublimite','3':'3 - Regime Normal','4':'4 - Simples Nacional - MEI'}[e.crt]||e.crt,25));
+  return '<table class="dz-cab"><tr>'+emit+dn+ch+'</tr></table>'+
+    dzRow([dzC('NATUREZA DA OPERAÇÃO',d.natOp,57,{fs:dzFs(d.natOp,w*0.57,7.4)}),dzC('PROTOCOLO DE AUTORIZAÇÃO DE USO',prot,43,{fs:7.4})])+dzRow(cells);
+}
+function dzDest(d,w){
+  const t=d.dest,en=t.end,ed=dzEndTxt(en);
+  let h=dzTit('DESTINATÁRIO / REMETENTE')+
+    dzRow([dzC('NOME / RAZÃO SOCIAL',t.nome,58,{fs:dzFs(t.nome,w*0.58,7.4)}),dzC('CNPJ / CPF',dzDoc(t.doc),24),dzC('DATA DA EMISSÃO',dzData(d.dhEmi),18)])+
+    dzRow([dzC('ENDEREÇO',ed,46,{fs:dzFs(ed,w*0.46,7.4)}),dzC('BAIRRO / DISTRITO',en.bairro,24,{fs:dzFs(en.bairro,w*0.24,7.4)}),dzC('CEP',dzCep(en.cep),12),dzC('DATA DA SAÍDA/ENTRADA',dzData(d.dhSai),18)])+
+    dzRow([dzC('MUNICÍPIO',en.mun,34,{fs:dzFs(en.mun,w*0.34,7.4)}),dzC('FONE / FAX',dzFone(en.fone),18),dzC('UF',en.uf,6),dzC('INSCRIÇÃO ESTADUAL',t.ie,24),dzC('HORA DA SAÍDA/ENTRADA',dzHora(d.dhSai),18)]);
+  const loc=(tt,x)=>{const s=[x.nome,x.doc?dzDoc(x.doc):'',[dzEndTxt(x),x.bairro,x.mun,x.uf].filter(Boolean).join(' - ')].filter(Boolean).join(' · ');return dzTit(tt)+dzRow([dzC('NOME / CNPJ / ENDEREÇO',s,100,{fs:dzFs(s,w,7.4)})]);};
+  if(d.retirada)h+=loc('LOCAL DE RETIRADA',d.retirada);if(d.entrega)h+=loc('LOCAL DE ENTREGA',d.entrega);
+  return h;
+}
+function dzFatura(d,cols){
+  if(!d.dups.length&&!d.fat)return '';
+  let h=dzTit('FATURA / DUPLICATA');
+  if(d.fat)h+='<div class="dz-fat">'+esc('Fatura: '+(d.fat.n||'-')+'   Valor original: R$ '+dzN(d.fat.vOrig)+'   Desconto: R$ '+dzN(d.fat.vDesc)+'   Valor líquido: R$ '+dzN(d.fat.vLiq))+'</div>';
+  for(let i=0;i<d.dups.length;i+=cols){const ls=d.dups.slice(i,i+cols);
+    h+='<table class="dz-dup"><tr>'+ls.map(u=>'<td style="width:'+(100/cols)+'%">Nº '+esc(u.n)+'<br>Venc. '+esc(dzData(u.venc))+'<br>R$ '+esc(dzN(u.v))+'</td>').join('')+(ls.length<cols?'<td colspan="'+(cols-ls.length)+'" style="border-left:0.2mm solid #000"></td>':'')+'</tr></table>';}
+  return h;
+}
+function dzImposto(d){
+  const t=d.tot,c=(l,v,w)=>dzC(l,dzN(v),w,{n:1});
+  let h=dzTit('CÁLCULO DO IMPOSTO')+
+    dzRow([c('BASE DE CÁLC. DO ICMS',t.vBC,12.5),c('VALOR DO ICMS',t.vICMS,12.5),c('BASE DE CÁLC. ICMS S.T.',t.vBCST,12.5),c('VALOR DO ICMS SUBST.',t.vST,12.5),c('V. IMP. IMPORTAÇÃO',t.vII,12.5),c('V. ICMS UF REMET.',t.vICMSUFRemet,12.5),c('V. FCP UF DEST.',t.vFCPUFDest,12.5),c('V. TOTAL PRODUTOS',t.vProd,12.5)])+
+    dzRow([c('VALOR DO FRETE',t.vFrete,12.5),c('VALOR DO SEGURO',t.vSeg,12.5),c('DESCONTO',t.vDesc,12.5),c('OUTRAS DESPESAS',t.vOutro,12.5),c('VALOR TOTAL IPI',t.vIPI,12.5),c('V. ICMS UF DEST.',t.vICMSUFDest,12.5),c('V. TOT. TRIB.',t.vTotTrib,12.5),dzC('V. TOTAL DA NOTA',dzN(t.vNF),12.5,{n:1,h:'<span style="font-weight:700">'+esc(dzN(t.vNF))+'</span>'})]);
+  if(d.ibsTot){const b=d.ibsTot;
+    h+=dzTit('TOTAL DO IBS / CBS / IS')+dzRow([c('VALOR DA CBS',b.vCBS,25),c('VALOR DO IBS UF',b.vIBSUF,25),c('VALOR DO IBS MUNICÍPIO',b.vIBSMun,25),c('VALOR DO IMPOSTO SELETIVO',b.vIS||0,25)]);
+    if(b.mono)h+=dzRow([c('VALOR DO IBS MONOFÁSICO',b.mono.vIBSMono,25),c('VALOR DA CBS MONOFÁSICA',b.mono.vCBSMono,25),c('VALOR DO IBS MONOFÁSICO POR RETENÇÃO',b.mono.vIBSMonoReten,25),c('VALOR DA CBS MONOFÁSICA POR RETENÇÃO',b.mono.vCBSMonoReten,25)]);}
+  return h;
+}
+const DZ_FRETE={'0':'0-Por conta do Remet','1':'1-Por conta do Dest','2':'2-Por conta de Terceiros','3':'3-Próprio por conta do Remet','4':'4-Próprio por conta do Dest','9':'9-Sem Ocorrência de Transporte'};
+function dzTransp(d,w){
+  const t=d.transp,vols=t.vols.length?t.vols.slice(0,3):[{}];
+  let h=dzTit('TRANSPORTADOR / VOLUMES TRANSPORTADOS')+
+    dzRow([dzC('NOME / RAZÃO SOCIAL',t.nome,32,{fs:dzFs(t.nome,w*0.32,7.4)}),dzC('FRETE POR CONTA',DZ_FRETE[t.mod]||t.mod,19,{fs:6.4}),dzC('CÓDIGO ANTT',t.rntc,11),dzC('PLACA DO VEÍCULO',t.placa,11),dzC('UF',t.ufv,5),dzC('CNPJ / CPF',dzDoc(t.doc),22)])+
+    dzRow([dzC('ENDEREÇO',t.end,43,{fs:dzFs(t.end,w*0.43,7.4)}),dzC('MUNICÍPIO',t.mun,30,{fs:dzFs(t.mun,w*0.3,7.4)}),dzC('UF',t.uf,5),dzC('INSCRIÇÃO ESTADUAL',t.ie,22)]);
+  vols.forEach(v=>{h+=dzRow([dzC('QUANTIDADE',v.q,14,{n:1}),dzC('ESPÉCIE',v.esp,20),dzC('MARCA',v.marca,18),dzC('NUMERAÇÃO',v.nVol,16),dzC('PESO BRUTO',v.pesoB?dzNx(v.pesoB,3,3):'',16,{n:1}),dzC('PESO LÍQUIDO',v.pesoL?dzNx(v.pesoL,3,3):'',16,{n:1})]);});
+  return h;
+}
+function dzTabProd(d,itens,cols){
+  const tot=cols.reduce((s,c)=>s+c[2],0),pc=c=>(c[2]/tot*100).toFixed(3)+'%';
+  const head='<colgroup>'+cols.map(c=>'<col style="width:'+pc(c)+'">').join('')+'</colgroup><thead><tr>'+cols.map(c=>'<th>'+esc(c[0]==='cst'?dzCst(d):c[1])+'</th>').join('')+'</tr></thead>';
+  const rows=itens.map((i,k)=>{const ix=d.itens.indexOf(i),ib=dzIbsLinha(i);
+    const v={cod:esc(i.cod),desc:esc(dzItemDesc(i)),ncm:esc(i.ncm),cst:esc(i.cst),cfop:esc(i.cfop),un:esc(i.un),qtd:esc(dzNx(i.qtd,2,4)),vun:esc(dzNx(i.vun,2,10,true)),vtot:dzN(i.vtot),bc:dzN(i.bc),vicms:dzN(i.vicms),vipi:dzN(i.vipi),aicms:dzN(i.aicms),aipi:dzN(i.aipi)};
+    const cls={qtd:'n',vun:'n',vtot:'n',bc:'n',vicms:'n',vipi:'n',aicms:'n',aipi:'n',cst:'c',cfop:'c',un:'c',ncm:'c'};
+    return '<tr class="'+(k?'i0':'')+'" data-i="'+ix+'">'+cols.map(c=>'<td'+(cls[c[0]]?' class="'+cls[c[0]]+'"':'')+'>'+v[c[0]]+'</td>').join('')+'</tr>'+
+      (ib?'<tr class="ib" data-i="'+ix+'"><td></td><td colspan="'+(cols.length-1)+'">'+esc(ib)+'</td></tr>':'');}).join('');
+  return '<table class="dz-p">'+head+'<tbody>'+rows+'</tbody></table>';
+}
+function dzIssqn(d){if(!d.issqn)return '';const c=(l,v,w)=>dzC(l,dzN(v),w,{n:1});
+  return dzTit('CÁLCULO DO ISSQN')+dzRow([dzC('INSCRIÇÃO MUNICIPAL',d.emit.im,25),c('VALOR TOTAL DOS SERVIÇOS',d.issqn.vServ,25),c('BASE DE CÁLCULO DO ISSQN',d.issqn.vBC,25),c('VALOR DO ISSQN',d.issqn.vISS,25)]);}
+function dzAdic(d,txt,h,cont){
+  return dzTit(cont?'DADOS ADICIONAIS (CONTINUAÇÃO)':'DADOS ADICIONAIS')+'<table class="dz-ad"><tr><td style="width:'+(cont?100:68)+'%;height:'+(h-DZ_G.tit).toFixed(2)+'mm"><i>INFORMAÇÕES COMPLEMENTARES'+(cont?' (CONTINUAÇÃO)':'')+'</i><div class="tx">'+esc(txt)+'</div></td>'+
+    (cont?'':'<td style="width:32%"><i>RESERVADO AO FISCO</i><div class="tx">'+esc(d.infAdFisco||'')+'</div></td>')+'</tr></table>';
+}
+/* marcas d'água: SEM VALOR FISCAL (homologação) e CANCELADA/DENEGADA (situação no arquivo fiscal) */
+function dzMarcas(d,sit){const m=[];if(d.tpAmb==='2')m.push(['SEM VALOR FISCAL','']);if(sit==='cancelada')m.push(['CANCELADA','c']);else if(sit==='denegada')m.push(['DENEGADA','c']);return m;}
+function dzCorpo(d,P,pg,k,nf){
+  const um=k===0,itens=pg.its.map(i=>d.itens[i]),cols=dzCols(pg.w);
+  let corpo='';
+  if(um&&!P.la)corpo+=dzCanhoto(d,pg.w)+'<div class="dz-corte"></div>';
+  corpo+=dzCabecalho(d,pg.w,k+1,nf);
+  if(um)corpo+=dzDest(d,pg.w)+dzFatura(d,P.cols)+dzImposto(d)+dzTransp(d,pg.w);
+  corpo+=dzTit('DADOS DOS PRODUTOS / SERVIÇOS')+'<div class="dz-pb" style="height:'+Math.max(0,pg.pb).toFixed(2)+'mm">'+dzTabProd(d,itens,cols)+'</div>';
+  if(um)corpo+=dzIssqn(d)+dzAdic(d,P.txt1,P.hAd+DZ_G.tit,false);
+  else if(pg.cont)corpo+=dzAdic(d,pg.cont,pg.hCont,true);
+  return corpo;
+}
+function danfeHtml(d,o){
+  o=o||{};const P=danfePaginas(d),G=P.G,nf=P.pags.length,marcas=dzMarcas(d,o.situacao);
+  const wm=marcas.length?'<div class="dz-wm" aria-hidden="true">'+marcas.map(m=>'<span class="'+m[1]+'">'+esc(m[0])+'</span>').join('')+'</div>':'';
+  const rod='<div class="dz-rod" style="left:'+G.m+'mm;bottom:1.2mm">DANFE gerado pela Central de Gestão a partir do XML original guardado no arquivo fiscal (MOC 7.0, Anexo II).</div>';
+  const out=P.pags.map((pg,k)=>{
+    const um=k===0,left=G.m+(um&&P.la?DZ_G.canhW:0);
+    let canh='';
+    if(um&&P.la){const H=P.inH,W=DZ_G.canhW-3;
+      canh='<div class="dz-cv" style="left:'+G.m+'mm;top:'+G.m+'mm;width:'+W+'mm;height:'+H+'mm"><div class="dz-cvi" style="width:'+H+'mm;height:'+W+'mm;transform:translateY('+H+'mm) rotate(-90deg)">'+dzCanhoto(d,H)+'</div></div>'+
+        '<div class="dz-cvc" style="left:'+(G.m+W+1.5)+'mm;top:'+G.m+'mm;height:'+H+'mm"></div>';}
+    return '<div class="dz-pg '+(P.la?'dz-la':'dz-po')+'" data-folha="'+(k+1)+'" style="width:'+G.W+'mm;height:'+G.H+'mm">'+canh+
+      '<div class="dz-in" style="left:'+left+'mm;top:'+G.m+'mm;width:'+pg.w+'mm;height:'+P.inH+'mm">'+dzCorpo(d,P,pg,k,nf)+'</div>'+wm+rod+'</div>';
+  }).join('');
+  return '<div class="dz" data-chave="'+esc(d.chave)+'" data-folhas="'+nf+'"><style>'+DZ_CSS+'</style>'+out+'</div>';
+}
+
+/* ---------- imprimir (quadro separado, como a v133.1) e baixar PDF ---------- */
+function dzImprimir(){
+  const c=DZ.cur;if(!c||!c.html)return;
+  const html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><title>'+esc(c.nome)+'</title><style>@page{size:A4 '+(c.d.tpImp==='2'?'landscape':'portrait')+';margin:0}html,body{margin:0;padding:0;background:#fff}'+
+    '.dz .dz-pg{page-break-after:always;break-after:page;box-shadow:none;margin:0}.dz .dz-pg:last-child{page-break-after:auto;break-after:auto}</style></head><body>'+c.html+'</body></html>';
+  try{
+    const old=document.getElementById('v1331Print');if(old)old.remove();
+    const fr=document.createElement('iframe');fr.id='v1331Print';fr.setAttribute('aria-hidden','true');fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(fr);const w=fr.contentWindow,dc=w.document;dc.open();dc.write(html);dc.close();
+    setTimeout(()=>{try{w.focus();w.print();}catch(e){toast('Não foi possível abrir a impressão aqui. Use “Baixar PDF”.','neg');}setTimeout(()=>{try{fr.remove();}catch(e){}},60000);},120);
+  }catch(e){toast('Não foi possível abrir a impressão aqui. Use “Baixar PDF”.','neg');}
+}
+/* html2canvas com a correção de cores da v133.1 (o fundo do html/body com color-mix quebrava a captura) */
+async function dzCaptura(el,op){
+  const r=document.documentElement,b=document.body,cl=r.classList.contains('cores-setor'),sr=r.style.background,sb=b.style.background;
+  r.classList.remove('cores-setor');r.style.background='#ffffff';b.style.background='#ffffff';
+  try{return await window.html2canvas(el,op);}finally{if(cl)r.classList.add('cores-setor');r.style.background=sr;b.style.background=sb;}
+}
+async function dzPdfBlob(){
+  const c=DZ.cur;if(!c||!c.html)throw new Error('Nada para gerar.');
+  await loadScript(H2C_URL,()=>!!window.html2canvas);
+  await loadScript(JSPDF_URL,()=>!!(window.jspdf&&window.jspdf.jsPDF));
+  const la=c.d.tpImp==='2',G=la?DZ_G.la:DZ_G.po;
+  const host=document.createElement('div');host.style.cssText='position:fixed;left:-30000px;top:0;background:#fff;z-index:-1';host.innerHTML=c.html;document.body.appendChild(host);
+  try{
+    try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;}catch(e){}
+    const {jsPDF}=window.jspdf,pdf=new jsPDF({unit:'mm',format:'a4',orientation:la?'landscape':'portrait'});
+    const pgs=Array.from(host.querySelectorAll('.dz-pg'));
+    for(let k=0;k<pgs.length;k++){
+      const pg=pgs[k],pr=pg.getBoundingClientRect(),mm=pr.width/G.W||3.78;
+      /* o código de barras sai em vetor no PDF (barras nítidas para o leitor): esconde na imagem e desenha por cima */
+      const bcs=Array.from(pg.querySelectorAll('svg.dz-bc')).map(s=>{const r=s.getBoundingClientRect();s.style.visibility='hidden';return {x:(r.left-pr.left)/mm,y:(r.top-pr.top)/mm,w:r.width/mm,h:r.height/mm};});
+      const cv=await dzCaptura(pg,{scale:2.5,backgroundColor:'#ffffff',useCORS:false,logging:false});
+      if(k)pdf.addPage('a4',la?'landscape':'portrait');
+      pdf.addImage(cv.toDataURL('image/jpeg',0.93),'JPEG',0,0,G.W,G.H);
+      const r=c128Barras(c.d.chave);pdf.setFillColor(0,0,0);
+      bcs.forEach(b=>{const mw=b.w/r.total;r.barras.forEach(br=>pdf.rect(b.x+br[0]*mw,b.y,br[1]*mw,b.h,'F'));});
+    }
+    return pdf.output('blob');
+  }finally{host.remove();}
+}
+
+/* ---------- telas: PDF do fornecedor ou DANFE gerado ---------- */
+const dzAcc=()=>typeof nfrAcesso==='function'?nfrAcesso():'';
+const DZ_ORIG={email:'veio por e-mail (caixa nfe@)',manual:'anexado à mão',lote:'importado em lote (ZIP de PDFs)'};
+function dzSit(info){return info&&info.situacao||'autorizada';}
+async function danfeAbrir(id,o){
+  o=o||{};
+  if(!nfrSelf()){toast('O DANFE do arquivo fiscal fica no servidor da empresa. Abra o sistema pelo endereço da empresa.','neg');return;}
+  let info=null;
+  try{info=await nfrApi('/api/arqfiscal/'+encodeURIComponent(id));}catch(e){toast(e.message,'neg');return;}
+  NFR.det[id]=info;
+  if(dzSit(info)==='cancelada')toast('Atenção: esta nota foi CANCELADA.','neg');
+  if(!o.gerado&&info.pdf)return dzMostrarPdf(id,info);
+  if(!o.gerado&&o.lanc){const dan=(typeof anxList==='function'?anxList('lanc',o.lanc):[]).find(a=>a.tipo==='danfe');
+    if(dan){anxCur={col:'lanc',id:o.lanc.id};anxView(dan,'closeModal','');try{$('#mf').insertAdjacentHTML('afterbegin','<button class="btn" data-act="danfeGerado" data-id="'+esc(id)+'">Ver DANFE gerado do XML</button>');}catch(e){}return;}}
+  return dzMostrarGerado(id,info);
+}
+async function dzMostrarGerado(id,info){
+  let t;try{t=await nfrXmlTexto(id);}catch(e){toast(e.message,'neg');return;}
+  let d;try{d=danfeLer(t);}catch(e){toast(e.message,'neg');return;}
+  const html=danfeHtml(d,{situacao:dzSit(info)}),nome=slug('danfe-'+(d.nNF||'sn')+'-'+String(d.chave).slice(-6));
+  DZ.cur={id,info,d,xml:t,html,nome};
+  const tot=dzAcc()==='total',podeAnexar=!!dzAcc()&&!info.pdf;
+  const aviso=[d.tpAmb==='2'?'Nota de homologação (teste): sem valor fiscal.':'',dzSit(info)==='cancelada'?'Nota CANCELADA'+(info.sitFonte?' ('+info.sitFonte+')':'')+'.':''].filter(Boolean).join(' ');
+  modal({title:'DANFE · NF-e '+(d.nNF||'s/n')+' série '+(d.serie||'1'),wide:true,nofocus:true,
+    body:(aviso?'<div class="note" style="border-color:var(--neg);margin:0 0 8px">'+esc(aviso)+'</div>':'')+
+      '<p class="sub" style="margin:0 0 8px">DANFE no leiaute oficial, montado a partir do XML original guardado no arquivo fiscal'+(info.pdf?'. O PDF que o fornecedor mandou também está guardado.':'.')+' Folhas: '+(html.match(/data-folhas="(\d+)"/)||[])[1]+'.</p>'+
+      '<div class="dzprev" id="dzPrev">'+html+'</div>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="danfeResumo" title="O espelho simples de antes (resumo dos dados)">Resumo</button>'+
+      (info.pdf?'<button class="btn" data-act="danfePdfVer" data-id="'+esc(id)+'">Ver PDF do fornecedor</button>':'')+
+      (podeAnexar?'<button class="btn" data-act="danfeAnexar" data-id="'+esc(id)+'">Anexar PDF do fornecedor</button>':'')+
+      '<button class="btn" data-act="danfeImprimir">Imprimir</button><button class="btn pri" id="dzBtnPdf" data-act="danfeBaixar">Baixar PDF</button>'});
+  dzAjustarZoom();
+}
+/* na tela: reduz as folhas para caber na largura (no celular também), sem mexer no tamanho real */
+function dzAjustarZoom(){try{const box=document.getElementById('dzPrev');if(!box||!box.clientWidth)return;const pg=box.querySelector('.dz-pg');if(!pg)return;
+  const z=Math.min(1,(box.clientWidth-24)/pg.getBoundingClientRect().width);const dz=box.querySelector('.dz');if(dz&&z<1)dz.style.zoom=String(Math.max(0.3,z));}catch(e){}}
+async function dzMostrarPdf(id,info){
+  const p=info.pdf,tot=dzAcc()==='total';
+  DZ.curPdf={id,info,blob:null,url:''};
+  modal({title:'DANFE do fornecedor · NF-e '+(info.numero||'s/n')+(info.parcNome?' · '+info.parcNome:''),wide:true,nofocus:true,
+    body:'<p class="sub" style="margin:0 0 8px">PDF original que o fornecedor mandou ('+esc(DZ_ORIG[p.origem]||p.origem)+(p.nome?': '+esc(p.nome):'')+'). Quem vale é o XML: confira se a chave impressa no PDF é <span class="mono">'+esc(dzChaveFmt(info.chave))+'</span>.</p>'+
+      (dzSit(info)==='cancelada'?'<div class="note" style="border-color:var(--neg);margin:0 0 8px"><b>Nota CANCELADA</b> na SEFAZ. Confira antes de pagar.</div>':'')+
+      '<div id="dzPdfBox"><p class="sub">Carregando o PDF…</p></div>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn pri" data-act="danfeGerado" data-id="'+esc(id)+'">Ver DANFE gerado do XML</button>'+
+      '<button class="btn" data-act="danfePdfBaixar">Baixar PDF</button>'+(tot?'<button class="btn" data-act="danfeAnexar" data-id="'+esc(id)+'" data-v="trocar">Trocar PDF</button><button class="btn dng" data-act="danfePdfRemover" data-id="'+esc(id)+'">Remover PDF</button>':'')});
+  try{
+    const r=await fetch('/api/arqfiscal/'+encodeURIComponent(id)+'/pdf',{credentials:'same-origin'});
+    if(!r.ok){let j=null;try{j=await r.json();}catch(e){}throw new Error((j&&j.erro)||'Não foi possível abrir o PDF.');}
+    const blob=await r.blob();DZ.curPdf.blob=blob;
+    const box=document.getElementById('dzPdfBox');if(!box)return;
+    const url=URL.createObjectURL(new Blob([blob],{type:'application/pdf'}));DZ.curPdf.url=url;
+    box.innerHTML='<iframe title="PDF do fornecedor" src="'+url+'" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:6px;background:#fff"></iframe>';
+  }catch(e){const box=document.getElementById('dzPdfBox');if(box)box.innerHTML='<div class="note" style="border-color:var(--neg)">'+esc(e.message)+'</div>';}
+}
+/* nota que a tela só conhece pela chave (Notas para lançar, nota lançada) */
+async function danfeChave(chave,fallback){
+  chave=String(chave||'').replace(/\D/g,'');
+  if(!nfrSelf()||!dzAcc()||chave.length!==44){if(fallback)return fallback();toast('Esta nota não está no arquivo fiscal.','neg');return;}
+  try{const j=await nfrApi('/api/arqfiscal/ch/'+chave);return danfeAbrir(j.id);}
+  catch(e){if(fallback){toast('O XML desta nota ainda não está no arquivo fiscal; mostrando o resumo.');return fallback();}toast(e.message,'neg');}
+}
+
+/* ---------- ações ---------- */
+A.nfrDanfe=d=>danfeAbrir(d.id);
+A.danfeGerado=d=>danfeAbrir(d.id,{gerado:true});
+A.danfePdfVer=d=>{const info=NFR.det[d.id];if(info&&info.pdf)return dzMostrarPdf(d.id,info);return danfeAbrir(d.id);};
+A.danfeResumo=()=>{const c=DZ.cur;if(!c)return;try{showDoc(nfrEspelho(nfrLerXml(c.xml),c.info),slug('resumo-nfe-'+(c.d.nNF||'sn')));}catch(e){toast(e.message,'neg');}};
+A.danfeImprimir=()=>dzImprimir();
+A.danfeBaixar=async()=>{const c=DZ.cur;if(!c)return;const b=document.getElementById('dzBtnPdf'),lbl=b?b.textContent:'';if(b){b.disabled=true;b.textContent='Gerando PDF…';}
+  try{const blob=await dzPdfBlob();await savePdf(c.nome+'.pdf',blob);}catch(e){toast((e&&e.message)||'Não foi possível gerar o PDF.','neg');}
+  finally{const b2=document.getElementById('dzBtnPdf');if(b2){b2.disabled=false;b2.textContent=lbl||'Baixar PDF';}}};
+A.danfePdfBaixar=async()=>{const c=DZ.curPdf;if(!c)return;
+  try{let blob=c.blob;if(!blob){const r=await fetch('/api/arqfiscal/'+encodeURIComponent(c.id)+'/pdf?baixar=1',{credentials:'same-origin'});if(!r.ok)throw new Error('Não foi possível baixar o PDF.');blob=await r.blob();}
+    await savePdf('danfe-fornecedor-'+(c.info.numero||'sn')+'-'+String(c.info.chave).slice(-6)+'.pdf',blob);}catch(e){toast(e.message,'neg');}};
+A.danfeAnexar=d=>{
+  const acc=dzAcc();if(!acc){toast('Seu perfil não anexa PDF de nota.','neg');return;}
+  const trocar=d.v==='trocar';if(trocar&&acc!=='total'){toast('Só quem tem acesso total ao arquivo fiscal troca o PDF.','neg');return;}
+  const max=((DZ.cfg&&DZ.cfg.pdfMaxMb)||3)*1048576;
+  nfrEscolher('.pdf,application/pdf',false,async fs=>{const f=fs[0];
+    if(f.size>max){toast('O PDF passa do limite de '+dzN(max/1048576,1)+' MB.','neg');return;}
+    try{const cab=f.slice?await f.slice(0,5).text():'%PDF-';if(cab!=='%PDF-'){toast('Este arquivo não é um PDF.','neg');return;}}catch(e){}
+    try{const j=await nfrApi('/api/arqfiscal/'+encodeURIComponent(d.id)+'/pdf?nome='+encodeURIComponent(f.name)+(trocar?'&substituir=1':''),{method:'POST',headers:{'content-type':'application/pdf'},body:f});
+      toast(j.r==='trocado'?'PDF do fornecedor trocado.':'PDF do fornecedor ligado à nota.','pos');NFR.chave='';if(typeof nfrCarregar==='function')nfrCarregar(true);danfeAbrir(d.id);}
+    catch(e){toast(e.message,'neg');}});
+};
+A.danfePdfRemover=d=>{confirmBox('Remover o PDF do fornecedor desta nota? O XML e o DANFE gerado continuam. Fica na auditoria.',async()=>{
+  try{await nfrApi('/api/arqfiscal/'+encodeURIComponent(d.id)+'/pdf',{method:'DELETE'});toast('PDF removido.','pos');NFR.chave='';if(typeof nfrCarregar==='function')nfrCarregar(true);}catch(e){toast(e.message,'neg');}},'Remover',true);};
+A.danfeNota=d=>{const n=get('notas',d.id);if(!n)return;danfeChave(n.chave,()=>A.danfeEspelho({id:n.id}));};
+
+/* ---------- importar DANFEs (ZIP de PDFs) ---------- */
+A.danfeImportar=()=>{
+  if(!nfrSelf()||!dzAcc()){toast('Seu perfil não importa PDFs no arquivo fiscal.','neg');return;}
+  const lim=(DZ.cfg&&DZ.cfg.pdfMaxMb)||3,limZ=(DZ.cfg&&DZ.cfg.zipMaxMb)||200;
+  modal({title:'Importar DANFEs (ZIP de PDFs)',nofocus:true,body:'<p style="margin:0 0 8px">Envie um ZIP com os PDFs dos DANFEs. Cada PDF é ligado à nota pela <b>chave de acesso que está no nome do arquivo</b> (ex.: <span class="mono">35260443991892000142550010002339921627432956.pdf</span>).</p>'+
+    '<ul class="sub" style="margin:0 0 8px;padding-left:18px"><li>A nota precisa já estar no arquivo fiscal (importe o XML antes). PDF de nota que não está lá é ignorado, com o motivo.</li><li>Só PDF de verdade (o arquivo começa com %PDF) e de até '+esc(dzN(lim,1))+' MB cada. ZIP de até '+esc(String(limZ))+' MB.</li><li>Nota que já tem PDF fica como está ("já existente"). Pode reenviar sem medo.</li>'+(dzAcc()!=='total'?'<li>Seu perfil envia só PDFs de notas de entrada.</li>':'')+'</ul>',
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button><button class="btn pri" data-act="danfeImpEscolher">Escolher ZIP(s)</button>'});
+};
+A.danfeImpEscolher=()=>nfrEscolher('.zip,application/zip',true,fs=>dzEnviarZips(fs));
+async function dzEnviarZips(files){
+  const limZ=((DZ.cfg&&DZ.cfg.zipMaxMb)||200)*1048576,g=files.find(f=>f.size>limZ);if(g){toast('“'+g.name+'” passa do limite de '+Math.round(limZ/1048576)+' MB. Divida em arquivos menores.','neg');return;}
+  const res=[];
+  for(let i=0;i<files.length;i++){const f=files[i];
+    modal({title:'Importando DANFEs',nofocus:true,body:'<p aria-live="polite">Enviando e conferindo <b>'+esc(f.name)+'</b> ('+(i+1)+' de '+files.length+')…</p>',foot:'<button class="btn" data-act="closeModal">Continuar em segundo plano</button>'});
+    try{res.push(await nfrApi('/api/arqfiscal/pdf/lote?nome='+encodeURIComponent(f.name),{method:'POST',headers:{'content-type':'application/zip'},body:f}));}
+    catch(e){res.push({arquivo:f.name,erro:e.message,novos:0,existentes:0,ignorados:0,lista:[],motivos:{}});}
+  }
+  NFR.chave='';if(typeof nfrCarregar==='function')nfrCarregar(true);dzRelatorio(res);
+}
+function dzRelatorio(res){
+  const soma=k=>res.reduce((s,r)=>s+(+r[k]||0),0),mot={};res.forEach(r=>Object.entries(r.motivos||{}).forEach(([k,v])=>{mot[k]=(mot[k]||0)+v;}));
+  const lista=[].concat(...res.map(r=>(r.lista||[]).map(x=>[r.arquivo,x.arquivo,x.r==='existente'?'Já existente':'Ignorado',x.motivo,x.chave||''])));
+  DZ.ultRel=lista.concat([].concat(...res.map(r=>(r.ligados||[]).map(x=>[r.arquivo,x.arquivo,'Novo','ligado à nota',x.chave]))));
+  modal({title:'Relatório: DANFEs importados',wide:true,nofocus:true,body:
+    '<div class="kpis">'+kpi('Novos',String(soma('novos')),'PDF ligado à nota','pos')+kpi('Já existentes',String(soma('existentes')),'nada mudou')+kpi('Ignorados',String(soma('ignorados')),'veja o motivo abaixo',soma('ignorados')?'warn':'')+'</div>'+
+    res.filter(r=>r.erro).map(r=>'<div class="note" style="border-color:var(--neg)"><b>'+esc(r.arquivo)+':</b> '+esc(r.erro)+'</div>').join('')+
+    (Object.keys(mot).length?'<h3 style="margin:12px 0 6px">Ignorados, por motivo</h3><ul style="margin:0;padding-left:18px">'+Object.entries(mot).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<li>'+esc(k)+': <b>'+v+'</b></li>').join('')+'</ul>':'')+
+    (lista.length?'<h3 style="margin:12px 0 6px">Arquivos não ligados'+(lista.length>40?' (primeiros 40 de '+lista.length+')':'')+'</h3><div class="tw"><table><thead><tr><th>Arquivo</th><th>Resultado</th><th>Motivo</th></tr></thead><tbody>'+lista.slice(0,40).map(x=>'<tr><td class="mono" style="word-break:break-all">'+esc(x[1])+'</td><td>'+esc(x[2])+'</td><td>'+esc(x[3])+'</td></tr>').join('')+'</tbody></table></div>':'')+
+    '<p class="sub" style="margin:10px 0 0">'+res.map(r=>esc(r.arquivo||'')+(r.segundos!=null?' em '+r.segundos+' s':'')).join(' · ')+'</p>',
+    foot:(DZ.ultRel.length?'<button class="btn" data-act="danfeRelCsv">Baixar relatório (CSV)</button>':'')+'<button class="btn pri" data-act="closeModal">Fechar</button>'});
+}
+A.danfeRelCsv=()=>{saveFile('importacao-danfes.csv',csv([['ZIP','Arquivo','Resultado','Motivo','Chave']].concat(DZ.ultRel||[])));};
+
+/* ---------- botões nas telas ---------- */
+/* Recebimento de notas › Arquivo fiscal: "Importar DANFEs (ZIP de PDFs)" */
+{const b0=nfrBotoes;nfrBotoes=function(){const h=b0.apply(this,arguments);if(!nfrSelf()||!dzAcc()||ui.nfr.aba!=='arq')return h;return '<button class="btn" data-act="danfeImportar">Importar DANFEs (ZIP de PDFs)</button>'+h;};}
+/* lista do arquivo fiscal: o botão DANFE avisa quando há o PDF do fornecedor */
+{const t0=nfrTabela;nfrTabela=function(){let h=t0.apply(this,arguments);const its=(NFR.lista&&NFR.lista.itens)||[];
+  its.forEach(r=>{if(!r.pdf)return;const a='data-act="nfrDanfe" data-id="'+esc(r.id)+'">DANFE</button>';h=h.split(a).join('data-act="nfrDanfe" data-id="'+esc(r.id)+'" title="Abre o PDF que o fornecedor mandou ('+esc(DZ_ORIG[r.pdf]||r.pdf)+')">DANFE (PDF)</button>');});return h;};}
+/* Contas a pagar/receber: DANFE abre o PDF do fornecedor ou o DANFE gerado; nota lançada no sistema: procura pela chave */
+{const v0=A.verDanfe;A.verDanfe=d=>{const l=get('lanc',d.id);
+  if(l&&l.arqf&&l.arqf.id&&nfrSelf()){if(!dzAcc()){toast('Seu perfil não abre o arquivo fiscal.','neg');return;}return danfeAbrir(l.arqf.id,{lanc:l});}
+  if(l&&l.notaId&&nfrSelf()&&dzAcc()&&!anxList('lanc',l).some(a=>a.tipo==='danfe')){const n=get('notas',l.notaId);if(n&&String(n.chave||'').replace(/\D/g,'').length===44)return danfeChave(n.chave,()=>v0(d));}
+  return v0(d);};}
+/* Notas para lançar e Notas fiscais: botão DANFE nas notas com chave */
+{const a0=addAnexBtns;addAnexBtns=function(html,tab){let h=a0.apply(this,arguments);if(!['nfrec','nf'].includes(tab)||typeof h!=='string')return h;
+  return h.replace(/<button class="btn sm" data-act="anexos" data-col="notas" data-id="([^"]+)">([^<]*)<\/button>/g,(m0,id)=>{const n=get('notas',id);
+    if(!n||String(n.chave||'').replace(/\D/g,'').length!==44)return m0;return m0+'<button class="btn sm" data-act="danfeNota" data-id="'+esc(id)+'" title="DANFE da nota (PDF do fornecedor ou gerado do XML)">DANFE</button>';});};}
+/* limites do servidor, uma vez, em segundo plano */
+if(nfrSelf()&&typeof setTimeout==='function')setTimeout(()=>{if(!dzAcc())return;nfrApi('/api/arqfiscal/pdf/config').then(j=>{DZ.cfg=j;}).catch(()=>{});},4500);
+Object.assign(ACT_GROUP,{danfeGerado:null,danfePdfVer:null,danfeResumo:null,danfeImprimir:null,danfeBaixar:null,danfePdfBaixar:null,danfeAnexar:null,danfePdfRemover:null,danfeNota:null,danfeImportar:null,danfeImpEscolher:null,danfeRelCsv:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{nfrDanfe:'Abre o PDF que o fornecedor mandou, quando há; senão o DANFE no leiaute oficial, gerado do XML original.',
+  danfeImportar:'Liga os PDFs dos DANFEs às notas do arquivo fiscal pela chave no nome do arquivo.',danfeNota:'DANFE da nota (PDF do fornecedor ou gerado do XML).',
+  danfeAnexar:'Anexa o PDF original do fornecedor a esta nota.',danfeResumo:'Mostra o espelho simples (resumo) da nota.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='133.1',APP_DATA='2026-10-29';
+const APP_VER='134',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['134','2026-10-29',['DANFE no padrão oficial (MOC 7.0, Anexo II) gerado a partir do XML: canhoto, código de barras da chave, protocolo, todos os quadros, IBS/CBS (NT 2026.010), várias folhas e marcas SEM VALOR FISCAL / CANCELADA.', 'PDF original do fornecedor guardado no arquivo fiscal (e-mail nfe@, anexo manual e importação em lote por ZIP de PDFs nomeados pela chave). O botão DANFE abre o PDF do fornecedor quando existe; o espelho antigo virou "Resumo".']],
   ['133.1','2026-10-29',['Visualizar / PDF: Exportar PDF voltou a funcionar (dava o erro "unsupported color function color" desde as cores por setor) e Imprimir passa a abrir só o documento, também no Safari.']],
   ['133','2026-10-29',['Contratos: aditivo tem o campo Assinado (Sim / Não, em negociação). Só os assinados contam na vigência e no valor atualizados, no saldo e no limite de acréscimos; os em negociação aparecem marcados. Aditivos já cadastrados contam como assinados.', 'Oportunidades: no filtro pela data do resultado, propostas antigas sem resultado registrado ficam de fora.']],
   ['132','2026-10-28',['Datas em DD/MM/AAAA em todo o sistema (telas, janelas, PDF, avisos, histórico e planilhas CSV); competências como MM/AAAA.', 'Contratos com clientes: descrição do projeto e objeto na horizontal (até 2 linhas, texto inteiro ao passar o mouse); Vigência atualizada e Valor atualizado com os aditivos, com o original ao lado, na lista, no detalhe e na ficha em PDF; botão + Criar novo projeto na edição do contrato.', 'Usuários: cabeçalho da tabela O que cada perfil pode fazer fixo ao rolar e coluna de perfil fixa ao rolar para o lado.', 'Oportunidades e licitações: filtros por data (apresentação/sessão, previsão ou resultado) com período, ano e mês.']],

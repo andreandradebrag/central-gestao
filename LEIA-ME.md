@@ -244,6 +244,20 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 - Credencial de aplicativo (client credentials, escopo `https://graph.microsoft.com/.default`): https://learn.microsoft.com/entra/identity-platform/v2-oauth2-client-creds-grant-flow
 - Limites do Graph (429 e `Retry-After`): https://learn.microsoft.com/graph/throttling
 
+## 6.3. DANFE oficial e PDF do fornecedor (v134)
+
+**DANFE gerado do XML.** O botão **DANFE** (Contas a pagar e a receber, Recebimento de notas, Arquivo fiscal e Caixa nfe@) monta, no navegador, o DANFE no leiaute oficial do Manual de Orientação do Contribuinte (MOC 7.0, Anexo II): canhoto, emitente, quadro DANFE (entrada/saída, número, série, folha x/y), código de barras CODE-128C da chave, chave em grupos de 4, protocolo, destinatário, fatura/duplicatas, cálculo do imposto, transportador/volumes, produtos (várias folhas, com o cabeçalho repetido), ISSQN e dados adicionais. Nota com tpImp=2 sai em paisagem. Quando o XML traz o grupo `IBSCBSTot` (reforma tributária), aparece o quadro **Total do IBS / CBS / IS** e uma linha de IBS/CBS por item, como na NT 2026.010. Marcas d'água: **SEM VALOR FISCAL** (homologação, tpAmb=2) e **CANCELADA** (situação no arquivo fiscal). Botões: **Imprimir** (quadro separado só com as folhas, A4 sem margem do navegador), **Baixar PDF** (precisa do html2canvas e do jsPDF; veja "Bibliotecas do navegador") e **Resumo** (o espelho simples de antes). O DANFE é montado do XML original guardado no servidor; nada é gravado.
+
+**PDF original do fornecedor.** Cada nota pode ter **um** PDF (o DANFE que o fornecedor mandou), guardado no `gestao.db` (tabela `arqf_pdf`, com origem, nome, tamanho e sha256). Ele chega por três caminhos: (1) **e-mail** (o "DANFE do e-mail" da caixa nfe@ passa a ser o PDF da nota, sozinho); (2) **anexo** pelo botão "Anexar PDF do fornecedor" no DANFE da nota; (3) **lote**: Recebimento de notas › Arquivo fiscal › **Importar DANFEs (ZIP de PDFs)**. Quando a nota tem o PDF, o botão DANFE abre o PDF, com o botão "Ver DANFE gerado do XML". O XML continua sendo o documento fiscal.
+
+**Importar DANFEs (ZIP de PDFs).** O ZIP traz PDFs cujo **nome tem a chave de 44 dígitos** (ex.: `35260443991892000142550010002339921627432956.pdf` ou `NFe3526…-danfe.pdf`). O servidor confere a chave (dígito verificador), se o arquivo é PDF de verdade (começa com `%PDF`) e o tamanho (até `ARQF_PDF_MAX_MB`, padrão 3 MB). Liga à nota que **já está no arquivo fiscal**; se a nota não está lá, ignora com o motivo "nota não encontrada no arquivo fiscal — importe o XML antes". Nota que já tem PDF fica como está ("já existente"): pode reenviar sem medo. O relatório mostra novos, já existentes e ignorados, com o motivo, e baixa em CSV. Tudo vai para a auditoria (`ARQF_PDF_*`).
+
+**Quem pode.** Igual ao arquivo fiscal: Fiscal, Financeiro, Administrador e Diretoria (e o dono) veem, anexam e importam; trocar e remover o PDF só eles. O Comprador vê e anexa só PDFs de notas de **entrada** (no lote, as saídas são ignoradas com motivo) e não troca nem remove. Os demais perfis não acessam.
+
+**Segurança.** O PDF vem de fora: o servidor entrega com `nosniff`, sem cache e com CSP `sandbox`; a tela mostra o PDF pelo leitor de PDF do navegador (cópia local, sem abrir como página do sistema) e oferece "Baixar PDF".
+
+**Variáveis (opcionais, serviço `gestao`)**: `ARQF_PDF_MAX_MB` (tamanho máximo de cada PDF, padrão 3, até 5) e `ARQF_PDF_ZIP_MB` (tamanho máximo do ZIP de PDFs, padrão 200).
+
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
 - Cada fornecedor convidado recebe um link próprio, `https://seu-dominio/cotacao/<código>`, que abre **sem login**. Ele vê só os itens do pedido, o prazo e o local de entrega, nunca os preços dos outros, e informa preço, marca, frete, prazo, pagamento e validade.
