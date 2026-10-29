@@ -23031,6 +23031,7 @@ function osfForm(r){osfEd=r;const novo=!get('osf',r.id),ck=(k,l)=>'<label class=
       '<div class="sect">Etapas que se aplicam</div><p class="sub" style="margin:0 0 6px">Aprovação, produção e entrega sempre valem. Galvanização e pintura seguem o acabamento.</p><div class="fg">'+ck('mat','Aguardando compra de material')+ck('insp','Inspeção de qualidade')+ck('emb','Separação e embalagem')+ck('env','Enviado (transporte)')+'</div>'+
       '<div class="sect">Lista de materiais</div>'+prods+'<div class="tw osf-ed" style="border:0"><table><thead><tr><th>Material</th><th>Un.</th><th>Qtd.</th><th></th></tr></thead><tbody id="osfMats">'+r.mats.map(osfMtRow).join('')+'</tbody></table></div>'+
       '<div class="acts" style="margin:6px 0"><button class="btn sm" data-act="osfEdAdd" data-k="mats">Adicionar material</button></div><p class="sub" style="margin:0 0 8px">Depois de salvar, use "Gerar solicitação de compra" na OS: o pedido segue o fluxo de Suprimentos (aprovação, cotação e pedido).</p>'+
+      osfxBloco(r.anexos||[],{ctx:'form',w:mayW('fab')})+/* v137: anexos já no formulário */
       '<div class="fg">'+field('Observações','obs','textarea',r.obs||'',{full:true,rows:2})+'</div>',
     saveLabel:novo?'Criar OS':'Salvar',save:root=>osfFormSalvar(root)});
   osfEdTot();}
@@ -23087,11 +23088,8 @@ function osfDetHtml(r){const w=mayW('fab')&&!r.cancelada,c=osfCfg(),cu=osfCusto(
   /* custo */
   h+='<div class="sect">Custo da OS</div><div class="osf-grid"><div><span>Material (pedidos de compra ligados)</span>'+(cu.leNf?money(cu.mat)+' <span class="sub">('+cu.peds+' pedido(s))</span>':'<span class="sub">sem acesso aos pedidos</span>')+'</div><div><span>Galvanização (valor informado)</span>'+money(cu.galv)+'</div><div><span>Horas de produção</span>'+(w?'<span style="display:flex;gap:6px"><input type="number" step="any" data-f="horas" value="'+esc(r.horas==null?'':r.horas)+'" aria-label="Horas" style="max-width:90px" placeholder="horas"><input type="number" step="any" data-f="valorHora" value="'+esc(r.valorHora==null?(c.valorHora||''):r.valorHora)+'" aria-label="Valor da hora (R$)" style="max-width:110px" placeholder="R$/hora"></span>':(+r.horas||0)+' h × '+money(+r.valorHora||0))+'</div><div><span>Total</span><b>'+money(cu.tot)+'</b></div></div>'+
     '<p class="sub" style="margin:0">O material e a galvanização já entram no custo da obra pelos pedidos e contas a pagar ligados ao projeto; este total é só da OS (não é somado de novo ao projeto).</p>';
-  /* anexos */
-  const ax=r.anexos||[];
-  h+='<div class="sect">Anexos (croqui, desenhos)</div>'+(ax.length?'<div class="tw" style="border:0"><table class="osf-tab"><tbody>'+ax.map((a,i)=>'<tr><td data-l="Arquivo">'+esc(a.nome)+'<div class="sub">'+fmtBytes(a.tam)+' · '+esc(nameOf(a.por))+' · '+fmtDT(a.em)+'</div></td><td class="act"><a class="btn sm" href="'+esc(anxUrl(a))+'" target="_blank" rel="noopener">Abrir</a>'+(w?'<button class="btn sm dng" data-act="osfAnxDel" data-id="'+esc(r.id)+'" data-i="'+i+'">Remover</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Nenhum anexo.</p>')+
-    (w?'<div class="acts" style="margin:6px 0"><button class="btn" data-act="osfAnxEscolher" data-id="'+esc(r.id)+'">Anexar PDF ou imagem</button></div><input type="file" id="osfFile" accept="application/pdf,image/png,image/jpeg" hidden>':'')+
-    '<p class="sub" style="margin:0">Os anexos em PDF entram no PDF da OS, depois da página da OS, na ordem acima.</p>';
+  /* anexos (v137: mesma lista e botões do formulário, em new_osfanx.js) */
+  h+=osfxBloco(r.anexos||[],{ctx:'det',id:r.id,w});
   if((r.emails||[]).length)h+='<div class="sect">Enviada por e-mail</div><ul style="margin:0;padding-left:18px">'+r.emails.slice(-10).reverse().map(m=>'<li>'+fmtDT(m.em)+' por '+esc(nameOf(m.por))+' para '+esc(m.para)+(m.cc&&m.cc.length?' (cópia: '+esc([].concat(m.cc).join(', '))+')':'')+'</li>').join('')+'</ul>';
   h+='<div class="sect">Observações</div>'+(w?field('Observações','obs','textarea',r.obs||'',{full:true,rows:2}):'<p style="margin:0">'+esc(r.obs||'—')+'</p>');
   if((r.avanc||[]).length)h+='<div class="sect">Histórico</div><ul style="margin:0;padding-left:18px">'+r.avanc.slice(-12).reverse().map(a=>'<li>'+fmtDT(a.em)+' · '+(a.volta?'voltou para':a.de?'avançou para':'criada em')+' "'+esc(osfEtCurto(a.para))+'"'+(a.auto?' (automático: material atendido)':'')+' · '+esc(a.por==='servidor'?'servidor':nameOf(a.por))+(a.motivo?' · motivo: '+esc(a.motivo):'')+'</li>').join('')+'</ul>';
@@ -23139,9 +23137,7 @@ A.osfSc=d=>{const r=get('osf',d.id);if(!r)return;const pend=osfMatPend(r);if(!pe
 /* anexos: mesmo armazenamento de arquivos dos outros registros (o servidor libera o arquivo para quem lê a OS) */
 let osfAnxId='';
 A.osfAnxEscolher=d=>{if(!mayW('fab')){toast('Seu perfil não anexa arquivos à OS.','neg');return;}osfAnxId=d.id;const f=$('#osfFile');if(f&&f.click)f.click();};
-async function osfAnxUpload(f){const as=await getAssets();if(!as){toast('Anexar arquivos só funciona na página publicada ou no sistema instalado, para quem pode gravar.','neg');return;}
-  const ct=f.type||(/\.pdf$/i.test(f.name)?'application/pdf':'');if(!/^(application\/pdf|image\/(png|jpeg))$/.test(ct)){toast('Use PDF, PNG ou JPG.','neg');return;}
-  try{const up=await as.upload(f,{type:ct});const r=get('osf',osfAnxId);if(!r)return;put('osf',Object.assign(cl(r),{anexos:(r.anexos||[]).concat([{id:up.id,nome:String(f.name).slice(0,120),tam:up.sizeBytes||f.size,ct:up.contentType||ct,por:actorId(),em:Date.now()}])}));toast('Arquivo anexado.','pos');osfAbrir(r.id);}catch(e){toast(typeof anxErr==='function'?anxErr(e):'Não foi possível anexar.','neg');}}
+async function osfAnxUpload(f){return osfxEnviar([f],'det',osfAnxId,'outro');} /* v137: mesmo envio do formulário (new_osfanx.js) */
 if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('change',e=>{const t=e.target;if(!t||t.id!=='osfFile')return;const f=t.files&&t.files[0];t.value='';if(f&&osfAnxId)osfAnxUpload(f);});
 A.osfAnxDel=d=>{const r=get('osf',d.id);if(!r)return;const a=(r.anexos||[])[+d.i];if(!a)return;confirmBox('Remover o anexo "'+esc(a.nome)+'" da OS?',async()=>{put('osf',Object.assign(cl(get('osf',r.id)),{anexos:(r.anexos||[]).filter((x,i)=>i!==+d.i)}));try{const as=await getAssets();if(as)await as.delete(a.id);}catch(e){}toast('Anexo removido.');osfAbrir(r.id);},'Remover',true);};
 Object.assign(ACT_GROUP,{osfNovo:'fab',osfEditar:'fab',osfEdAdd:null,osfEdDel:null,osfAbrir:null,osfAvancarBt:'fab',osfVoltarBt:'fab',osfEntregar:'fab',osfCancelar:'fab',osfAprovar:null,osfSc:'fab',osfAnxEscolher:'fab',osfAnxDel:'fab',osfCfg:'cfg',osfCfgSalvar:'cfg'});
@@ -23307,11 +23303,11 @@ async function osfPdfMontar(r,o){o=o||{};await loadScript(PDFLIB_URL,()=>!!windo
   if((r.mats||[]).length)para('Materiais:',r.mats.map(x=>x.desc+': '+fmtQ(x.qtd)+' '+(x.un||'')).join('; '),{size:9.5});
   if(r.entrega)para('Entrega:','recebido por '+(r.entrega.quem||'')+' em '+fmtDate(r.entrega.data)+(r.entrega.assin?' (assinado na tela)':''),{size:9.5});
   if(r.obs)para('Observações:',r.obs,{size:9.5});
-  const ax=(r.anexos||[]);if(ax.length)para('Anexos:',ax.map((a,i)=>(i+1)+'. '+a.nome).join('   '),{size:9});
+  const ax=(r.anexos||[]);if(ax.length)para('Anexos:',osfxPdfLista(ax),{size:9});/* v137: tipo e "(só anexado)" */
   rodape(pg);
   /* anexos na sequência */
   let anxPag=0;const falhas=[];
-  for(const a of ax){try{const bf=o.buscar?await o.buscar(a):await (await fetch(anxUrl(a),{credentials:'same-origin'})).arrayBuffer();const u8=new Uint8Array(bf);
+  for(const a of ax){if(!osfxEntraPdf(a))continue;/* v137: Word, Excel, DWG etc. ficam só na lista */try{const bf=o.buscar?await o.buscar(a):await (await fetch(anxUrl(a),{credentials:'same-origin'})).arrayBuffer();const u8=new Uint8Array(bf);
       const ehPdf=u8[0]===0x25&&u8[1]===0x50&&u8[2]===0x44&&u8[3]===0x46;
       if(ehPdf){const src=await L.PDFDocument.load(u8,{ignoreEncryption:true});const ps=await doc.copyPages(src,src.getPageIndices());ps.forEach(p=>doc.addPage(p));anxPag+=ps.length;}
       else if(/^image\/(png|jpeg)$/.test(a.ct||'')||/\.(png|jpe?g)$/i.test(a.nome||'')){const im=(u8[0]===0x89&&u8[1]===0x50)?await doc.embedPng(u8):await doc.embedJpg(u8);const p=doc.addPage([W,H]),s=Math.min((W-2*M)/im.width,(H-2*M)/im.height,1);p.drawImage(im,{x:(W-im.width*s)/2,y:(H-im.height*s)/2,width:im.width*s,height:im.height*s});anxPag++;}
@@ -26832,9 +26828,126 @@ function scrHistHtml(s){
 Object.assign(ACT_GROUP,{scReabrir:'comp',scCompl:'comp'});
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{scReabrir:'Volta a solicitação para rascunho para alterar itens e reenviar. O comprador é avisado.',scCompl:'Abre uma nova solicitação ligada a esta, com o mesmo projeto, etapa e local de entrega.'});
 
+/* ===== v137: anexos já na Nova OS de fabricação (e na edição) =====
+   - Formulário de nova/edição da OS (osfForm): seção "Anexos (desenhos, especificações, fotos)" com o tipo do documento
+     (Desenho, Especificação, Foto, Outro), botão "Anexar documento" e, no celular, "Tirar foto" (câmera traseira).
+   - Os arquivos sobem na hora para o mesmo armazenamento dos anexos (getAssets/as.upload) e ficam no rascunho (osfEd.anexos).
+     Ao salvar, vão para a OS. Ao cancelar/fechar sem salvar, os enviados nessa abertura do formulário são apagados do
+     armazenamento (no sistema instalado vão para a lixeira de anexos do servidor). Anexo já salvo removido no formulário só sai
+     do armazenamento quando a OS é salva.
+   - Tipos aceitos: PDF, JPG, PNG, WEBP, HEIC/HEIF, DOC, DOCX, XLS, XLSX, DWG, DXF; até 20 MB por arquivo. WEBP e HEIC são
+     convertidos para JPG no envio quando o navegador consegue; se não conseguir, ficam como vieram e não entram no PDF da OS.
+   - PDF da OS: PDF e imagens (PNG/JPG) entram depois da página da OS; os demais aparecem só na lista "Anexos:" com
+     "(só anexado)" e não contam como falha.
+   - A mesma lista e os mesmos botões ficam na tela de detalhes da OS. Permissão: mayW('fab'). */
+const OSFX_TIPOS=[['desenho','Desenho'],['espec','Especificação'],['foto','Foto'],['outro','Outro']];
+const OSFX_MAX=20*1024*1024;
+const OSFX_EXT={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif',
+  doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',dwg:'application/acad',dxf:'application/dxf'};
+const OSFX_ACCEPT='.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,.xls,.xlsx,.dwg,.dxf,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif';
+const osfxTipoNome=t=>(OSFX_TIPOS.find(x=>x[0]===t)||['',''])[1];
+const osfxExt=n=>{const m=/\.([A-Za-z0-9]{1,5})$/.exec(String(n||''));return m?m[1].toLowerCase():'';};
+/* tipo do arquivo pela extensão (os navegadores mandam tipos variados para DWG/HEIC); '' = não aceito */
+function osfxCt(f){const e=osfxExt(f&&f.name);if(OSFX_EXT[e])return OSFX_EXT[e];const t=String(f&&f.type||'').toLowerCase();
+  if(/^image\/(jpeg|png|webp|heic|heif)$/.test(t))return t;if(t==='application/pdf')return t;return '';}
+/* entra no PDF da OS: PDF, PNG e JPG */
+function osfxEntraPdf(a){const ct=String(a&&a.ct||'').toLowerCase();if(ct)return /^(application\/pdf|image\/(png|jpe?g))$/.test(ct);return /\.(pdf|png|jpe?g)$/i.test(a&&a.nome||'');}
+const osfxInline=a=>/^(application\/pdf|image\/(png|jpe?g|gif|webp))$/i.test(String(a&&a.ct||''));
+const osfxUrl=a=>osfxInline(a)?anxUrl(a):'/_blob/'+a.id+'?baixar=1&nome='+encodeURIComponent(String(a.nome||'arquivo').slice(0,120));
+/* texto da lista "Anexos:" do PDF da OS */
+function osfxPdfLista(ax){return (ax||[]).map((a,i)=>{const t=osfxTipoNome(a.tipo),so=!osfxEntraPdf(a);return (i+1)+'. '+a.nome+(t||so?' ('+[t,so?'só anexado':''].filter(Boolean).join(', ')+')':'');}).join('   ');}
+/* conversão WEBP/HEIC → JPG pelo navegador (troca-se em teste) */
+const OSFX={conv:async function(f){
+  try{if(typeof createImageBitmap!=='function'||typeof document==='undefined'||!document.createElement)return null;
+    const bm=await createImageBitmap(f);const cv=document.createElement('canvas');if(!cv||!cv.getContext||!cv.toBlob)return null;
+    cv.width=bm.width;cv.height=bm.height;const g=cv.getContext('2d');if(!g)return null;g.fillStyle='#fff';g.fillRect(0,0,cv.width,cv.height);g.drawImage(bm,0,0);
+    const b=await new Promise(res=>cv.toBlob(res,'image/jpeg',0.9));return b&&b.size?b:null;}catch(e){return null;}}};
+/* prepara um arquivo: valida tipo e tamanho, converte WEBP/HEIC quando der. Devolve {blob,nome,ct,tam} ou {erro} */
+async function osfxPrep(f){const nome=String(f&&f.name||'arquivo').slice(0,120);let ct=osfxCt(f);
+  if(!ct)return {erro:nome+': tipo não aceito. Use PDF, imagem (JPG, PNG, WEBP, HEIC), Word, Excel, DWG ou DXF.'};
+  if(!(f.size>0))return {erro:nome+': arquivo vazio.'};
+  if(f.size>OSFX_MAX)return {erro:nome+': passa de 20 MB.'};
+  if(/^image\/(webp|heic|heif)$/.test(ct)){const j=await OSFX.conv(f);if(j&&j.size<=OSFX_MAX)return {blob:j,nome:nome.replace(/\.[A-Za-z0-9]{1,5}$/,'')+'.jpg',ct:'image/jpeg',tam:j.size,conv:true};}
+  return {blob:f,nome,ct,tam:f.size};}
+async function osfxApagar(id){try{const as=await getAssets();if(as&&id)await as.delete(id);}catch(e){}}
+
+/* ---------- sessão do formulário (rascunho) ---------- */
+let osfxSess=null,osfxAbrindo=false,osfxSalvando=false,osfxAlvo={ctx:'',id:''};
+const osfxEd=()=>osfEd,osfxSessao=()=>osfxSess;
+function osfxDescartar(){const ss=osfxSess;if(!ss)return;osfxSess=null;ss.fechado=true;ss.novos.forEach(osfxApagar);ss.novos=[];}
+{const f0=osfForm;osfForm=function(r){if(osfxSess)osfxDescartar();r.anexos=(r.anexos||[]).slice();
+  osfxSess={recId:r.id,novos:[],removidos:[],pend:0,fechado:false};osfxAbrindo=true;try{return f0.apply(this,arguments);}finally{osfxAbrindo=false;}};}
+{const s0=osfFormSalvar;osfFormSalvar=function(root){const ss=osfxSess;
+  if(ss&&ss.pend>0){toast('Aguarde terminar o envio dos anexos.','neg');return false;}
+  osfxSalvando=true;let r;try{r=s0.apply(this,arguments);}finally{osfxSalvando=false;}
+  if(r!==false&&osfEd===null&&ss&&osfxSess===ss){osfxSess=null;ss.fechado=true;ss.removidos.forEach(osfxApagar);}
+  return r;};}
+{const c0=closeModal;closeModal=function(){if(osfxSess&&!osfxSalvando)osfxDescartar();return c0.apply(this,arguments);};}
+{const m0=modal;modal=function(o){if(osfxSess&&!osfxAbrindo&&!osfxSalvando)osfxDescartar();return m0.apply(this,arguments);};}
+
+/* ---------- HTML da lista e dos botões (formulário e detalhe) ---------- */
+function osfxLinhas(ax,o){const w=o.w,form=o.ctx==='form';
+  if(!ax.length)return '<p class="sub" style="margin:0">Nenhum anexo.</p>';
+  return '<div class="tw" style="border:0"><table class="osf-tab"><tbody>'+ax.map((a,i)=>{const t=osfxTipoNome(a.tipo);
+    return '<tr><td data-l="Arquivo">'+esc(a.nome)+'<div class="sub">'+[t&&!form?t:'',fmtBytes(a.tam),a.por?nameOf(a.por):'',a.em?fmtDT(a.em):'',osfxEntraPdf(a)?'entra no PDF da OS':'só anexado'].filter(Boolean).map(esc).join(' · ')+'</div></td>'+
+      (form&&w?'<td data-l="Tipo"><select data-osfxt="'+i+'" aria-label="Tipo do documento">'+opt(OSFX_TIPOS,a.tipo||'outro')+'</select></td>':'')+
+      '<td class="act"><a class="btn sm" href="'+esc(osfxUrl(a))+'" target="_blank" rel="noopener">Abrir</a>'+
+      (w?(form?'<button class="btn sm dng" data-act="osfxDel" data-i="'+i+'">Remover</button>':'<button class="btn sm dng" data-act="osfAnxDel" data-id="'+esc(o.id)+'" data-i="'+i+'">Remover</button>'):'')+'</td></tr>';}).join('')+'</tbody></table></div>';}
+const osfxSig=ax=>(ax||[]).map(a=>a.id+':'+(a.tipo||'')).join(',');
+function osfxBloco(ax,o){osfEstilo();const ctx=o.ctx,w=o.w,ss=ctx==='form'?osfxSess:null;
+  let h='<div class="sect">Anexos (desenhos, especificações, fotos)</div><div id="osfxLista">'+osfxLinhas(ax,o)+'</div>'+
+    '<p class="sub" id="osfxPend" style="margin:4px 0 0">'+(ss&&ss.pend>0?'Enviando '+ss.pend+' arquivo(s)…':'')+'</p>';
+  if(ctx==='form')h+='<input type="hidden" id="osfAnxSig" value="'+esc(osfxSig(ax))+'">';
+  if(w)h+='<div class="fg osfx-ctl" style="margin-top:6px"><label class="f"><span>Tipo do documento</span><select id="osfxTipo">'+opt(OSFX_TIPOS,'desenho')+'</select></label></div>'+
+    '<div class="acts" style="margin:6px 0"><button class="btn" data-act="osfxEscolher" data-ctx="'+ctx+'" data-id="'+esc(o.id||'')+'">Anexar documento</button>'+
+    '<button class="btn osfx-cam" data-act="osfxFoto" data-ctx="'+ctx+'" data-id="'+esc(o.id||'')+'">Tirar foto</button></div>'+
+    '<input type="file" id="osfxFile" class="osfx-in" accept="'+OSFX_ACCEPT+'" multiple hidden><input type="file" id="osfxCam" class="osfx-in" accept="image/*" capture="environment" hidden>';
+  h+='<p class="sub" style="margin:0 0 8px">PDF, imagens (JPG, PNG, WEBP, HEIC), Word, Excel, DWG e DXF, até 20 MB por arquivo. PDF e imagens entram no PDF da OS, depois da página da OS, na ordem acima; os demais ficam só anexados.'+(ctx==='form'?' Os arquivos sobem na hora e ficam na OS ao salvar; se fechar sem salvar, eles são apagados.':'')+'</p>';
+  return h;}
+function osfxRender(){if(!osfEd)return;const el=$('#osfxLista');if(el)el.innerHTML=osfxLinhas(osfEd.anexos||[],{ctx:'form',w:mayW('fab')});
+  const p=$('#osfxPend');if(p)p.textContent=osfxSess&&osfxSess.pend>0?'Enviando '+osfxSess.pend+' arquivo(s)…':'';
+  const s=$('#osfAnxSig');if(s)s.value=osfxSig(osfEd.anexos);}
+let osfxCss=false;
+{const e0=osfEstilo;osfEstilo=function(){e0.apply(this,arguments);if(osfxCss||typeof document==='undefined'||!document.createElement)return;osfxCss=true;
+  try{const st=document.createElement('style');st.textContent='@media (min-width:761px) and (hover:hover) and (pointer:fine){.osfx-cam{display:none}}';document.head.appendChild(st);}catch(e){}};}
+
+/* ---------- ações ---------- */
+function osfxPode(){if(!mayW('fab')){toast('Seu perfil não anexa arquivos à OS.','neg');return false;}return true;}
+A.osfxEscolher=d=>{if(!osfxPode())return;osfxAlvo={ctx:d.ctx||'form',id:d.id||'',foto:false};const f=$('#osfxFile');if(f&&f.click)f.click();};
+A.osfxFoto=d=>{if(!osfxPode())return;osfxAlvo={ctx:d.ctx||'form',id:d.id||'',foto:true};const f=$('#osfxCam');if(f&&f.click)f.click();};
+A.osfxDel=d=>{if(!osfEd||!osfxPode())return;const l=osfEd.anexos||[],a=l[+d.i];if(!a)return;l.splice(+d.i,1);const ss=osfxSess;
+  if(ss){const k=ss.novos.indexOf(a.id);if(k>=0){ss.novos.splice(k,1);osfxApagar(a.id);}else ss.removidos.push(a.id);}
+  osfxRender();toast('Anexo retirado da OS'+(ss&&ss.removidos.includes(a.id)?' (sai de vez ao salvar).':'.'));};
+/* envia arquivos: no formulário entram no rascunho; no detalhe, direto na OS salva */
+async function osfxEnviar(fs,ctx,id,tipo){fs=[].slice.call(fs||[]);if(!fs.length)return 0;if(!osfxPode())return 0;
+  const as=await getAssets();if(!as){toast('Anexar arquivos só funciona na página publicada ou no sistema instalado, para quem pode gravar.','neg');return 0;}
+  tipo=OSFX_TIPOS.some(x=>x[0]===tipo)?tipo:'outro';const ss=ctx==='form'?osfxSess:null;if(ctx==='form'&&!ss)return 0;
+  let n=0;const erros=[];
+  for(const f of fs){const p=await osfxPrep(f);if(p.erro){erros.push(p.erro);continue;}
+    if(ss){ss.pend++;osfxRender();}
+    let up=null;try{up=await as.upload(p.blob,{type:p.ct});}catch(e){erros.push(p.nome+': '+(typeof anxErr==='function'?anxErr(e):'não foi possível enviar.'));}
+    if(ss){ss.pend--;}
+    if(!up){if(ss)osfxRender();continue;}
+    const a={id:up.id,nome:p.nome,tipo,tam:up.sizeBytes||p.tam,ct:up.contentType||p.ct,por:actorId(),em:Date.now()};
+    if(ss){if(ss.fechado||osfxSess!==ss||!osfEd){osfxApagar(up.id);continue;}/* fechou sem salvar enquanto subia */
+      ss.novos.push(up.id);osfEd.anexos=(osfEd.anexos||[]).concat([a]);osfxRender();n++;}
+    else{const r=get('osf',id);if(!r){osfxApagar(up.id);continue;}put('osf',Object.assign(cl(r),{anexos:(r.anexos||[]).concat([a])}));n++;}}
+  if(n)toast(n===1?'Arquivo anexado.':n+' arquivos anexados.','pos');
+  if(erros.length)toast(erros.join(' '),'neg');
+  if(!ss&&n&&typeof osfAbrir==='function'&&id)osfAbrir(id);
+  return n;}
+if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('change',e=>{const t=e.target;if(!t)return;
+    if(t.classList&&t.classList.contains&&t.classList.contains('osfx-in')){const fs=[].slice.call(t.files||[]);t.value='';const al=osfxAlvo;
+      const tp=al.foto?'foto':(($('#osfxTipo')||{}).value||'outro');if(fs.length)osfxEnviar(fs,al.ctx,al.id,tp);return;}
+    if(t.dataset&&t.dataset.osfxt!=null&&osfEd){const a=(osfEd.anexos||[])[+t.dataset.osfxt];if(a){a.tipo=t.value;const s=$('#osfAnxSig');if(s)s.value=osfxSig(osfEd.anexos);}}});}
+Object.assign(ACT_GROUP,{osfxEscolher:'fab',osfxFoto:'fab',osfxDel:'fab'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='136.2',APP_DATA='2026-10-29';
+const APP_VER='137',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['137','2026-10-29',['OS de fabricação: anexar desenhos, especificações e fotos já na tela de Nova OS e na edição (botão Anexar documento e Tirar foto no celular). Aceita PDF, imagens, Word, Excel, DWG e DXF; PDF e imagens entram no PDF da OS, os demais ficam só anexados.']],
   ['136.2','2026-10-29',['Menu: "Notas de saída" passa a se chamar "Notas Fiscais" (Fiscal e Vendas).']],
   ['136.1','2026-10-29',['DANFE gerado: o quadro do código de barras e da chave de acesso saía cortado à direita (tela, Baixar PDF e impressão) por causa de uma largura mínima de tabelas do sistema.']],
   ['136','2026-10-29',['Solicitação de compra: botão Reabrir para editar quando está aguardando cotação ou em cotação (a cotação é mantida: item novo entra em branco, item removido sai, quantidade alterada fica marcada para conferir). Com pedidos gerados ou atendida, botão Criar SC complementar. Reabrem: quem pediu, o comprador e o administrador; fica no histórico e o comprador é avisado.']],
