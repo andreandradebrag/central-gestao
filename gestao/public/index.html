@@ -578,7 +578,7 @@ const MENU=[
  ['painel','Painel',[['painel','Painel'],['dir','Painel da diretoria']]],
  ['cad','Cadastros',[['cli','Clientes'],['forn','Fornecedores'],['transp','Transportadoras']]],
  ['fin','Financeiro',[['rec','Contas a receber'],['pag','Contas a pagar'],['fin','Lançamentos'],['recor','Recorrências'],['conc','Conciliação bancária'],['fluxo','Fluxo de caixa'],['dre','DRE'],['fc90','Fluxo de 90 dias'],['aprov','Aprovações'],['contas','Contas bancárias'],['plano','Plano de contas']]],
- ['ven','Vendas',[['psv','Pedidos de venda'],['nfse','NFS-e (serviços)'],['nf','Notas de saída','saida']]],
+ ['ven','Vendas',[['psv','Pedidos de venda'],['nfse','NFS-e (serviços)'],['nf','Notas Fiscais','saida']]],
  ['ctr2','Comercial e contratos',[['opp','Oportunidades e licitações'],['ctr','Contratos'],['med','Medições'],['hab','Habilitação']]],
  ['com','Compras',[['sc','Solicitações de compra'],['cot','Mapa de cotação'],['ped','Pedidos de compra'],['nfrec','NFs recebidas'],['nf','Notas de entrada','entrada']]],
  ['est','Estoque',[['est','Estoque'],['sep','Separação de itens'],['rom','Romaneios de envio'],['almox','Almoxarifados']]],
@@ -13487,7 +13487,7 @@ const AREAS=[
    ['rom','Romaneios de envio',null,'Estoque'],['almox','Almoxarifados',null,'Estoque'],['avforn','Avaliação de fornecedores',null,'Fornecedores']]],
  ['finan','Financeiro',[['fc90','Fluxo de 90 dias'],['pag','Contas a pagar'],['rec','Contas a receber'],['conc','Conciliação bancária'],['fin','Lançamentos'],['fluxo','Fluxo de caixa'],['dre','DRE'],
    ['cobr','Cobrança e renegociação',null,'Contas a receber'],['recor','Recorrências',null,'Lançamentos'],['ifin','Índices financeiros',null,'Relatórios'],['contas','Contas bancárias',null,'Configuração'],['plano','Plano de contas',null,'Configuração']]],
- ['fisc','Fiscal',[['nfse','NFS-e (serviços)'],['nf','Notas de saída','saida'],['trib','Tributos e obrigações'],['ibs','Reforma tributária'],['ctb','Fechamento e exportação'],['assess','Assessorias']]],
+ ['fisc','Fiscal',[['nfse','NFS-e (serviços)'],['nf','Notas Fiscais','saida'],['trib','Tributos e obrigações'],['ibs','Reforma tributária'],['ctb','Fechamento e exportação'],['assess','Assessorias']]],
  ['pess','Pessoal',[['dpp','Painel do DP'],['func','Colaboradores'],['ferias','Férias'],['fpag','Folha e holerites'],['pajuste','Ajustes de ponto'],['pespelho','Espelho de ponto'],['bh','Banco de horas'],
    ['rs','Recrutamento e seleção',null,'Admissão e saída'],['adm','Admissões',null,'Admissão e saída'],['desl','Desligamentos',null,'Admissão e saída'],
    ['dpmov','Movimentações',null,'Vida funcional'],['afast','Afastamentos',null,'Vida funcional'],['dpsol','Solicitações',null,'Vida funcional'],['rhdoc','Documentos e ASO',null,'Vida funcional'],['ponto','Registrar ponto',null,'Vida funcional'],
@@ -26833,8 +26833,9 @@ Object.assign(ACT_GROUP,{scReabrir:'comp',scCompl:'comp'});
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{scReabrir:'Volta a solicitação para rascunho para alterar itens e reenviar. O comprador é avisado.',scCompl:'Abre uma nova solicitação ligada a esta, com o mesmo projeto, etapa e local de entrega.'});
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='136.1',APP_DATA='2026-10-29';
+const APP_VER='136.2',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['136.2','2026-10-29',['Menu: "Notas de saída" passa a se chamar "Notas Fiscais" (Fiscal e Vendas).']],
   ['136.1','2026-10-29',['DANFE gerado: o quadro do código de barras e da chave de acesso saía cortado à direita (tela, Baixar PDF e impressão) por causa de uma largura mínima de tabelas do sistema.']],
   ['136','2026-10-29',['Solicitação de compra: botão Reabrir para editar quando está aguardando cotação ou em cotação (a cotação é mantida: item novo entra em branco, item removido sai, quantidade alterada fica marcada para conferir). Com pedidos gerados ou atendida, botão Criar SC complementar. Reabrem: quem pediu, o comprador e o administrador; fica no histórico e o comprador é avisado.']],
   ['135','2026-10-29',['Importar NFS-e emitidas (ZIP do Omie): lê o padrão da prefeitura (ABRASF) e o Padrão Nacional, guarda XML e PDF no arquivo fiscal, marca as canceladas e não duplica ao reimportar.', 'Ligação das NFS-e com Contas a receber: liga sozinha quando há um único título com o mesmo tomador, valor (bruto ou líquido) e data próxima; os demais casos vão para a lista Conferir (ligar, criar título ou ignorar). Título ligado a nota cancelada fica marcado.']],
