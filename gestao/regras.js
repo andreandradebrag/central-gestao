@@ -1146,6 +1146,58 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }, 10 * 60e3).unref();
 
   /* =====================================================================
+     v139. DOCUMENTOS DE HABILITAÇÃO: AVISO POR E-MAIL NO DIA DE SOLICITAR A RENOVAÇÃO
+     Mesma configuração dos alertas (ALERTAS_EMAIL=0 desliga; ALERTAS_RESUMO_HORA, padrão 8, horário de Brasília).
+     Prazo de cada documento: campo renovDias; vazio = padrão do tipo (mesma tabela do app, new_habren.js).
+     Cada documento entra no e-mail UMA vez por ciclo: quando chega a data (validade - prazo) sem a renovação solicitada,
+     e de novo se vencer sem validade nova (tabela hab_aviso guarda o que já foi avisado para aquela validade).
+     Destinatários: donos, ALERTAS_EMAIL_PARA e contas com perfil Comercial (ou perfil personalizado que grava Comercial).
+     ===================================================================== */
+  const HAB_PAD = { 'Certidão de falência e recuperação judicial': 30, 'Certidão de distribuição cível': 30, 'Alvará de funcionamento': 30, 'Alvará CETESB': 30, 'Balanço patrimonial': 30, 'LO – Licença de Operação (CETESB)': 120 };
+  const habPad = t => HAB_PAD[t] != null ? HAB_PAD[t] : /fal[eê]ncia|recupera[cç][aã]o judicial|distribui[cç][aã]o c[ií]vel/i.test(String(t || '')) ? 30 : 15;
+  const habDias = r => r.renovDias !== '' && r.renovDias != null && isFinite(+r.renovDias) ? Math.max(0, Math.min(365, Math.round(+r.renovDias))) : habPad(r.tipo);
+  const isoMais = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const dataBR = iso => String(iso || '').slice(0, 10).split('-').reverse().join('/');
+  db.exec('CREATE TABLE IF NOT EXISTS hab_aviso(id TEXT, tipo TEXT, val TEXT, ts INTEGER, PRIMARY KEY(id, tipo))');
+  function destHabilitacao() {
+    const em = new Set(ALERTAS_PARA);
+    for (const c of q.contas.all()) if (c.ativo && c.email && c.nivel === 'owner') em.add(c.email);
+    for (const u of col('usr')) { if (!u.uid || u.ativo === false) continue; const pr = PERM.perfis[u.perfil];
+      if (u.perfil === 'comercial' || (pr && pr.custom && Array.isArray(pr.w) && pr.w.includes('ctr'))) { const c = q.contaPorId.get(u.uid); if (c && c.ativo && c.email) em.add(c.email); } }
+    return [...em];
+  }
+  function habSituacoes(hoje) {
+    const ren = [], venc = [];
+    for (const r of col('hab')) {
+      const val = /^\d{4}-\d{2}-\d{2}/.test(String(r.validade || '')) ? String(r.validade).slice(0, 10) : ''; if (!val) continue;
+      if (hoje > val) venc.push({ r, val }); else if (hoje >= isoMais(val, -habDias(r)) && !r.renovSol) ren.push({ r, val });
+    }
+    return { ren, venc };
+  }
+  function avisarHabilitacao(hoje) {
+    hoje = hoje || hojeSP();
+    const { ren, venc } = habSituacoes(hoje), ja = db.prepare('SELECT val FROM hab_aviso WHERE id=? AND tipo=?'), marca = db.prepare('INSERT OR REPLACE INTO hab_aviso(id,tipo,val,ts) VALUES(?,?,?,?)');
+    const novosR = ren.filter(x => { const a = ja.get(x.r.id, 'ren'); return !a || a.val !== x.val; }), novosV = venc.filter(x => { const a = ja.get(x.r.id, 'venc'); return !a || a.val !== x.val; });
+    if (!novosR.length && !novosV.length) return { renovar: 0, vencidos: 0, enviado: false };
+    const nome = r => String(r.tipo || 'Documento') + (r.numero ? ' nº ' + r.numero : '');
+    const linhas = [].concat(novosR.length ? ['Chegou a data de solicitar a renovação (' + novosR.length + '):'] : [], novosR.map(x => '• ' + nome(x.r) + ': vence em ' + dataBR(x.val) + ' (pedir com ' + habDias(x.r) + ' dias de antecedência)'),
+      novosV.length ? ['Vencidos sem validade nova (' + novosV.length + '):'] : [], novosV.map(x => '• ' + nome(x.r) + ': venceu em ' + dataBR(x.val) + (x.r.renovSol ? ' (renovação solicitada, documento novo ainda não cadastrado)' : '')),
+      ['Abra Comercial › Habilitação. Depois de pedir, clique em "Renovação solicitada" no documento para parar o aviso.']);
+    const para = destHabilitacao(), conf = EMAIL.configurado(), enviado = conf && para.length > 0;
+    auditar(null, null, 'ALERTA_EMAIL_HABILITACAO', 'hab', null, { para, renovar: novosR.length, vencidos: novosV.length, enviado, motivo: !conf ? 'SMTP não configurado' : !para.length ? 'sem destinatário' : undefined, linhas });
+    const ts = Date.now(); novosR.forEach(x => marca.run(x.r.id, 'ren', x.val, ts)); novosV.forEach(x => marca.run(x.r.id, 'venc', x.val, ts));
+    if (enviado) { const m = EMAIL.modelo('Documentos de habilitação', linhas, 'Abrir a habilitação', APP_URL + '#hab', 'Aviso diário da Central de Gestão.');
+      for (const p of para) EMAIL.enviar({ para: p, assunto: 'Habilitação: renovar documentos · Central de Gestão', texto: m.texto, html: m.html }).catch(e => auditar(null, null, 'ALERTA_EMAIL_FALHA', 'hab', null, { para: p, erro: e.message })); }
+    return { renovar: novosR.length, vencidos: novosV.length, para: para.length, enviado };
+  }
+  setInterval(() => {
+    try { const h = hojeSP(), hr = new Date(Date.now() - 3 * 3600e3).getUTCHours();
+      if (ALERTAS && hr >= HORA_RESUMO && cfgK('hab_aviso_dia') !== h) { cfgSet('hab_aviso_dia', h); avisarHabilitacao(h); }
+    } catch (e) { console.error('[habilitacao]', e.message); }
+  }, 10 * 60e3).unref();
+  /* ===== fim v139 ===== */
+
+  /* =====================================================================
      v111. PESQUISA DE SATISFAÇÃO RESPONDIDA PELO CLIENTE (achado Q2): link de uso único, que expira
      (PESQUISA_LINK_DIAS, padrão 30). O servidor guarda só o hash do token (pesqlink/<sha256>) e grava a resposta
      na própria pesquisa (pesq/<id>), a mesma coleção do NPS em Qualidade › Satisfação do cliente.
@@ -1700,7 +1752,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (m === 'POST' && p === '/api/pesquisa/link') { await R(b => rotaPesqLink(conta, req, b)); return true; }
     if (m === 'POST' && p === '/api/admin/avisos') { /* dono: mandar agora o aviso aos aprovadores ou o resumo dos cadastros bancários */
       if (!ehDono(conta)) { json(res, 403, { code: 'not_granted', erro: 'Só o dono.' }); return true; }
-      const b = await lerJson(req); json(res, 200, b.tipo === 'resumo' ? enviarResumo() : avisarAprovadores()); return true; }
+      const b = await lerJson(req); json(res, 200, b.tipo === 'resumo' ? enviarResumo() : b.tipo === 'habilitacao' ? (ALERTAS ? avisarHabilitacao() : { desligado: true }) : avisarAprovadores()); return true; } /* v139: tipo habilitacao */
     if (m === 'GET' && p === '/api/aprovacoes/pendentes') { /* quem vai receber o aviso diário (conferência) */
       if (!(ehDono(conta) || perfilEm(conta, ['admin']))) { json(res, 403, { code: 'not_granted', erro: 'Só administrador.' }); return true; }
       json(res, 200, { itens: pendenciasAprovacao().map(i => Object.assign({}, i, { quem: i.quem.map(nomeConta) })) }); return true; }

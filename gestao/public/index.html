@@ -6523,7 +6523,7 @@ A.oppContrato=d=>{const o=get('opp',d.id);if(!o)return;if(!o.parcId){toast('Cada
   const s0=EDC.save;EDC.save=r=>{const x=s0(r);if(x!==false)put('opp',Object.assign(cl(get('opp',o.id)),{ctrId:r.id}));return x;};edRender();};
 ACT_GROUP.oppContrato='ctr';
 const HAB_T=['CND federal (Receita/PGFN)','CRF do FGTS','CNDT (débitos trabalhistas)','Certidão estadual','Certidão municipal','Certidão de falência e recuperação judicial','Balanço patrimonial','Contrato social e alterações','Registro da empresa no CREA/CAU','Atestado de capacidade técnica','CAT (acervo técnico)','Alvará de funcionamento','Outro'];
-defMod({tab:'hab',col:'hab',group:'ctr',title:'Documentos de habilitação',sub:'Certidões e documentos exigidos em licitações, com validade e alerta 15 dias antes de vencer.',novo:'Novo documento',one:'documento',ph:'Documento ou número',
+defMod({tab:'hab',col:'hab',group:'ctr',title:'Documentos de habilitação',sub:'Certidões e documentos exigidos em licitações, com validade e aviso no dia de solicitar a renovação.',novo:'Novo documento',one:'documento',ph:'Documento ou número',
   search:r=>[r.tipo,r.numero,r.obs].join(' '),sort:(a,b)=>cmpDate(a.validade,b.validade),
   filters:[{k:'sit',l:'Situação',opts:()=>[['venc','Vencido'],['avenc','Vence em 15 dias'],['ok','Válido']],match:(r,v)=>{const d=r.validade?dTo(r.validade):999;return v==='venc'?d<0:v==='avenc'?d>=0&&d<=15:d>15;}}],
   kpis:rows=>kpi('Válidos',String(rows.filter(r=>!r.validade||dTo(r.validade)>15).length),'documentos')+kpi('Vencendo',String(rows.filter(r=>r.validade&&dTo(r.validade)>=0&&dTo(r.validade)<=15).length),'15 dias','neg')+kpi('Vencidos',String(rows.filter(r=>r.validade&&dTo(r.validade)<0).length),'renovar já','neg'),
@@ -26949,9 +26949,96 @@ if(typeof document!=='undefined'&&document.addEventListener){
     if(t.dataset&&t.dataset.osfxt!=null&&osfEd){const a=(osfEd.anexos||[])[+t.dataset.osfxt];if(a){a.tipo=t.value;const s=$('#osfAnxSig');if(s)s.value=osfxSig(osfEd.anexos);}}});}
 Object.assign(ACT_GROUP,{osfxEscolher:'fab',osfxFoto:'fab',osfxDel:'fab'});
 
+/* ===== v139: Documentos de habilitação — prazo para solicitar a renovação =====
+   Cada documento tem "Solicitar a renovação com N dias de antecedência" (campo renovDias; vazio = padrão do tipo).
+   Situação (habRenSit): 'sem' (sem validade), 'ok' (em dia), 'ren' (renovar: hoje >= validade - prazo e ainda não venceu),
+   'sol' (renovação solicitada, ainda não venceu), 'venc' (vencido, mesmo que a renovação tenha sido solicitada).
+   Ordem de gravidade: Em dia < Solicitada < Renovar < Vencido.
+   Botão "Renovação solicitada" (linha e formulário): grava renovSol {em,por,obs,val} e acrescenta em renovHist (permanente).
+   Validade nova posterior à anterior limpa renovSol e o ciclo recomeça (renovHist continua).
+   Padrões por tipo (HAB_RENOV_PAD): 30 dias para o que depende de cartório, prefeitura ou contador; 120 para a LO da CETESB
+   (a renovação da licença de operação deve ser pedida com 120 dias de antecedência, LC 140/2011 art. 14 §4º); 15 para o resto
+   (as certidões emitidas na hora pela internet). O servidor (regras.js, bloco v139) usa a mesma tabela no e-mail diário. */
+['Certidão de distribuição cível'].forEach(t=>{if(!HAB_T.includes(t))HAB_T.splice(HAB_T.indexOf('Outro')<0?HAB_T.length:HAB_T.indexOf('Outro'),0,t);});
+{const o=habTiposOrd();HAB_T.splice(0,HAB_T.length,...o);}
+const HAB_RENOV_PADRAO=15;
+const HAB_RENOV_PAD={'Certidão de falência e recuperação judicial':30,'Certidão de distribuição cível':30,'Alvará de funcionamento':30,'Alvará CETESB':30,'Balanço patrimonial':30,'LO – Licença de Operação (CETESB)':120};
+const habRenovPad=tipo=>{if(HAB_RENOV_PAD[tipo]!=null)return HAB_RENOV_PAD[tipo];if(/fal[eê]ncia|recupera[cç][aã]o judicial|distribui[cç][aã]o c[ií]vel/i.test(String(tipo||'')))return 30;return HAB_RENOV_PADRAO;};
+const habRenovProprio=r=>r&&r.renovDias!==''&&r.renovDias!=null&&isFinite(+r.renovDias);
+const habRenovDias=r=>habRenovProprio(r)?Math.max(0,Math.min(365,Math.round(+r.renovDias))):habRenovPad(r&&r.tipo);
+const habRenovData=r=>r&&r.validade?addDays(String(r.validade).slice(0,10),-habRenovDias(r)):'';
+function habRenSit(r){if(!r||!r.validade)return 'sem';const d=dTo(String(r.validade).slice(0,10));if(d<0)return 'venc';
+  if(todayStr()>=habRenovData(r))return r.renovSol?'sol':'ren';return 'ok';}
+const HAB_SIT_ORD={sem:0,ok:0,sol:1,ren:2,venc:3};
+const habDiaTs=t=>{const d=new Date(+t||Date.now());return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
+const habDdMm=iso=>fmtDate(iso).slice(0,5);
+function habValHtml(r){const s=habRenSit(r);if(s==='sem')return '<span class="mut">sem validade</span>';
+  const d=dTo(String(r.validade).slice(0,10)),dt=habRenovData(r),pz=habRenovDias(r)+' dias'+(habRenovProprio(r)?'':', padrão do tipo'),sol=r.renovSol;
+  const solTxt=sol?'renovação solicitada em '+habDdMm(habDiaTs(sol.em)):'';
+  if(s==='venc')return pill('Vencido há '+(-d)+' d','neg')+'<div class="sub">'+(solTxt?esc(solTxt):'venceu em '+fmtDate(r.validade))+'</div>';
+  if(s==='sol')return pill('Renovação solicitada em '+habDdMm(habDiaTs(sol.em)),'acc')+'<div class="sub">vence '+(d===0?'hoje':'em '+fmtDate(r.validade))+(sol.obs?' · '+esc(sol.obs):'')+'</div>';
+  if(s==='ren')return pill('Renovar desde '+habDdMm(dt),'warn')+'<div class="sub">'+(d===0?'vence hoje':'vence em '+d+' d ('+fmtDate(r.validade)+')')+'</div>';
+  return pill('Em dia','pos')+'<div class="sub">até '+fmtDate(r.validade)+' · renovar a partir de '+fmtDate(dt)+' ('+pz+')</div>';}
+function habRenSolicitar(id,obs){const r=get('hab',id);if(!r)return 'Documento não encontrado.';if(!r.validade)return 'Este documento não tem validade.';
+  const em=Date.now(),reg={em,por:actorId(),obs:String(obs||'').trim().slice(0,300),val:String(r.validade).slice(0,10)};
+  const n=cl(r);n.renovSol=reg;n.renovHist=(Array.isArray(r.renovHist)?r.renovHist:[]).concat([Object.assign({tipo:'solicitada'},reg)]);put('hab',n);return n;}
+/* estado do formulário aberto: marcar/desfazer a solicitação junto com o Salvar */
+const HABR={id:'',sol:false,desfazer:false};
+function habRenAplicar(r,old){/* usado no pre do cadastro */
+  old=old||null;const em=Date.now();r.renovHist=Array.isArray(r.renovHist)?r.renovHist.slice():(old&&Array.isArray(old.renovHist)?old.renovHist.slice():[]);
+  if(r.renovDias===''||r.renovDias==null)r.renovDias='';else r.renovDias=Math.max(0,Math.min(365,Math.round(+r.renovDias)));
+  if(old&&r.renovSol&&r.validade&&old.validade&&String(r.validade)>String(old.validade)){r.renovHist.push({tipo:'nova validade',em,por:actorId(),de:old.validade,para:r.validade});delete r.renovSol;}
+  if(HABR.id&&HABR.id===r.id){
+    if(HABR.desfazer&&r.renovSol){r.renovHist.push({tipo:'desfeita',em,por:actorId(),val:r.renovSol.val||''});delete r.renovSol;}
+    if(HABR.sol&&r.validade&&!r.renovSol){const o=((typeof $==='function'&&$('#habRenObs'))||{}).value;const reg={em,por:actorId(),obs:String(HABR.obs!=null?HABR.obs:(o||'')).trim().slice(0,300),val:String(r.validade).slice(0,10)};r.renovSol=reg;r.renovHist.push(Object.assign({tipo:'solicitada'},reg));}
+    HABR.sol=false;HABR.desfazer=false;HABR.obs=null;}
+  if(!r.renovHist.length)delete r.renovHist;return r;}
+{const d=MODS2.hab;
+  d.sub='Certidões e documentos exigidos em licitações, com validade, aviso no dia de solicitar a renovação (prazo de cada documento), arquivo anexado e pacote ZIP para enviar no portal.';
+  const f0=d.fields;d.fields=r=>{const l=f0(r),i=l.findIndex(f=>f&&f.k==='validade');const nf=F('renovDias','Solicitar a renovação com quantos dias de antecedência (vazio = padrão do tipo)','number',{step:1,ph:'padrão: '+habRenovPad(r&&r.tipo)+' dias'});if(i>=0)l.splice(i+1,0,nf);else l.push(nf);return l;};
+  d.cols=d.cols.map(c=>c&&c[0]==='Validade'?['Validade',r=>habValHtml(r)]:c);
+  d.filters=(d.filters||[]).map(f=>f&&f.k==='sit'?{k:'sit',l:'Situação',opts:()=>[['venc','Vencido'],['ren','Renovar agora'],['sol','Renovação solicitada'],['ok','Em dia']],match:(r,v)=>{const s=habRenSit(r);return v==='avenc'?(s==='ren'||s==='sol'):v==='ok'?(s==='ok'||s==='sem'):s===v;}}:f);
+  d.kpis=rows=>{const c=k=>rows.filter(r=>habRenSit(r)===k).length;
+    return kpi('Em dia',String(rows.filter(r=>['ok','sem'].includes(habRenSit(r))).length),'documentos')+kpi('Renovar agora',c('ren')?'<span style="color:var(--warn)">'+c('ren')+'</span>':'0','chegou a data de pedir')+kpi('Renovação solicitada',String(c('sol')),'aguardando o documento novo')+kpi('Vencidos',String(c('venc')),'renovar já','neg');};
+  d.sort=(a,b)=>(HAB_SIT_ORD[habRenSit(b)]-HAB_SIT_ORD[habRenSit(a)])||cmpDate(a.validade,b.validade);
+  const ra=d.rowActs;d.rowActs=r=>{const s=habRenSit(r);return ((s==='ren'||(s==='venc'&&!r.renovSol))&&mayW('ctr')?'<button class="btn sm pri" data-act="habRenSol" data-id="'+esc(r.id)+'" title="Registra quem pediu e quando; o aviso para até a validade">Renovação solicitada</button>':'')+(ra?ra(r):'');};
+  const v0=d.validate;d.validate=(r,isNew)=>{const e=v0?v0(r,isNew):'';if(e)return e;if(r.renovDias!==''&&r.renovDias!=null&&(!isFinite(+r.renovDias)||+r.renovDias<0||+r.renovDias>365))return 'O prazo para solicitar a renovação deve ficar entre 0 e 365 dias (vazio usa o padrão do tipo).';return '';};
+  const p0=d.pre;d.pre=(r,isNew)=>{if(p0)p0(r,isNew);habRenAplicar(r,isNew?null:get('hab',r.id));};}
+A.habRenSol=x=>{const r=get('hab',x&&x.id);if(!r)return;
+  modal({title:'Renovação solicitada: '+r.tipo,body:'<p class="sub" style="margin:0 0 8px">Registra que a renovação foi pedida (por você, agora). O aviso para; se o documento vencer sem a validade nova, volta a avisar.</p><div class="fg">'+field('Observação (opcional: protocolo, onde foi pedido)','habRenObs','text','',{full:true})+'</div>',saveLabel:'Registrar',
+    save:()=>{const o=(($('#f_habRenObs')||{}).value)||'';const n=habRenSolicitar(r.id,o);if(typeof n==='string'){toast(n,'neg');return false;}toast('Renovação solicitada registrada.','pos');}});};
+function habRenBox(r){const sol=r&&r.renovSol&&!HABR.desfazer;
+  return '<div class="sect" style="grid-column:1/-1;margin:10px 0 0">Renovação</div><div id="habRenBox" style="grid-column:1/-1">'+
+    (sol?'<p class="sub" style="margin:0 0 6px">Renovação solicitada em '+fmtDT(r.renovSol.em)+' por '+esc(nameOf(r.renovSol.por))+(r.renovSol.obs?' · '+esc(r.renovSol.obs):'')+'. Ao salvar uma validade nova, o registro é limpo e o aviso recomeça.</p><button type="button" class="btn sm" data-act="habRenDesfazer">Desfazer a solicitação</button>':
+     HABR.sol?'<label class="f full"><span>Observação (opcional: protocolo, onde foi pedido)</span><input id="habRenObs" placeholder="ex.: protocolo 123/2026"></label><p class="sub" style="margin:4px 0 0">A solicitação é registrada quando você clicar em Salvar.</p>':
+     '<p class="sub" style="margin:0 0 6px">'+(r&&r.validade?'Aviso para solicitar a renovação a partir de '+fmtDate(habRenovData(r))+'.':'Informe a validade para o sistema avisar a data de pedir a renovação.')+'</p>'+(r&&r.validade?'<button type="button" class="btn sm" data-act="habRenForm">Renovação solicitada</button>':''))+'</div>';}
+function habRenBoxRender(){const b=$('#habRenBox');if(!b||!b.parentNode)return;const r=get('hab',HABR.id)||{validade:(($('#f_validade')||{}).value)||'',tipo:(($('#f_tipo')||{}).value)||''};
+  const t=document.createElement('div');t.innerHTML=habRenBox(Object.assign({},r,{validade:(($('#f_validade')||{}).value)||r.validade,tipo:(($('#f_tipo')||{}).value)||r.tipo,renovDias:(($('#f_renovDias')||{}).value)||''}));const nb=t.querySelector('#habRenBox');if(nb)b.innerHTML=nb.innerHTML;}
+A.habRenForm=()=>{HABR.sol=true;HABR.desfazer=false;habRenBoxRender();const o=$('#habRenObs');if(o&&o.focus)o.focus();};
+A.habRenDesfazer=()=>{HABR.desfazer=true;HABR.sol=false;habRenBoxRender();const b=$('#habRenBox');if(b&&b.insertAdjacentHTML)b.insertAdjacentHTML('beforeend','<p class="sub" style="margin:4px 0 0">A solicitação será desfeita quando você clicar em Salvar.</p>');};
+Object.assign(ACT_GROUP,{habRenSol:'ctr',habRenForm:'ctr',habRenDesfazer:'ctr'});
+['habNovo','habEdit'].forEach(k=>{const a0=A[k];if(!a0)return;A[k]=x=>{const r0=k==='habEdit'&&x?get('hab',x.id):null;HABR.id='';HABR.sol=false;HABR.desfazer=false;HABR.obs=null;
+  a0(x);HABR.id=r0?r0.id:(HABF.novo||'');const mb=$('#mb');if(!mb||!mb.querySelector)return;const fg=mb.querySelector('.fg');
+  const ref=fg&&fg.querySelector?fg.querySelector('#habArqs'):null,sect=ref&&ref.previousElementSibling;
+  const html=habRenBox(r0||{validade:(($('#f_validade')||{}).value)||'',tipo:(($('#f_tipo')||{}).value)||''});
+  if(sect&&sect.insertAdjacentHTML)sect.insertAdjacentHTML('beforebegin',html);else if(fg)fg.insertAdjacentHTML('beforeend',html);
+  const ph=()=>{const i=mb.querySelector('#f_renovDias'),s=mb.querySelector('#f_tipo');if(i&&s)i.placeholder='padrão: '+habRenovPad(s.value)+' dias';habRenBoxRender();};
+  ['#f_tipo','#f_validade','#f_renovDias'].forEach(q=>{const e=mb.querySelector(q);if(e)e.addEventListener(q==='#f_tipo'?'change':'input',ph);});};});
+/* Histórico: as solicitações de renovação ficam guardadas no próprio documento (renovHist) */
+{const h0=histModal;histModal=function(col,r){const x=h0.apply(this,arguments);try{if(col==='hab'&&r&&Array.isArray(r.renovHist)&&r.renovHist.length){const mb=$('#mb');
+  const TX={solicitada:'Renovação solicitada','nova validade':'Validade nova (ciclo recomeça)',desfeita:'Solicitação desfeita'};
+  mb.innerHTML+='<div class="sect" style="margin:14px 0 6px">Solicitações de renovação</div><div class="tw"><table><thead><tr><th>Quando</th><th>Quem</th><th>O quê</th></tr></thead><tbody>'+r.renovHist.slice().reverse().map(h=>'<tr><td class="mono" style="white-space:nowrap">'+fmtDT(h.em)+'</td><td>'+nm(h.por)+'</td><td>'+esc(TX[h.tipo]||h.tipo)+(h.val?' · validade '+fmtDate(h.val):'')+(h.de?' · de '+fmtDate(h.de)+' para '+fmtDate(h.para):'')+(h.obs?' · '+esc(h.obs):'')+'</td></tr>').join('')+'</tbody></table></div>';}}catch(e){}return x;};}
+/* Início: aviso no dia certo (troca o aviso fixo de 15 dias) */
+function alertasHabRen(){if(!mayR('ctr')||(typeof isColab==='function'&&isColab()))return [];const it=[],ls=S.hab||[];
+  const ren=ls.filter(r=>habRenSit(r)==='ren').length,venc=ls.filter(r=>habRenSit(r)==='venc').length;
+  if(ren)it.push(['hab',ren+' documento(s) de habilitação: chegou a data de solicitar a renovação',String(ren)]);
+  if(venc)it.push(['hab',venc+' documento(s) de habilitação vencido(s)',String(venc)]);return it;}
+{const a0=alertasCtr;alertasCtr=function(){const it=a0.apply(this,arguments);try{return (it||[]).filter(x=>!(Array.isArray(x)&&x[0]==='hab'&&/certid[aã]o\(ões\) de habilitação vencida\(s\) ou vencendo/.test(String(x[1])))).concat(alertasHabRen());}catch(e){return it;}};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='138',APP_DATA='2026-10-29';
+const APP_VER='139',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['139','2026-10-29',['Documentos de habilitação: prazo para solicitar a renovação em cada documento (padrão do tipo: 30 dias para certidões demoradas e alvarás, 120 para a LO da CETESB, 15 para os demais). Etiqueta Renovar desde DD/MM, cartão Renovar agora, aviso no Início e por e-mail no dia certo, e botão Renovação solicitada para parar o aviso.']],
   ['138','2026-10-29',['Projetos: o campo Nome passa a se chamar Descrição (cadastro, criação a partir de proposta/contrato e importação).', 'Documentos e telas de consulta (OS de fabricação e de serviço, SC, cotação, pedido de compra, separação, romaneio, medição, relatórios, e-mails e CSV) mostram só o código do projeto; as listas de escolha e a busca rápida continuam com código e descrição.']],
   ['137','2026-10-29',['OS de fabricação: anexar desenhos, especificações e fotos já na tela de Nova OS e na edição (botão Anexar documento e Tirar foto no celular). Aceita PDF, imagens, Word, Excel, DWG e DXF; PDF e imagens entram no PDF da OS, os demais ficam só anexados.']],
   ['136.2','2026-10-29',['Menu: "Notas de saída" passa a se chamar "Notas Fiscais" (Fiscal e Vendas).']],
