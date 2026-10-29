@@ -24517,7 +24517,7 @@ function nfrTabela(){
     const b=(a,l,c,extra)=>'<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+esc(r.id)+'"'+(extra||'')+'>'+l+'</button>';
     const pode=!nfrDentroPrazo(r.emissao)&&me.owner;
     const acts=b('nfrDanfe','DANFE')+b('nfrXml','XML')+(tot?b('nfrLigar',r.vinc&&r.vinc.length?'Ligação':'Ligar',r.sug&&r.sug.length&&!(r.vinc&&r.vinc.length)?'pri':''):'')+(tot?b('nfrSituacao','Situação'):'')+(pode?b('nfrExcluir','Excluir','dng'):'');
-    return '<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td>'+(r.tipo==='saida'?pill('Saída',''):pill('Entrada',''))+'</td><td class="mono" title="Chave '+esc(r.chave)+'">'+esc(r.numero||'s/n')+'/'+esc(r.serie||'1')+'</td>'+
+    return '<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td>'+(r.tipo==='saida'?pill('Saída',''):pill('Entrada',''))+'</td><td class="mono" title="Chave '+esc(r.chave)+'">'+(r.modelo==='nfse'?'NFS-e '+esc(r.numero||'s/n'):esc(r.numero||'s/n')+'/'+esc(r.serie||'1'))+'</td>'+
       '<td>'+esc(r.parcNome||'—')+'<div class="sub mono">'+esc(nfrDocFmt(r.parcDoc))+'</div></td><td class="num">'+money(r.valor)+'</td>'+
       '<td>'+nfrSitPill(r)+(r.sitMsg?'<div class="sub">'+esc(r.sitMsg)+'</div>':r.fila?'<div class="sub">consulta no conector agendada</div>':'')+(r.situacao==='cancelada'&&r.vinc&&r.vinc.length?'<div class="sub neg"><b>título ligado: confira</b></div>':'')+'</td>'+
       '<td>'+nfrVincTxt(r)+'</td><td class="mono" title="Prazo de guarda do XML (5 anos a partir de 1º de janeiro do ano seguinte)">'+fmtDate(r.guardaAte)+'</td><td class="act">'+acts+'</td></tr>';
@@ -24785,7 +24785,7 @@ function nfrMarca(l){
   h=h.replace(/<tr><td class="mono">((?:(?!<\/tr>)[\s\S])*?)<\/tr>/g,tr=>{const m=/data-act="(?:editLanc|baixar|estornar)" data-id="([^"]+)"/.exec(tr);if(!m)return tr;const l=get('lanc',m[1]);if(!l)return tr;const mk=nfrMarca(l);if(!mk)return tr;
     let k=-1;for(let c=0;c<3;c++){k=tr.indexOf('</td>',k+1);if(k<0)return tr;}return tr.slice(0,k)+mk+tr.slice(k);});
   const canc=S.lanc.filter(l=>l.tipo===tipo&&l.status!=='cancelado'&&l.arqf&&['cancelada','inexistente','denegada'].includes(l.arqf.sit));
-  if(canc.length&&f.nfs!=='canc'){const k='<div class="stack">',p=h.indexOf(k);const av='<div class="note" style="border-color:var(--neg)"><b>Nota fiscal cancelada:</b> '+canc.length+' título(s) estão ligados a nota cancelada ou não encontrada na SEFAZ. Confira antes de '+(rec?'receber':'pagar')+'. <button class="btn sm" data-act="nfrFiltroCanc" data-k="'+key+'">Ver</button></div>';if(p>=0)h=h.slice(0,p+k.length)+av+h.slice(p+k.length);}
+  if(canc.length&&f.nfs!=='canc'){const k='<div class="stack">',p=h.indexOf(k);const av='<div class="note" style="border-color:var(--neg)"><b>Nota fiscal cancelada:</b> '+canc.length+' título(s) estão ligados a nota cancelada (na SEFAZ ou na prefeitura) ou não encontrada na SEFAZ. Confira antes de '+(rec?'receber':'pagar')+'. <button class="btn sm" data-act="nfrFiltroCanc" data-k="'+key+'">Ver</button></div>';if(p>=0)h=h.slice(0,p+k.length)+av+h.slice(p+k.length);}
   return h;};}
 A.nfrFiltroCanc=d=>{const f=ui[d.k];if(!f)return;f.nfs='canc';f.sit='todos';render();};
 {const b0=addAnexBtns;addAnexBtns=function(html,tab){let h=b0.apply(this,arguments);if(!['pag','rec','fin'].includes(tab)||typeof h!=='string')return h;
@@ -26373,9 +26373,320 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{nfrDanfe:'Abre o PDF que 
   danfeImportar:'Liga os PDFs dos DANFEs às notas do arquivo fiscal pela chave no nome do arquivo.',danfeNota:'DANFE da nota (PDF do fornecedor ou gerado do XML).',
   danfeAnexar:'Anexa o PDF original do fornecedor a esta nota.',danfeResumo:'Mostra o espelho simples (resumo) da nota.'});
 
+/* ===== v135: NFS-e EMITIDAS pela INA (ZIP exportado do Omie) → arquivo fiscal, Fiscal › NFS-e e Contas a receber =====
+   O servidor (deploy/gestao/arquivofiscal.js, blocos v135) lê o ZIP do Omie nos dois padrões (ABRASF da prefeitura de Tuiuti até
+   2025 e NFS-e Padrão Nacional de 2026), guarda o XML original e o PDF no arquivo fiscal, registra os cancelamentos, cria/atualiza
+   a nota na coleção 'nfse' (origem 'omie') e liga ao título de Contas a receber quando há exatamente 1 que serve.
+   Aqui ficam:
+   - o botão "Importar NFS-e emitidas (ZIP do Omie)" (Recebimento de notas › Arquivo fiscal / Saídas / NFS-e emitidas, e Sistema ›
+     Importar cadastros), com o relatório (novas, já existentes, completadas, canceladas, ignoradas com motivo, CSV);
+   - a aba "NFS-e emitidas" do Recebimento de notas: lista "Conferir ligação" com as sugestões, Ligar, Criar título a receber,
+     Ignorar e os filtros (ligadas, canceladas com título, ignoradas);
+   - no título (Contas a receber): marca "NFS-e nº" com as retenções, botão NFS-e (PDF original ou resumo do XML), "Ligar NFS-e";
+   - em Fiscal › NFS-e: as importadas aparecem como Emitida/Cancelada com os valores do XML (não os percentuais do rascunho). */
+const NFS={cfg:null,ultRel:null,ligRow:null,lote:null};
+if(!ui.nfr.nfsf)ui.nfr.nfsf='conferir';
+const nfsAcc=()=>typeof nfrAcesso==='function'?nfrAcesso():'';
+const nfsTot=()=>nfsAcc()==='total';
+/* CNPJ formatado; CPF (pessoa física) sempre mascarado na tela (LGPD) — o servidor já manda mascarado */
+const nfsDoc=d=>{d=String(d||'');if(/\*/.test(d))return d;const x=digits(d);return x.length===14?fmtDoc(x):x.length===11?'***.'+x.slice(3,6)+'.'+x.slice(6,9)+'-**':d;};
+const NFS_RET=[['iss','ISS'],['inss','INSS'],['irrf','IR'],['csll','CSLL'],['pis','PIS'],['cofins','COFINS'],['outras','Outras']];
+const nfsRetTxt=ret=>NFS_RET.filter(k=>ret&&+ret[k[0]]).map(k=>k[1]+' '+money(+ret[k[0]])).join(' · ');
+const nfsNum=r=>esc(String((r&&r.numero)||'s/n'));
+function nfsCfgLocal(){const c=cfg();return {tol:c.nfseTol==null||c.nfseTol===''?0.05:+c.nfseTol,dias:+c.nfseDias||60};}
+
+/* ---------- importar o ZIP do Omie ---------- */
+A.nfsImportar=()=>{
+  if(!nfrSelf()){toast('A importação de NFS-e fica no servidor da empresa. Abra o sistema pelo endereço da empresa.','neg');return;}
+  if(!nfsTot()){toast('Seu perfil não importa NFS-e emitidas. Quem importa: Fiscal, Financeiro, Administrador e Diretoria.','neg');return;}
+  const c=nfsCfgLocal(),lim=(NFS.cfg&&NFS.cfg.zipMaxMb)||100;
+  modal({title:'Importar NFS-e emitidas (ZIP do Omie)',nofocus:true,body:'<p style="margin:0 0 8px">Envie o ZIP que o Omie exporta em <b>NFS-e emitidas</b> (pastas <span class="mono">nfse_&lt;período&gt;</span>). O servidor lê os dois padrões: o da prefeitura de Tuiuti (até 2025) e o Padrão Nacional (2026).</p>'+
+    '<ul class="sub" style="margin:0 0 8px;padding-left:18px"><li>Guarda no arquivo fiscal o XML original de cada nota emitida pela INA e o PDF (DANFSe ou demonstrativo). Nota de outro prestador é recusada, com o motivo.</li>'+
+    '<li>Notas canceladas na prefeitura ficam como <b>Canceladas</b> e nunca ligam a título. Se um título já estiver ligado a uma nota que agora consta cancelada, ele fica sinalizado.</li>'+
+    '<li>Cada nota aparece em Fiscal › NFS-e. Nota que o próprio sistema já registrou não é duplicada.</li>'+
+    '<li>Ligação com Contas a receber: mesmo CNPJ do tomador, valor igual ao bruto ou ao líquido (tolerância de '+money(c.tol)+') e vencimento ou competência até '+c.dias+' dias da emissão. Só liga sozinho quando há exatamente 1 título que serve; o resto vai para a lista <b>Conferir</b>. Nenhum título é criado.</li>'+
+    '<li>Pode reenviar o mesmo ZIP: nada é duplicado e o que faltava é completado.</li></ul>'+
+    '<p class="sub" style="margin:0">Limite: '+esc(String(lim))+' MB por ZIP.</p>',
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button><button class="btn pri" data-act="nfsImpEscolher">Escolher ZIP(s)</button>'});
+};
+A.nfsImpEscolher=()=>nfrEscolher('.zip,application/zip',true,fs=>nfsEnviar(fs));
+async function nfsEnviar(files){
+  const lim=((NFS.cfg&&NFS.cfg.zipMaxMb)||100)*1048576,g=files.find(f=>f.size>lim);
+  if(g){toast('“'+g.name+'” passa do limite de '+Math.round(lim/1048576)+' MB. Exporte um período menor no Omie.','neg');return [];}
+  const res=[];
+  for(let i=0;i<files.length;i++){const f=files[i];
+    modal({title:'Importando NFS-e emitidas',nofocus:true,body:'<p aria-live="polite">Enviando e conferindo <b>'+esc(f.name)+'</b> ('+(i+1)+' de '+files.length+', '+(f.size/1048576).toFixed(1).replace('.',',')+' MB)…</p><p class="sub">O servidor lê cada XML, guarda o original e procura o título a receber de cada nota.</p>',foot:'<button class="btn" data-act="closeModal">Continuar em segundo plano</button>'});
+    try{res.push(await nfrApi('/api/arqfiscal/nfse/lote?nome='+encodeURIComponent(f.name),{method:'POST',headers:{'content-type':'application/zip'},body:f}));}
+    catch(e){res.push({arquivo:f.name,erro:e.message,notas:[],lista:[],motivos:{}});}
+  }
+  NFR.chave='';if(typeof nfrCarregar==='function')nfrCarregar(true);nfsRelatorio(res);return res;
+}
+function nfsRelatorio(res){
+  const soma=k=>res.reduce((s,r)=>s+(+r[k]||0),0),mot={},anos={};
+  res.forEach(r=>{Object.entries(r.motivos||{}).forEach(([k,v])=>{mot[k]=(mot[k]||0)+v;});Object.entries(r.anos||{}).forEach(([a,x])=>{anos[a]=x;});});
+  const notas=[].concat(...res.map(r=>r.notas||[])),ign=[].concat(...res.map(r=>(r.lista||[]).map(x=>Object.assign({zip:r.arquivo},x))));
+  const dps=[].concat(...res.map(r=>r.dpsSemNota||[])),rps=[].concat(...res.map(r=>r.rpsSemNota||[]));
+  NFS.ultRel={notas,ign,dps,rps};
+  const RES={nova:'Nova',existente:'Já existente',completada:'Completada'};
+  const anosH=Object.keys(anos).sort().map(a=>{const x=anos[a];return '<tr><td>'+esc(a)+'</td><td class="num">'+x.notas+'</td><td class="num">'+x.canceladas+'</td><td class="num">'+money(x.brutoValidas)+'</td><td class="num">'+money(x.liqValidas)+'</td><td class="num">'+Object.keys(x.tomadores||{}).length+'</td></tr>';}).join('');
+  modal({title:'Relatório: NFS-e emitidas importadas',wide:true,nofocus:true,body:
+    '<div class="kpis">'+kpi('Notas novas',String(soma('novas')),soma('semXml')?soma('semXml')+' sem XML autorizado (RPS + PDF)':'guardadas no arquivo fiscal','pos')+
+      kpi('Completadas',String(soma('completadas')),'já estavam; faltava PDF, XML ou o registro')+kpi('Já existentes',String(soma('existentes')),'nada mudou')+
+      kpi('Canceladas',String(soma('canceladas')),soma('cancNovas')+' cancelamento(s) novo(s)',soma('canceladas')?'neg':'')+
+      kpi('Ligadas a título',String(soma('ligadas')),'automaticamente','pos')+kpi('Para conferir',String(soma('conferir')),'escolha o título ou crie',soma('conferir')?'warn':'')+
+      kpi('Ignorados',String(soma('ignoradas')),'veja o motivo',soma('ignoradas')?'warn':'')+'</div>'+
+    res.filter(r=>r.erro).map(r=>'<div class="note" style="border-color:var(--neg)"><b>'+esc(r.arquivo)+':</b> '+esc(r.erro)+'</div>').join('')+
+    (soma('semXml')?'<div class="note" style="margin-top:8px"><b>Sem XML autorizado:</b> o ZIP não trouxe o XML da prefeitura dessas notas (o Omie gravou uma página de erro no lugar). Foram guardados o RPS enviado e o PDF da nota, com o código de verificação lido do PDF. Se o XML chegar depois, reimporte: a nota é completada.</div>':'')+
+    (dps.length?'<div class="note" style="margin-top:8px"><b>DPS enviada sem nota:</b><ul style="margin:4px 0 0;padding-left:18px">'+dps.map(d=>'<li>DPS '+esc(d.dps)+' de '+fmtDate(d.emissao)+' ('+money(d.valor)+')'+(d.os?', enviada pela OS':'')+': '+(d.rejeicao&&d.rejeicao.length?'rejeitada — '+esc(d.rejeicao.map(e=>e.codigo+' '+e.msg).join('; ').slice(0,260)):'sem resposta de autorização')+(d.reemitida&&d.reemitida.length?'. Reemitida como NFS-e '+esc(d.reemitida.join(', '))+'.':'')+'</li>').join('')+'</ul></div>':'')+
+    (rps.length?'<div class="note" style="margin-top:8px"><b>RPS enviado sem nota nem PDF:</b> '+rps.map(r=>'RPS '+esc(r.rps)+' ('+money(r.valor)+')').join(', ')+'. Confira no portal da prefeitura.</div>':'')+
+    (anosH?'<h3 style="margin:12px 0 6px">Por ano (notas válidas, sem as canceladas)</h3><div class="tw"><table><thead><tr><th>Ano</th><th class="num">Notas</th><th class="num">Canceladas</th><th class="num">Bruto</th><th class="num">Líquido</th><th class="num">Tomadores</th></tr></thead><tbody>'+anosH+'</tbody></table></div>':'')+
+    (Object.keys(mot).length?'<h3 style="margin:12px 0 6px">Ignorados, por motivo</h3><ul style="margin:0;padding-left:18px">'+Object.entries(mot).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<li>'+esc(k)+': <b>'+v+'</b></li>').join('')+'</ul>':'')+
+    (ign.length?'<div class="tw" style="margin-top:6px"><table><thead><tr><th>Arquivo</th><th>Motivo</th></tr></thead><tbody>'+ign.slice(0,30).map(x=>'<tr><td class="mono" style="word-break:break-all">'+esc(x.arquivo)+'</td><td>'+esc(x.motivo)+'</td></tr>').join('')+'</tbody></table></div>':'')+
+    (notas.length?'<h3 style="margin:12px 0 6px">Notas'+(notas.length>60?' (primeiras 60 de '+notas.length+'; todas no CSV)':'')+'</h3><div class="tw"><table><thead><tr><th>Emissão</th><th>NFS-e</th><th>Tomador</th><th class="num">Bruto</th><th class="num">Líquido</th><th>Resultado</th><th>Ligação</th></tr></thead><tbody>'+
+      notas.slice(0,60).map(n=>'<tr><td class="mono">'+fmtDate(n.emissao)+'</td><td class="mono">'+esc(n.numero)+'</td><td>'+esc(n.tomador)+'<div class="sub mono">'+esc(nfsDoc(n.tomDoc))+'</div></td><td class="num">'+money(n.bruto)+'</td><td class="num">'+money(n.liq)+'</td><td>'+esc(RES[n.resultado]||n.resultado||'')+(n.situacao==='cancelada'?' '+pill('Cancelada','neg'):'')+(n.semXml?' '+pill('sem XML','warn'):'')+'</td><td>'+esc(n.ligacao)+'</td></tr>').join('')+'</tbody></table></div>':'')+
+    '<p class="sub" style="margin:10px 0 0">'+res.map(r=>esc(r.arquivo||'')+(r.total!=null?': '+r.total+' arquivo(s)':'')+(r.apoio?' ('+r.apoio+' de apoio do Omie: solicitações, protocolos e cópias)':'')+(r.segundos!=null?' em '+r.segundos+' s':'')).join(' · ')+'</p>',
+    foot:'<button class="btn" data-act="nfsRelCsv">Baixar relatório (CSV)</button>'+(soma('conferir')?'<button class="btn" data-act="nfsIrConferir">Conferir ligações</button>':'')+'<button class="btn pri" data-act="closeModal">Fechar</button>'});
+}
+A.nfsRelCsv=()=>{const R=NFS.ultRel;if(!R)return;
+  const linhas=[['Tipo','Arquivo/Número','Emissão','Tomador','CNPJ/CPF','Bruto','Líquido','Retenções','Situação','Resultado','Ligação','Motivo']];
+  R.notas.forEach(n=>linhas.push(['Nota',n.numero,n.emissao,n.tomador,nfsDoc(n.tomDoc),String(n.bruto).replace('.',','),String(n.liq).replace('.',','),String(n.totRet).replace('.',','),n.situacao,n.resultado+(n.semXml?' (sem XML autorizado)':''),n.ligacao,n.motivoLig||'']));
+  R.ign.forEach(x=>linhas.push([x.r==='guardado'?'Guardado':'Ignorado',x.arquivo,'','','','','','','','','',x.motivo]));
+  R.dps.forEach(d=>linhas.push(['DPS sem nota',d.arquivo,d.emissao,'','',String(d.valor).replace('.',','),'','','','','',(d.rejeicao||[]).map(e=>e.codigo+' '+e.msg).join('; ')+(d.reemitida&&d.reemitida.length?' — reemitida como '+d.reemitida.join(', '):'')]));
+  saveFile('importacao-nfse-emitidas.csv',csv(linhas));};
+A.nfsIrConferir=()=>{closeModal();Object.assign(ui.nfr,{aba:'nfse',nfsf:'conferir',pg:0});if(ui.tab!=='nfrec'&&ui.tab!=='arqf')ui.tab='nfrec';render();};
+
+/* ---------- aba "NFS-e emitidas" no Recebimento de notas ---------- */
+if(!NFR_ABAS.some(a=>a[0]==='nfse'))NFR_ABAS.splice(NFR_ABAS.findIndex(a=>a[0]==='said')+1||NFR_ABAS.length,0,['nfse','NFS-e emitidas']);
+{const a0=nfrAbas;nfrAbas=function(){let h=a0.apply(this,arguments);
+  if(!nfsTot())return h.replace(/<button[^>]*data-v="nfse"[^>]*>[\s\S]*?<\/button>/,'');
+  const res=NFR.lista&&NFR.lista.resumo,n=res&&res.nfseConferir;
+  return n?h.replace(/(data-v="nfse">NFS-e emitidas)/,'$1 ('+n+')'):h;};}
+{const q0=nfrQuery;nfrQuery=function(){const f=ui.nfr;if(f.aba!=='nfse')return q0.apply(this,arguments);
+  const fx={conferir:{vinc:'conferir'},ligadas:{vinc:'ligada'},canc:{sit:'cancelada'},cancLig:{vinc:'cancligada'},ign:{vinc:'ignorada'},todas:{}}[f.nfsf||'conferir']||{};
+  const base=Object.assign({modelo:'nfse',q:f.q,de:f.de,ate:f.ate},fx),bk=JSON.stringify(base);
+  if(NFR.base!==undefined&&NFR.base!==bk)f.pg=0;NFR.base=bk;
+  const o=Object.assign(base,{pg:f.pg||0,n:50}),p=[];Object.keys(o).forEach(k=>{if(o[k]!==''&&o[k]!=null)p.push(k+'='+encodeURIComponent(o[k]));});return p.join('&');};}
+{const b0=nfrBotoes;nfrBotoes=function(){const h=b0.apply(this,arguments);if(!nfrSelf()||!nfsTot()||!['arq','said','nfse'].includes(ui.nfr.aba))return h;
+  return '<button class="btn'+(ui.nfr.aba==='nfse'?' pri':'')+'" data-act="nfsImportar">Importar NFS-e emitidas (ZIP do Omie)</button>'+h;};}
+{const v0=nfrView;nfrView=function(){const h=v0.apply(this,arguments);if(ui.nfr.aba!=='nfse')return h;
+  return h.replace('<p class="sub" style="margin:0"></p>','<p class="sub" style="margin:0">NFS-e emitidas pela INA, importadas do Omie. Confira a ligação de cada nota com a conta a receber: confirme a sugestão, escolha o título, crie o título a partir da nota ou marque para ignorar.</p>');};}
+function nfsSugHtml(r){
+  const s=(r.sug||[]).slice(0,3);if(!s.length)return '<div class="sub">'+esc((r.nfse&&r.nfse.lig&&r.nfse.lig.motivo)||'nenhum título encontrado')+'</div>';
+  return s.map((x,i)=>'<div class="sub" style="margin:2px 0">'+x.lancs.map(id=>{const l=get('lanc',id);return l?esc(l.desc||'título')+' · '+money(l.valor)+(l.venc?' · venc. '+fmtDate(l.venc):''):'título removido';}).join(' + ')+
+    ' <button class="btn sm'+(i===0?' pri':'')+'" data-act="nfsSugLigar" data-id="'+esc(r.id)+'" data-v="'+i+'" title="'+esc(x.motivo)+'">Ligar</button></div>').join('')+(r.sug.length>3?'<div class="sub">+'+(r.sug.length-3)+' sugestão(ões) em “Ligar…”</div>':'');
+}
+function nfsTabela(){
+  const L=NFR.lista;if(!L)return '<p class="sub">'+(NFR.erro?esc(NFR.erro):'Carregando as NFS-e…')+'</p>';
+  const its=L.itens||[],res=L.resumo||{},f=ui.nfr,lab=(t,h)=>'<label class="f"><span>'+t+'</span>'+h+'</label>';
+  const kp='<div class="kpis">'+kpi('NFS-e no arquivo',String(res.nfse||0),'importadas do Omie')+kpi('Ligadas a título',String(res.nfseLigadas||0),'contas a receber',res.nfseLigadas?'pos':'')+
+    kpi('Para conferir',String(res.nfseConferir||0),'sem título, autorizadas',res.nfseConferir?'warn':'')+kpi('Canceladas com título',String(res.nfseCancLig||0),res.nfseCancLig?'confira o título':'nenhuma',res.nfseCancLig?'neg':'')+'</div>';
+  const alerta=res.nfseCancLig?'<div class="note" style="border-color:var(--neg)"><b>Atenção:</b> '+res.nfseCancLig+' NFS-e cancelada(s) na prefeitura estão ligadas a contas a receber. Confira se o título deve ser cancelado ou trocado. <button class="btn sm" data-act="nfsVerCancLig">Ver</button></div>':'';
+  const filtros='<div class="bar">'+lab('Mostrar','<select id="s_nfsf" data-filter="nfr.nfsf">'+opt([['conferir','Conferir ligação'],['ligadas','Ligadas a título'],['cancLig','Canceladas com título'],['canc','Canceladas'],['ign','Ignoradas na conferência'],['todas','Todas']],f.nfsf||'conferir')+'</select>')+
+    '<label class="f grow"><span>Buscar</span><input id="q_nfs" data-filter="nfr.q" value="'+esc(f.q)+'" placeholder="Número, tomador ou CNPJ"></label>'+
+    lab('Emissão de','<input type="date" id="d_nfsde" data-filter="nfr.de" value="'+esc(f.de)+'">')+lab('até','<input type="date" id="d_nfsate" data-filter="nfr.ate" value="'+esc(f.ate)+'">')+
+    '<div class="f" style="align-self:flex-end"><button class="btn sm" data-act="nfsConfig">Regra da ligação</button></div></div>';
+  const rows=its.map(r=>{const x=r.nfse||{},b=(a,l,c,t)=>'<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+esc(r.id)+'"'+(t?' title="'+esc(t)+'"':'')+'>'+l+'</button>';
+    const ligado=r.vinc&&r.vinc.length,canc=r.situacao==='cancelada';
+    const lig=ligado?pill(r.vincConf==='manual'?'Ligada (à mão)':'Ligada','pos')+'<div class="sub">'+r.vinc.map(id=>{const l=get('lanc',id);return l?esc(l.desc||'título')+' · '+money(l.valor):'título';}).join('<br>')+'</div>'+(canc?'<div class="sub neg"><b>nota cancelada: confira o título</b></div>':'')
+      :canc?'<span class="sub">cancelada: não liga</span>':x.ign?pill('Ignorada','')+(x.ign.motivo?'<div class="sub">'+esc(x.ign.motivo)+'</div>':''):nfsSugHtml(r);
+    const acts=b('nfsVer','NFS-e','',r.pdf?'Abre o PDF original da nota':'Mostra o resumo a partir do XML')+(canc&&!ligado?'':b('nfsLigar',ligado?'Ligação':'Ligar…'))+
+      (!ligado&&!canc&&mayW('fin')?b('nfsCriar','Criar título'):'')+(!ligado&&!canc?(x.ign?b('nfsRever','Voltar a conferir'):b('nfsIgnorar','Ignorar')):'');
+    return '<tr><td class="mono">'+fmtDate(r.emissao)+'</td><td class="mono">'+nfsNum(r)+'<div class="sub">'+(x.padrao==='nacional'?'Padrão Nacional':'Prefeitura')+(x.rps?' · RPS '+esc(x.rps):'')+'</div>'+(x.semXml?pill('sem XML autorizado','warn'):'')+'</td>'+
+      '<td class="nfs-tom">'+esc(x.tomNome||r.parcNome||'—')+'<div class="sub mono">'+esc(nfsDoc(x.tomDoc||r.parcDoc))+'</div></td><td class="num">'+money(x.bruto!=null?x.bruto:r.valor)+'</td>'+
+      '<td class="num">'+money(x.liq)+(x.totRet?'<div class="sub" title="Retenções">'+esc(nfsRetTxt(x.ret))+'</div>':'')+(x.cbs||x.ibs?'<div class="sub">IBS '+money(x.ibs||0)+' · CBS '+money(x.cbs||0)+'</div>':'')+'</td>'+
+      '<td>'+(canc?pill('Cancelada','neg')+(x.canc&&x.canc.dh?'<div class="sub">em '+fmtDate(String(x.canc.dh).slice(0,10))+'</div>':''):pill('Emitida','pos'))+'</td><td class="nfs-lig">'+lig+'</td><td class="act">'+acts+'</td></tr>';}).join('');
+  const pg=L.pg||0,np=Math.max(1,Math.ceil((L.total||0)/(L.n||50)));
+  return kp+alerta+filtros+'<div class="tw"><table class="nfs-tab"><thead><tr><th>Emissão</th><th>NFS-e</th><th>Tomador</th><th class="num">Bruto</th><th class="num">Líquido</th><th>Situação</th><th>Ligação / sugestões</th><th></th></tr></thead><tbody>'+
+    (rows||emptyRow(8,NFR.carregando?'Carregando…':(f.nfsf||'conferir')==='conferir'?'Nenhuma NFS-e para conferir.':'Nenhuma NFS-e neste filtro.'))+'</tbody>'+
+    (L.total?'<tfoot><tr><td colspan="3">'+L.total+' nota(s)'+(np>1?' · página '+(pg+1)+' de '+np:'')+'</td><td class="num">'+money(L.soma)+'</td><td colspan="4" class="act">'+(pg>0?'<button class="btn sm" data-act="nfrPag" data-v="-1">‹ Anterior</button>':'')+(pg+1<np?'<button class="btn sm" data-act="nfrPag" data-v="1">Próxima ›</button>':'')+'</td></tr></tfoot>':'')+'</table></div>';
+}
+{const t0=nfrTabela;nfrTabela=function(){if(ui.nfr.aba==='nfse')return nfsTabela();let h=t0.apply(this,arguments);
+  /* nas outras abas (Arquivo fiscal, Saídas, Pendentes, Ligadas) a NFS-e tem botão "NFS-e" no lugar do DANFE */
+  ((NFR.lista&&NFR.lista.itens)||[]).forEach(r=>{if(r.modelo!=='nfse')return;h=h.replace(new RegExp('data-act="nfrDanfe" data-id="'+r.id+'"[^>]*>DANFE(?: \\(PDF\\))?</button>'),'data-act="nfrDanfe" data-id="'+r.id+'" title="NFS-e: PDF original ou resumo do XML">NFS-e</button>');});
+  return h;};}
+A.nfsVerCancLig=()=>{Object.assign(ui.nfr,{aba:'nfse',nfsf:'cancLig',pg:0});render();};
+const nfsLinha=id=>(typeof nfrLinha==='function'?nfrLinha(id):null);
+{const d0=A.nfrDanfe;A.nfrDanfe=d=>{const r=nfsLinha(d.id);if(r&&r.modelo==='nfse')return nfsAbrir(d.id);return d0(d);};}
+{const x0=A.nfrXml;A.nfrXml=async d=>{const r=nfsLinha(d.id);if(!r||r.modelo!=='nfse')return x0(d);try{const t=await nfrXmlTexto(d.id);saveFile(r.chave+'-nfse.xml',t);}catch(e){toast(e.message,'neg');}};}
+{const s0=A.nfrSituacao;A.nfrSituacao=d=>{const r=nfsLinha(d.id);if(r&&r.modelo==='nfse'){toast('A situação da NFS-e vem dos arquivos da prefeitura/Omie: o cancelamento entra quando você importa o ZIP de novo. Para conferir agora, consulte a nota no portal da prefeitura ou no Emissor Nacional.');return;}return s0(d);};}
+{const l0=A.nfrLigar;A.nfrLigar=d=>{const r=nfsLinha(d.id);if(r&&r.modelo==='nfse')return nfsLigarModal(r);return l0(d);};}
+{const c0=A.nfrCriarConta;A.nfrCriarConta=d=>{const r=NFR.ligRow;if(r&&r.modelo==='nfse')return nfsCriarModal(r);return c0(d);};}
+
+/* ---------- ver a NFS-e: PDF original ou resumo do XML ---------- */
+function nfsResumoDoc(info){
+  const x=info.nfseDet||{},c=cfg(),ret=x.ret||{},canc=info.situacao==='cancelada';
+  return {tipo:'NFS-e · resumo do XML',numero:info.numero,situacao:(canc?'CANCELADA na prefeitura'+(x.canc&&x.canc.dh?' em '+fmtDate(String(x.canc.dh).slice(0,10)):''):'Emitida')+(x.semXml?' · sem XML autorizado (dados do RPS enviado)':''),
+    meta:[['Prestador',(c.razao||c.fantasia||'')],['CNPJ do prestador',fmtDoc(info.emitDoc||c.cnpj||'')],['Inscrição municipal',x.prestIm||c.im||''],['Tomador',x.tomNome||info.parcNome||''],['CNPJ/CPF do tomador',nfsDoc(x.tomDoc||'')],
+      ['Emissão',fmtDate(x.emissao||info.emissao)],['Competência',x.competencia?fmtDate(x.competencia):''],[x.padrao==='nacional'?'Chave de acesso':'Código de verificação',x.padrao==='nacional'?info.chave:(x.codVerif||'')],
+      ['RPS / DPS',(x.rps||'')+(x.serieRps?' série '+x.serieRps:'')],['Código do serviço',[x.codServico,x.nbs?'NBS '+x.nbs:''].filter(Boolean).join(' · ')],['Local da prestação (IBGE)',x.localPrest||''],['Padrão',x.padrao==='nacional'?'NFS-e Padrão Nacional':'ABRASF (prefeitura)']],
+    tables:[{head:['Discriminação do serviço','Valor'],num:[1],rows:[[x.desc||'',money(x.bruto)]]}],
+    totals:[['Valor dos serviços',money(x.bruto)],['Deduções / desconto',money(x.deducoes||0)+' / '+money(x.desconto||0)],['Base de cálculo',money(x.base)],['ISS ('+fmtPct(x.aliq)+')'+(x.issRetido?' retido pelo tomador':' a recolher'),money(x.iss)]]
+      .concat(NFS_RET.filter(k=>k[0]!=='iss'&&+ret[k[0]]).map(k=>[k[1]+' retido',money(ret[k[0]])]))
+      .concat([['Total das retenções',money(x.totRet)]]).concat(x.ibs||x.cbs?[['IBS / CBS (informativo)',money(x.ibs||0)+' / '+money(x.cbs||0)]]:[]).concat([['Valor líquido',money(x.liq),1]]),
+    obs:'Resumo montado a partir do XML original guardado no arquivo fiscal. A nota válida é a da prefeitura (ou do Ambiente Nacional).'};
+}
+async function nfsAbrir(id,o){
+  o=o||{};
+  if(!nfrSelf()){toast('A NFS-e fica no arquivo fiscal do servidor da empresa. Abra o sistema pelo endereço da empresa.','neg');return;}
+  let info;try{info=await nfrApi('/api/arqfiscal/'+encodeURIComponent(id));}catch(e){toast(e.message,'neg');return;}
+  NFR.det[id]=info;NFS.cur={id,info,lanc:o.lanc||null};
+  if(info.situacao==='cancelada')toast('Atenção: esta NFS-e foi CANCELADA na prefeitura.','neg');
+  if(!info.pdf||o.resumo){showDoc(nfsResumoDoc(info),slug('nfse-'+(info.numero||'sn')));return;}
+  const tot=nfsTot();
+  modal({title:'NFS-e '+(info.numero||'s/n')+(info.parcNome?' · '+info.parcNome:''),wide:true,nofocus:true,
+    body:'<p class="sub" style="margin:0 0 8px">PDF original da nota ('+esc(String(info.pdf.nome||''))+'). Quem vale é o XML guardado no arquivo fiscal.</p>'+
+      (info.situacao==='cancelada'?'<div class="note" style="border-color:var(--neg);margin:0 0 8px"><b>NFS-e CANCELADA</b> na prefeitura. Não receba por ela.</div>':'')+
+      (info.nfse&&info.nfse.totRet?'<p class="sub" style="margin:0 0 8px">Bruto '+money(info.nfse.bruto)+' · retenções '+esc(nfsRetTxt(info.nfse.ret))+' · líquido <b>'+money(info.nfse.liq)+'</b></p>':'')+
+      '<div id="nfsPdfBox"><p class="sub">Carregando o PDF…</p></div>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="nfsResumo" data-id="'+esc(id)+'">Resumo do XML</button><button class="btn" data-act="nfsBaixarXml" data-id="'+esc(id)+'">Baixar XML</button><button class="btn" data-act="nfsBaixarPdf" data-id="'+esc(id)+'">Baixar PDF</button>'+
+      (tot&&o.lanc&&info.vinc&&info.vinc.includes(o.lanc.id)?'<button class="btn dng" data-act="nfsDesligar" data-id="'+esc(id)+'">Desligar do título</button>':'')});
+  try{const r=await fetch('/api/arqfiscal/'+encodeURIComponent(id)+'/pdf',{credentials:'same-origin'});if(!r.ok)throw new Error('Não foi possível abrir o PDF.');
+    const blob=await r.blob();NFS.curPdf=blob;const box=document.getElementById('nfsPdfBox');if(!box)return;
+    box.innerHTML='<iframe title="PDF da NFS-e" src="'+URL.createObjectURL(new Blob([blob],{type:'application/pdf'}))+'" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:6px;background:#fff"></iframe>';}
+  catch(e){const box=document.getElementById('nfsPdfBox');if(box)box.innerHTML='<div class="note" style="border-color:var(--neg)">'+esc(e.message)+'</div>';}
+}
+A.nfsVer=d=>nfsAbrir(d.id);
+A.nfsResumo=d=>nfsAbrir(d.id,{resumo:true});
+A.nfsBaixarXml=async d=>{const i=NFR.det[d.id];try{const t=await nfrXmlTexto(d.id);saveFile(((i&&i.chave)||'nfse')+'-nfse.xml',t);}catch(e){toast(e.message,'neg');}};
+A.nfsBaixarPdf=d=>{const i=NFR.det[d.id];if(NFS.curPdf)saveFile('nfse-'+((i&&i.numero)||'sn')+'.pdf',NFS.curPdf);};
+
+/* ---------- ligar / desligar / ignorar ---------- */
+function nfsCands(row){
+  const x=row.nfse||{},pid=x.parcId||(S.parc.find(p=>digits(p.doc||'')===String(row.parcDoc||''))||{}).id||'',vinc=new Set(row.vinc||[]);
+  const livre=l=>(!l.arqf||!l.arqf.ch||l.arqf.ch===row.chave)&&(!l.nfseId||l.nfseId===x.docId||vinc.has(l.id));
+  const base=S.lanc.filter(l=>l.tipo==='receber'&&l.status!=='cancelado'&&!l.transf&&!l.guia&&livre(l));
+  const dist=l=>Math.min(Math.abs((+l.valor||0)-(+x.liq||0)),Math.abs((+l.valor||0)-(+x.bruto||0)));
+  const doCli=base.filter(l=>(pid&&l.parcId===pid)||vinc.has(l.id)).sort((a,b)=>dist(a)-dist(b)).slice(0,40);
+  const ids=new Set(doCli.map(l=>l.id));
+  const outros=base.filter(l=>!ids.has(l.id)&&dist(l)<=Math.max(0.05,nfsCfgLocal().tol)).slice(0,20);
+  return {pid,doCli,outros};
+}
+function nfsLigarModal(row){
+  if(!nfsTot()){toast('Seu perfil não liga notas a títulos.','neg');return;}
+  NFS.ligRow=row;NFR.ligRow=row;
+  const x=row.nfse||{},c=nfsCands(row),sel=new Set(row.vinc||[]),sug=row.sug||[];
+  const linhaL=l=>'<label style="display:flex;gap:8px;align-items:flex-start;padding:4px 0"><input type="checkbox" name="l_'+esc(l.id)+'"'+(sel.has(l.id)?' checked':'')+'><span>'+esc(l.desc||'título')+'<span class="sub"> · '+esc(parcNome(l.parcId))+' · '+money(l.valor)+(+l.retido?' (retido '+money(l.retido)+')':'')+(l.venc?' · venc. '+fmtDate(l.venc):'')+(l.pago?' · recebido':'')+'</span></span></label>';
+  modal({title:'Ligar NFS-e '+(row.numero||'s/n')+' · '+(x.tomNome||row.parcNome||''),wide:true,nofocus:true,body:
+    '<p class="sub" style="margin:0 0 8px">Emitida em '+fmtDate(row.emissao)+': bruto '+money(x.bruto)+', retenções '+money(x.totRet||0)+', líquido <b>'+money(x.liq)+'</b>. Marque o título desta nota em Contas a receber (ou as parcelas que somam o valor dela).</p>'+
+    (row.situacao==='cancelada'?'<div class="note" style="border-color:var(--neg)"><b>Nota cancelada:</b> não liga a título. Se houver título ligado, desligue e confira o título.</div>':'')+
+    (sug.length?'<div class="note"><b>Sugestões do sistema:</b><ul style="margin:4px 0 0;padding-left:18px">'+sug.map((s,i)=>'<li>'+esc(s.motivo)+' — '+s.lancs.map(id=>{const l=get('lanc',id);return l?esc(l.desc||'título')+' ('+money(l.valor)+')':'título removido';}).join(', ')+' <button class="btn sm" data-act="nfsSugOk" data-v="'+i+'">Ligar</button></li>').join('')+'</ul></div>':'')+
+    '<h3 style="margin:10px 0 4px">Títulos deste cliente</h3>'+(c.doCli.length?'<div style="max-height:40vh;overflow:auto">'+c.doCli.map(linhaL).join('')+'</div>':'<p class="sub">Nenhum título em aberto deste cliente'+(c.pid?'':' (o CNPJ '+esc(nfsDoc(x.tomDoc||row.parcDoc))+' não está em Cadastros)')+'.</p>')+
+    (c.outros.length?'<h3 style="margin:10px 0 4px">Outros títulos com o mesmo valor</h3><div style="max-height:25vh;overflow:auto">'+c.outros.map(linhaL).join('')+'</div>':''),
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button>'+(row.vinc&&row.vinc.length?'<button class="btn dng" data-act="nfsDesligar" data-id="'+esc(row.id)+'">Desligar</button>':'')+
+      (!(row.vinc&&row.vinc.length)&&row.situacao!=='cancelada'&&mayW('fin')?'<button class="btn" data-act="nfsCriar" data-id="'+esc(row.id)+'">Criar título a receber</button>':'')+(row.situacao!=='cancelada'?'<button class="btn pri" data-act="nfsLigarOk">Ligar marcados</button>':'')});
+}
+A.nfsLigar=d=>{const r=nfsLinha(d.id);if(r)nfsLigarModal(r);};
+async function nfsLigarIds(row,ids){
+  try{const j=await nfrApi('/api/arqfiscal/'+encodeURIComponent(row.id)+'/ligar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lancIds:ids})});
+    closeModal();toast('NFS-e '+(row.numero||'')+' ligada a '+ids.length+' título(s).','pos');NFR.det[row.id]=Object.assign({},row,j);A.nfrRecarregar();return true;}
+  catch(e){toast(e.message,'neg');return false;}
+}
+A.nfsLigarOk=()=>{const row=NFS.ligRow;if(!row)return;const root=$('#mb'),ids=[];
+  (root&&root.querySelectorAll?Array.from(root.querySelectorAll('input[type=checkbox]')):[]).forEach(i=>{if(i.checked&&/^l_/.test(i.name))ids.push(i.name.slice(2));});
+  if(!ids.length){toast('Marque ao menos um título, ou use Desligar.','neg');return;}return nfsLigarIds(row,ids);};
+A.nfsSugOk=d=>{const row=NFS.ligRow;if(!row||!row.sug)return;const s=row.sug[+d.v];if(s)return nfsLigarIds(row,s.lancs);};
+A.nfsSugLigar=d=>{const row=nfsLinha(d.id);if(!row||!row.sug)return;const s=row.sug[+d.v];if(!s)return;
+  const ls=s.lancs.map(id=>get('lanc',id)).filter(Boolean);
+  confirmBox('Ligar a NFS-e '+esc(row.numero||'')+' ('+money((row.nfse||{}).liq)+' líquido) a '+ls.map(l=>'“'+esc(l.desc||'título')+'” ('+money(l.valor)+')').join(' + ')+'?',()=>{nfsLigarIds(row,s.lancs);},'Ligar');};
+A.nfsDesligar=d=>{const row=nfsLinha(d.id)||NFR.det[d.id];if(!row)return;
+  confirmBox('Tirar a ligação da NFS-e '+esc(row.numero||'')+' com o(s) título(s)? O sistema não liga de novo sozinho esta nota (as sugestões continuam).',async()=>{
+    try{await nfrApi('/api/arqfiscal/'+encodeURIComponent(row.id)+'/desligar',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});toast('Ligação desfeita.');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}},'Desligar',true);};
+A.nfsIgnorar=d=>{const row=nfsLinha(d.id);if(!row)return;
+  modal({title:'Ignorar a NFS-e '+(row.numero||'')+' na conferência',body:'<p class="sub" style="margin:0 0 8px">Use quando a nota não tem título a receber no sistema (ex.: recebida antes de usar o sistema). Ela sai da lista Conferir; a nota continua guardada no arquivo fiscal.</p><div class="fg">'+field('Motivo (opcional)','motivo','text','',{full:true})+'</div>',saveLabel:'Ignorar',
+    save:root=>{const v=readForm(root);nfrApi('/api/arqfiscal/'+encodeURIComponent(row.id)+'/nfse-ignorar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ignorar:true,motivo:v.motivo||''})}).then(()=>{toast('NFS-e ignorada na conferência.');A.nfrRecarregar();}).catch(e=>toast(e.message,'neg'));}});};
+A.nfsRever=async d=>{try{await nfrApi('/api/arqfiscal/'+encodeURIComponent(d.id)+'/nfse-ignorar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ignorar:false})});toast('A NFS-e voltou para a lista Conferir.');A.nfrRecarregar();}catch(e){toast(e.message,'neg');}};
+
+/* ---------- criar o título a receber a partir da nota (só por botão, com confirmação) ---------- */
+function nfsCriarModal(row){
+  if(!mayW('fin')){toast('Seu perfil não cria contas a receber.','neg');return;}
+  if(row.situacao==='cancelada'){toast('NFS-e cancelada: não cria título.','neg');return;}
+  NFS.ligRow=row;const x=row.nfse||{},c=nfsCands(row),parc=c.pid?get('parc',c.pid):null;
+  modal({title:'Criar título a receber · NFS-e '+(row.numero||''),nofocus:true,body:
+    '<p class="sub" style="margin:0 0 8px">Cliente: <b>'+esc(parc?parc.nome:(x.tomNome||''))+'</b> '+esc(nfsDoc(x.tomDoc||row.parcDoc))+(parc?'':' (será cadastrado em Cadastros)')+'. Bruto '+money(x.bruto)+(x.totRet?', retenções '+esc(nfsRetTxt(x.ret)):'')+'.</p>'+
+    '<div class="fg">'+field('Valor a receber (líquido da nota)','valor','number',x.liq)+field('Vencimento *','venc','date','')+field('Projeto / obra (opcional)','projId','select','',{opts:projOpts(),blank:'Sem projeto'})+
+    field('Conta bancária','contaId','select',(S.conta[0]||{}).id||'',{opts:S.conta.map(k=>[k.id,k.nome||k.banco||k.id]),blank:'—'})+'</div>',
+    saveLabel:'Criar e ligar',save:root=>{const v=readForm(root);
+      if(!v.venc){toast('Informe o vencimento.','neg');return false;}
+      if(!(+v.valor>0)){toast('Informe o valor a receber.','neg');return false;}
+      NFS.criar=v;setTimeout(()=>confirmBox('Criar a conta a receber de '+money(+v.valor)+' com vencimento em '+fmtDate(v.venc)+' para '+esc(parc?parc.nome:(x.tomNome||''))+', já ligada à NFS-e '+esc(row.numero||'')+'?',()=>{nfsCriarOk();},'Criar e ligar'),0);}});
+}
+A.nfsCriar=d=>{const r=nfsLinha(d.id)||NFS.ligRow;if(r)nfsCriarModal(r);};
+async function nfsCriarOk(){
+  const row=NFS.ligRow,v=NFS.criar;if(!row||!v)return null;const x=row.nfse||{},c=nfsCands(row);
+  const p=c.pid?get('parc',c.pid):put('parc',{id:uid(),nome:x.tomNome||row.parcNome||'Cliente',tipo:'cliente',doc:nfsDoc(x.tomDoc||row.parcDoc)});
+  const l=put('lanc',{id:uid(),tipo:'receber',desc:'NFS-e '+(row.numero||'s/n')+' — '+(x.tomNome||row.parcNome||''),valor:r2(+v.valor),retido:r2(+x.totRet||0),venc:v.venc,comp:ym(row.emissao),emissao:row.emissao,
+    parcId:p.id,projId:v.projId||'',categoria:'Prestação de serviços',contaId:v.contaId||'',comum:false,nfseId:x.docId||'',estoqueValor:0,status:'aberto',pago:''});
+  NFS.criar=null;await nfsLigarIds(row,[l.id]);return l;
+}
+A.nfsConfig=()=>{const c=nfsCfgLocal();
+  modal({title:'Regra da ligação das NFS-e',body:'<p class="sub" style="margin:0 0 10px">A NFS-e liga sozinha ao título de Contas a receber quando há <b>exatamente 1</b> título do mesmo cliente (CNPJ do tomador) com o valor igual ao bruto ou ao líquido da nota e o vencimento ou a competência perto da emissão. Com 0 ou mais de 1, a nota vai para a lista Conferir, com as sugestões.</p>'+
+    '<div class="grid2">'+field('Tolerância do valor (em reais)','nfseTol','number',c.tol,{})+field('Janela de datas (dias antes ou depois da emissão)','nfseDias','number',c.dias,{})+'</div>',
+    save:root=>{const v=readForm(root);const tol=Math.min(50,Math.max(0,+v.nfseTol||0)),dias=Math.min(365,Math.max(1,Math.round(+v.nfseDias||60)));
+      put('cfg',Object.assign(cl(cfg()),{nfseTol:tol,nfseDias:dias}));toast('Regra salva. Use "Procurar títulos de novo" (Mais…) para aplicar às notas sem ligação.','pos');}});};
+
+/* ---------- Contas a receber: marca da NFS-e, retenções, botão NFS-e, "Ligar NFS-e" ---------- */
+{const m0=nfrMarca;nfrMarca=function(l){
+  if(l&&l.arqf&&l.arqf.mod==='nfse'){const ret=nfsRetTxt(l.arqf.ret);
+    return (l.arqf.sit==='cancelada'?' <span class="pill neg" title="A NFS-e ligada foi CANCELADA na prefeitura">NFS-e '+esc(l.arqf.n||'')+' cancelada</span>':' <span class="pill pos" title="NFS-e ligada'+(l.arqf.por?' em '+esc(fmtDate(new Date(l.arqf.em).toISOString().slice(0,10))):'')+'">NFS-e '+esc(l.arqf.n||'')+'</span>')+
+      (ret?'<div class="sub" title="Retenções da NFS-e (bruto '+esc(money(l.arqf.bruto))+')">ret.: '+esc(ret)+'</div>':'');}
+  return m0.apply(this,arguments);};}
+const nfsLivresDo=l=>!l||l.tipo!=='receber'||l.arqf||l.notaId||!l.parcId?[]:S.nfse.filter(n=>n.origem==='omie'&&n.status==='emitida'&&!n.lancId&&n.parcId===l.parcId&&n.arqf&&n.arqf.id);
+{const a0=addAnexBtns;addAnexBtns=function(html,tab){let h=a0.apply(this,arguments);if(!['pag','rec','fin'].includes(tab)||typeof h!=='string')return h;
+  h=h.replace(/<button class="btn sm" data-act="verDanfe" data-id="([^"]+)"[^>]*>DANFE<\/button>/g,(m0,id)=>{const l=get('lanc',id);return l&&l.arqf&&l.arqf.mod==='nfse'?'<button class="btn sm" data-act="nfsVerTitulo" data-id="'+id+'" title="Abre a NFS-e ligada (PDF original ou resumo do XML)">NFS-e</button>':m0;});
+  if(nfrSelf()&&nfsTot())h=h.replace(/(<button class="btn sm" data-act="anexos" data-col="lanc" data-id="([^"]+)"[^>]*>[^<]*<\/button>)/g,(m0,b,id)=>{const l=get('lanc',id);return nfsLivresDo(l).length?b+'<button class="btn sm" data-act="nfsTituloLigar" data-id="'+id+'" title="Há NFS-e importada deste cliente sem título">Ligar NFS-e</button>':m0;});
+  return h;};}
+{const v0=A.verDanfe;A.verDanfe=d=>{const l=get('lanc',d.id);if(l&&l.arqf&&l.arqf.mod==='nfse')return nfsAbrir(l.arqf.id,{lanc:l});return v0(d);};}
+A.nfsVerTitulo=d=>{const l=get('lanc',d.id);if(l&&l.arqf&&l.arqf.id)return nfsAbrir(l.arqf.id,{lanc:l});};
+A.nfsTituloLigar=d=>{const l=get('lanc',d.id);if(!l)return;
+  const dd=x=>Math.min(Math.abs((+(x.imp&&x.imp.liq)||0)-(+l.valor||0)),Math.abs((+x.valor||0)-(+l.valor||0)));
+  const ns=nfsLivresDo(l).sort((a,b)=>dd(a)-dd(b)).slice(0,30);if(!ns.length){toast('Nenhuma NFS-e importada deste cliente sem título.');return;}
+  NFS.titLanc=l;
+  modal({title:'Ligar NFS-e ao título “'+(l.desc||'')+'”',wide:true,nofocus:true,body:'<p class="sub" style="margin:0 0 8px">Título de '+money(l.valor)+(l.venc?', vencimento '+fmtDate(l.venc):'')+'. NFS-e importadas deste cliente que ainda não têm título:</p><div class="tw"><table><thead><tr><th>Emissão</th><th>NFS-e</th><th class="num">Bruto</th><th class="num">Líquido</th><th></th></tr></thead><tbody>'+
+    ns.map(n=>'<tr><td class="mono">'+fmtDate(n.emissaoReal||n.emissao)+'</td><td class="mono">'+esc(n.numOficial)+'</td><td class="num">'+money(n.valor)+'</td><td class="num">'+money(n.imp?n.imp.liq:n.valor)+'</td><td class="act"><button class="btn sm pri" data-act="nfsTitLigarOk" data-id="'+esc(n.arqf.id)+'">Ligar</button></td></tr>').join('')+'</tbody></table></div>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'});};
+A.nfsTitLigarOk=async d=>{const l=NFS.titLanc;if(!l)return;try{await nfrApi('/api/arqfiscal/'+encodeURIComponent(d.id)+'/ligar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lancIds:[l.id]})});closeModal();toast('NFS-e ligada ao título.','pos');}catch(e){toast(e.message,'neg');}};
+
+/* ---------- Fiscal › NFS-e: as importadas do Omie ---------- */
+/* valores oficiais da nota (do XML), não os percentuais do rascunho */
+{const c0=nfseCalc;nfseCalc=function(n){if(!n||!n.imp)return c0.apply(this,arguments);const x=n.imp,r=x.ret||{};
+  return {bruto:+x.bruto||0,ded:+x.ded||0,desc:+x.desc||0,base:+x.base||0,iss:+x.iss||0,ret:{iss:+r.iss||0,irrf:+r.irrf||0,pis:+r.pis||0,cofins:+r.cofins||0,csll:+r.csll||0,inss:+r.inss||0,outras:+r.outras||0},totRet:+x.totRet||0,liq:+x.liq||0};};}
+{const nd=nfseDoc;nfseDoc=function(n){const o=nd.apply(this,arguments);if(!n||(!n.imp&&!n.arqf))return o;
+  if(n.imp){o.meta=o.meta.map(m=>m[0]==='Tomador'&&!m[1]?[m[0],n.tomNome||'']:m[0]==='CNPJ/CPF do tomador'&&!m[1]?[m[0],nfsDoc(n.tomDoc)]:m);
+    o.meta.push(['Origem','Importada do Omie (XML original no arquivo fiscal)']);if(n.imp.ibs||n.imp.cbs)o.totals.splice(o.totals.length-1,0,['IBS / CBS (informativo)',money(n.imp.ibs)+' / '+money(n.imp.cbs)]);
+    o.situacao=(n.status==='cancelada'?'Cancelada na prefeitura':'Emitida')+(n.imp.semXml?' · sem XML autorizado':'');o.obs='Espelho com os valores do XML original da nota. A NFS-e válida é a da prefeitura (ou do Ambiente Nacional).';}
+  if(n.chave)o.meta.push([String(n.chave).length===50?'Chave de acesso':'Identificação no arquivo fiscal',n.chave]);
+  if(n.cancPref)o.situacao+=' · CANCELADA NA PREFEITURA';return o;};}
+{const d=MODS2.nfse;if(d){
+  d.cols=d.cols.map(c=>c[0]==='Tomador'?[c[0],r=>(r.parcId?esc(parcNome(r.parcId)):esc(r.tomNome||'—')+(r.tomDoc?'<div class="sub mono">'+esc(nfsDoc(r.tomDoc))+'</div>':''))+(r.projId?'<div class="sub">'+esc(projNome(r.projId))+'</div>':'')+(r.origem==='omie'?'<div class="sub">importada do Omie</div>':'')].concat(c.slice(2))
+    :c[0]==='Situação'?[c[0],r=>c[1](r)+(r.cancPref?' '+pill('Cancelada na prefeitura','neg'):'')+(r.imp&&r.imp.semXml?'<div class="sub">sem XML autorizado</div>':'')+(r.origem==='omie'?(r.lancId?'<div class="sub">título ligado</div>':r.status==='emitida'?'<div class="sub warn">sem título a receber</div>':''):'')].concat(c.slice(2)):c);
+  const ra=d.rowActs;d.rowActs=r=>{if(r.origem==='omie')return '<button class="btn sm" data-act="nfsVerDoc" data-id="'+r.id+'">NFS-e</button><button class="btn sm" data-act="nfseView" data-id="'+r.id+'">Espelho</button>'+(r.status==='emitida'&&!r.lancId&&nfrSelf()&&nfsTot()?'<button class="btn sm" data-act="nfsLigarDoc" data-id="'+r.id+'">Ligar título</button>':'');
+    const h=ra(r);return r.arqf&&r.arqf.id?'<button class="btn sm" data-act="nfsVerDoc" data-id="'+r.id+'">NFS-e</button>'+h:h;};
+  d.filters=(d.filters||[]).concat([{k:'org',l:'Origem',opts:()=>[['omie','Importadas do Omie'],['sis','Registradas no sistema']],match:(r,v)=>v==='omie'?r.origem==='omie':r.origem!=='omie'}]);
+  /* headActs é texto no defMod: vira um getter, para mostrar o botão só a quem importa (o perfil é conhecido só depois de entrar) */
+  const h0=d.headActs||'';Object.defineProperty(d,'headActs',{configurable:true,get(){return (nfrSelf()&&nfsTot()?'<button class="btn" data-act="nfsImportar">Importar NFS-e emitidas (ZIP do Omie)</button>':'')+h0;}});
+}}
+A.nfsVerDoc=d=>{const n=get('nfse',d.id);if(n&&n.arqf&&n.arqf.id)return nfsAbrir(n.arqf.id);toast('Esta NFS-e não está no arquivo fiscal.','neg');};
+A.nfsLigarDoc=async d=>{const n=get('nfse',d.id);if(!n||!n.arqf)return;try{const j=await nfrApi('/api/arqfiscal/'+encodeURIComponent(n.arqf.id));NFR.det[j.id]=j;nfsLigarModal(j);}catch(e){toast(e.message,'neg');}};
+
+/* ---------- Sistema › Importar cadastros: atalho para a mesma importação ---------- */
+{const t0=impTopo;impTopo=function(sel){const h=t0.apply(this,arguments);if(!nfrSelf()||!nfsTot())return h;const k=h.lastIndexOf('</div>');if(k<0)return h;
+  const card='<div class="card imp-op"><div class="imp-op-h"><h2 style="margin:0">NFS-e emitidas (Omie)</h2></div><p style="margin:6px 0 4px"><b>Para que serve:</b> guarda as notas de serviço emitidas no arquivo fiscal, mostra em Fiscal › NFS-e e liga cada uma à conta a receber.</p><p class="sub" style="margin:0 0 10px"><b>Arquivo:</b> o ZIP de "NFS-e emitidas" exportado do Omie (XML, TXT e PDF).</p><button class="btn pri" data-act="nfsImportar">Importar NFS-e emitidas</button></div>';
+  return h.slice(0,k)+card+h.slice(k);};}
+
+/* lista: o tomador não espreme e os botões quebram linha dentro da célula (sem cortar em 1366 px) */
+{const css='.nfs-tab td.nfs-tom{min-width:170px}.nfs-tab td.num .sub{white-space:normal;max-width:190px;margin-left:auto}.nfs-tab td.nfs-lig{min-width:200px;max-width:260px;white-space:normal;overflow-wrap:anywhere}.nfs-tab td.act{white-space:normal;width:190px;min-width:190px;text-align:right}.nfs-tab td.act .btn{margin:2px 0 2px 4px}';try{if(document.head&&document.head.insertAdjacentHTML)document.head.insertAdjacentHTML('beforeend','<style>'+css+'</style>');}catch(e){}}
+/* limites do servidor, uma vez, em segundo plano */
+if(nfrSelf()&&typeof setTimeout==='function')setTimeout(()=>{if(!nfsTot())return;nfrApi('/api/arqfiscal/nfse/config').then(j=>{NFS.cfg=j;}).catch(()=>{});},5000);
+Object.assign(ACT_GROUP,{nfsImportar:null,nfsImpEscolher:null,nfsRelCsv:null,nfsIrConferir:null,nfsVerCancLig:null,nfsVer:null,nfsResumo:null,nfsBaixarXml:null,nfsBaixarPdf:null,nfsLigar:null,nfsLigarOk:null,nfsSugOk:null,nfsSugLigar:null,
+  nfsDesligar:null,nfsIgnorar:null,nfsRever:null,nfsCriar:'fin',nfsConfig:'cfg',nfsVerTitulo:null,nfsTituloLigar:null,nfsTitLigarOk:null,nfsVerDoc:null,nfsLigarDoc:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{nfsImportar:'Lê o ZIP de NFS-e emitidas do Omie: guarda XML e PDF no arquivo fiscal, registra cancelamentos e liga às contas a receber.',
+  nfsVer:'Abre a NFS-e: o PDF original ou o resumo do XML.',nfsCriar:'Cria a conta a receber a partir da nota (valor líquido) e já liga.',nfsIgnorar:'Tira a nota da lista Conferir (ex.: recebida antes do sistema).',
+  nfsTituloLigar:'Liga este título a uma NFS-e importada do mesmo cliente.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='134',APP_DATA='2026-10-29';
+const APP_VER='135',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['135','2026-10-29',['Importar NFS-e emitidas (ZIP do Omie): lê o padrão da prefeitura (ABRASF) e o Padrão Nacional, guarda XML e PDF no arquivo fiscal, marca as canceladas e não duplica ao reimportar.', 'Ligação das NFS-e com Contas a receber: liga sozinha quando há um único título com o mesmo tomador, valor (bruto ou líquido) e data próxima; os demais casos vão para a lista Conferir (ligar, criar título ou ignorar). Título ligado a nota cancelada fica marcado.']],
   ['134','2026-10-29',['DANFE no padrão oficial (MOC 7.0, Anexo II) gerado a partir do XML: canhoto, código de barras da chave, protocolo, todos os quadros, IBS/CBS (NT 2026.010), várias folhas e marcas SEM VALOR FISCAL / CANCELADA.', 'PDF original do fornecedor guardado no arquivo fiscal (e-mail nfe@, anexo manual e importação em lote por ZIP de PDFs nomeados pela chave). O botão DANFE abre o PDF do fornecedor quando existe; o espelho antigo virou "Resumo".']],
   ['133.1','2026-10-29',['Visualizar / PDF: Exportar PDF voltou a funcionar (dava o erro "unsupported color function color" desde as cores por setor) e Imprimir passa a abrir só o documento, também no Safari.']],
   ['133','2026-10-29',['Contratos: aditivo tem o campo Assinado (Sim / Não, em negociação). Só os assinados contam na vigência e no valor atualizados, no saldo e no limite de acréscimos; os em negociação aparecem marcados. Aditivos já cadastrados contam como assinados.', 'Oportunidades: no filtro pela data do resultado, propostas antigas sem resultado registrado ficam de fora.']],

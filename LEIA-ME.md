@@ -258,6 +258,33 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 **Variáveis (opcionais, serviço `gestao`)**: `ARQF_PDF_MAX_MB` (tamanho máximo de cada PDF, padrão 3, até 5) e `ARQF_PDF_ZIP_MB` (tamanho máximo do ZIP de PDFs, padrão 200).
 
+## 6.4. NFS-e emitidas: importação do ZIP do Omie e ligação com Contas a receber (v135)
+
+**Onde.** Fiscal › Arquivo fiscal (ou Suprimentos › Recebimento de notas), nas abas Arquivo fiscal, Saídas emitidas e **NFS-e emitidas**: botão **Importar NFS-e emitidas (ZIP do Omie)**. O mesmo botão está em Fiscal › NFS-e e em Sistema › Importar cadastros. Envie o ZIP que o Omie exporta em "NFS-e emitidas" (pastas `nfse_<período>/<subpasta>/arquivo`), sem descompactar.
+
+**O que o servidor lê.** Os dois padrões, no mesmo ZIP:
+- **Prefeitura de Tuiuti (ABRASF 2.03, até 2025)**: `consultar_situacao_resposta/*.xml` (a nota autorizada: número, código de verificação, valores, retenções, tomador) e `cancelar_nfse_resposta/*.xml` (cancelamento com a confirmação da prefeitura). A identificação da nota no arquivo fiscal é `NFSE-<CNPJ>-<município>-<número>`.
+- **NFS-e Padrão Nacional (2026)**: `distribuicao/*.xml` (a NFS-e com a chave de 50 dígitos, valores, retenções e IBS/CBS) e `distribuicao/*.pdf` (DANFSe). Se o XML da distribuição faltar, o servidor usa o XML que vem dentro dos `.txt` do Omie (`xmlGZipB64`). O cancelamento é o evento 101101/105102 com o registro do Ambiente Nacional.
+- PDFs: o DANFSe oficial (2026) ou o demonstrativo do Omie (2024–2025), um por nota.
+- Arquivos de apoio (solicitações, protocolos, cópias repetidas) são contados à parte; páginas HTML de erro do Omie são ignoradas com o motivo e **não são guardadas** (podem conter dados do proxy do Omie).
+- Nota com o XML da prefeitura faltando, mas com o RPS enviado e o PDF no ZIP: é guardada como **"sem XML autorizado"** (RPS + PDF, código de verificação lido do PDF). Se o XML chegar depois, reimporte: a nota é completada.
+- DPS/RPS enviado sem nota (rejeitado): aparece no relatório com a mensagem de rejeição e, quando houver, a nota que a substituiu.
+
+**Conferências.** Só entram NFS-e cujo **prestador é a empresa** (CNPJ de Sistema › Configurações ou `ARQF_CNPJ`); as de outro CNPJ são recusadas com o motivo. Reimportar não duplica nada (notas, PDFs, eventos, registros do app) e completa o que faltava. Limites: ZIP até `ARQF_NFSE_ZIP_MB` (padrão 100 MB), 5 MB por XML/TXT, 3 MB por PDF; nomes com `../` ou caminho absoluto, arquivos protegidos por senha e compressão suspeita (ZIP-bomba) são recusados sem ler. O servidor não extrai nada para o disco. Tudo vai para a auditoria (`ARQF_NFSE_*`).
+
+**O que acontece no sistema.**
+- O XML original fica no arquivo fiscal (gzip, prazo de guarda de 5 anos, como as NF-e), como documento de **saída** modelo NFS-e, com o PDF.
+- Cada nota aparece em **Fiscal › NFS-e** como **Emitida** ou **Cancelada**, com número, código de verificação/chave, tomador, valores, retenções (ISS retido, INSS, IR, CSLL, PIS, COFINS) e IBS/CBS quando houver (origem "importada do Omie"). Se o próprio sistema já tinha registrado a mesma nota (mesmo número e ano, mesmo código de verificação), ela **não é duplicada**: o registro do sistema só é ligado ao arquivo fiscal; se a prefeitura cancelou, ele fica sinalizado "Cancelada na prefeitura".
+- **Ligação com Contas a receber** (nunca cria títulos): mesmo CNPJ do tomador (cliente pelo documento), valor do título igual ao **bruto** ou ao **líquido** da nota (ou valor + retido = bruto), com tolerância de R$ 0,05, e vencimento ou competência até 60 dias da emissão. **Exatamente 1** título que serve (e que não serve a outra nota) → liga sozinho. 0 ou mais de 1 → aba **NFS-e emitidas › Conferir ligação**, com as sugestões (a mais próxima primeiro), os botões Ligar, **Criar título a receber** (com o líquido e as retenções, vencimento a preencher, projeto opcional, sempre com confirmação) e Ignorar. Parcelas do mesmo documento que somam a nota viram sugestão e podem ser ligadas juntas (o servidor confere a soma). A tolerância e a janela ficam em "Regra da ligação".
+- **Nota cancelada nunca liga.** Se um título já estava ligado a uma nota que agora consta cancelada, o título fica com a marca vermelha "NFS-e … cancelada", entra no filtro "Nota cancelada" e no aviso do topo de Contas a receber.
+- No título ligado: marca **NFS-e nº** com as retenções e botão **NFS-e** (abre o PDF original; sem PDF, o resumo montado do XML; com "Desligar do título"). Em título sem nota, o botão **Ligar NFS-e** aparece quando há NFS-e importada do mesmo cliente sem título. Quem ligou e quando fica no título e na auditoria. Depois de desligar à mão, o sistema não liga de novo sozinho aquela nota.
+
+**Quem pode.** Igual ao arquivo fiscal: Fiscal, Financeiro, Administrador e Diretoria (e o dono). Comprador, RH, Leitura e os demais não importam nem veem as NF-e/NFS-e de saída.
+
+**Variáveis (opcionais, serviço `gestao`)**: `ARQF_NFSE_ZIP_MB` (tamanho máximo do ZIP de NFS-e, padrão 100).
+
+**Atenção.** A importação grava direto nos títulos (campo `arqf` e `nfseId`) e nos registros da coleção `nfse`, como o arquivo fiscal já faz: não passa pela trava de competência fechada, porque só registra a ligação e a nota emitida, sem mudar valores dos títulos.
+
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
 - Cada fornecedor convidado recebe um link próprio, `https://seu-dominio/cotacao/<código>`, que abre **sem login**. Ele vê só os itens do pedido, o prazo e o local de entrega, nunca os preços dos outros, e informa preço, marca, frete, prazo, pagamento e validade.
