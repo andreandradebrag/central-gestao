@@ -25796,9 +25796,32 @@ ACT_GROUP.v132OppLimpa=null;
 Object.assign(V132,{edc:()=>EDC,oppData:v132OppData,proxCod:v132ProxCod,html:v132Html,txt:v132Txt,csvCel:v132CsvCel});
 v132EmbrulhaV();
 
+/* ===== v133.1: Exportar PDF e Imprimir voltam a funcionar =====
+   1) Exportar PDF: o html2canvas (1.4) sempre lê a cor de fundo do <html> e do <body>; desde a v121 (cores por setor) o fundo do body
+      usa color-mix(), que o navegador devolve como "color(srgb …)" e o html2canvas não entende ("unsupported color function 'color'").
+      Durante a captura, o fundo do html/body fica branco simples.
+   2) Imprimir: a impressão passa a sair de um quadro separado só com o documento (funciona no Safari e não leva o menu nem as cores). */
+{const embrulha=()=>{const f=window.html2canvas;if(!f||f.__v1331)return;
+  const g=function(){const r=document.documentElement,b=document.body,cl=r.classList.contains('cores-setor'),sr=r.style.background,sb=b.style.background;
+    r.classList.remove('cores-setor');r.style.background='#ffffff';b.style.background='#ffffff';
+    const volta=()=>{if(cl)r.classList.add('cores-setor');r.style.background=sr;b.style.background=sb;};
+    let p;try{p=f.apply(this,arguments);}catch(e){volta();throw e;}return Promise.resolve(p).then(x=>{volta();return x;},e=>{volta();throw e;});};
+  g.__v1331=true;window.html2canvas=g;};
+  const d0=docToPdf;docToPdf=async function(o){embrulha();await loadScript(H2C_URL,()=>!!window.html2canvas);embrulha();return d0.apply(this,arguments);};}
+{const p0=A.docPrint;A.docPrint=()=>{if(!curDoc)return;
+  try{const css=curDoc.o.raw?Array.from(document.querySelectorAll('style')).map(s=>s.textContent).join('\n'):'';
+    const html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><title>'+esc(curDoc.o.tipo+(curDoc.o.numero?' nº '+curDoc.o.numero:''))+'</title><style>'+css+'\n'+DOC_CSS+'\nbody{background:#fff!important;color:#111a27;margin:0}:root{color-scheme:light}@page{margin:12mm}</style></head><body>'+docHtml(curDoc.o)+'</body></html>';
+    const old=document.getElementById('v1331Print');if(old)old.remove();
+    const fr=document.createElement('iframe');fr.id='v1331Print';fr.setAttribute('aria-hidden','true');fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(fr);const w=fr.contentWindow,dc=w.document;dc.open();dc.write(html);dc.close();
+    const ir=()=>{try{w.focus();w.print();}catch(e){p0();}setTimeout(()=>{try{fr.remove();}catch(e){}},60000);};
+    const imgs=Array.from(dc.images||[]);if(!imgs.length||imgs.every(i=>i.complete))setTimeout(ir,50);else{let n=imgs.length;const um=()=>{if(--n<=0)ir();};imgs.forEach(i=>{if(i.complete)um();else{i.onload=um;i.onerror=um;}});setTimeout(()=>{if(n>0){n=0;ir();}},3000);}
+  }catch(e){p0();}};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='133',APP_DATA='2026-10-29';
+const APP_VER='133.1',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['133.1','2026-10-29',['Visualizar / PDF: Exportar PDF voltou a funcionar (dava o erro "unsupported color function color" desde as cores por setor) e Imprimir passa a abrir só o documento, também no Safari.']],
   ['133','2026-10-29',['Contratos: aditivo tem o campo Assinado (Sim / Não, em negociação). Só os assinados contam na vigência e no valor atualizados, no saldo e no limite de acréscimos; os em negociação aparecem marcados. Aditivos já cadastrados contam como assinados.', 'Oportunidades: no filtro pela data do resultado, propostas antigas sem resultado registrado ficam de fora.']],
   ['132','2026-10-28',['Datas em DD/MM/AAAA em todo o sistema (telas, janelas, PDF, avisos, histórico e planilhas CSV); competências como MM/AAAA.', 'Contratos com clientes: descrição do projeto e objeto na horizontal (até 2 linhas, texto inteiro ao passar o mouse); Vigência atualizada e Valor atualizado com os aditivos, com o original ao lado, na lista, no detalhe e na ficha em PDF; botão + Criar novo projeto na edição do contrato.', 'Usuários: cabeçalho da tabela O que cada perfil pode fazer fixo ao rolar e coluna de perfil fixa ao rolar para o lado.', 'Oportunidades e licitações: filtros por data (apresentação/sessão, previsão ou resultado) com período, ano e mês.']],
   ['131','2026-10-28',['Aparência do menu (para teste, escolha de cada pessoa) em Sistema › Configurações ou no menu da conta: Atual, F1 (três linhas, módulos rolando para os lados), F2 (duas linhas com menu da conta), C (barra lateral de ícones com painel de telas) e D (mega-menu com Favoritas e recentes).', 'Busca rápida Ir para… (Ctrl+K ou Cmd+K, e o botão de busca do topo): encontra telas, ações Novo… e registros (clientes, fornecedores, colaboradores, obras, propostas, contas), só o que o perfil pode ver.']],
