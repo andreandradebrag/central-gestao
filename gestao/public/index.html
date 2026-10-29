@@ -2741,7 +2741,7 @@ A.scEnviar=d=>{
   },'Enviar');
 };
 A.scEmail=d=>{const s=get('sc',d.id);if(s)emailModal(cfg().emailComprador||'',scEmailAssunto(s),scEmailTexto(s),'E-mail ao comprador');};
-A.scCancel=d=>confirmBox('Cancelar esta solicitação? A separação pendente e a cotação aberta também serão canceladas.',()=>{
+A.scCancel=d=>confirmBox('Cancelar esta solicitação? A separação pendente e a cotação aberta (inclusive a de solicitação reaberta) também serão canceladas.',()=>{
   const s=get('sc',d.id);if(!s)return;
   S.sep.filter(x=>x.scId===s.id&&SEP_ABERTA(x)).forEach(x=>put('sep',Object.assign(cl(x),{status:'cancelado'})));
   S.cot.filter(x=>x.scId===s.id&&x.status==='aberta').forEach(x=>put('cot',Object.assign(cl(x),{status:'cancelada'})));
@@ -26683,9 +26683,159 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{nfsImportar:'Lê o ZIP de
   nfsVer:'Abre a NFS-e: o PDF original ou o resumo do XML.',nfsCriar:'Cria a conta a receber a partir da nota (valor líquido) e já liga.',nfsIgnorar:'Tira a nota da lista Conferir (ex.: recebida antes do sistema).',
   nfsTituloLigar:'Liga este título a uma NFS-e importada do mesmo cliente.'});
 
+/* =============== v136: ALTERAR SOLICITAÇÃO DE COMPRA DEPOIS DE ENVIADA =============== */
+/* Aguardando cotação e Em cotação: "Reabrir para editar" (volta a rascunho, edita e reenvia).
+   Em cotação: ao reenviar, a cotação é preservada (item novo entra em branco, item removido sai,
+   quantidade alterada mantém o preço e fica sinalizada). Pedidos gerados e Atendida: continuam travadas;
+   botão "Criar SC complementar". Reabre: quem pediu, o comprador e o administrador. */
+const SCR_AVISOS=[];
+function scrAviso(u,txt){if(!u)return;SCR_AVISOS.push({u,txt});if(SCR_AVISOS.length>50)SCR_AVISOS.shift();try{if(typeof avisoChat==='function')avisoChat(u,txt);}catch(e){}}
+const scrNorm=t=>String(t||'').trim().toLowerCase();
+const scrNome=()=>me.nome||(me.uid?nameOf(me.uid):'')||'Usuário';
+function scrComprador(){try{return (typeof matCfg==='function'?matCfg().comprador:'')||'';}catch(e){return '';}}
+const scrAdmin=()=>!!me.owner||me.perfil==='admin';
+const scrEhComprador=()=>['comprador','compras'].includes(me.perfil)||(!!me.uid&&scrComprador()===me.uid);
+const scrEhSolicitante=sc=>!!sc&&(sc.solUid?sc.solUid===actorId():(!!me.nome&&scrNorm(sc.solicitante)===scrNorm(me.nome)));
+/* quem pode reabrir: precisa gravar em Compras (o servidor só aceita assim) e ser admin, comprador ou quem pediu */
+function scPodeReabrir(sc){if(!sc||!mayW('comp'))return false;return scrAdmin()||scrEhComprador()||scrEhSolicitante(sc);}
+const scrCotAberta=sc=>S.cot.find(c=>c.scId===sc.id&&c.status==='aberta')||null;
+/* reabre: devolve a SC (rascunho) ou um texto com o motivo de não poder */
+function scReabrirCore(id,motivo){
+  const sc0=get('sc',id);if(!sc0)return 'Solicitação não encontrada.';
+  if(!['enviada','cotacao'].includes(sc0.status))return 'Só dá para reabrir solicitação aguardando cotação ou em cotação. Com pedidos gerados ou atendida, crie uma SC complementar.';
+  if(!scPodeReabrir(sc0))return 'Só quem pediu, o comprador ou o administrador pode reabrir esta solicitação.';
+  const sep=sc0.sepId?get('sep',sc0.sepId):null;
+  if(sep&&(sep.status==='separado'||sep.status==='entregue'))return 'A separação nº '+sep.numero+' desta solicitação já foi '+(sep.status==='entregue'?'entregue':'separada')+' pelo almoxarifado. Para pedir mais itens, crie uma SC complementar.';
+  const s=cl(sc0),de=s.status,cot0=scrCotAberta(s),ks=[];
+  if(sep&&sep.status==='pendente')put('sep',Object.assign(cl(sep),{status:'cancelado',obsCancel:'Solicitação nº '+s.numero+' reaberta para edição'}));
+  if(sep)delete s.sepId;
+  if(cot0){
+    const c=cotChaves(cl(cot0));
+    /* liga cada item da SC ao item da cotação: pela chave; se não tiver, pelo produto/descrição na ordem */
+    s.itens.forEach(i=>{if(i.k&&c.itens.some(x=>x.k===i.k))ks.push(i.k);});
+    s.itens.filter(i=>(+i.qCom||0)>0&&!(i.k&&ks.includes(i.k))).forEach(i=>{
+      const x=c.itens.find(x=>!ks.includes(x.k)&&(x.prodId||'')===(i.prodId||'')&&scrNorm(x.desc)===scrNorm(i.desc));
+      if(x){i.k=x.k;ks.push(x.k);}else i.k='';
+    });
+    put('cot',c);
+  }
+  s.itens.forEach(i=>{if(!i.k)i.k=uid();});
+  const ag=Date.now(),mot=String(motivo||'').trim().slice(0,500);
+  s.status='rascunho';
+  s.reab={de,em:ag,por:actorId(),cotId:cot0?cot0.id:'',ks};
+  s.reabHist=(s.reabHist||[]).concat([{tipo:'reaberta',de,por:actorId(),nome:scrNome(),em:ag,motivo:mot,sepCancel:sep&&sep.status==='pendente'?sep.numero:''}]);
+  put('sc',s);
+  const txt='A solicitação de compra nº '+s.numero+(s.projId?' ('+projNome(s.projId)+')':'')+' foi reaberta para edição por '+scrNome()+(mot?': '+mot:'')+'.'+(cot0?' A cotação nº '+cot0.numero+' fica parada até o reenvio.':'');
+  const comp=scrComprador();if(comp&&comp!==actorId())scrAviso(comp,txt+' (Compras › Solicitações de compra)');
+  if(s.solUid&&s.solUid!==actorId()&&s.solUid!==comp)scrAviso(s.solUid,txt);
+  return s;
+}
+/* reenvio de SC que tinha cotação: ajusta a cotação existente sem perder os preços */
+function scrConcilia(cot0,sc,rb){
+  const c=cotChaves(cl(cot0)),ks=new Set(rb.ks||[]),out={novos:0,removidos:0,qtd:0};
+  const comp=sc.itens.filter(i=>(+i.qCom||0)>0);
+  const porK=new Map(comp.filter(i=>i.k).map(i=>[i.k,i]));
+  const usados=new Set(),itens=[],orig=[];
+  c.itens.forEach((x,oi)=>{
+    if(!ks.has(x.k)){itens.push(x);orig.push(oi);return;} /* item que o comprador incluiu direto na cotação */
+    const i=porK.get(x.k);
+    if(!i||(x.prodId||'')!==(i.prodId||'')||scrNorm(x.desc)!==scrNorm(i.desc)){out.removidos++;return;}
+    usados.add(i);
+    const n=Object.assign({},x,{desc:i.desc,un:i.un||x.un,qtd:+i.qCom});
+    if(Math.abs((+x.qtd||0)-(+i.qCom||0))>1e-9){n.alt={tipo:'qtd',de:+x.qtd||0,para:+i.qCom,em:Date.now()};out.qtd++;}
+    itens.push(n);orig.push(oi);
+  });
+  comp.forEach(i=>{if(usados.has(i))return;
+    if(!i.k||c.itens.some(x=>x.k===i.k))i.k=uid(); /* produto trocado: vira item novo */
+    itens.push({prodId:i.prodId||'',desc:i.desc,un:i.un||'UN',qtd:+i.qCom,k:i.k,alt:{tipo:'novo',em:Date.now()}});orig.push(-1);out.novos++;});
+  c.precos=c.forn.map((f,j)=>orig.map(oi=>oi>=0?((c.precos[j]||[])[oi]==null?'':(c.precos[j]||[])[oi]):''));
+  c.escolha=orig.map(oi=>oi>=0&&c.escolha[oi]!=null?c.escolha[oi]:-1);
+  c.itens=itens;c.revEm=Date.now();
+  put('cot',c);
+  return out;
+}
+{const e0=scEnviarCore;scEnviarCore=function(sc0){
+  const rb=sc0&&sc0.reab;
+  const r=e0(sc0);if(!rb)return r;
+  const s=cl(get('sc',r.id)||r),cot=rb.cotId?get('cot',rb.cotId):null;
+  let res=null;
+  if(cot&&cot.status==='aberta'){
+    if(s.status==='enviada'){res=scrConcilia(cot,s,rb);s.status='cotacao';}
+    else{put('cot',Object.assign(cl(cot),{status:'cancelada'}));res={cancelada:true};}
+  }
+  delete s.reab;
+  s.reabHist=(s.reabHist||[]).concat([{tipo:'reenviada',por:actorId(),nome:scrNome(),em:Date.now(),cot:res}]);
+  put('sc',s);
+  const det=res?(res.cancelada?' Tudo será atendido pelo estoque: a cotação nº '+cot.numero+' foi cancelada.':' Cotação nº '+cot.numero+' mantida: '+res.novos+' item(ns) novo(s) para cotar, '+res.removidos+' removido(s), '+res.qtd+' com quantidade alterada (conferir).'):'';
+  const comp=scrComprador();if(comp&&comp!==actorId())scrAviso(comp,'A solicitação de compra nº '+s.numero+(s.projId?' ('+projNome(s.projId)+')':'')+' foi alterada e reenviada por '+scrNome()+'.'+det);
+  if(res&&!res.cancelada)setTimeout(()=>toast('Solicitação reenviada.'+det,'pos'),60);
+  return s;
+};}
+/* SC reaberta: a cotação fica só para consulta e não gera pedido */
+const scrScReab=c=>{const sc=c&&c.scId?get('sc',c.scId):null;return sc&&sc.status==='rascunho'&&sc.reab?sc:null;};
+{const o0=openCot;openCot=function(c,ro){return o0(c,ro||!!scrScReab(c));};}
+{const g0=A.cqGerar;A.cqGerar=d=>{const sc=scrScReab(cqd);if(sc){toast('A solicitação nº '+sc.numero+' foi reaberta para edição. Gere os pedidos depois que ela for reenviada.','neg');return;}return g0(d);};}
+/* mapa: sinaliza item novo e quantidade alterada */
+{const t0=cqTable;cqTable=function(){let h=t0();const c=cqd;if(!c||!c.itens)return h;let pos=h.indexOf('<tbody>');if(pos<0)return h;
+  c.itens.forEach(it=>{const key='<tr><td>'+esc(it.desc),p=h.indexOf(key,pos);if(p<0)return;let ins='';
+    if(it.alt&&it.alt.tipo==='qtd')ins=' <span class="pill warn" title="Quantidade mudou de '+esc(fmtQ(it.alt.de))+' para '+esc(fmtQ(it.alt.para))+' na reabertura da solicitação. O preço unitário foi mantido.">quantidade alterada — conferir</span>';
+    else if(it.alt&&it.alt.tipo==='novo')ins=' <span class="pill acc" title="Item incluído na reabertura da solicitação: peça o preço aos fornecedores.">item novo — cotar</span>';
+    const at=p+key.length;h=h.slice(0,at)+ins+h.slice(at);pos=at+ins.length;});
+  return h;};}
+/* lista: botões novos */
+{const v0=V.sc;V.sc=()=>{let h=v0();
+  S.sc.forEach(s=>{
+    const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
+    if(['enviada','cotacao'].includes(s.status)&&scPodeReabrir(s))h=h.replace(det,det+'<button class="btn sm" data-act="scReabrir" data-id="'+s.id+'">Reabrir para editar</button>');
+    else if(['comprada','atendida'].includes(s.status))h=h.replace(det,det+'<button class="btn sm" data-act="scCompl" data-id="'+s.id+'">Criar SC complementar</button>');
+    else if(s.status==='rascunho'&&s.reab){
+      h=h.replace('<button class="btn sm pri" data-act="scEnviar" data-id="'+s.id+'">Enviar ao comprador</button>','<button class="btn sm pri" data-act="scEnviar" data-id="'+s.id+'" title="Reaberta em '+esc(fmtDT(s.reab.em))+'">Reenviar ao comprador</button>');
+      h=h.replace('<button class="btn sm dng" data-act="scDel" data-id="'+s.id+'">Excluir</button>','<button class="btn sm dng" data-act="scCancel" data-id="'+s.id+'">Cancelar</button>');
+    }
+  });return h;};}
+A.scReabrir=d=>{
+  const sc=get('sc',d.id);if(!sc)return;
+  if(!scPodeReabrir(sc)){toast('Só quem pediu, o comprador ou o administrador pode reabrir esta solicitação.','neg');return;}
+  const cot=scrCotAberta(sc),sep=sc.sepId?get('sep',sc.sepId):null;
+  if(sep&&(sep.status==='separado'||sep.status==='entregue')){toast(scReabrirCore(sc.id,''),'neg');return;}
+  modal({title:'Reabrir a solicitação nº '+sc.numero+' para editar',nofocus:true,saveLabel:'Reabrir para editar',
+    body:'<p style="margin:0 0 8px">A solicitação volta a rascunho: você altera os itens e reenvia ao comprador. O comprador recebe um aviso.</p>'+
+      (cot?'<div class="note" style="margin:0 0 8px"><b>Esta solicitação já está em cotação (nº '+esc(cot.numero)+').</b> Os preços já lançados podem ficar desatualizados. Ao reenviar, a cotação é mantida: itens novos entram em branco para os fornecedores cotarem, itens removidos saem e itens com quantidade alterada mantêm o preço unitário, marcados para conferir. Até o reenvio, a cotação não gera pedidos.</div>':'')+
+      (sep&&sep.status==='pendente'?'<p class="sub" style="margin:0 0 8px">A separação nº '+esc(sep.numero)+' (ainda pendente) será cancelada e refeita no reenvio.</p>':'')+
+      '<label class="f full"><span>Motivo (opcional)</span><textarea id="scrMot" rows="2" maxlength="500" placeholder="Ex.: faltou incluir parafusos; quantidade de tinta mudou"></textarea></label>',
+    save:()=>{const r=scReabrirCore(sc.id,($('#scrMot')||{}).value||'');if(typeof r==='string'){toast(r,'neg');return false;}
+      toast('Solicitação reaberta. Altere e use Reenviar ao comprador.','pos');setTimeout(()=>{const s=get('sc',r.id);if(s&&s.status==='rascunho')openSc(cl(s));},60);}});
+};
+/* SC complementar */
+function scComplNova(id){
+  const o=get('sc',id);if(!o)return null;
+  return {id:uid(),numero:nextNum('sc'),data:todayStr(),necessidade:o.necessidade&&o.necessidade>todayStr()?o.necessidade:addDays(todayStr(),7),solicitante:me.nome||'',solUid:actorId(),projId:o.projId||'',etapaId:o.etapaId||'',localEntrega:o.localEntrega||'',obs:'Complementar à SC nº '+o.numero,status:'rascunho',complDe:o.id,complNum:o.numero,itens:[{prodId:'',desc:'',un:'UN',qtd:1,k:uid()}]};
+}
+A.scCompl=d=>{const n=scComplNova(d.id);if(n)openSc(n);};
+{const n0=A.scNovo;A.scNovo=d=>{const r=n0(d);if(scd&&!scd.solUid)scd.solUid=actorId();return r;};}
+{const d0=A.scDel;A.scDel=d=>{const s=get('sc',d.id);if(s&&s.reab){toast('Esta solicitação foi reaberta depois de enviada. Use Cancelar (a cotação e a separação ligadas também são canceladas).','neg');return;}return d0(d);};}
+/* aviso no formulário */
+{const b0=scBody;scBody=function(){const h=b0();const x=scd||{},o=x.complDe?get('sc',x.complDe):null;let n='';
+  if(x.reab)n+='<div class="note" style="margin:0 0 10px">Solicitação reaberta em '+esc(fmtDT(x.reab.em))+(x.reab.cotId?'. Ao reenviar, a cotação existente é atualizada (itens novos em branco, removidos saem, quantidade alterada fica marcada para conferir).':'.')+' Depois de salvar, use <b>Reenviar ao comprador</b> na lista.</div>';
+  if(x.complDe)n+='<div class="note" style="margin:0 0 10px">Complementar à SC nº <b>'+esc(o?o.numero:x.complNum||'')+'</b>.</div>';
+  return n+h;};}
+/* detalhes: SC ligada e histórico */
+function scrHistHtml(s){
+  const o=s.complDe?get('sc',s.complDe):null,fil=S.sc.filter(x=>x.complDe===s.id),hs=s.reabHist||[];
+  let h='';
+  if(s.complDe||fil.length)h+='<div class="sect">Solicitações ligadas</div><ul style="margin:0;padding-left:18px">'+(s.complDe?'<li>Complementar à SC nº '+esc(o?o.numero:s.complNum||'')+(o?' ('+esc((SC_ST[o.status]||['',''])[0])+')':'')+'</li>':'')+fil.map(x=>'<li>SC complementar nº '+esc(x.numero)+' ('+esc((SC_ST[x.status]||['',''])[0])+')</li>').join('')+'</ul>';
+  if(hs.length)h+='<div class="sect">Reaberturas</div><ul style="margin:0;padding-left:18px">'+hs.map(r=>'<li>'+esc(fmtDT(r.em))+' · '+(r.tipo==='reaberta'?'reaberta por '+esc(r.nome||'')+' (estava '+esc(((SC_ST[r.de]||['',''])[0]).toLowerCase())+')'+(r.motivo?': '+esc(r.motivo):'')+(r.sepCancel?' · separação nº '+esc(r.sepCancel)+' cancelada':''):'reenviada por '+esc(r.nome||'')+(r.cot?(r.cot.cancelada?' · cotação cancelada (tudo do estoque)':' · cotação mantida: '+r.cot.novos+' novo(s), '+r.cot.removidos+' removido(s), '+r.cot.qtd+' quantidade(s) alterada(s)'):''))+'</li>').join('')+'</ul>';
+  return h;
+}
+{const v0=A.scVer;A.scVer=d=>{const r=v0(d);const s=get('sc',d.id),mb=$('#mb');if(s&&mb){const h=scrHistHtml(s);if(h)mb.innerHTML=(mb.innerHTML||'')+h;}return r;};}
+{const d0=scDoc;scDoc=function(sc){const o=d0(sc);const p=sc.complDe?get('sc',sc.complDe):null;if(sc.complDe&&o.meta)o.meta.push(['Complementar à SC','nº '+(p?p.numero:sc.complNum||'')]);const f=S.sc.filter(x=>x.complDe===sc.id).map(x=>x.numero);if(f.length&&o.meta)o.meta.push(['SC complementar',f.map(n=>'nº '+n).join(', ')]);return o;};}
+Object.assign(ACT_GROUP,{scReabrir:'comp',scCompl:'comp'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{scReabrir:'Volta a solicitação para rascunho para alterar itens e reenviar. O comprador é avisado.',scCompl:'Abre uma nova solicitação ligada a esta, com o mesmo projeto, etapa e local de entrega.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='135',APP_DATA='2026-10-29';
+const APP_VER='136',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['136','2026-10-29',['Solicitação de compra: botão Reabrir para editar quando está aguardando cotação ou em cotação (a cotação é mantida: item novo entra em branco, item removido sai, quantidade alterada fica marcada para conferir). Com pedidos gerados ou atendida, botão Criar SC complementar. Reabrem: quem pediu, o comprador e o administrador; fica no histórico e o comprador é avisado.']],
   ['135','2026-10-29',['Importar NFS-e emitidas (ZIP do Omie): lê o padrão da prefeitura (ABRASF) e o Padrão Nacional, guarda XML e PDF no arquivo fiscal, marca as canceladas e não duplica ao reimportar.', 'Ligação das NFS-e com Contas a receber: liga sozinha quando há um único título com o mesmo tomador, valor (bruto ou líquido) e data próxima; os demais casos vão para a lista Conferir (ligar, criar título ou ignorar). Título ligado a nota cancelada fica marcado.']],
   ['134','2026-10-29',['DANFE no padrão oficial (MOC 7.0, Anexo II) gerado a partir do XML: canhoto, código de barras da chave, protocolo, todos os quadros, IBS/CBS (NT 2026.010), várias folhas e marcas SEM VALOR FISCAL / CANCELADA.', 'PDF original do fornecedor guardado no arquivo fiscal (e-mail nfe@, anexo manual e importação em lote por ZIP de PDFs nomeados pela chave). O botão DANFE abre o PDF do fornecedor quando existe; o espelho antigo virou "Resumo".']],
   ['133.1','2026-10-29',['Visualizar / PDF: Exportar PDF voltou a funcionar (dava o erro "unsupported color function color" desde as cores por setor) e Imprimir passa a abrir só o documento, também no Safari.']],
