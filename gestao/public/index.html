@@ -6368,14 +6368,15 @@ const CTR_ST={vigente:['Vigente','pos'],suspenso:['Suspenso','warn'],encerrado:[
 const CTR_GAR=[['','Sem garantia'],['seguro','Seguro-garantia'],['caucao','Caução em dinheiro ou títulos'],['fianca','Fiança bancária']];
 const CTR_IDX=[['','Sem reajuste'],['INCC-DI','INCC-DI'],['IPCA','IPCA'],['IGP-M','IGP-M'],['SINAPI','Índice SINAPI'],['outro','Outro']];
 GRIDS.ctrIt={f:'itens',minw:820,paste:true,cols:[['item','Item','text'],['desc','Descrição do serviço','text'],['un','Un.','text'],['qtd','Quantidade','number'],['pu','Preço unitário (com BDI)','number'],['tot','Total','calc',r=>nf2((+r.qtd||0)*(+r.pu||0))]],blank:()=>({item:'',desc:'',un:'un',qtd:'',pu:''})};
-GRIDS.ctrAd={f:'aditivos',minw:760,cols:[['num','Nº','text'],['data','Data (AAAA-MM-DD)','text'],['tipo','Tipo','select',[['acrescimo','Acréscimo de valor'],['supressao','Supressão de valor'],['prazo','Prorrogação de prazo'],['reajuste','Reajuste']]],['valor','Valor (R$)','number'],['novoFim','Nova vigência (AAAA-MM-DD)','text'],['obs','Justificativa','text']],blank:()=>({num:'',data:todayStr(),tipo:'acrescimo',valor:'',novoFim:'',obs:''})};
+GRIDS.ctrAd={f:'aditivos',minw:860,cols:[['num','Nº','text'],['data','Data (AAAA-MM-DD)','text'],['tipo','Tipo','select',[['acrescimo','Acréscimo de valor'],['supressao','Supressão de valor'],['prazo','Prorrogação de prazo'],['reajuste','Reajuste']]],['assinado','Assinado','select',[['sim','Sim'],['nao','Não (em negociação)']]],['valor','Valor (R$)','number'],['novoFim','Nova vigência (AAAA-MM-DD)','text'],['obs','Justificativa','text']],blank:()=>({num:'',data:todayStr(),tipo:'acrescimo',assinado:'sim',valor:'',novoFim:'',obs:''})};
 const ctrItens=c=>(c.itens||[]).filter(i=>i.desc||+i.qtd);
 const ctrIni=c=>ctrItens(c).length?r2(sum(ctrItens(c),i=>(+i.qtd||0)*(+i.pu||0))):(+c.valor||0);
-const ctrAcr=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='acrescimo'),a=>a.valor));
-const ctrSup=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='supressao'),a=>a.valor));
-const ctrReaj=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='reajuste'),a=>a.valor));
+const ctrAdOk=a=>!(a&&a.assinado==='nao');
+const ctrAcr=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='acrescimo'&&ctrAdOk(a)),a=>a.valor));
+const ctrSup=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='supressao'&&ctrAdOk(a)),a=>a.valor));
+const ctrReaj=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='reajuste'&&ctrAdOk(a)),a=>a.valor));
 const ctrAtual=c=>r2(ctrIni(c)+ctrAcr(c)-ctrSup(c)+ctrReaj(c));
-const ctrFim=c=>(c.aditivos||[]).filter(a=>a.novoFim&&/^\d{4}-\d{2}-\d{2}$/.test(a.novoFim)).map(a=>a.novoFim).sort().pop()||c.vigFim||'';
+const ctrFim=c=>(c.aditivos||[]).filter(a=>ctrAdOk(a)&&a.novoFim&&/^\d{4}-\d{2}-\d{2}$/.test(a.novoFim)).map(a=>a.novoFim).sort().pop()||c.vigFim||'';
 const ctrLim=c=>c.publico==='nao'?null:(c.reforma?0.5:0.25);
 const ctrPctAcr=c=>{const i=ctrIni(c);return i>0?ctrAcr(c)/i:0;};
 const medsDe=cid=>S.med.filter(m=>m.ctrId===cid).sort((a,b)=>(+a.numero||0)-(+b.numero||0));
@@ -6436,7 +6437,7 @@ A.ctrVer=d=>{
   modal({title:'Contrato '+c.numero,wide:true,nofocus:true,body:'<p style="margin:0 0 6px">'+esc(c.objeto)+'</p><p class="sub" style="margin:0 0 10px">'+esc(parcNome(c.parcId))+(c.projId?' · '+esc(projNome(c.projId)):'')+(c.processo?' · processo '+esc(c.processo):'')+'</p>'+
     '<div class="kpis">'+kpi('Valor atual',money(at),'inicial '+money(ctrIni(c)))+kpi('Medido',money(me_),pctV(at?me_/at:null))+kpi('Recebido',money(rec),'das medições')+kpi('Saldo a executar',money(at-me_),'')+'</div>'+
     (al.length?'<div class="note">'+al.map(a=>esc(a[1])).join(' · ')+'</div>':'')+
-    '<div class="sect">Aditivos</div>'+((c.aditivos||[]).length?'<ul style="margin:0;padding-left:18px">'+c.aditivos.map(a=>'<li>'+esc((a.num?'Nº '+a.num+' · ':'')+fmtDate(a.data)+' · '+({acrescimo:'Acréscimo',supressao:'Supressão',prazo:'Prazo',reajuste:'Reajuste'}[a.tipo]||a.tipo)+(+a.valor?' · '+money(a.valor):'')+(a.novoFim?' · nova vigência '+fmtDate(a.novoFim):'')+(a.obs?' · '+a.obs:''))+'</li>').join('')+'</ul><p class="sub">Acréscimos: '+pctV(ctrPctAcr(c))+(ctrLim(c)!=null?' do valor inicial (limite '+pctV(ctrLim(c))+')':'')+'.</p>':'<p class="sub">Nenhum aditivo.</p>')+
+    '<div class="sect">Aditivos</div>'+((c.aditivos||[]).length?'<ul style="margin:0;padding-left:18px">'+c.aditivos.map(a=>'<li>'+esc((a.num?'Nº '+a.num+' · ':'')+fmtDate(a.data)+' · '+({acrescimo:'Acréscimo',supressao:'Supressão',prazo:'Prazo',reajuste:'Reajuste'}[a.tipo]||a.tipo)+(+a.valor?' · '+money(a.valor):'')+(a.novoFim?' · nova vigência '+fmtDate(a.novoFim):'')+(a.obs?' · '+a.obs:'')+(ctrAdOk(a)?'':' · em negociação (não assinado: não conta na vigência nem no valor)'))+'</li>').join('')+'</ul><p class="sub">Acréscimos: '+pctV(ctrPctAcr(c))+(ctrLim(c)!=null?' do valor inicial (limite '+pctV(ctrLim(c))+')':'')+'.</p>':'<p class="sub">Nenhum aditivo.</p>')+
     '<div class="sect">Medições</div><div class="tw"><table style="min-width:620px"><thead><tr><th>Nº</th><th>Período</th><th class="num">Faturar</th><th class="num">Retenção</th><th>Situação</th></tr></thead><tbody>'+(ms.length?ms.map(m=>{const t=medTot(m,c);return '<tr><td>'+esc(m.numero)+'</td><td class="mono">'+fmtDate(m.ini)+' a '+fmtDate(m.fim)+'</td><td class="num">'+money(t.fat)+'</td><td class="num">'+money(t.ret)+'</td><td>'+pill(MED_ST[m.status][0],MED_ST[m.status][1])+'</td></tr>';}).join(''):emptyRow(5,'Nenhuma medição.'))+'</tbody></table></div>'+
     (c.garTipo?'<p style="margin:10px 0 0">Garantia: '+esc((CTR_GAR.find(x=>x[0]===c.garTipo)||[0,''])[1])+(c.garValor?' · '+money(c.garValor):'')+(c.garVenc?' · vence '+fmtDate(c.garVenc):'')+'</p>':''),
     foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="ctrDel" data-id="'+c.id+'">Excluir</button><button class="btn" data-act="ctrEdit" data-id="'+c.id+'">Editar</button><button class="btn pri" data-act="medNova" data-c="'+c.id+'">Nova medição</button>'});
@@ -25653,10 +25654,10 @@ function v132MarcaStk(h){
 const v132Dias=(a,b)=>Math.round((new Date(b+'T12:00:00')-new Date(a+'T12:00:00'))/864e5);
 const V132_ISO=/^\d{4}-\d{2}-\d{2}$/;
 function v132Vig(c){c=c||{};const orig=V132_ISO.test(c.vigFim||'')?c.vigFim:'';
-  const ads=(c.aditivos||[]).filter(a=>a&&V132_ISO.test(a.novoFim||''));
+  const ads=(c.aditivos||[]).filter(a=>a&&V132_ISO.test(a.novoFim||'')&&ctrAdOk(a));
   const atual=ctrFim(c)||orig,dias=orig&&atual&&atual>orig?v132Dias(orig,atual):0;
   return {orig,atual,dias,n:ads.length,mudou:!!(orig&&atual&&atual!==orig)};}
-function v132Val(c){c=c||{};const ini=ctrIni(c),at=ctrAtual(c),ads=(c.aditivos||[]).filter(a=>a&&['acrescimo','supressao','reajuste'].includes(a.tipo)&&+a.valor);
+function v132Val(c){c=c||{};const ini=ctrIni(c),at=ctrAtual(c),ads=(c.aditivos||[]).filter(a=>a&&['acrescimo','supressao','reajuste'].includes(a.tipo)&&+a.valor&&ctrAdOk(a));
   return {ini,atual:at,dif:r2(at-ini),n:ads.length,acr:ctrAcr(c),sup:ctrSup(c),reaj:ctrReaj(c)};}
 const v132Pl=(n,s,p)=>n+' '+(n===1?s:p);
 function v132VigTxt(c){const v=v132Vig(c);if(!v.atual)return '—';
@@ -25702,7 +25703,7 @@ A.v132CtrFicha=d=>{const c=get('ctr',d&&d.id);if(!c)return;const vg=v132Vig(c),v
   showDoc({tipo:'Ficha do contrato',numero:c.numero,situacao:(CTR_ST[c.status||'vigente']||['—'])[0],
     meta:[['Contratante',parcNome(c.parcId)],['Projeto',p?(p.codigo||'')+(p.nome&&p.nome!==p.codigo?' · '+p.nome:''):'—'],['Objeto',c.objeto||''],['Processo / edital',c.processo||''],['Assinatura',c.assinatura?fmtDate(c.assinatura):''],
       ['Início da vigência',c.vigIni?fmtDate(c.vigIni):''],['Vigência atualizada',v132VigTxt(c)],['Valor atualizado',v132ValTxt(c)],['Medido',money(md)],['Saldo a executar',money(va.atual-md)]],
-    tables:[{title:'Aditivos',head:['Nº','Data','Tipo','Valor','Nova vigência','Justificativa'],num:[3],rows:ads.length?ads.map(a=>[a.num||'',a.data?fmtDate(a.data):'',V132_AD_T[a.tipo]||a.tipo||'',+a.valor?money(a.valor):'',a.novoFim?fmtDate(a.novoFim):'',a.obs||'']):[['','','Nenhum aditivo','','','']]}],
+    tables:[{title:'Aditivos',head:['Nº','Data','Tipo','Valor','Nova vigência','Justificativa'],num:[3],rows:ads.length?ads.map(a=>[a.num||'',a.data?fmtDate(a.data):'',(V132_AD_T[a.tipo]||a.tipo||'')+(ctrAdOk(a)?'':' (em negociação, não conta)'),+a.valor?money(a.valor):'',a.novoFim?fmtDate(a.novoFim):'',a.obs||'']):[['','','Nenhum aditivo','','','']]}],
     totals:[['Valor original',money(va.ini)],['Acréscimos',money(va.acr)],['Supressões',money(va.sup)],['Reajustes',money(va.reaj)],['Valor atualizado',money(va.atual),true]]},'ficha-contrato-'+slug(String(c.numero||'contrato')));};
 ACT_GROUP.v132CtrFicha=null;
 
@@ -25762,7 +25763,7 @@ const V132_MES=[['01','Janeiro'],['02','Fevereiro'],['03','Março'],['04','Abril
 const V132_OK=['dref','dde','date','dano','dmes'];
 function v132OppData(o,ref){ref=ref==null?(ui.opp&&ui.opp.dref)||'':ref;const iso=x=>{x=String(x||'').slice(0,10);return V132_ISO.test(x)?x:'';};
   let d=ref==='prev'?iso(o.prev):ref==='res'?iso(o.resultadoEm):iso(o.dataSessao)||iso(o.dataApres);
-  if(!d&&o.historico)d=iso(o.dataSessao)||iso(o.dataApres)||iso(o.prev)||iso(o.resultadoEm);
+  if(!d&&o.historico&&ref!=='res')d=iso(o.dataSessao)||iso(o.dataApres)||iso(o.prev)||iso(o.resultadoEm);
   return d;}
 {const d=MODS2.opp;if(d){const f=ui.opp;V132_OK.forEach(k=>{if(f[k]==null)f[k]='';});
   try{const s=JSON.parse(sessionStorage.getItem('cg.v132.oppData')||'null');if(s&&typeof s==='object')V132_OK.forEach(k=>{if(typeof s[k]==='string')f[k]=s[k];});}catch(e){}
@@ -25784,7 +25785,7 @@ function v132OppBarra(h){const f=ui.opp;
     lab('dde',['De','<input type="date" id="s_opp_dde" data-filter="opp.dde" value="'+esc(f.dde||'')+'">'])+
     lab('date',['Até','<input type="date" id="s_opp_date" data-filter="opp.date" value="'+esc(f.date||'')+'">'])+anoSel+mesSel.replace('>Todos<','>Todos os meses<')+
     (ativo?'<button class="btn sm" data-act="v132OppLimpa" style="margin-bottom:2px">Limpar datas</button>':'')+
-    '<span class="sub" style="flex-basis:100%;margin-top:-2px">Sem data no campo escolhido, a oportunidade fica fora quando há filtro de data'+(S.opp.some(o=>o.historico)?' (o histórico importado usa a data que tiver)':'')+'.</span></div>';
+    '<span class="sub" style="flex-basis:100%;margin-top:-2px">Sem data no campo escolhido, a oportunidade fica fora quando há filtro de data'+(S.opp.some(o=>o.historico)?' (o histórico importado usa a data que tiver, exceto no filtro por data do resultado: sem resultado registrado, fica fora)':'')+'.</span></div>';
   const ib=h.indexOf('<div class="bar">');if(ib<0)return h;const fb=h.indexOf('</div>',ib);
   return h.slice(0,fb+6)+bloco+h.slice(fb+6);}
 {const v0=V.opp;if(v0){V.opp=function(){const f=ui.opp;if(f.dde&&f.date&&f.dde>f.date){const t=f.dde;f.dde=f.date;f.date=t;}
@@ -25796,8 +25797,9 @@ Object.assign(V132,{edc:()=>EDC,oppData:v132OppData,proxCod:v132ProxCod,html:v13
 v132EmbrulhaV();
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='132',APP_DATA='2026-10-28';
+const APP_VER='133',APP_DATA='2026-10-29';
 const CHANGELOG=[
+  ['133','2026-10-29',['Contratos: aditivo tem o campo Assinado (Sim / Não, em negociação). Só os assinados contam na vigência e no valor atualizados, no saldo e no limite de acréscimos; os em negociação aparecem marcados. Aditivos já cadastrados contam como assinados.', 'Oportunidades: no filtro pela data do resultado, propostas antigas sem resultado registrado ficam de fora.']],
   ['132','2026-10-28',['Datas em DD/MM/AAAA em todo o sistema (telas, janelas, PDF, avisos, histórico e planilhas CSV); competências como MM/AAAA.', 'Contratos com clientes: descrição do projeto e objeto na horizontal (até 2 linhas, texto inteiro ao passar o mouse); Vigência atualizada e Valor atualizado com os aditivos, com o original ao lado, na lista, no detalhe e na ficha em PDF; botão + Criar novo projeto na edição do contrato.', 'Usuários: cabeçalho da tabela O que cada perfil pode fazer fixo ao rolar e coluna de perfil fixa ao rolar para o lado.', 'Oportunidades e licitações: filtros por data (apresentação/sessão, previsão ou resultado) com período, ano e mês.']],
   ['131','2026-10-28',['Aparência do menu (para teste, escolha de cada pessoa) em Sistema › Configurações ou no menu da conta: Atual, F1 (três linhas, módulos rolando para os lados), F2 (duas linhas com menu da conta), C (barra lateral de ícones com painel de telas) e D (mega-menu com Favoritas e recentes).', 'Busca rápida Ir para… (Ctrl+K ou Cmd+K, e o botão de busca do topo): encontra telas, ações Novo… e registros (clientes, fornecedores, colaboradores, obras, propostas, contas), só o que o perfil pode ver.']],
   ['130.2','2026-10-28',['Botão Sair (e Enviar link de senha em Usuários › Editar) de volta: tinham sumido desde a versão 124 por um arquivo do sistema sobrescrito por engano.', 'Fábrica virou módulo próprio no menu superior, ao lado de Qualidade, com Painel de produção e Ordens de fabricação (saiu de Obras).']],
