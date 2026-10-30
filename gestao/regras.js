@@ -84,6 +84,165 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const salvar = (p, data, conta, req, metodo, antes) => { const s = p.split('/'), ts = Date.now(); q.docPut.run(p, s.slice(0, -1).join('/'), s[s.length - 1], JSON.stringify(data), ts); avisarDoc('set', p, data, ts); auditar(conta, req, metodo || 'ROTA', p, antes, data); atualizarCitacoes(conta, p, data); return ts; };
 
   /* =====================================================================
+     v140 (relatorios/feito_v140_p2p.md): compras → nota → contas a pagar
+     1. POST /api/nota/lancar: o navegador monta o pacote do lançamento (nota lançada, movimentos de estoque, contas a pagar,
+        guias de retenção, produto novo, baixa da entrada provisória do pedido) e o servidor confere quem lança (Fiscal,
+        Administrador, dono ou personalizado que grava Notas), revalida as travas (recebimento físico, pedido aprovado,
+        divergência aprovada, nota sem pedido acima do limite com motivo, nota repetida por fornecedor+número+série e por
+        chave, inclusive contra contas criadas a partir do XML no Arquivo fiscal) e grava tudo numa transação.
+     2. Conta a pagar ligada a nota (notaId) só nasce por essa rota (regraLancNota).
+     3. Alçada padrão: cfg.alcPadrao {em, campos} é gravado uma vez, quando o pedido e/ou o pagamento ainda não tinham alçada
+        (ausente ou 0). Vale o piso de R$ 2.000 (o recomendado do checklist) com os níveis N1 até R$ 10 mil, N2 até R$ 100 mil e
+        N3 acima com duas pessoas. Não é retroativo: conta ou pedido criado antes de "em" não passa a precisar de aprovação.
+        Quando o Administrador salva as regras de aprovação, alcPadrao.ativo fica false e vale o que ele gravou.
+     ===================================================================== */
+  const P2 = require('./p2p.js');
+  const P2N = (() => {
+    const PISO = 2000;
+    const vazio = v => v == null || v === '' || !(+v > 0);
+    function alcPadraoDe(c) {
+      const ap = c.alcPadrao && typeof c.alcPadrao === 'object' ? c.alcPadrao : null, cs = ap && Array.isArray(ap.campos) ? ap.campos : [];
+      const liga = k => !!ap && ap.ativo !== false && cs.includes(k) && vazio(c[k === 'ped' ? 'alcPed' : 'alcPag']);
+      return { ped: liga('ped') ? PISO : (+c.alcPed || 0), pag: liga('pag') ? PISO : (+c.alcPag || 0), em: ap ? +ap.em || 0 : 0, campos: cs, ativo: !!ap && ap.ativo !== false };
+    }
+    /* item criado antes da ativação (ou sem data de criação) não entra na alçada que nasceu com a v140 */
+    const antesDaAlcada = (pd, k, r) => !!(pd && pd.em && pd.campos.includes(k) && !(+(r && r.cr) >= pd.em));
+    const crMinimo = r => { const pd = alcadas().padrao; if (pd && pd.em && !(+r.cr >= pd.em)) r.cr = Date.now(); };
+    /* gravação única na subida do servidor */
+    try {
+      const c = doc('cfg/empresa');
+      if (!(c && c.alcPadrao)) {
+        const campos = ['ped', 'pag'].filter(k => vazio((c || {})[k === 'ped' ? 'alcPed' : 'alcPag']));
+        if (campos.length) { const n = Object.assign({ id: 'empresa' }, c || {}, { alcPadrao: { em: Date.now(), campos, ativo: true, piso: PISO } }); q.docPut.run('cfg/empresa', 'cfg', 'empresa', JSON.stringify(n), Date.now()); }
+      }
+    } catch (e) { console.error('[v140] alçada padrão:', e.message); }
+
+    let ROTA = null; /* id da nota sendo lançada pela rota (libera as contas dela em antesGravar) */
+    function regraLancNota(conta, velho, novo) {
+      if (!novo || novo.tipo !== 'pagar' || !novo.notaId) return null;
+      if (ROTA && String(novo.notaId) === ROTA) return null;
+      if (velho && String(velho.notaId || '') === String(novo.notaId)) return null;
+      if (!velho && novo.saldoDe) { const o = doc('lanc/' + String(novo.saldoDe)); if (o && String(o.notaId || '') === String(novo.notaId)) return null; } /* saldo de baixa parcial */
+      if (perfilEm(conta, ['admin']) && novo.impLote && !ehDono(conta)) return null; /* importação de outro sistema (Administrador) */
+      return erro('Conta a pagar de nota fiscal só nasce do lançamento da nota (botão Lançar, pelo Fiscal), que confere recebimento, aprovação e duplicidade. Para pagar sem nota, lance a conta sem ligar a uma nota.');
+    }
+    function podeLancar(conta) {
+      if (ehDono(conta)) return true; const d = defDe(conta); if (!d) return false; if (d.w === '*') return true;
+      const w = Array.isArray(d.w) ? d.w : []; if (!w.includes('nf')) return false;
+      if (d.so && Array.isArray(d.so.nf) && !d.so.nf.includes('notas')) return false;
+      if (Array.isArray(d.rascunho) && d.rascunho.includes('notas')) return false;
+      return true;
+    }
+    const normCh = ch => String(ch || '').replace(/\D/g, '');
+    function travas(n, id) {
+      const m = [], c = cfgEmp(); if (n.tipo !== 'entrada') return m;
+      const num = String(n.numero || ''), ser = String(n.serie || '1'), ch = normCh(n.chave);
+      const outras = col('notas').filter(o => o.id !== id && o.tipo === 'entrada');
+      if (num && outras.some(o => o.status === 'lancada' && o.parcId === n.parcId && String(o.numero || '') === num && String(o.serie || '1') === ser)) m.push('Já existe a NF nº ' + num + '/' + ser + ' deste fornecedor lançada. Exclua este rascunho para não pagar duas vezes.');
+      if (ch && outras.some(o => o.status === 'lancada' && normCh(o.chave) === ch)) m.push('Já existe uma nota lançada com esta chave de acesso.');
+      const xml = col('lanc').filter(l => l.tipo === 'pagar' && l.status !== 'cancelado' && String(l.notaId || '') !== id && ((ch && l.arqf && normCh(l.arqf.ch) === ch) || (!l.notaId && num && String(l.nf || '') === num && l.parcId === n.parcId)));
+      if (xml.length) m.push('Já existe conta a pagar desta nota (' + xml.slice(0, 3).map(l => (l.desc || 'conta') + ' de ' + P2.r2(l.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })).join('; ') + '), criada pelo Arquivo fiscal ou à mão. Para não pagar duas vezes: peça ao Financeiro para cancelar essa conta e lance de novo, ou exclua este rascunho.');
+      if (n.pedId) {
+        const p = doc('ped/' + String(n.pedId));
+        if (!p) m.push('O pedido de compra ligado à nota não foi encontrado.');
+        else {
+          const rs = Array.isArray(p.recebs) ? p.recebs : [];
+          if (n.recebId && !rs.some(r => r.id === n.recebId)) m.push('O recebimento ligado à nota não existe mais no pedido nº ' + (p.numero || '') + '. Escolha o recebimento de novo.');
+          if (!n.recebId && (n.chave || n.recebida)) m.push('Falta o recebimento físico: em Pedidos de compra › Receber, o almoxarife informa as quantidades que chegaram e escolhe esta nota.');
+          const A = alcadas();
+          if (A.ped > 0 && p.status !== 'cancelado' && pedTotal(p) > A.ped && !P2N_antes(A, p) && !(p.aprov && p.aprov.ok)) m.push('O pedido nº ' + (p.numero || '') + ' ainda não foi aprovado. O material pode ser recebido, mas a nota e o pagamento ficam travados até a aprovação (Financeiro › Aprovações).');
+          const cf = P2.supConf(n, p, c), ap = (doc('notas/' + id) || {}).confAprov;
+          if (((cf && cf.div) || n.confPend) && !(confOk(ap) && (!cf || !cf.div || !ap.sig || ap.sig === cf.sig))) m.push('Divergência com o pedido ou o recebimento acima da tolerância: precisa da aprovação do comprador e do solicitante (ou gestor), pessoas diferentes, antes de gerar a conta a pagar (Suprimentos › Conferência).');
+        }
+      } else {
+        const sp = P2.semPed(n, c);
+        if (sp && !sp.ok) m.push('Nota de ' + sp.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ' sem pedido de compra. Ligue a nota a um pedido ou informe o motivo e a justificativa (seção "Pedido de compra e conferência"). A regra vale acima de ' + sp.min.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + '.');
+      }
+      return m;
+    }
+    const P2N_antes = (A, p) => antesDaAlcada(A.padrao, 'ped', p);
+    const ID_OK = /^[\w\-.|~@+=]{1,200}$/, COLS_OK = new Set(['notas', 'mov', 'lanc', 'prod', 'ped']);
+    function rotaNotaLancar(conta, req, b) {
+      b = b && typeof b === 'object' ? b : {};
+      const id = String(b.id || ''); if (!ID_OK.test(id)) return erro('Nota inválida.', 400);
+      if (!podeLancar(conta)) { auditar(conta, req, 'NOTA_LANCAR_NEGADO', 'notas/' + id, null, null); return erro('Quem lança a nota (estoque e contas a pagar) é o Fiscal ou um administrador. O seu perfil não lança notas.'); }
+      if (!pode(conta, 'notas/' + id, 'w')) return erro('Sem permissão para alterar notas.');
+      const velho = doc('notas/' + id); if (!velho) return erro('Nota não encontrada. Salve o rascunho antes de lançar.', 404);
+      if (velho.status !== 'rascunho') return erro('Esta nota não está mais em rascunho (já foi lançada ou cancelada). Atualize a tela.', 409);
+      const docs = Array.isArray(b.docs) ? b.docs : []; if (!docs.length || docs.length > 3000) return erro('Pacote do lançamento inválido.', 400);
+      const fin = new Map();
+      for (const d of docs) {
+        const c = String((d && d.col) || ''), i = String((d && d.id) || ''), p = c + '/' + i;
+        if (!COLS_OK.has(c) || !ID_OK.test(i)) return erro('Item inesperado no lançamento da nota (' + c.slice(0, 20) + ').', 400);
+        if (d.del) { fin.set(p, { c, i, p, del: true }); continue; }
+        if (!d.data || typeof d.data !== 'object' || Array.isArray(d.data)) return erro('Dados inválidos no lançamento da nota.', 400);
+        fin.set(p, { c, i, p, data: Object.assign({}, d.data, { id: i }) });
+      }
+      const N = fin.get('notas/' + id); if (!N || N.del || N.data.status !== 'lancada') return erro('O pacote não traz a nota lançada.', 400);
+      const n = N.data; if (n.tipo !== velho.tipo) return erro('O tipo da nota não confere.', 400);
+      const mot = travas(n, id);
+      if (mot.length) { auditar(conta, req, 'NOTA_LANCAR_RECUSADO', 'notas/' + id, null, { motivos: mot }); return { erro: 'A nota ainda não pode ser lançada. ' + mot.join(' '), motivos: mot, st: 409 }; }
+      /* as contas do pacote (parcelas + guias de retenção) fecham com o total da nota */
+      { const tt = P2.notaTotais(n), sl = P2.r2([...fin.values()].filter(x => x.c === 'lanc' && !x.del && String(x.data.notaId || '') === id).reduce((s, x) => s + (+x.data.valor || 0), 0));
+        if (tt.vNF > 0 && Math.abs(sl - tt.vNF) > 0.05) return erro('As contas do lançamento (' + sl.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ') não fecham com o total da nota (' + tt.vNF.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + '). Abra a nota de novo e lance outra vez.', 400); }
+      const provs = new Set(); if (n.pedId) { const p = doc('ped/' + String(n.pedId)); (p && Array.isArray(p.recebs) ? p.recebs : []).forEach(r => (Array.isArray(r.movProv) ? r.movProv : []).forEach(x => provs.add(String(x)))); }
+      const prep = []; ROTA = id;
+      try {
+        for (const x of fin.values()) {
+          const vx = doc(x.p);
+          if (x.c === 'notas' && x.i !== id) return erro('O lançamento só altera a própria nota.', 400);
+          if (x.c === 'lanc' && (x.del || vx || String(x.data.notaId || '') !== id)) return erro('O lançamento da nota só cria as contas desta nota.', 400);
+          if (x.c === 'mov' && (x.del ? !(vx && provs.has(x.i)) : (vx || String(x.data.notaId || '') !== id))) return erro('O lançamento da nota só cria os movimentos de estoque desta nota (e tira a entrada provisória do recebimento).', 400);
+          if (x.c === 'ped' && (x.del || !vx || x.i !== String(n.pedId || ''))) return erro('O lançamento da nota só atualiza o pedido ligado a ela.', 400);
+          if (x.c === 'prod' && x.del) return erro('O lançamento da nota não exclui produtos.', 400);
+          if (!pode(conta, x.p, 'w') || !perfilPermite(conta, x.p, 'w')) return erro('Seu perfil não permite gravar ' + x.c + '.');
+          /* contas e movimentos da própria nota: só por esta rota (o Fiscal não grava contas a pagar pela gravação comum) */
+          const daNota = (x.c === 'lanc' || x.c === 'mov') && !x.del;
+          if (!daNota && !gravacaoPermitida(conta, x.p) && !excecaoGravacao(conta, x.p, vx, x.data || null, x.del ? 'DELETE' : 'PUT')) return erro('Seu perfil não grava ' + x.c + ' (' + x.i + ').');
+          const v = x.del ? antesExcluir(conta, x.p, vx, req) : antesGravar(conta, x.p, vx, x.data, req);
+          if (v && v.reauth) return erro('Confirme a senha e lance de novo.', 409);
+          if (v && v.erro) return erro((x.c === 'lanc' ? 'Conta a pagar: ' : x.c === 'mov' ? 'Estoque: ' : '') + v.erro, v.st);
+          prep.push({ x, vx, v: v || {} });
+        }
+      } finally { ROTA = null; }
+      /* herança da aprovação do pedido: a soma das contas desta nota não passa do aprovado + tolerância */
+      const ls = prep.filter(o => o.x.c === 'lanc' && !o.x.del && o.v.data && o.v.data.tipo === 'pagar' && o.v.data.status !== 'cancelado');
+      const her = ls.filter(o => o.v.data.aprovHerdada && o.v.data.aprovHerdada.tipo === 'ped');
+      if (her.length) { const p = doc('ped/' + String(her[0].v.data.aprovHerdada.id)), tot = P2.r2(ls.reduce((s, o) => s + (+o.v.data.valor || 0), 0) + col('lanc').filter(l => l.tipo === 'pagar' && l.status !== 'cancelado' && String(l.notaId || '') === id && !fin.has('lanc/' + l.id)).reduce((s, l) => s + (+l.valor || 0), 0));
+        if (!p || !(p.aprov && p.aprov.ok) || tot > (+p.aprov.valor || pedTotal(p)) * (1 + tolHerd()) + 0.01) her.forEach(o => delete o.v.data.aprovHerdada); }
+      const ts = Date.now();
+      db.exec('BEGIN');
+      try {
+        for (const { x, v } of prep) { if (x.del) q.docDel.run(x.p); else { const t = JSON.stringify(v.data); if (t.length > 4 * 1024 * 1024) throw new Error('grande'); q.docPut.run(x.p, x.c, x.i, t, ts); } }
+        db.exec('COMMIT');
+      } catch (e) { try { db.exec('ROLLBACK'); } catch (z) { } return erro('Falha ao gravar o lançamento. Nada foi gravado; tente de novo.', 500); }
+      for (const { x, vx, v } of prep) { avisarDoc(x.del ? 'del' : 'set', x.p, x.del ? null : v.data, ts); try { depois(conta, req, x.del ? 'DELETE' : 'PUT', x.p, vx, x.del ? null : v.data, v); } catch (e) { } }
+      const tt = P2.notaTotais(n);
+      auditar(conta, req, 'NOTA_LANCADA', 'notas/' + id, null, { numero: n.numero || '', serie: n.serie || '', parcId: n.parcId || '', valor: tt.vNF, contas: ls.map(o => o.x.i), movimentos: prep.filter(o => o.x.c === 'mov' && !o.x.del).length, provisoriasBaixadas: prep.filter(o => o.x.c === 'mov' && o.x.del).length });
+      return { ok: true, msg: 'Nota lançada: estoque e contas a pagar atualizados.', docs: prep.filter(o => !o.x.del).map(o => ({ col: o.x.c, id: o.x.i, data: o.v.data })), dels: prep.filter(o => o.x.del).map(o => ({ col: o.x.c, id: o.x.i })) };
+    }
+    /* solicitação de compra: sair de rascunho/aprovação para o comprador (enviada) ou para o estoque (atendida) exige a
+       aprovação de material (aprovMat.ok). Vale: aprovador de material (matFluxo.aprov), aprovador das alçadas, Administrador
+       ou dono; ou o limite automático (matFluxo.autoAte) com o valor estimado que o navegador calculou. Quem pediu não aprova
+       a própria solicitação. Uma aprovação já gravada (reenvio de solicitação reaberta) continua valendo. */
+    function ehAprovMat(conta) {
+      if (ehDono(conta) || perfilEm(conta, ['admin'])) return true; const f = cfgEmp().matFluxo || {};
+      return (Array.isArray(f.aprov) && f.aprov.includes(conta.id)) || todosAprovadores().includes(conta.id) || aprovadoresDe('compras').includes(conta.id);
+    }
+    function regraScAprov(conta, velho, novo) {
+      const v = velho || {}; if (!['enviada', 'atendida'].includes(novo.status) || (velho && !['rascunho', 'aprovacao', 'recusada'].includes(v.status))) return null;
+      const a = novo.aprovMat && typeof novo.aprovMat === 'object' ? novo.aprovMat : null;
+      if (!(a && a.ok)) return erro('A solicitação de compra precisa da aprovação de material antes de seguir para o comprador ou para a separação. Use Enviar: ela vai para Aguardando aprovação.', 409);
+      if (velho && igual(v.aprovMat, a)) return null;
+      if (a.auto === 'limite') { const lim = +((cfgEmp().matFluxo || {}).autoAte) || 0; if (!(lim > 0 && a.valorEst != null && +a.valorEst <= lim + 0.009)) return erro('O valor estimado passa do limite de aprovação automática: a solicitação precisa de aprovação.', 409); }
+      else if (!ehAprovMat(conta)) return erro('Só um aprovador de material aprova a solicitação de compra. Envie para aprovação.');
+      else if (!a.auto && (v.solUid || novo.solUid) === conta.id && !ehDono(conta)) return erro('Quem pediu não aprova a própria solicitação.');
+      novo.aprovMat = Object.assign({}, a, { por: conta.id, em: Date.now(), srv: 1 }); return null;
+    }
+    return { alcPadraoDe, antesDaAlcada, crMinimo, regraLancNota, rotaNotaLancar, podeLancar, travas, regraScAprov };
+  })();
+
+  /* =====================================================================
      7. TRILHA DE AUDITORIA
      ===================================================================== */
   const SEGREDOS = /^(senha|senha2|atual|nova|codigo|rec|token|segredo|hash|totp|img)$/i;
@@ -240,7 +399,9 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const c = cfgEmp(), x = c.alcNiv || {}, n = Object.assign({}, ALC_DEF, x);
     ['ap1', 'ap2', 'ap3'].forEach(k => { if (!Array.isArray(n[k])) n[k] = []; });
     n.n1 = +n.n1 > 0 ? +n.n1 : ALC_DEF.n1; n.n2 = +n.n2 > n.n1 ? +n.n2 : Math.max(n.n1, ALC_DEF.n2); n.frac = n.frac !== false;
-    n.aprov = Array.isArray(c.aprovadores) ? c.aprovadores : []; n.ped = +c.alcPed || 0; n.pag = +c.alcPag || 0; return n;
+    n.aprov = Array.isArray(c.aprovadores) ? c.aprovadores : []; n.ped = +c.alcPed || 0; n.pag = +c.alcPag || 0;
+    /* v140: alçada padrão (cfg.alcPadrao, gravado uma vez pelo servidor) quando a empresa ainda não tinha configurado */
+    const pd = P2N.alcPadraoDe(c); n.ped = pd.ped; n.pag = pd.pag; n.padrao = pd; return n;
   }
   const pedItBruto = i => (+i.qtd || 0) * (+i.vUnit || 0), pedItDesc = i => r2(pedItBruto(i) * Math.min(100, Math.max(0, +i.pDesc || 0)) / 100);
   const pedItBase = i => r2(pedItBruto(i) - pedItDesc(i)), pedItTot = i => r2(pedItBase(i) + r2(pedItBase(i) * (+i.pIpi || 0) / 100) + (+i.vSt || 0));
@@ -352,7 +513,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     } else if (c === 'lanc' || c === 'ped' || c === 'aprovsol') {
       if (c === 'aprovsol' && velho.status !== 'pendente') return erro('Este pedido já foi decidido.', 409);
       const v = c === 'aprovsol' ? (+velho.valor || 0) : valorAlc(c, velho), vp = c === 'ped' ? pedTotal(velho) : (+velho.valor || 0), nv = c === 'lanc' && velho.obrig ? Math.min(2, nivelDe(v)) : nivelDe(v), dois = nv === 3; /* v111: pagamento obrigatório (folha, guias, tributos): nível até 2, um aprovador */
-      if (!dono && !quemAprova(nv).includes(eu)) return erro('Este item é do ' + NIV_NOME[nv] + ': você não está entre os aprovadores desse nível.');
+      const qa = quemAprova(nv), fb = !qa.length && (dono || perfilEm(conta, ['admin'])); /* v140: nível sem aprovador → dono/Administrador */
+      if (!dono && !qa.includes(eu) && !fb) return erro('Este item é do ' + NIV_NOME[nv] + ': você não está entre os aprovadores desse nível.');
       const autor = c === 'aprovsol' ? (velho.por || velho.crBy || '') : (velho.crBy || '');
       if (autor && autor === eu && !dono) return erro('Quem lançou não pode aprovar o próprio lançamento.');
       const par = velho.aprovParc || null;
@@ -361,8 +523,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (dec !== 'nao' && nv === 3 && !END.reautenticado(req)) return { reauth: true }; /* v111: aprovar no nível 3 pede a senha de novo */
       const ass = { por: eu, em: agora, ip, obs }; delete n.aprovParc;
       if (dec === 'nao') { n.aprov = { ok: false, por: eu, em: agora, ip, obs, valor: vp, valorAlc: v, nivel: nv, srv: 1 }; if (c === 'ped') n.status = 'cancelado'; if (c === 'aprovsol') n.status = 'recusado'; }
-      else if (dois && !par) { n.aprovParc = Object.assign({ valor: vp, nivel: nv, srv: 1 }, ass); parcial = true; msg = 'Primeira aprovação registrada. Acima de ' + alcadas().n2.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ' falta a aprovação de outra pessoa.'; }
-      else { n.aprov = { ok: true, por: eu, em: agora, ip, obs, valor: vp, valorAlc: v, nivel: nv, assin: (par ? [par] : []).concat([ass]), srv: 1 }; if (c === 'aprovsol') { n.status = 'aprovado'; msg = 'Aprovado. Quem pediu já pode concluir a operação.'; } }
+      else if (dois && !par && !fb) { n.aprovParc = Object.assign({ valor: vp, nivel: nv, srv: 1 }, ass); parcial = true; msg = 'Primeira aprovação registrada. Acima de ' + alcadas().n2.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ' falta a aprovação de outra pessoa.'; }
+      else { n.aprov = { ok: true, por: eu, em: agora, ip, obs, valor: vp, valorAlc: v, nivel: nv, assin: (par ? [par] : []).concat([ass]), srv: 1 }; if (fb) n.aprov.semAprovador = true; if (c === 'aprovsol') { n.status = 'aprovado'; msg = 'Aprovado. Quem pediu já pode concluir a operação.'; } }
       delete n.aprovReaberta;
     } else if (c === 'adtoit') {
       if (!gravaGrupo(conta, 'fin')) return erro('Só o Financeiro aprova comprovantes de prestação de contas.');
@@ -420,7 +582,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     return false;
   }
   const aprovacaoValida = l => !!(l && ((l.aprov && l.aprov.ok) || (l.obrig && l.aprovParc) || herancaOk(l)));
-  function precisaAprovPag(l) { const A = alcadas(); return A.pag > 0 && l.tipo === 'pagar' && l.status !== 'cancelado' && !l.transf && !l.adtoId && valorAlc('lanc', l) > A.pag; }
+  function precisaAprovPag(l) { const A = alcadas(); return A.pag > 0 && l.tipo === 'pagar' && l.status !== 'cancelado' && !l.transf && !l.adtoId && !P2N.antesDaAlcada(A.padrao, 'pag', l) && !P2.concLivre(l) && valorAlc('lanc', l) > A.pag; } /* v140: antesDaAlcada, concLivre */
   function regraPago(conta, p, velho, novo) {
     const v = velho || {};
     /* pagoSemAprov é carimbado pelo servidor: ninguém põe nem tira por fora */
@@ -1111,7 +1273,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const desde = (r, p) => Math.max(+r.cr || 0, +(r.aprovReaberta && r.aprovReaberta.em) || 0, +r.enviadoEm || 0, +r.solEm || 0) || docTs(p);
     const add = (quem, tipo, desc, valor, d, fora, fin) => { if (!d || d > lim) return; const f = (fora || []).filter(Boolean); itens.push({ quem: [...new Set(quem)].filter(u => !f.includes(u)), tipo, desc: String(desc || '').slice(0, 160), valor, desde: d, fin: !!fin }); };
     for (const l of col('lanc')) if (!l.pago && !l.aprov && precisaAprovPag(l) && !aprovacaoValida(l)) add(quemAprova(l.obrig ? Math.min(2, nivelDe(valorAlc('lanc', l))) : nivelDe(valorAlc('lanc', l))), 'Conta a pagar', l.desc, +l.valor, desde(l, 'lanc/' + l.id), [l.crBy, l.aprovParc && l.aprovParc.por], true);
-    if (A.ped > 0) for (const p of col('ped')) if (!p.aprov && p.status !== 'cancelado' && pedTotal(p) > A.ped) add(quemAprova(nivelDe(pedTotal(p))), 'Pedido de compra', 'Pedido ' + (p.numero || p.id), pedTotal(p), desde(p, 'ped/' + p.id), [p.crBy]);
+    if (A.ped > 0) for (const p of col('ped')) if (!p.aprov && p.status !== 'cancelado' && pedTotal(p) > A.ped && !P2N.antesDaAlcada(A.padrao, 'ped', p)) add( /* v140: pedido antigo fora da alçada padrão */quemAprova(nivelDe(pedTotal(p))), 'Pedido de compra', 'Pedido ' + (p.numero || p.id), pedTotal(p), desde(p, 'ped/' + p.id), [p.crBy]);
     for (const x of col('aprovsol')) if (x.status === 'pendente') add(quemAprova(nivelDe(+x.valor || 0)), 'Pedido de aprovação', (x.tipo || '') + ' ' + (x.chave || ''), +x.valor || 0, +x.em || desde(x, 'aprovsol/' + x.id), [x.por], true);
     for (const x of col('heaut')) if (x.status === 'pendente') add(aprovadoresDe('rh').length ? aprovadoresDe('rh') : contasQueGravam('rh'), 'Hora extra', (x.data || '') + ' · ' + (x.horas || '') + ' h · ' + (x.motivo || ''), null, desde(x, 'heaut/' + x.id), [x.solPor]);
     for (const x of col('adtoit')) if ((x.status || 'pendente') === 'pendente') add(contasQueGravam('fin'), 'Comprovante de adiantamento', x.desc || x.id, +x.valor || 0, desde(x, 'adtoit/' + x.id), [x.crBy], true);
@@ -1480,7 +1642,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* =====================================================================
      ENTRADA: regras antes de gravar ou excluir um documento
      ===================================================================== */
-  const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf']; /* v125: osf = e-mail da fábrica e aprovadores da OS */
+  const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf', 'alcPadrao', 'supSemPedMin', 'supSemPedIsentas', 'supTolQtd']; /* v140: alcPadrao e as regras da nota sem pedido/tolerância (o servidor confere no lançamento) */ /* v125: osf = e-mail da fábrica e aprovadores da OS */
   /* v111: a Diretoria não lança, mas decide: liberação (docLib) e aprovação/recusa de medições, sem mudar outros campos */
   const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
     fzpedfech: ['st', 'porConf', 'emConf', 'devObs', 'eventos'], opp: ['goAprov', 'goReq', 'goHist'] };
@@ -1636,7 +1798,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     if (Array.isArray(d.rascunho) && d.rascunho.includes(c0)) {
       if (m === 'DELETE') { if (velho && velho.status !== 'rascunho') return erro('Seu perfil só exclui notas em rascunho.'); }
-      else if ((velho && velho.status !== 'rascunho') || novo.status !== 'rascunho') return erro('Seu perfil só cria e altera notas em rascunho (do recebimento). Quem lança a nota é o Comprador, o Fiscal ou o Financeiro.');
+      else if ((velho && velho.status !== 'rascunho') || novo.status !== 'rascunho') return erro('Seu perfil só cria e altera notas em rascunho (do recebimento). Quem valida e lança a nota é o Fiscal (ou um administrador).');
     }
     if (m === 'DELETE' && velho && Array.isArray(d.naoExclui) && d.naoExclui.includes(c0)) return erro('Seu perfil não exclui este registro (fica com o Gestor de segurança do trabalho ou um administrador).');
     if (c0 === 'cfg' && m !== 'DELETE' && Array.isArray(d.cfgNao)) { const k = d.cfgNao.find(k => !igual((velho || {})[k], novo[k])); if (k) return erro('Seu perfil não altera esta configuração (' + k + '). Fica com o Gestor de segurança do trabalho ou um administrador.'); }
@@ -1652,9 +1814,10 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     /* autor carimbado pelo servidor */
     if (!AREAS.has(c0) && c0 !== 'cfg' && c0 !== 'usr') {
       if (velho) { if (velho.crBy !== undefined) novo.crBy = velho.crBy; else delete novo.crBy; if (velho.cr !== undefined) novo.cr = velho.cr; }
-      else if (novo.crBy !== undefined || s.length === 2) { novo.crBy = conta.id; if (!novo.cr) novo.cr = Date.now(); }
+      else if (novo.crBy !== undefined || s.length === 2) { novo.crBy = conta.id; if (!novo.cr) novo.cr = Date.now(); if ((c0 === 'lanc' || c0 === 'ped') && s.length === 2) P2N.crMinimo(novo); } /* v140 */
     }
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin']))) { const v = velho || {}; const k = CFG_PROT.find(k => !igual(v[k], novo[k])); if (k) return erro('Alçadas e aprovadores só um administrador altera.'); }
+    if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual(((velho || {}).matFluxo || {}).autoAte, (novo.matFluxo || {}).autoAte)) return erro('O limite de aprovação automática das solicitações só um administrador altera.'); /* v140 */
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin', 'rh'])) && !igual((velho || {}).pfonte, novo.pfonte)) return erro('As fontes e a trava do ponto só o RH ou um administrador alteram.');
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual(((velho || {}).fz || {}).fech2, (novo.fz || {}).fech2)) return erro('O modo de fechamento (duas etapas) só um administrador altera.');
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual((velho || {}).p0, novo.p0)) return erro('Quem vê o Painel do Início só um administrador altera.'); /* v115 */
@@ -1671,6 +1834,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'parc' && s.length === 2) regraParc(conta, req, velho, novo, ctx);
     let e = regraAprov(c0, conta, req, velho, novo, ctx); if (e) return e;
     if (s.length === 2) {
+      if (c0 === 'lanc') { e = P2N.regraLancNota(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'rdo') { e = regraAptRdo(velho, novo); if (e) return e; }
@@ -1681,6 +1845,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */
       if (c0 === 'nfse') { e = regraNfseCanc(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'sc') { e = P2N.regraScAprov(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'notas') { e = regraNotaConf(conta, req, velho, novo); if (e) return e; }
       e = travaPonto(c0, velho, novo); if (e) return e;
       e = regrasJur1(c0, conta, velho, novo) || regrasJur2(c0, conta, velho, novo); if (e) return e;
@@ -1743,6 +1908,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   async function rota(p, m, req, res, conta, u) {
     const R = async fn => { const b = await lerJson(req); const r = fn(b); if (r.reauth) { auditar(conta, req, 'PEDE_SENHA', p, null, null); if (END.exigirReauth(req, res)) return; return json(res, 409, { erro: 'Repita a ação.' }); } if (r.erro) return json(res, r.st || 403, { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro }); return json(res, 200, r); };
     if (m === 'POST' && (p === '/api/aprovar')) { await R(b => rotaAprovar(conta, req, b)); return true; }
+    if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }
     if (m === 'POST' && (p === '/api/competencia/fechar' || p === '/api/competencia/reabrir')) { await R(b => rotaCompetencia(p.endsWith('fechar') ? 'fechar' : 'reabrir', conta, req, b)); return true; }
     if (m === 'POST' && p === '/api/epi/assinar') { await R(b => rotaEpiAssinar(conta, req, b)); return true; }

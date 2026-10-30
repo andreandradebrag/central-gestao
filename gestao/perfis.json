@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-29T22:45:32.421Z",
+ "gerado": "2026-10-30T11:48:16.027Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -327,7 +327,9 @@
      "recebidoEm"
     ],
     "sc": [
-     "status"
+     "status",
+     "sepId",
+     "sepPend"
     ]
    },
    "camposSt": {
@@ -489,13 +491,11 @@
   ],
   "ped": [
    "nf",
-   "comp",
-   "fin"
+   "comp"
   ],
   "notas": [
    "nf",
-   "comp",
-   "fin"
+   "comp"
   ],
   "prod": [
    "est",

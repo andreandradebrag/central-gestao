@@ -6622,8 +6622,8 @@ V.fc90=()=>{
 };
 /* ===== alçadas de aprovação ===== */
 GROUP_OF_TAB.aprov='fin';
-const alc=()=>{const c=cfg();return {ped:+c.alcPed||0,pag:+c.alcPag||0,aprov:Array.isArray(c.aprovadores)?c.aprovadores:[]};};
-const podeAprovar=()=>store.mode!=='db'||me.owner||alc().aprov.includes(actorId());
+const alc=()=>{const c=cfg(),pd=p2nAlcPadrao(c);return {ped:pd.ped,pag:pd.pag,aprov:Array.isArray(c.aprovadores)?c.aprovadores:[],padrao:pd};};
+const podeAprovar=()=>store.mode!=='db'||me.owner||alc().aprov.includes(actorId())||p2nAprovFallback();
 function precisaAprov(col,r){const a=alc();if(col==='ped')return a.ped>0&&pedTotal(r)>a.ped&&r.status!=='cancelado';if(col==='lanc')return a.pag>0&&r.tipo==='pagar'&&(+r.valor||0)>a.pag&&r.status!=='cancelado';return false;}
 const aprovOk=(col,r)=>!precisaAprov(col,r)||(r.aprov&&r.aprov.ok);
 {const pe=A.pedEnviado;A.pedEnviado=d=>{const p=get('ped',d.id);if(p&&!aprovOk('ped',p)){toast('Pedido acima de '+money(alc().ped)+': precisa de aprovação antes de enviar (Financeiro › Aprovações).','neg');return;}return pe(d);};}
@@ -20970,7 +20970,7 @@ function p2Sync(){const vistos=new Set();
 let P2_CM=null;
 /* coleção → módulos, igual ao gen_perm.js (perfis.json › colecoes) */
 function p2ColMods(){if(P2_CM)return P2_CM;const col={},add=(c,g)=>{if(!c||!g)return;(col[c]=col[c]||new Set()).add(g);};
-  const TL={ctrlint:['acordo','cot','invaj','parc','prod'],cfgcheck:'*',aprovcfg:'*'},soLe=(tab,c)=>{const t=TL[tab];return t==='*'||(Array.isArray(t)&&t.includes(c));};
+  const TL={ctrlint:['acordo','cot','invaj','parc','prod','ped','notas'],cfgcheck:'*',aprovcfg:'*'},soLe=(tab,c)=>{const t=TL[tab];return t==='*'||(Array.isArray(t)&&t.includes(c));};
   const M2=typeof MODS2!=='undefined'?MODS2:{};
   Object.entries(GROUP_OF_TAB).forEach(([tab,g])=>{(TAB_COLS[tab]||[]).forEach(c=>{if(!soLe(tab,c))add(c,g);});const m=M2[tab];if(m)add(m.col,m.group||g);});
   Object.entries(M2).forEach(([tab,m])=>add(m.col,m.group||GROUP_OF_TAB[tab]));
@@ -20990,7 +20990,7 @@ function p2PodeGravar(col,velho,novo,exclui){if(me.owner)return '';const d=p2Def
     if(k)return 'Seu perfil ('+d.nome+') só altera '+(col==='ped'?'o recebimento':'o andamento')+' deste registro.';
     const sts=d.camposSt&&d.camposSt[col];if(Array.isArray(sts)&&!p2Igual(velho.status,novo.status)&&!sts.includes(novo.status))return 'Seu perfil ('+d.nome+') não muda a situação para "'+String(novo.status||'')+'".';}
   if(Array.isArray(d.rascunho)&&d.rascunho.includes(col)){if(exclui){if(velho&&velho.status!=='rascunho')return 'Seu perfil só exclui notas em rascunho.';}
-    else if((velho&&velho.status!=='rascunho')||(novo&&novo.status!=='rascunho'))return 'Seu perfil ('+d.nome+') só registra notas em rascunho (do recebimento). Quem lança a nota é o Comprador, o Fiscal ou o Financeiro.';}
+    else if((velho&&velho.status!=='rascunho')||(novo&&novo.status!=='rascunho'))return 'Seu perfil ('+d.nome+') só registra notas em rascunho (do recebimento). Quem valida e lança a nota é o Fiscal (ou um administrador).';}
   if(d.rhdocNr&&col==='rhdoc'&&((velho&&!p2DocNr(velho))||(!exclui&&!p2DocNr(novo))))return 'Seu perfil ('+d.nome+') registra só certificados de NR. ASO, contrato e os outros documentos ficam com o Gestor de segurança do trabalho ou o RH.';
   if(exclui&&velho&&Array.isArray(d.naoExclui)&&d.naoExclui.includes(col))return 'Seu perfil ('+d.nome+') não exclui '+nome+'.';
   if(col==='cfg'&&!exclui&&Array.isArray(d.cfgNao)){const k=d.cfgNao.find(k=>!p2Igual((velho||{})[k],(novo||{})[k]));if(k)return 'Seu perfil ('+d.nome+') não altera esta configuração de SST.';}
@@ -27035,9 +27035,208 @@ function alertasHabRen(){if(!mayR('ctr')||(typeof isColab==='function'&&isColab(
   if(venc)it.push(['hab',venc+' documento(s) de habilitação vencido(s)',String(venc)]);return it;}
 {const a0=alertasCtr;alertasCtr=function(){const it=a0.apply(this,arguments);try{return (it||[]).filter(x=>!(Array.isArray(x)&&x[0]==='hab'&&/certid[aã]o\(ões\) de habilitação vencida\(s\) ou vencendo/.test(String(x[1])))).concat(alertasHabRen());}catch(e){return it;}};}
 
+/* =====================================================================================================================
+   v140 (relatorios/feito_v140_p2p.md): compras → nota → contas a pagar e permissões por perfil
+   1. Lançamento da nota pelo servidor: no servidor próprio (SEGA_SRV), o efetivarNota de sempre roda no navegador para MONTAR o
+      pacote (nota lançada, movimentos de estoque, contas a pagar, guias, produto novo, baixa da entrada provisória), mas nada é
+      gravado pela gravação comum: tudo vai junto em POST /api/nota/lancar. O servidor confere quem lança (Fiscal ou
+      administrador), revalida as travas (deploy/gestao/p2p.js) e grava numa transação. Se recusar, a tela volta como estava.
+      Escolha: o cálculo continua num lugar só (o navegador, que já faz rateio, retenções, data de entrada, provisória);
+      o servidor não recalcula valores, ele confere regras, permissões e o vínculo de cada item com a nota.
+   2. Arquivo fiscal: "Criar conta a pagar" vira "Lançar pelo recebimento" (a nota segue o fluxo normal).
+   3. Alçada padrão (cfg.alcPadrao, gravado pelo servidor): piso de R$ 2.000 para pedidos e pagamentos enquanto a empresa não
+      configurou; não vale para o que foi criado antes da ativação. Nível sem aprovador: aprova o dono ou o Administrador.
+   4. Permissões: validar e lançar nota = Fiscal; Comprador e Almoxarife consultam a caixa nfe@; conta criada pela conciliação
+      fica "paga, aguardando aprovação" quando não é tarifa, imposto/guia ou transferência.
+   5. Solicitação de compra: toda SC passa pela aprovação de material (salvo quem é aprovador ou o limite automático);
+      quem não grava separação não cria separação "órfã": a SC fica com a separação pendente para o almoxarife criar.
+   ===================================================================================================================== */
+
+/* ---------- quem valida e lança a nota (igual ao servidor: regras.js › P2N.podeLancar) ---------- */
+function p2nPodeLancar(){if(store.mode!=='db'||me.owner)return true;const d=(typeof p2Def==='function'?p2Def(me.perfil):PERFIS[me.perfil])||null;if(!d)return false;if(d.w==='*')return true;
+  const w=Array.isArray(d.w)?d.w:[];if(!w.includes('nf'))return false;if(d.so&&Array.isArray(d.so.nf)&&!d.so.nf.includes('notas'))return false;if(Array.isArray(d.rascunho)&&d.rascunho.includes('notas'))return false;return true;}
+const P2N_MSG_LANCA='Quem valida e lança a nota (estoque e contas a pagar) é o Fiscal ou um administrador. O Comprador cuida da solicitação, da cotação e do pedido; o Almoxarife registra o recebimento físico.';
+
+/* ---------- 1. pacote do lançamento ---------- */
+let P2N_CAP=null;
+{const p0=persist;persist=function(col,rec,isDel){if(P2N_CAP&&store.mode==='db'&&rec&&rec.id){if(rec._pm)return p0.apply(this,arguments);P2N_CAP.docs.push({col,id:rec.id,del:!!isDel,data:isDel?null:cl(rec)});return;}return p0.apply(this,arguments);};}
+{const p0=put;put=function(col,rec){const cap=P2N_CAP;if(cap&&rec&&rec.id&&IDX[col]){const k=col+'/'+rec.id;if(!cap.prior.has(k)){const o=IDX[col].get(rec.id);cap.prior.set(k,o?cl(o):null);}}
+  const r=p0.apply(this,arguments);if(cap&&r&&r.id&&IDX[col]){const k=col+'/'+r.id;if(!cap.prior.has(k))cap.prior.set(k,null);}return r;};}
+{const d0=del;del=function(col,id){const cap=P2N_CAP;if(cap&&IDX[col]){const k=col+'/'+id;if(!cap.prior.has(k)){const o=IDX[col].get(id);cap.prior.set(k,o?cl(o):null);}}return d0.apply(this,arguments);};}
+/* desfaz na tela o que o lançamento recusado tinha mudado */
+function p2nDesfaz(cap){cap.prior.forEach((o,k)=>{const i=k.indexOf('/'),c=k.slice(0,i),id=k.slice(i+1);if(o)segaLocal(c,o);else segaTira(c,id);});}
+/* manda o que foi capturado pela gravação comum (lançamento que nem chegou a acontecer: a nota só foi ajustada) */
+function p2nGravaComum(cap){const p0=P2N_PERSIST0;const vist=new Map();cap.docs.forEach(d=>vist.set(d.col+'/'+d.id,d));vist.forEach(d=>{const r=d.del?(cap.prior.get(d.col+'/'+d.id)||{id:d.id}):get(d.col,d.id);if(r)p0(d.col,r,d.del);});}
+const P2N_PERSIST0=persist;
+const P2N_ENV=new Set();
+async function p2nEnviar(id,cap){
+  P2N_ENV.add(id);
+  try{
+    /* o rascunho salvo agora há pouco precisa chegar ao servidor antes do lançamento */
+    for(let k=0;k<3;k++){const pr=chains.get('notas/'+id);if(!pr)break;try{await pr;}catch(e){}}
+    const r=await fetch('/api/nota/lancar',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({id,docs:cap.docs})});
+    let j={};try{j=await r.json();}catch(e){}
+    if(!r.ok){p2nDesfaz(cap);const ms=Array.isArray(j.motivos)&&j.motivos.length?j.motivos:[j.erro||('Erro '+r.status+' no servidor.')];
+      msgModal('A nota não foi lançada',ms.concat(['Nada foi gravado: estoque e contas a pagar continuam como estavam.']));return false;}
+    (j.docs||[]).forEach(d=>{if(d&&d.col&&d.data)segaLocal(d.col,Object.assign({},d.data,{id:d.id}));});(j.dels||[]).forEach(d=>segaTira(d.col,d.id));
+    return true;
+  }catch(e){p2nDesfaz(cap);msgModal('A nota não foi lançada',['Sem conexão com o servidor. Nada foi gravado; tente de novo.']);return false;}
+  finally{P2N_ENV.delete(id);}
+}
+{const e0=efetivarNota;efetivarNota=function(id){
+  if(store.mode!=='db'||P2N_CAP)return e0.apply(this,arguments);
+  const n0=get('notas',id);if(!n0||n0.status!=='rascunho')return e0.apply(this,arguments);
+  if(!p2nPodeLancar()){msgModal('Esta nota não pode ser lançada por você',[P2N_MSG_LANCA]);return false;}
+  if(!(typeof SEGA_SRV==='function'&&SEGA_SRV()))return e0.apply(this,arguments);
+  if(P2N_ENV.has(id)){toast('Esta nota já está sendo lançada. Aguarde.','neg');return false;}
+  const cap={docs:[],prior:new Map()};P2N_CAP=cap;let r=false;
+  try{r=e0.apply(this,arguments);}catch(e){P2N_CAP=null;p2nDesfaz(cap);throw e;}finally{P2N_CAP=null;}
+  if(r!==true){if(cap.docs.length)p2nGravaComum(cap);return r;}
+  p2nEnviar(id,cap);return true;};}
+
+/* validação da nota recebida: também é do Fiscal */
+Object.assign(ACT_GROUP,{nfValidar:'nf',nfrecValidar:'nf',nfrecRecusar:'nf',nfrecReabrir:'nf',nfrecLancar:'nf'});
+['nfValidar','nfrecValidar','nfrecRecusar','nfrecReabrir','nfrecLancar','nfSaveEf','efetivarNota'].forEach(a=>{const f=A[a];if(typeof f!=='function')return;
+  A[a]=function(){if(!p2nPodeLancar()){toast(P2N_MSG_LANCA,'neg');return;}return f.apply(this,arguments);};});
+RH_POST.push(()=>{if(p2nPodeLancar())return;try{$$('#view [data-act="nfrecValidar"],#view [data-act="nfrecLancar"],#view [data-act="efetivarNota"],#view [data-act="nfrecRecusar"],#view [data-act="nfrecReabrir"]').forEach(b=>b.remove());}catch(e){}});
+
+/* ---------- 2. Arquivo fiscal: a nota segue pelo recebimento ---------- */
+ACT_GROUP.nfrCriarConta=null;
+const p2nChave=s=>String(s||'').replace(/\D/g,'');
+async function p2nLancarXml(row){
+  const ch=p2nChave(row.chave),n=ch?S.notas.find(x=>x.tipo==='entrada'&&x.status!=='cancelada'&&p2nChave(x.chave)===ch):null;
+  if(n&&n.status==='lancada'){toast('A NF '+(n.numero||'s/n')+' já foi lançada. As contas dela estão em Contas a pagar.','pos');return;}
+  if(typeof closeModal==='function')closeModal();
+  if(n){ui.tab='nfrec';render();if(p2nPodeLancar())setTimeout(()=>{const x=get('notas',n.id);if(x)openNota(cl(x));},60);
+    toast('A NF '+(n.numero||'s/n')+' já está em NFs recebidas. O recebimento físico é registrado no pedido e o Fiscal valida e lança.','pos');return;}
+  let t='';try{t=await nfrXmlTexto(row.id);}catch(e){toast(e.message,'neg');return;}
+  let x=null;try{x=parseNfe(t);}catch(e){toast(e.message||'Não foi possível ler o XML.','neg');return;}
+  x.recebida=true;x.recEm=todayStr();x.origem='xml';const g=put('notas',x);
+  if(!g||!get('notas',x.id))return;
+  ui.tab='nfrec';render();
+  msgModal('Nota enviada para o recebimento',['A NF '+(x.numero||'s/n')+' de '+parcNome(x.parcId)+' ('+money(notaTotais(x).vNF)+') está em Suprimentos › NFs recebidas.','O almoxarife registra o recebimento físico no pedido de compra; o Fiscal confere, valida e lança.','A conta a pagar nasce no lançamento, com as travas de recebimento, aprovação e nota repetida.']);
+}
+{const c0=A.nfrCriarConta;A.nfrCriarConta=d=>{const r=typeof NFR!=='undefined'?NFR.ligRow:null;
+  if(!r||r.modelo==='nfse'||r.tipo==='saida'){if(r&&r.tipo==='saida'&&!mayW('fin')){toast('Seu perfil não cria contas a receber.','neg');return;}return c0(d);}
+  return p2nLancarXml(r);};}
+{const l0=A.nfrLigar;A.nfrLigar=d=>{const r=l0(d);try{const row=typeof NFR!=='undefined'?NFR.ligRow:null;if(row&&row.modelo!=='nfse'&&row.tipo!=='saida')document.querySelectorAll('[data-act="nfrCriarConta"]').forEach(b=>{b.textContent='Lançar pelo recebimento';b.title='A nota vai para NFs recebidas: recebimento físico, validação e lançamento pelo Fiscal. A conta a pagar nasce no lançamento.';});}catch(e){}return r;};}
+
+/* ---------- 3. alçada padrão e quem aprova quando o nível não tem aprovador ---------- */
+const P2N_PISO=2000;
+/* função (e não const) porque alc(), lá no começo do sistema, chama esta; por isso também o 2000 escrito aqui dentro */
+function p2nAlcPadrao(c){c=c||{};const ap=c&&c.alcPadrao&&typeof c.alcPadrao==='object'?c.alcPadrao:null,cs=ap&&Array.isArray(ap.campos)?ap.campos:[],vz=v=>v==null||v===''||!(+v>0);
+  const liga=k=>!!ap&&ap.ativo!==false&&cs.includes(k)&&vz(c[k==='ped'?'alcPed':'alcPag']);
+  return {ped:liga('ped')?2000:(+c.alcPed||0),pag:liga('pag')?2000:(+c.alcPag||0),em:ap?+ap.em||0:0,campos:cs,ativo:!!ap&&ap.ativo!==false,liga:liga('ped')||liga('pag')};}
+/* criado antes da ativação da alçada padrão? Registro novo (ainda sem data de criação e fora da base) conta como de agora */
+const p2nAntes=(k,r)=>{const pd=p2nAlcPadrao(cfg());if(!(pd.em&&pd.campos.includes(k)&&r))return false;const o=r.id?get(k==='ped'?'ped':'lanc',r.id):null,cr=+r.cr||+(o&&o.cr)||0;if(!cr)return !!o;return cr<pd.em;};
+const P2N_CONC_LIVRE=/tarifa|taxa banc|despesa(s)? banc|iof|cesta de servic|manutencao de conta|imposto|tribut|guia|darf|\bdas\b|gps|fgts|inss|irrf|\biss\b|\bpis\b|cofins|csll|icms|ipva|iptu|retid/;
+const p2nConcLivre=l=>!!(l&&(l.criadoPorExtrato||l.concExt)&&(l.transf||P2N_CONC_LIVRE.test(gsNorm(l.categoria||''))));
+{const p0=precisaAprov;precisaAprov=function(col,r){if(r&&(col==='ped'||col==='lanc')&&p2nAntes(col==='ped'?'ped':'pag',r))return false;if(col==='lanc'&&p2nConcLivre(r))return false;return p0.apply(this,arguments);};}
+function p2nSemAprovador(){const a=alc();return !a.aprov.length&&![1,2,3].some(i=>aprovadoresDe('n'+i).length);}
+/* podeAprovar() (lá no começo) chama esta: sem nenhum aprovador cadastrado, o Administrador aprova */
+function p2nAprovFallback(){if(store.mode!=='db'||me.owner)return true;const p=PERFIS[me.perfil];return !!(p&&p.w==='*')&&p2nSemAprovador();}
+const p2nAdmin=()=>store.mode!=='db'||me.owner||(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+{const f0=finPodeNivel;finPodeNivel=function(i){if(f0.apply(this,arguments))return true;return p2nAdmin()&&!finQuemAprova(i).length;};}
+/* conta criada pela conciliação: tarifa, imposto/guia e transferência entram livres; as outras ficam pagas, aguardando aprovação */
+{const p0=put;put=function(col,rec){if(col==='lanc'&&rec&&rec.tipo==='pagar'&&rec.criadoPorExtrato&&rec.pago&&!rec.concExt&&!get('lanc',rec.id)&&!p2nConcLivre(rec)&&precisaAprov('lanc',Object.assign({},rec,{pago:''}))&&!(rec.aprov&&rec.aprov.ok)){
+    rec=Object.assign({},rec,{concExt:rec.criadoPorExtrato,pagoSemAprov:true,pagoSemAprovInfo:{por:actorId(),em:Date.now(),ext:rec.criadoPorExtrato},concAguardAprov:true});}
+  return p0.apply(this,[col,rec]);};}
+{const a0=aprovPend;aprovPend=function(){const out=a0.apply(this,arguments);try{S.lanc.filter(l=>l.tipo==='pagar'&&l.pago&&l.pagoSemAprov&&l.criadoPorExtrato&&l.status!=='cancelado'&&!(l.aprov&&l.aprov.ok)&&!p2nConcLivre(l)).forEach(l=>{if(!out.some(x=>x[1]&&x[1].id===l.id))out.push(['lanc',l]);});}catch(e){}return out;};}
+/* o Administrador salvou as regras: vale o que ele gravou (o padrão sai; a data de ativação continua valendo para o que veio antes) */
+{const s0=A.alcSalvar;A.alcSalvar=function(){const antes=get('cfg','empresa');const r=s0.apply(this,arguments);const c=get('cfg','empresa');
+  if(c&&c!==antes&&c.alcPadrao&&c.alcPadrao.ativo!==false)put('cfg',Object.assign(cl(c),{alcPadrao:Object.assign({},c.alcPadrao,{ativo:false,salvoEm:Date.now(),salvoPor:actorId()})}));return r;};}
+function p2nAvisoAprov(){const c=cfg(),pd=p2nAlcPadrao(c);let h='';
+  if(pd.liga)h+='<div class="note" style="margin:0 0 10px"><b>Alçada padrão ligada.</b> A empresa ainda não tinha configurado as alçadas: pedidos de compra e pagamentos acima de '+money(P2N_PISO)+' precisam de aprovação (até '+money(finAlc().n1)+' nível 1, gestor; até '+money(finAlc().n2)+' nível 2, diretoria; acima disso duas pessoas da diretoria). Vale para o que foi criado a partir de '+fmtDT(pd.em)+'; o que já existia não fica travado. Confira e salve as regras abaixo para assumir a configuração.</div>';
+  if(p2nSemAprovador())h+='<div class="note" style="margin:0 0 10px;border-color:var(--neg,#c33)"><b>Configure os aprovadores.</b> Nenhum aprovador está cadastrado nos níveis: enquanto isso, quem aprova é o dono ou o Administrador (uma assinatura basta). Cadastre em Início › Matriz de aprovadores.</div>';
+  const cp=S.lanc.filter(l=>l.tipo==='pagar'&&l.pago&&l.pagoSemAprov&&l.criadoPorExtrato&&l.status!=='cancelado'&&!(l.aprov&&l.aprov.ok)&&!p2nConcLivre(l));
+  if(cp.length)h+='<div class="note" style="margin:0 0 10px">'+cp.length+' conta(s) criada(s) pela conciliação do extrato, já paga(s), aguardando aprovação ('+money(sum(cp,l=>+l.valor||0))+'). Elas aparecem em Pendentes.</div>';
+  return h;}
+{const v0=V.aprov;V.aprov=function(){const h=v0.apply(this,arguments),a=p2nAvisoAprov();if(!a)return h;const k='<div class="stack">',i=h.indexOf(k);return i>=0?h.slice(0,i+k.length)+a+h.slice(i+k.length):a+h;};}
+
+/* ---------- 4. caixa nfe@: Comprador e Almoxarife consultam ---------- */
+const p2nMailLeitura=()=>{if(me.owner||store.mode!=='db')return false;const p=PERFIS[me.perfil]||{},pp=(p&&!p.custom&&p.papel)||me.perfil;return pp==='comprador'||pp==='almoxarife';};
+if(typeof mailAcesso==='function'){const m0=mailAcesso;mailAcesso=function(){return m0.apply(this,arguments)||p2nMailLeitura();};}
+['mailLer','mailDispensar'].forEach(a=>{const f=A[a];if(typeof f!=='function')return;A[a]=function(){if(p2nMailLeitura()){toast('Seu perfil só consulta a caixa nfe@. Ler agora e tirar da lista ficam com o Fiscal, o Financeiro e o Administrador.','neg');return;}return f.apply(this,arguments);};});
+RH_POST.push(()=>{if(!p2nMailLeitura())return;try{$$('#view [data-act="mailLer"],#view [data-act="mailDispensar"]').forEach(b=>b.remove());}catch(e){}});
+
+/* ---------- 5. solicitação de compra: aprovação de material e separação ---------- */
+/* valor estimado: preço do item (vEst) ou custo médio do estoque; sem nenhum dos dois, o valor é desconhecido */
+function p2nScValor(sc){let v=0,ok=true;const st=stockAll();(sc&&sc.itens||[]).forEach(i=>{const q=+i.qtd||0;if(!(q>0))return;let pu=+i.vEst||0;
+  if(!(pu>0)&&i.prodId){const s=st.of(i.prodId);pu=+s.custo||0;if(!(pu>0)){const p=get('prod',i.prodId);pu=p?(+p.custoPadrao||0):0;}}
+  if(pu>0)v+=q*pu;else ok=false;});return {valor:r2(v),conhecido:ok};}
+const p2nScAuto=()=>{const v=+(matCfg().autoAte);return v>0?v:0;};
+function p2nEhAprovMat(){if(store.mode!=='db'||me.owner)return true;const u=actorId();return matCfg().aprov.includes(u)||(typeof podeAprovar==='function'&&podeAprovar())||(p2nAdmin()&&!matCfg().aprov.length);}
+/* '' = segue direto; senão, o motivo de ir para aprovação */
+function p2nScPrecisa(sc){const est=p2nScValor(sc);
+  if(p2nEhAprovMat())return {vai:false,est,por:'aprovador'};
+  const a=sc.aprovMat;if(sc.reab&&a&&a.ok&&est.conhecido&&a.valorEst!=null&&est.valor<=(+a.valorEst||0)+0.009)return {vai:false,est,por:'mantida'};
+  const lim=p2nScAuto();if(lim>0&&est.conhecido&&est.valor<=lim)return {vai:false,est,por:'limite'};
+  return {vai:true,est};}
+let P2N_SCENV=null;
+{const s0=A.scEnviar;A.scEnviar=d=>{const sc=get('sc',d.id);if(!sc||sc.status!=='rascunho')return s0(d);
+  const pr=p2nScPrecisa(sc);if(!pr.vai){P2N_SCENV={id:sc.id,por:pr.por,est:pr.est,em:Date.now()};return s0(d);}
+  confirmBox('Enviar a solicitação '+esc(sc.numero)+' para aprovação?<br><br>Você não está entre os aprovadores de material'+(p2nScAuto()?' e o valor estimado ('+(pr.est.conhecido?money(pr.est.valor):'sem preço')+') passa do limite automático de '+money(p2nScAuto()):'')+'. Depois de aprovada, o que tem no estoque vira separação e o restante vai para o comprador.',()=>{
+    const s=Object.assign(cl(sc),{status:'aprovacao',solUid:sc.solUid||actorId(),aprovPedidoEm:Date.now(),valorEst:pr.est.conhecido?pr.est.valor:null});put('sc',s);
+    const ms=s.aprovUid?[s.aprovUid]:matCfg().aprov;ms.forEach(u=>{if(u!==actorId())avisoChat(u,'Solicitação de compra nº '+s.numero+(s.projId?' ('+projNome(s.projId)+')':'')+' aguarda a sua aprovação em Financeiro › Aprovações.');});
+    toast('Solicitação enviada para aprovação.','pos');},'Enviar para aprovação');};}
+/* quem aprovou (ou quem enviou sendo aprovador / dentro do limite) fica registrado na SC */
+{const e0=scEnviarCore;scEnviarCore=function(sc0){let s=sc0;
+  const env=P2N_SCENV&&s&&s.id===P2N_SCENV.id&&Date.now()-P2N_SCENV.em<3600e3?P2N_SCENV:null;if(env)P2N_SCENV=null;
+  if(env&&!(s.aprovMat&&s.aprovMat.ok))s=Object.assign(cl(s),{aprovMat:{ok:true,por:actorId(),em:Date.now(),auto:env.por,valorEst:env.est.conhecido?env.est.valor:null,obs:env.por==='limite'?'Dentro do limite de aprovação automática':env.por==='mantida'?'Reenvio sem aumento do valor estimado':'Enviada por um aprovador'}});
+  else if(s&&s.aprovMat&&s.aprovMat.ok&&s.aprovMat.valorEst==null){const e=p2nScValor(s);if(e.conhecido)s=Object.assign(cl(s),{aprovMat:Object.assign({},s.aprovMat,{valorEst:e.valor})});}
+  P2N_SEP.on++;try{const r=e0.call(this,s);return (r&&r.id&&get('sc',r.id))||r;}finally{P2N_SEP.on--;if(!P2N_SEP.on)P2N_SEP.hit=null;}};}
+/* separação: quem não grava separação (encarregado, diretoria) não cria separação "órfã". O almoxarife, que cria a separação
+   pendente, passa a poder ligar a separação na SC (campos sepId e sepPend, além da situação) */
+if(PERFIS.almoxarife&&PERFIS.almoxarife.campos&&Array.isArray(PERFIS.almoxarife.campos.sc))['sepId','sepPend'].forEach(k=>{if(!PERFIS.almoxarife.campos.sc.includes(k))PERFIS.almoxarife.campos.sc.push(k);});
+const P2N_SEP={on:0,hit:null};
+function p2nPodeSep(){if(store.mode!=='db'||me.owner)return true;if(!mayW('comp'))return false;return !(typeof p2PodeGravar==='function'&&p2PodeGravar('sep',null,{id:'x'},false));}
+{const p0=put;put=function(col,rec){
+  if(P2N_SEP.on&&rec&&col==='sep'&&!(rec.id&&get('sep',rec.id))&&!p2nPodeSep()){if(!rec.id)rec.id=uid();P2N_SEP.hit=rec;return rec;}
+  if(P2N_SEP.on&&rec&&col==='sc'&&P2N_SEP.hit&&rec.sepId===P2N_SEP.hit.id){rec=Object.assign({},rec,{sepId:'',sepPend:{itens:P2N_SEP.hit.itens,em:Date.now(),por:actorId()}});}
+  return p0.apply(this,[col,rec]);};}
+A.p2nCriarSep=d=>{const sc=get('sc',d.id);if(!sc||!sc.sepPend||sc.sepId){toast('Esta solicitação não tem separação pendente.','neg');return;}if(!p2nPodeSep()){toast('Seu perfil não cria separação. Quem cria é o almoxarife ou o comprador.','neg');return;}
+  const sp=put('sep',Object.assign({id:uid(),numero:nextNum('sep'),scId:sc.id,projId:sc.projId||'',data:todayStr(),necessidade:sc.necessidade,solicitante:sc.solicitante||'',localEntrega:sc.localEntrega||'',status:'pendente',itens:sc.sepPend.itens||[]},sc.ex?{ex:true}:{}));
+  if(!sp||!get('sep',sp.id))return;put('sc',Object.assign(cl(sc),{sepId:sp.id,sepPend:null}));toast('Separação nº '+sp.numero+' criada.','pos');render();};
+ACT_GROUP.p2nCriarSep=null;
+const p2nSepPend=()=>S.sc.filter(s=>s.sepPend&&!s.sepId&&s.status!=='cancelada');
+function p2nSepPendHtml(){const ls=p2nSepPend();if(!ls.length)return '';const pode=p2nPodeSep();
+  return '<div class="note" style="margin:0 0 10px"><b>'+ls.length+' solicitação(ões) aprovada(s) com separação a criar.</b> Quem aprovou ou enviou não grava separação; '+(pode?'crie aqui':'o almoxarife ou o comprador cria')+'.<ul style="margin:6px 0 0;padding-left:18px">'+ls.map(s=>'<li>SC nº '+esc(s.numero)+(s.projId?' · '+esc(projNome(s.projId)):'')+' · '+(s.sepPend.itens||[]).length+' item(ns)'+(pode?' <button class="btn sm pri" data-act="p2nCriarSep" data-id="'+s.id+'">Criar separação</button>':'')+'</li>').join('')+'</ul></div>';}
+['sep','sc'].forEach(t=>{if(typeof V[t]!=='function')return;const v0=V[t];V[t]=function(){const h=v0.apply(this,arguments),a=p2nSepPendHtml();if(!a)return h;const k='<div class="stack">',i=h.indexOf(k);return i>=0?h.slice(0,i+k.length)+a+h.slice(i+k.length):a+h;};});
+/* aprovar direto da lista de solicitações */
+{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);S.sc.filter(s=>s.status==='aprovacao').forEach(s=>{if(typeof podeAprovarMat!=='function'||!podeAprovarMat(s))return;const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
+  h=h.replace(det,'<button class="btn sm pri" data-act="matAprovar" data-id="'+s.id+'">Aprovar</button><button class="btn sm dng" data-act="matAprovar" data-dec="nao" data-id="'+s.id+'">Recusar</button>'+det);});return h;};}
+/* configuração: aprovar automaticamente até R$ X (0 = sempre aprovar) */
+{const m0=matCard;matCard=function(){let h=m0.apply(this,arguments);if(!mayW('cfg'))return h;const k='<div class="acts" style="margin-top:8px"><button class="btn pri" data-act="matCfgSalvar">';
+  const f='<div class="fg" style="margin-top:8px">'+field('Aprovar automaticamente solicitação até (R$ estimado; 0 = toda solicitação passa por aprovação)','maAuto','number',p2nScAuto())+'</div><p class="sub" style="margin:4px 0 0">Vale para a solicitação de compra enviada por quem não é aprovador. O valor estimado usa o preço do item ou o custo médio do estoque; item sem preço e sem custo faz a solicitação ir para aprovação.</p>';
+  return h.includes(k)?h.replace(k,f+k):h;};}
+A.matCfgSalvar=()=>{const el=$('#f_maAuto'),v=el&&el.value!==''?r2(+el.value):p2nScAuto();if(!(v>=0)){toast('Valor inválido.','neg');return;}
+  if(v!==p2nScAuto()&&!p2nAdmin()){toast('O limite de aprovação automática só um administrador altera.','neg');return;}
+  const ap=$$('#view [data-mau]').filter(x=>x.checked).map(x=>x.dataset.mau),c=cfg();
+  put('cfg',Object.assign({},c,{id:'empresa',matFluxo:Object.assign({},c.matFluxo||{},{aprov:ap,almox:($('#f_maAlmox')||{}).value||'',comprador:($('#f_maComp')||{}).value||'',autoAte:v})}));toast('Fluxo de material salvo.','pos');};
+
+/* ---------- 6. textos: perfis, ajuda e quem faz o quê ---------- */
+{const d=(k,t)=>{if(PERFIS[k])PERFIS[k].desc=t;};
+  d('fiscal','Valida e lança as notas de entrada (gera o estoque e as contas a pagar, conferidos pelo servidor), trata as exceções da conferência (nota sem pedido, divergência), estoque e cadastros. Consulta o financeiro, mas não paga.');
+  d('financeiro','Contas a pagar e a receber, baixa, conciliação bancária, remessa, caixa e cadastros. Consulta pedidos de compra e notas, mas não cria pedido nem lança nota.');
+  if(PERFIS.comprador)d('comprador','Solicitações de compra, cotações, pedidos de compra, acordos de preço e cadastro de fornecedores (dados bancários ficam pendentes até o Financeiro confirmar). Consulta estoque, obras e a caixa nfe@. Não valida nem lança nota, não mexe no estoque e não vê contas a pagar nem dados bancários.');
+  if(PERFIS.almoxarife)d('almoxarife','Recebimento físico do material (pela tela do pedido), entradas e saídas de estoque, almoxarifados, separação, devolução de sobras, inventário (o ajuste continua dependendo de aprovação de outra pessoa), ferramentas e equipamentos e entrega de EPI. Consulta pedidos, fornecedores, obras e a caixa nfe@. Não cria pedido nem lança nota.');}
+const P2N_QUEM=[['Solicitação de compra','Quem precisa (obra, encarregado, comprador). Vai para aprovação de material, salvo se quem envia é aprovador ou o valor estimado está dentro do limite automático.'],
+  ['Cotação, pedido de compra e acordo de preço','Comprador. O pedido acima da alçada é aprovado em Financeiro › Aprovações (até R$ 10 mil nível 1, até R$ 100 mil nível 2, acima duas pessoas).'],
+  ['Recebimento físico','Almoxarife, pela tela do pedido (Receber).'],
+  ['Validar e lançar a nota de entrada','Fiscal (ou administrador). O servidor confere recebimento, aprovação do pedido, divergência, nota sem pedido e nota repetida, e grava estoque e contas a pagar juntos.'],
+  ['Contas a pagar, baixa, conciliação e remessa','Financeiro. Conta criada pela conciliação: tarifa, imposto/guia e transferência entram livres; as outras ficam pagas, aguardando aprovação.'],
+  ['Caixa nfe@','Fiscal, Financeiro, Administrador e Diretoria usam; Comprador e Almoxarife consultam.']];
+const p2nQuemHtml=()=>'<div class="card"><h2>Quem faz o quê nas compras</h2><div class="tw" style="border:0"><table style="min-width:560px"><tbody>'+P2N_QUEM.map(x=>'<tr><td style="width:34%"><b>'+esc(x[0])+'</b></td><td>'+esc(x[1])+'</td></tr>').join('')+'</tbody></table></div></div>';
+if(typeof V.perfc==='function'){const v0=V.perfc;V.perfc=function(){const h=v0.apply(this,arguments);if(!(me.owner||mayW('usr')))return h;const k='<div class="stack">',i=h.indexOf(k);return i>=0?h.slice(0,i+k.length)+p2nQuemHtml()+h.slice(i+k.length):h+p2nQuemHtml();};}
+RH_PRE.push(()=>{try{if(typeof TUT==='undefined'||TUT.some(t=>t.id==='p2p'))return;TUT.unshift({id:'p2p',t:'Compras, nota e contas a pagar: quem faz o quê',g:'comp',ver:'140',p:P2N_QUEM.map(x=>x[0]+': '+x[1]).concat([
+  'Arquivo fiscal: o botão Lançar pelo recebimento leva a nota para NFs recebidas; a conta a pagar não é mais criada direto do XML. Contas criadas antes continuam, e o lançamento da mesma nota é recusado para não pagar duas vezes.',
+  'Nota recusada pelo servidor: aparece a lista do que falta (por exemplo, recebimento físico ou aprovação do pedido) e nada é gravado.',
+  'Alçada padrão: se a empresa não configurou, pedidos e pagamentos acima de R$ 2.000 precisam de aprovação a partir da atualização; sem aprovadores cadastrados, aprova o dono ou o Administrador.'])});}catch(e){}});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='139',APP_DATA='2026-10-29';
+const APP_VER='140',APP_DATA='2026-10-30';
 const CHANGELOG=[
+  ['140','2026-10-30',['Compras e notas: a nota de entrada é lançada pelo servidor de uma vez (estoque e contas a pagar), pelo perfil Fiscal, com as travas de recebimento, aprovação, divergência e duplicidade conferidas no servidor. O Arquivo fiscal não cria mais conta direto do XML.', 'Alçadas de aprovação ligadas por padrão (até R$ 10 mil gestor, até R$ 100 mil diretoria, acima duas pessoas); sem aprovador cadastrado, o dono ou administrador aprova.', 'Perfis: Comprador faz solicitação, cotação e pedido; Fiscal valida e lança a nota; Almoxarife recebe; Financeiro programa e paga (não cria pedido). Toda solicitação de compra passa por aprovação. Conta criada pela conciliação fora de tarifas, impostos e transferências fica para aprovar.']],
   ['139','2026-10-29',['Documentos de habilitação: prazo para solicitar a renovação em cada documento (padrão do tipo: 30 dias para certidões demoradas e alvarás, 120 para a LO da CETESB, 15 para os demais). Etiqueta Renovar desde DD/MM, cartão Renovar agora, aviso no Início e por e-mail no dia certo, e botão Renovação solicitada para parar o aviso.']],
   ['138','2026-10-29',['Projetos: o campo Nome passa a se chamar Descrição (cadastro, criação a partir de proposta/contrato e importação).', 'Documentos e telas de consulta (OS de fabricação e de serviço, SC, cotação, pedido de compra, separação, romaneio, medição, relatórios, e-mails e CSV) mostram só o código do projeto; as listas de escolha e a busca rápida continuam com código e descrição.']],
   ['137','2026-10-29',['OS de fabricação: anexar desenhos, especificações e fotos já na tela de Nova OS e na edição (botão Anexar documento e Tirar foto no celular). Aceita PDF, imagens, Word, Excel, DWG e DXF; PDF e imagens entram no PDF da OS, os demais ficam só anexados.']],

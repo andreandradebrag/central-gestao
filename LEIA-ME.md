@@ -191,7 +191,7 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 ## 6.2. Microsoft 365: caixa nfe@ (notas que chegam por e-mail, v130)
 
-**O que faz.** O serviço `gestao` lê a caixa **nfe@inaservicos.com.br** pelo Microsoft Graph (de hora em hora, e pelo botão "Ler agora"). Os XML de NF-e anexados (soltos ou dentro de ZIP) vão para o Arquivo fiscal com origem **e-mail**; o PDF (DANFE) só é guardado se tiver a chave de acesso no nome ou no texto. Cada mensagem lida vai para a pasta **Processadas** (criada sozinha). Do e-mail ficam só remetente, assunto e data; o corpo nunca é guardado. A tela fica em **Suprimentos › Recebimento de notas › Caixa nfe@** e o estado aparece em **Sistema › Configurações**. Quem usa: Fiscal, Financeiro, Administrador e Diretoria. Código: `gestao/caixanfe.js`; tabelas `caixa_msg`, `caixa_pdf`, `caixa_leitura` e `arqf_origem` no `gestao.db`.
+**O que faz.** O serviço `gestao` lê a caixa **nfe@inaservicos.com.br** pelo Microsoft Graph (de hora em hora, e pelo botão "Ler agora"). Os XML de NF-e anexados (soltos ou dentro de ZIP) vão para o Arquivo fiscal com origem **e-mail**; o PDF (DANFE) só é guardado se tiver a chave de acesso no nome ou no texto. Cada mensagem lida vai para a pasta **Processadas** (criada sozinha). Do e-mail ficam só remetente, assunto e data; o corpo nunca é guardado. A tela fica em **Suprimentos › Recebimento de notas › Caixa nfe@** e o estado aparece em **Sistema › Configurações**. Quem usa: Fiscal, Financeiro, Administrador e Diretoria. Comprador e Almoxarife **consultam** (lista, situação e PDF), sem "Ler agora" nem tirar e-mail da lista (v140). Código: `gestao/caixanfe.js`; tabelas `caixa_msg`, `caixa_pdf`, `caixa_leitura` e `arqf_origem` no `gestao.db`.
 
 **Conferências.** (1) a nota precisa ter a INA como destinatária (CNPJ de Configurações); (2) se a nota já estava no arquivo (SEFAZ, Omie, envio manual), ela é marcada "também recebida por e-mail" (todas as origens ficam guardadas, com a data); (3) a situação na SEFAZ é conferida pela **fila de consulta por chave** do conector fiscal (seção 6.1, mesmos limites por hora e bloqueio 656). **Nunca há consulta por NSU** (o Omie é o dono da sequência). Nota cancelada, denegada ou não encontrada na SEFAZ aparece em vermelho: **não pagar**.
 
@@ -284,6 +284,26 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 **Variáveis (opcionais, serviço `gestao`)**: `ARQF_NFSE_ZIP_MB` (tamanho máximo do ZIP de NFS-e, padrão 100).
 
 **Atenção.** A importação grava direto nos títulos (campo `arqf` e `nfseId`) e nos registros da coleção `nfse`, como o arquivo fiscal já faz: não passa pela trava de competência fechada, porque só registra a ligação e a nota emitida, sem mudar valores dos títulos.
+
+## 6.5. Compras, nota e contas a pagar: quem faz o quê (v140)
+
+| Etapa | Quem faz |
+|---|---|
+| Solicitação de compra (SC) | Quem precisa. Toda SC passa pela **aprovação de material** (Financeiro › Aprovações), salvo se quem envia é aprovador ou o valor estimado está dentro do limite automático. |
+| Cotação, pedido de compra, acordo de preço | **Comprador**. Pedido acima da alçada é aprovado em Financeiro › Aprovações. O **Financeiro não cria nem edita pedido** (só consulta). |
+| Recebimento físico | **Almoxarife**, na tela do pedido (Receber). |
+| Validar e lançar a nota de entrada | **Fiscal** (ou Administrador/dono). Comprador, Almoxarife e Financeiro não validam nem lançam. |
+| Contas a pagar, baixa, conciliação, remessa | **Financeiro**. |
+
+**Lançamento da nota pelo servidor.** O botão Lançar monta, no navegador, o pacote do lançamento (nota, movimentos de estoque, contas a pagar, guias de retenção, produto novo, baixa da entrada provisória do recebimento) e envia tudo de uma vez para `POST /api/nota/lancar`. O servidor confere o perfil e **revalida as travas**: recebimento físico, pedido aprovado (quando a alçada vale para ele), divergência com o pedido/recebimento aprovada por duas pessoas, nota sem pedido acima do limite só com motivo, e **nota repetida** (mesmo fornecedor + número + série, mesma chave de acesso, ou conta já criada a partir do XML no Arquivo fiscal). Passando, grava tudo numa só transação; recusando, nada é gravado e a tela mostra o motivo. As regras de cálculo estão em `gestao/p2p.js` (o mesmo cálculo do navegador). Conta a pagar ligada a uma nota (`notaId`) só nasce por essa rota; o servidor recusa a gravação comum (exceção: o saldo de uma baixa parcial).
+
+**Arquivo fiscal.** O botão "Criar conta a pagar" virou **Lançar pelo recebimento**: a nota vai para Recebimento de notas e segue o fluxo. As contas criadas antes por ele continuam; lançar a mesma nota depois é recusado (para não pagar duas vezes).
+
+**Alçada padrão.** Na primeira subida da v140, se a empresa não tinha alçada de pedido e/ou de pagamento (vazia ou 0), o servidor grava `cfg.alcPadrao` com a data: passa a valer **R$ 2.000** como piso, com nível 1 até R$ 10 mil (gestor), nível 2 até R$ 100 mil (diretoria) e acima disso duas pessoas. **Não é retroativo**: pedido ou conta criado antes dessa data não fica travado. Sem nenhum aprovador cadastrado no nível, **o dono ou o Administrador aprovam** (uma assinatura basta) e a tela Aprovações mostra "Configure os aprovadores". Quando o Administrador salva as regras de aprovação, vale o que ele gravou.
+
+**Conciliação.** Conta criada pela conciliação (Criar lançamento e regras automáticas) entra livre quando a **categoria** é tarifa bancária, imposto/guia ou é transferência entre contas. As demais, acima da alçada, entram **pagas, marcadas "pago sem aprovação"** e aparecem em Aprovações para aprovar depois; a conciliação não fica travada.
+
+**Separação da SC.** Quem aprova ou envia a SC sem poder gravar separação (Encarregado, Diretoria) não cria mais separação "órfã": a SC fica com a separação pendente e o Almoxarife (ou o Comprador) cria em Estoque › Separação.
 
 ## 7. Cotações com fornecedores (Compras › Cotações)
 

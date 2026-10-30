@@ -335,9 +335,12 @@ module.exports = function (ctx) {
 
   /* ---------- permissão e rotas ---------- */
   function acesso(conta) { if (!conta || !conta.ativo) return false; if (conta.nivel === 'owner') return true; return PAPEIS.includes(papelDe(perfilDe(conta))); }
+  /* v140: Comprador e Almoxarife consultam a caixa (lista, situação e PDF), sem ler agora nem tirar e-mail da lista */
+  const LEITURA = ['comprador', 'almoxarife'];
+  const soLeitura = conta => !!conta && conta.ativo && conta.nivel !== 'owner' && LEITURA.includes(papelDe(perfilDe(conta)));
   async function rota(p, m, req, res, conta, u) {
     if (!p.startsWith('/api/caixanfe')) return false;
-    if (!acesso(conta)) { auditar(conta, req, 'CAIXA_NFE_NEGADO', p, null, null); json(res, 403, { code: 'not_granted', erro: 'Seu perfil não tem acesso à caixa de notas por e-mail. Quem usa: Fiscal, Financeiro, Administrador e Diretoria.' }); return true; }
+    if (!acesso(conta) && !(soLeitura(conta) && m === 'GET')) { auditar(conta, req, 'CAIXA_NFE_NEGADO', p, null, null); json(res, 403, { code: 'not_granted', erro: soLeitura(conta) ? 'Seu perfil só consulta a caixa de notas por e-mail. Ler agora e tirar da lista ficam com o Fiscal, o Financeiro e o Administrador.' : 'Seu perfil não tem acesso à caixa de notas por e-mail. Quem usa: Fiscal, Financeiro, Administrador e Diretoria (Comprador e Almoxarife só consultam).' }); return true; }
     if (p === '/api/caixanfe' && m === 'GET') { json(res, 200, Object.assign(estado(), listas(u.searchParams.get('dias')))); return true; }
     if (p === '/api/caixanfe/estado' && m === 'GET') { json(res, 200, estado()); return true; }
     if (p === '/api/caixanfe/ler' && m === 'POST') {
