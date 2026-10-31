@@ -157,6 +157,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       } else {
         const sp = P2.semPed(n, c);
         if (sp && !sp.ok) m.push('Nota de ' + sp.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ' sem pedido de compra. Ligue a nota a um pedido ou informe o motivo e a justificativa (seção "Pedido de compra e conferência"). A regra vale acima de ' + sp.min.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + '.');
+        m.push(...P2Q.travaPequena(n, id, c)); /* v141: compra pequena sem pedido */
       }
       return m;
     }
@@ -241,6 +242,278 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     return { alcPadraoDe, antesDaAlcada, crMinimo, regraLancNota, rotaNotaLancar, podeLancar, travas, regraScAprov };
   })();
+
+  /* =====================================================================
+     v141 (relatorios/feito_v141_p2p2.md): compras → nota → contas a pagar, entrega 2
+     1. Fila "O que precisa de ação": GET /api/p2p/fila traz os XML de entrada que ainda não viraram nota e as NFS-e de
+        fornecedor (o resto da fila o navegador monta com as notas, pedidos e recebimentos que já tem).
+     2. Lançamento automático da nota que confere. ESCOLHA: o cálculo da nota (rateio, retenções, data de entrada,
+        competência, entrada provisória, romaneio) continua num lugar só, o navegador (efetivarNota). O automático roda no
+        navegador do primeiro Fiscal/Administrador que estiver com o sistema aberto: ele pega uma trava no servidor
+        (POST /api/p2p/trava, 90 s, uma por nota/XML) e manda o pacote pela MESMA rota POST /api/nota/lancar com auto:true.
+        O servidor confere de novo as condições (P2.autoFalta: XML, um pedido, recebimento físico, conferência sem
+        divergência, sem item fora do pedido) além das travas de sempre (duplicidade, aprovação do pedido, contas que fecham),
+        marca lancAuto {por:'sistema'} e grava a auditoria NOTA_LANCADA_AUTO com a conta "sistema". Dois gatilhos não
+        lançam duas vezes: a trava recusa o segundo e a rota recusa nota que não está mais em rascunho.
+     3. Compra pequena sem pedido (até cfg.p2pPequenaAte, padrão supSemPedMin = R$ 1.000): categoria, projeto e aprovação do
+        nível 1 (POST /api/p2p/pequena/aprovar, carimbada pelo servidor). Não retroativa (cfg.p2pPequenaEm).
+     5. Devolução ao fornecedor: POST /api/nota/devolver (Fiscal/Administrador) estorna o estoque (saída pelo custo de entrada),
+        abate ou cancela as contas em aberto da nota (já paga: crédito a receber do fornecedor) e, se pedido, reabre o saldo do
+        pedido; o Almoxarife confirma a saída física (POST /api/nota/devolucao/saida).
+     6. Avisos por e-mail (SMTP configurado): varredura a cada P2P_AVISO_INTERVALO_S (120 s) com chave única por evento
+        (tabela p2p_aviso), e o e-mail do pedido ao fornecedor pelo servidor com o PDF (POST /api/ped/email).
+     ===================================================================== */
+  const P2Q = (() => {
+    try { db.exec('CREATE TABLE IF NOT EXISTS p2p_trava(k TEXT PRIMARY KEY, conta TEXT, ate INTEGER); CREATE TABLE IF NOT EXISTS p2p_aviso(k TEXT PRIMARY KEY, ts INTEGER);'); } catch (e) { console.error('[v141] tabelas:', e.message); }
+    try { const c = doc('cfg/empresa') || {}; if (!c.p2pPequenaEm) { const n = Object.assign({ id: 'empresa' }, c, { p2pPequenaEm: Date.now() }); q.docPut.run('cfg/empresa', 'cfg', 'empresa', JSON.stringify(n), Date.now()); } } catch (e) { console.error('[v141] compra pequena:', e.message); }
+    const TRAVA_MS = Math.max(10, +process.env.P2P_TRAVA_S || 90) * 1000;
+    const ID_OK = /^[\w\-.|~@+=]{1,200}$/, K_OK = /^(xml|nota):[\w\-.|~@+=]{1,200}$/;
+    const masc = d => { d = String(d || '').replace(/\D/g, ''); return d.length === 11 ? '***.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-**' : d; };
+    const moedaQ = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const br = d => /^\d{4}-\d{2}-\d{2}/.test(String(d || '')) ? String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4) : '';
+    /* pessoas por papel (perfil de Usuários), só contas ativas */
+    function papelUsers(...ps) { const out = []; for (const u of col('usr')) { if (!u.uid || u.ativo === false) continue; const c = q.contaPorId.get(u.uid); if (!c || !c.ativo) continue; if (ps.includes(papelDe(u.perfil))) out.push(u.uid); } return out; }
+    const QUEM = { comprador: () => papelUsers('comprador', 'compras'), almoxarife: () => papelUsers('almoxarife'), fiscal: () => papelUsers('fiscal'), aprovador: () => todosAprovadores() };
+    const quemPapel = k => { const f = QUEM[k]; const l = f ? f() : []; return l.length ? l : q.contas.all().filter(c => c.ativo && c.nivel === 'owner').map(c => c.id); };
+
+    /* ---------- 2. trava do processamento automático ---------- */
+    function rotaTrava(conta, req, b) {
+      const k = String((b && b.k) || ''); if (!K_OK.test(k)) return erro('Chave inválida.', 400);
+      if (!P2N.podeLancar(conta)) return erro('Só o Fiscal ou um administrador processa o lançamento automático.');
+      const agora = Date.now(); db.prepare('DELETE FROM p2p_trava WHERE ate<?').run(agora);
+      const r = db.prepare('INSERT OR IGNORE INTO p2p_trava(k,conta,ate) VALUES(?,?,?)').run(k, conta.id, agora + TRAVA_MS);
+      if (!r.changes) return erro('Esta nota já está sendo processada por outra pessoa.', 409);
+      return { ok: true, ate: agora + TRAVA_MS };
+    }
+    /* ---------- 1. fila: XML sem nota e NFS-e de fornecedor ---------- */
+    function veFila(conta) { if (ehDono(conta) || P2N.podeLancar(conta)) return true; return ['admin', 'financeiro', 'fiscal', 'diretoria', 'comprador', 'compras', 'almoxarife', 'projetos'].includes(papelConta(conta)); }
+    const temArqf = () => { try { return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='arqf'").get(); } catch (e) { return false; } };
+    function rotaFila(conta) {
+      if (!veFila(conta)) return erro('Seu perfil não vê a fila do recebimento de notas.');
+      const c = cfgEmp(), out = { xmls: [], nfsef: [], auto: c.p2pAuto !== false, autoDias: Math.max(1, +c.p2pAutoDias || 45) };
+      if (!temArqf()) return out;
+      const chs = new Set(col('notas').filter(n => n.status !== 'cancelada').map(n => String(n.chave || '').replace(/\D/g, '')).filter(Boolean));
+      const pdoc = new Map(); for (const x of col('parc')) { const d = String(x.doc || '').replace(/\D/g, ''); if (d && !pdoc.has(d)) pdoc.set(d, x.id); } /* o navegador recebe o cadastro (parcId), não o CPF */
+      const lim = new Date(Date.now() - 3 * 3600e3 - 120 * 864e5).toISOString().slice(0, 10);
+      for (const r of db.prepare("SELECT id, chave, numero, serie, emissao, valor, parc_doc, parc_nome, origem, vinc, em FROM arqf WHERE tipo='entrada' AND coalesce(modelo,'55')='55' AND situacao='autorizada' AND emissao>=? ORDER BY emissao DESC LIMIT 500").all(lim)) {
+        if (chs.has(r.chave) || r.vinc) continue;
+        out.xmls.push({ id: r.id, chave: r.chave, numero: r.numero, serie: r.serie, emissao: r.emissao, valor: r.valor, parcDoc: masc(r.parc_doc), parcId: pdoc.get(String(r.parc_doc || '')) || '', parcNome: r.parc_nome, origem: r.origem, em: r.em });
+      }
+      let nf = []; try { nf = db.prepare("SELECT id, chave, numero, emissao, valor, parc_doc, parc_nome, situacao, vinc, nfse, em FROM arqf WHERE modelo='nfsef' ORDER BY emissao DESC LIMIT 300").all(); } catch (e) { }
+      for (const r of nf) {
+        let j = {}; try { j = JSON.parse(r.nfse || '{}'); } catch (e) { }
+        const pf = String(r.parc_doc || '').length === 11;
+        out.nfsef.push({ id: r.id, chave: r.chave, numero: r.numero, emissao: r.emissao, valor: r.valor, parcDoc: masc(r.parc_doc), parcId: pdoc.get(String(r.parc_doc || '')) || '', pf, parcNome: r.parc_nome, situacao: r.situacao, ret: j.ret || {}, bruto: j.bruto, liq: j.liq, competencia: j.competencia || '', lig: j.lig || null, semXml: !!j.semXml, desc: String(j.desc || '').slice(0, 200), em: r.em });
+      }
+      return out;
+    }
+    /* ---------- 2. lançamento automático pela mesma rota ---------- */
+    let AUTO = null;
+    const rot0 = P2N.rotaNotaLancar;
+    P2N.rotaNotaLancar = function (conta, req, b) {
+      b = b && typeof b === 'object' ? b : {};
+      const id = String(b.id || ''), docs = Array.isArray(b.docs) ? b.docs : [];
+      const N = docs.find(d => d && d.col === 'notas' && String(d.id) === id && d.data && typeof d.data === 'object' && !Array.isArray(d.data));
+      if (!b.auto) { if (N) delete N.data.lancAuto; return rot0(conta, req, b); }
+      const velho = doc('notas/' + id);
+      if (!P2N.podeLancar(conta) || !velho || !N || velho.status !== 'rascunho') return rot0(conta, req, Object.assign({}, b, { auto: false }));
+      const n = N.data, p = n.pedId ? doc('ped/' + String(n.pedId)) : null, mot = P2.autoFalta(n, p, cfgEmp());
+      if (String(velho.pedId || '') !== String(n.pedId || '') || String(velho.recebId || '') !== String(n.recebId || '')) mot.push('O pedido ou o recebimento da nota mudou durante o lançamento automático.');
+      if (mot.length) { auditar(conta, req, 'NOTA_AUTO_RECUSADA', 'notas/' + id, null, { motivos: mot }); return { erro: 'Não lançada automaticamente. ' + mot.join(' '), motivos: mot, st: 409 }; }
+      n.lancAuto = { em: Date.now(), por: 'sistema', via: conta.id }; n.valid = 'validada'; n.validadoPor = 'sistema'; if (!n.validadoEm) n.validadoEm = Date.now();
+      AUTO = id; let r; try { r = rot0(conta, req, b); } finally { AUTO = null; }
+      if (r && r.ok) { const tt = P2.notaTotais(n); auditar({ id: 'sistema' }, req, 'NOTA_LANCADA_AUTO', 'notas/' + id, null, { msg: 'lançada automaticamente', via: conta.id, numero: n.numero || '', parcId: n.parcId || '', valor: tt.vNF }); r.auto = true; }
+      else if (r && r.motivos) auditar(conta, req, 'NOTA_AUTO_RECUSADA', 'notas/' + id, null, { motivos: r.motivos });
+      return r;
+    };
+    /* campos que só o servidor grava na nota: lançamento automático, aprovação da compra pequena e devoluções */
+    function regraNota(conta, velho, novo) {
+      const v = velho || {}, keep = k => { if (v[k] !== undefined) novo[k] = v[k]; else delete novo[k]; };
+      if (!igual(v.lancAuto, novo.lancAuto) && AUTO !== String(novo.id || '')) keep('lancAuto');
+      if (!igual(v.pequenaAprov, novo.pequenaAprov)) keep('pequenaAprov');
+      if (!igual(v.devols, novo.devols)) keep('devols');
+      return null;
+    }
+    /* trava da compra pequena (chamada pelas travas do lançamento) */
+    function travaPequena(n, id, c) {
+      const vx = doc('notas/' + id) || {}, pq = P2.pequena(n, c, vx.cr, vx.pequenaAprov), m = [];
+      if (!pq) return m;
+      if (pq.falta.length) m.push('Compra pequena sem pedido (' + moedaQ(pq.valor) + ', até ' + moedaQ(pq.lim) + '): informe ' + pq.falta.join(' e ') + ' na nota.');
+      if (!pq.aprov) m.push(vx.pequenaAprov && vx.pequenaAprov.dec === 'nao' ? 'A compra pequena sem pedido foi recusada pelo gestor: ' + (vx.pequenaAprov.obs || '') : pq.aprovMenor ? 'O valor da nota passou do que o gestor aprovou na compra pequena. Peça a aprovação de novo.' : 'Compra pequena sem pedido: falta a aprovação do gestor (nível 1), em Suprimentos › Recebimento de notas › O que precisa de ação.');
+      return m;
+    }
+    /* ---------- 3. aprovação da compra pequena ---------- */
+    function podeAprovPequena(conta) { if (ehDono(conta)) return true; const qa = quemAprova(1); if (qa.includes(conta.id) || ehDiretor(conta)) return true; return !qa.length && perfilEm(conta, ['admin']); }
+    function rotaPequena(conta, req, b) {
+      const id = String((b && b.id) || ''); if (!ID_OK.test(id)) return erro('Nota inválida.', 400);
+      const n = doc('notas/' + id); if (!n) return erro('Nota não encontrada.', 404);
+      if (n.status !== 'rascunho') return erro('A nota não está mais em rascunho.', 409);
+      const pq = P2.pequena(n, cfgEmp(), n.cr, null); if (!pq) return erro('Esta nota não é uma compra pequena sem pedido.', 409);
+      if (!podeAprovPequena(conta)) { auditar(conta, req, 'COMPRA_PEQUENA_NEGADA', 'notas/' + id, null, null); return erro('Quem aprova a compra pequena sem pedido é o gestor (nível 1 da matriz de aprovadores), a diretoria ou, sem aprovador cadastrado, o administrador.'); }
+      if (n.crBy && n.crBy === conta.id && !ehDono(conta)) return erro('Quem registrou a nota não aprova a própria compra.');
+      if (pq.falta.length) return erro('Antes da aprovação, informe ' + pq.falta.join(' e ') + ' na nota.', 409);
+      const dec = b.dec === 'nao' ? 'nao' : 'sim', obs = String(b.obs || '').trim().slice(0, 500);
+      if (dec === 'nao' && !obs) return erro('Informe o motivo da recusa.', 400);
+      const novo = Object.assign({}, n, { pequenaAprov: { ok: dec === 'sim', dec, por: conta.id, em: Date.now(), valor: pq.valor, obs } });
+      salvar('notas/' + id, novo, conta, req, dec === 'sim' ? 'COMPRA_PEQUENA_APROVADA' : 'COMPRA_PEQUENA_RECUSADA', n);
+      return { ok: true, data: novo };
+    }
+    /* conta a pagar avulsa pequena (opcional, cfg.p2pPequenaConta): mesma regra, aprovação nível 1 antes de pagar */
+    function contaPequena(l) {
+      const c = cfgEmp(); if (c.p2pPequenaConta !== true || !l || l.tipo !== 'pagar' || l.status === 'cancelado') return false;
+      if (l.notaId || l.medempId || l.guia || l.transf || l.adtoId || l.retencaoDe || l.retPendDe || l.foFunc || !l.parcId || P2.concLivre(l)) return false;
+      const pc = P2.pequenaCfg(c); if (!pc.ativo || !pc.em || !(+l.cr >= pc.em)) return false;
+      const v = +l.valor || 0, k = P2.norm(l.categoria || ''); if (!(v > 0) || v > pc.lim + 0.004) return false;
+      return !(k && String(pc.isentas || '').split(/[,;\n]/).map(x => P2.norm(x).trim()).filter(Boolean).some(w => k.includes(w)));
+    }
+    /* ---------- 5. devolução ao fornecedor ---------- */
+    function rotaDevolver(conta, req, b) {
+      b = b || {}; const id = String(b.id || ''); if (!ID_OK.test(id)) return erro('Nota inválida.', 400);
+      if (!P2N.podeLancar(conta)) { auditar(conta, req, 'NOTA_DEVOLUCAO_NEGADA', 'notas/' + id, null, null); return erro('Quem registra a devolução ao fornecedor é o Fiscal ou um administrador. O almoxarife confirma depois a saída física do material.'); }
+      const n = doc('notas/' + id); if (!n) return erro('Nota não encontrada.', 404);
+      if (n.tipo !== 'entrada' || n.status !== 'lancada') return erro('Só nota de entrada já lançada tem devolução ao fornecedor.', 409);
+      const motivo = String(b.motivo || '').trim().slice(0, 500); if (!motivo) return erro('Informe o motivo da devolução.', 400);
+      const nfDev = String(b.nfDev || '').trim().slice(0, 60), chDev = String(b.chDev || '').replace(/\D/g, '').slice(0, 44);
+      if (!nfDev && !chDev) return erro('Informe o número da NF de devolução emitida (ou envie o XML dela).', 400);
+      const movs = (n.movIds || []).map(x => doc('mov/' + x)).filter(Boolean);
+      const dv = P2.devCalc(n, Array.isArray(b.itens) ? b.itens : [], movs);
+      if (dv.erros.length) return { erro: dv.erros.join(' '), motivos: dv.erros, st: 400 };
+      if (!dv.itens.length) return erro('Informe a quantidade devolvida de pelo menos um item.', 400);
+      const ts = Date.now(), hoje = hojeSP(), devId = 'dev' + ts.toString(36) + Math.random().toString(36).slice(2, 7), w = [], parc = doc('parc/' + String(n.parcId || '')) || {};
+      const movIds = [];
+      dv.itens.forEach((x, i) => { if (!x.prodId) return; const mid = devId + '_m' + i, m0 = movs.find(m => m.prodId === x.prodId) || {};
+        w.push({ p: 'mov/' + mid, velho: null, data: { id: mid, data: hoje, prodId: x.prodId, tipo: 'saida', devFor: true, subtipo: 'devfor', qtd: x.qtd, custoUnit: x.custo, projId: '', almoxId: m0.almoxId || '', prateleira: m0.prateleira || '', notaId: n.id, devId, obs: 'Devolução ao fornecedor · NF-e ' + (n.numero || 's/n') + (nfDev ? ' · NF de devolução ' + nfDev : '') } }); movIds.push(mid); });
+      const ls = (n.lancIds || []).map(x => doc('lanc/' + x)).filter(l => l && l.tipo === 'pagar' && l.status !== 'cancelado');
+      const tt = P2.notaTotais(n), fr = tt.vNF > 0 ? dv.bruto / tt.vNF : 0;
+      let resta = dv.liquido; const abat = [], guias = [];
+      for (const l of ls.filter(l => !l.guia).sort((a, c) => String(c.venc || '').localeCompare(String(a.venc || '')))) {
+        if (resta <= 0.004) break; if (l.pago) continue;
+        const v = +l.valor || 0, a = P2.r2(Math.min(v, resta)), nv = P2.r2(v - a); resta = P2.r2(resta - a);
+        const nl = Object.assign({}, l, { devAbat: P2.r2((+l.devAbat || 0) + a), valorOrig: l.valorOrig != null ? l.valorOrig : v }, nv <= 0.004 ? { status: 'cancelado', cancMotivo: 'Devolução ao fornecedor (NF de devolução ' + (nfDev || chDev) + ')' } : { valor: nv });
+        w.push({ p: 'lanc/' + l.id, velho: l, data: nl }); abat.push({ id: l.id, valor: a, cancelada: nv <= 0.004 });
+      }
+      for (const g of ls.filter(l => l.guia)) { const a = P2.r2((+g.valor || 0) * fr); if (!(a > 0)) continue;
+        if (g.pago) { guias.push({ id: g.id, valor: a, paga: true }); continue; }
+        const nv = P2.r2((+g.valor || 0) - a); w.push({ p: 'lanc/' + g.id, velho: g, data: Object.assign({}, g, { devAbat: P2.r2((+g.devAbat || 0) + a), valorOrig: g.valorOrig != null ? g.valorOrig : +g.valor || 0 }, nv <= 0.004 ? { status: 'cancelado', cancMotivo: 'Devolução ao fornecedor' } : { valor: nv }) }); guias.push({ id: g.id, valor: a }); }
+      let creditoId = '';
+      if (resta > 0.004) { creditoId = devId + '_cr';
+        w.push({ p: 'lanc/' + creditoId, velho: null, data: { id: creditoId, tipo: 'receber', desc: 'Crédito de devolução ao fornecedor · NF-e ' + (n.numero || 's/n') + ' · ' + (parc.nome || ''), valor: resta, venc: new Date(Date.parse(hoje + 'T12:00:00Z') + 30 * 864e5).toISOString().slice(0, 10), comp: hoje.slice(0, 7), parcId: n.parcId || '', projId: n.projId || '', categoria: 'Devolução de compras (crédito com fornecedor)', status: 'aberto', pago: '', devolucaoDe: n.id, devId, estoqueValor: 0, crBy: conta.id, cr: ts, obs: 'A conta da nota já estava paga: o valor devolvido fica como crédito do fornecedor (abater numa próxima compra ou receber).' } }); }
+      let reab = null;
+      if (b.substituir && n.pedId) { const p = doc('ped/' + String(n.pedId));
+        if (p && p.status !== 'cancelado') { const its = dv.itens.filter(x => x.pedK != null && x.pedK !== '' && (p.itens || [])[+x.pedK]).map(x => ({ k: +x.pedK, qtd: -x.qtd }));
+          if (its.length) { reab = { id: devId + '_rc', data: hoje, por: conta.id, em: ts, devolucao: true, devId, itens: its, notaId: '', obs: 'Devolução ao fornecedor: saldo reaberto para substituição' };
+            const np = Object.assign({}, p, { recebs: (Array.isArray(p.recebs) ? p.recebs : []).concat([reab]), recParcial: true, saldoEnc: null }); if (np.status === 'recebido') np.status = 'enviado';
+            w.push({ p: 'ped/' + p.id, velho: p, data: np }); } } }
+      const dev = { id: devId, em: ts, por: conta.id, data: hoje, itens: dv.itens, bruto: dv.bruto, ret: dv.ret, liquido: dv.liquido, abatido: P2.r2(dv.liquido - resta), abat, guias, credito: resta > 0.004 ? resta : 0, creditoId, motivo, nfDev, chDev, substituir: !!reab, movIds, saidaFis: null };
+      const nn = Object.assign({}, n, { devols: (Array.isArray(n.devols) ? n.devols : []).concat([dev]), devTotal: P2.r2((+n.devTotal || 0) + dv.bruto) });
+      w.push({ p: 'notas/' + n.id, velho: n, data: nn });
+      for (const x of w) { const e = travaCompetencia(x.p.split('/')[0], x.velho, x.data); if (e) return e; }
+      db.exec('BEGIN');
+      try { for (const x of w) q.docPut.run(x.p, x.p.split('/')[0], x.p.split('/')[1], JSON.stringify(x.data), ts); db.exec('COMMIT'); }
+      catch (e) { try { db.exec('ROLLBACK'); } catch (z) { } return erro('Falha ao gravar a devolução. Nada foi gravado; tente de novo.', 500); }
+      for (const x of w) { avisarDoc('set', x.p, x.data, ts); auditar(conta, req, 'PUT', x.p, x.velho, x.data); }
+      auditar(conta, req, 'NOTA_DEVOLUCAO', 'notas/' + n.id, null, { devId, valor: dv.bruto, liquido: dv.liquido, abatido: dev.abatido, credito: dev.credito, itens: dv.itens.length, nfDev, chDev, substituir: !!reab });
+      return { ok: true, dev, docs: w.map(x => ({ col: x.p.split('/')[0], id: x.p.split('/')[1], data: x.data })) };
+    }
+    function rotaDevSaida(conta, req, b) {
+      b = b || {}; const id = String(b.id || ''), did = String(b.devId || ''); if (!ID_OK.test(id) || !ID_OK.test(did)) return erro('Dados inválidos.', 400);
+      if (!(ehDono(conta) || P2N.podeLancar(conta) || papelConta(conta) === 'almoxarife')) return erro('Quem confirma a saída física da devolução é o almoxarife (ou o Fiscal).');
+      const n = doc('notas/' + id); if (!n) return erro('Nota não encontrada.', 404);
+      const ds = Array.isArray(n.devols) ? n.devols : [], k = ds.findIndex(d => d.id === did); if (k < 0) return erro('Devolução não encontrada.', 404);
+      if (ds[k].saidaFis) return erro('A saída física desta devolução já foi confirmada.', 409);
+      const nn = Object.assign({}, n, { devols: ds.map((d, i) => i === k ? Object.assign({}, d, { saidaFis: { por: conta.id, em: Date.now(), obs: String(b.obs || '').slice(0, 300) } }) : d) });
+      salvar('notas/' + id, nn, conta, req, 'NOTA_DEVOLUCAO_SAIDA', n); return { ok: true, data: nn };
+    }
+    /* ---------- 6. e-mail do pedido ao fornecedor (com o PDF) ---------- */
+    const pedEnvios = new Map();
+    async function rotaPedEmail(conta, req, res) {
+      const fim = (st, o) => json(res, st, o), b = await lerJson(req), id = String(b.id || ''), p = 'ped/' + id;
+      if (!ID_OK.test(id)) return fim(400, { code: 'invalid_argument', erro: 'Pedido inválido.' });
+      if (!(ehDono(conta) || (pode(conta, p, 'w') && perfilPermite(conta, p, 'w') && gravacaoPermitida(conta, p) && gravaCol(conta, 'ped')))) { auditar(conta, req, 'PED_EMAIL_NEGADO', p, null, null); return fim(403, { code: 'not_granted', erro: 'Só quem faz pedidos de compra (Comprador) envia o pedido ao fornecedor.' }); }
+      const d = doc(p); if (!d) return fim(404, { code: 'not_found', erro: 'Pedido não encontrado.' });
+      const f = doc('parc/' + String(d.parcId || '')) || {}, para = String(f.email || '').split(/[,;\s]+/).map(x => x.trim()).find(emailOk);
+      if (!para) return fim(409, { code: 'failed_precondition', erro: 'O fornecedor não tem e-mail cadastrado. Cadastre o e-mail dele em Fornecedores.' });
+      const cc = [...new Set((Array.isArray(b.cc) ? b.cc : String(b.cc || '').split(/[,;\s]+/)).map(x => String(x).trim()).filter(Boolean))];
+      if (cc.length > 5 || cc.some(x => !emailOk(x))) return fim(400, { code: 'invalid_argument', erro: 'Confira os e-mails de "copiar para" (no máximo 5).' });
+      const pdf = Buffer.from(String(b.pdf || ''), 'base64');
+      if (pdf.length > 10 * 1048576) return fim(413, { code: 'too_large', erro: 'O PDF do pedido passa de 10 MB.' });
+      if (pdf.length < 8 || pdf.subarray(0, 5).toString('latin1') !== '%PDF-') return fim(400, { code: 'invalid_argument', erro: 'PDF inválido.' });
+      if (!EMAIL.configurado()) { auditar(conta, req, 'PED_EMAIL_SEM_SMTP', p, null, { para }); return fim(503, { code: 'unavailable', semSmtp: true, erro: 'O envio de e-mail não está configurado no servidor (SMTP).' }); }
+      const agora = Date.now(), env = (pedEnvios.get(conta.id) || []).filter(t => agora - t < 3600e3); if (env.length >= 30) return fim(429, { code: 'rate_limited', erro: 'Muitos envios na última hora. Tente mais tarde.' });
+      const emp = cfgEmp(), assunto = 'Pedido de compra nº ' + (d.numero || '') + ' · ' + (emp.fantasia || emp.razao || ''), texto = String(b.texto || '').replace(/\r/g, '').slice(0, 20000) || ('Segue em anexo o pedido de compra nº ' + (d.numero || '') + '.');
+      const html = '<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;color:#0f1b2d"><pre style="font-family:inherit;white-space:pre-wrap">' + esc(texto) + '</pre></body></html>';
+      const nome = 'Pedido-' + String(d.numero || id).replace(/[^\w.\-]+/g, '_').slice(0, 40) + '.pdf';
+      try { await EMAIL.enviar({ para, cc, assunto, texto: texto + '\n', html, anexos: [{ nome, tipo: 'application/pdf', dados: pdf }] }); }
+      catch (e) { auditar(conta, req, 'PED_EMAIL_FALHA', p, null, { para, erro: String((e && e.message) || e).slice(0, 200) }); return fim(502, { code: 'unavailable', erro: 'O e-mail não foi enviado: ' + String((e && e.message) || e).slice(0, 200) }); }
+      env.push(agora); pedEnvios.set(conta.id, env);
+      const atual = doc(p) || d, n = JSON.parse(JSON.stringify(atual));
+      n.emails = (Array.isArray(n.emails) ? n.emails : []).concat([{ em: agora, por: conta.id, para, cc, bytes: pdf.length, arq: nome }]).slice(-30);
+      salvar(p, n, conta, req, 'PED_EMAIL', atual); return fim(200, { ok: true, data: n, para });
+    }
+    /* ---------- 6. avisos automáticos por e-mail ---------- */
+    const AV_LIGA = !/^(0|nao|não|false|desligado)$/i.test(String(process.env.P2P_AVISOS || '1'));
+    const AV_MS = Math.max(15, +process.env.P2P_AVISO_INTERVALO_S || 120) * 1000;
+    function eventosAviso() {
+      const ev = [], c = cfgEmp(), mf = c.matFluxo || {}, scs = new Map(col('sc').map(s => [s.id, s]));
+      for (const s of scs.values()) if (s.status === 'aprovacao') {
+        const quem = s.aprovUid ? [s.aprovUid] : (Array.isArray(mf.aprov) && mf.aprov.length ? mf.aprov : todosAprovadores());
+        ev.push({ k: 'sc:' + s.id + ':' + (s.aprovPedidoEm || s.enviadoEm || ''), quem: quem.filter(u => u !== s.solUid), tipo: 'Solicitação de compra aguardando aprovação', txt: 'A solicitação de compra nº ' + (s.numero || '') + ' aguarda a sua aprovação (Financeiro › Aprovações).' });
+      }
+      for (const p of col('ped')) {
+        if (p.status === 'cancelado') continue;
+        if (p.aprov && p.aprov.ok) ev.push({ k: 'pedap:' + p.id, quem: [p.crBy || mf.comprador].filter(Boolean), tipo: 'Pedido de compra aprovado', txt: 'O pedido de compra nº ' + (p.numero || '') + ' foi aprovado e pode ser enviado ao fornecedor.' });
+        const s = p.scId ? scs.get(p.scId) : null, sol = s ? (s.solUid || s.crBy) : '';
+        for (const r of (Array.isArray(p.recebs) ? p.recebs : [])) if (!r.devolucao && sol) ev.push({ k: 'rec:' + p.id + ':' + r.id, quem: [sol], tipo: 'Material chegou', txt: 'Chegou material do pedido de compra nº ' + (p.numero || '') + (s ? ' (solicitação nº ' + (s.numero || '') + ')' : '') + ', recebido em ' + br(r.data) + '.' });
+      }
+      for (const n of col('notas')) {
+        if (n.tipo !== 'entrada' || n.status === 'cancelada') continue;
+        const nf = 'NF nº ' + (n.numero || 's/n') + ' de ' + ((doc('parc/' + String(n.parcId || '')) || {}).nome || 'fornecedor');
+        if (n.confPend && !confOk(n.confAprov)) ev.push({ k: 'div:' + n.id, quem: QUEM.comprador().concat(todosAprovadores()), tipo: 'Nota com divergência', txt: 'A ' + nf + ' tem divergência com o pedido ou o recebimento e aguarda a aprovação do comprador e do gestor.' });
+        if (n.status !== 'rascunho') continue;
+        if (n.p2qMot && n.p2qMot.sig) ev.push({ k: 'fila:' + n.id + ':' + n.p2qMot.sig, quem: quemPapel(n.p2qMot.quem || 'fiscal'), tipo: 'Nota parada no recebimento', txt: 'A ' + nf + ' não foi lançada automaticamente: ' + (Array.isArray(n.p2qMot.motivos) ? n.p2qMot.motivos.slice(0, 3).join(' ') : '') });
+        if (n.pedId && !n.recebId && (n.chave || n.recebida)) { const p = doc('ped/' + String(n.pedId)) || {}; ev.push({ k: 'semrec:' + n.id, quem: quemPapel('almoxarife'), tipo: 'Falta o recebimento físico', txt: 'A ' + nf + ' chegou e falta registrar o recebimento físico do pedido nº ' + (p.numero || '') + ' (Pedidos de compra › Receber).' }); }
+        const pq = P2.pequena(n, c, n.cr, n.pequenaAprov);
+        if (pq && !pq.aprov && !pq.falta.length && !(n.pequenaAprov && n.pequenaAprov.dec === 'nao')) ev.push({ k: 'peq:' + n.id + ':' + pq.valor, quem: quemAprova(1).length ? quemAprova(1) : quemPapel('aprovador'), tipo: 'Compra pequena sem pedido', txt: 'A ' + nf + ' (' + moedaQ(pq.valor) + ') é uma compra pequena sem pedido e aguarda a sua aprovação (Suprimentos › Recebimento de notas).' });
+      }
+      return ev;
+    }
+    function avisosVarrer(silencioso) {
+      const ev = eventosAviso(), ins = db.prepare('INSERT OR IGNORE INTO p2p_aviso(k,ts) VALUES(?,?)'), conf = EMAIL.configurado(), out = [];
+      for (const e of ev) {
+        if (!ins.run(e.k, Date.now()).changes || silencioso) continue;
+        const env = [];
+        for (const u of [...new Set(e.quem.filter(Boolean))]) { const ct = q.contaPorId.get(u); if (!ct || !ct.ativo) continue; const ok = conf && emailOk(ct.email);
+          if (ok) { const m = EMAIL.modelo(e.tipo, [e.txt], 'Abrir a Central de Gestão', APP_URL, 'Aviso automático da Central de Gestão.'); EMAIL.enviar({ para: ct.email, assunto: e.tipo + ' · Central de Gestão', texto: m.texto, html: m.html }).catch(er => auditar(null, null, 'P2P_AVISO_FALHA', 'p2p/aviso', null, { k: e.k, para: ct.email, erro: String(er && er.message || er).slice(0, 200) })); }
+          env.push({ id: u, email: ok }); }
+        auditar(null, null, 'P2P_AVISO', 'p2p/aviso', null, { k: e.k, tipo: e.tipo, para: env.map(x => x.id), emails: env.filter(x => x.email).length, smtp: conf });
+        out.push({ k: e.k, tipo: e.tipo, quem: env.map(x => x.id), email: env.filter(x => x.email).map(x => x.id) });
+      }
+      return out;
+    }
+    setImmediate(() => { try { if (!db.prepare('SELECT 1 FROM p2p_aviso LIMIT 1').get()) avisosVarrer(true); } catch (e) { console.error('[v141] avisos:', e.message); } });
+    setInterval(() => { if (AV_LIGA) try { avisosVarrer(false); } catch (e) { console.error('[v141] avisos:', e.message); } }, AV_MS).unref();
+    /* itens para o aviso diário das aprovações (pendenciasAprovacao) */
+    function pendencias(lim, desde, add) {
+      const c = cfgEmp(), mf = c.matFluxo || {};
+      for (const s of col('sc')) if (s.status === 'aprovacao') add(s.aprovUid ? [s.aprovUid] : (Array.isArray(mf.aprov) && mf.aprov.length ? mf.aprov : todosAprovadores()), 'Solicitação de compra', 'Solicitação nº ' + (s.numero || s.id), s.valorEst == null ? null : +s.valorEst, +s.aprovPedidoEm || desde(s, 'sc/' + s.id), [s.solUid, s.crBy]);
+      for (const n of col('notas')) { if (n.status !== 'rascunho' || n.tipo !== 'entrada') continue; const pq = P2.pequena(n, c, n.cr, n.pequenaAprov); if (pq && !pq.aprov && !pq.falta.length && !(n.pequenaAprov && n.pequenaAprov.dec === 'nao')) add(quemAprova(1), 'Compra pequena sem pedido', 'NF ' + (n.numero || 's/n'), pq.valor, desde(n, 'notas/' + n.id), [n.crBy], true); }
+    }
+    /* ---------- rotas ---------- */
+    async function rota(p, m, req, res, conta) {
+      const R = async fn => { const b = await lerJson(req), r = fn(b || {}); if (r.erro) return json(res, r.st || 403, { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || undefined }); return json(res, 200, r); };
+      if (m === 'POST' && p === '/api/p2p/trava') { await R(b => rotaTrava(conta, req, b)); return true; }
+      if (m === 'GET' && p === '/api/p2p/fila') { const r = rotaFila(conta); json(res, r.erro ? r.st || 403 : 200, r.erro ? { code: 'not_granted', erro: r.erro } : r); return true; }
+      if (m === 'POST' && p === '/api/p2p/pequena/aprovar') { await R(b => rotaPequena(conta, req, b)); return true; }
+      if (m === 'POST' && p === '/api/nota/devolver') { await R(b => rotaDevolver(conta, req, b)); return true; }
+      if (m === 'POST' && p === '/api/nota/devolucao/saida') { await R(b => rotaDevSaida(conta, req, b)); return true; }
+      if (m === 'POST' && p === '/api/ped/email') { await rotaPedEmail(conta, req, res); return true; }
+      if (m === 'GET' && p === '/api/p2p/smtp') { json(res, 200, { smtp: EMAIL.configurado() }); return true; }
+      if (m === 'POST' && p === '/api/admin/avisos/p2p') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) { json(res, 403, { code: 'not_granted', erro: 'Só administrador.' }); return true; } json(res, 200, { avisos: avisosVarrer(false) }); return true; }
+      return false;
+    }
+    return { rota, regraNota, travaPequena, contaPequena, pendencias, avisosVarrer, eventosAviso };
+  })();
+  /* ===================== fim v141 ===================== */
 
   /* =====================================================================
      7. TRILHA DE AUDITORIA
@@ -582,7 +855,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     return false;
   }
   const aprovacaoValida = l => !!(l && ((l.aprov && l.aprov.ok) || (l.obrig && l.aprovParc) || herancaOk(l)));
-  function precisaAprovPag(l) { const A = alcadas(); return A.pag > 0 && l.tipo === 'pagar' && l.status !== 'cancelado' && !l.transf && !l.adtoId && !P2N.antesDaAlcada(A.padrao, 'pag', l) && !P2.concLivre(l) && valorAlc('lanc', l) > A.pag; } /* v140: antesDaAlcada, concLivre */
+  function precisaAprovPag(l) { if (P2Q.contaPequena(l)) return true; /* v141 */ const A = alcadas(); return A.pag > 0 && l.tipo === 'pagar' && l.status !== 'cancelado' && !l.transf && !l.adtoId && !P2N.antesDaAlcada(A.padrao, 'pag', l) && !P2.concLivre(l) && valorAlc('lanc', l) > A.pag; } /* v140: antesDaAlcada, concLivre */
   function regraPago(conta, p, velho, novo) {
     const v = velho || {};
     /* pagoSemAprov é carimbado pelo servidor: ninguém põe nem tira por fora */
@@ -1281,6 +1554,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     for (const x of col('medemp')) if (x.status === 'aguardando') add(todosAprovadores().concat(aprovadoresDe('diretoria')), 'Medição de empreiteiro', 'Medição nº ' + (x.numero || ''), (x.fixo && x.fixo.bruto) || null, desde(x, 'medemp/' + x.id), [x.enviadoPor]);
     for (const x of col('nfse')) if (x.status === 'emitida' && x.canc && x.canc.st === 'pendente') add(contasQueGravam('fin'), 'Cancelamento de NFS-e', 'NFS-e ' + (x.numOficial || x.numero || ''), null, +x.canc.em || desde(x, 'nfse/' + x.id), [x.canc.por]);
     for (const x of col('notas')) if (x.confPend && !confOk(x.confAprov)) add(contasQueGravam('comp').concat(todosAprovadores()), 'Divergência de nota', 'NF ' + (x.numero || 's/n'), null, desde(x, 'notas/' + x.id), []);
+    P2Q.pendencias(lim, desde, add); /* v141: solicitação de compra aguardando aprovação e compra pequena sem pedido */
     return itens;
   }
   function avisarAprovadores() {
@@ -1642,7 +1916,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* =====================================================================
      ENTRADA: regras antes de gravar ou excluir um documento
      ===================================================================== */
-  const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf', 'alcPadrao', 'supSemPedMin', 'supSemPedIsentas', 'supTolQtd']; /* v140: alcPadrao e as regras da nota sem pedido/tolerância (o servidor confere no lançamento) */ /* v125: osf = e-mail da fábrica e aprovadores da OS */
+  const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf', 'alcPadrao', 'supSemPedMin', 'supSemPedIsentas', 'supTolQtd', 'p2pAuto', 'p2pAutoDias', 'p2pPequena', 'p2pPequenaAte', 'p2pPequenaEm', 'p2pPequenaConta']; /* v140: alcPadrao e as regras da nota sem pedido/tolerância (o servidor confere no lançamento) */ /* v125: osf = e-mail da fábrica e aprovadores da OS */
   /* v111: a Diretoria não lança, mas decide: liberação (docLib) e aprovação/recusa de medições, sem mudar outros campos */
   const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
     fzpedfech: ['st', 'porConf', 'emConf', 'devObs', 'eventos'], opp: ['goAprov', 'goReq', 'goHist'] };
@@ -1837,6 +2111,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'lanc') { e = P2N.regraLancNota(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'medemp') { const v = velho || {}; if (!igual(v.nfsef, novo.nfsef)) { if (v.nfsef !== undefined) novo.nfsef = v.nfsef; else delete novo.nfsef; } } /* v141: NFS-e do empreiteiro ligada pelo arquivo fiscal */
       if (c0 === 'rdo') { e = regraAptRdo(velho, novo); if (e) return e; }
       if (c0 === 'func') { e = regraAptFunc(velho, novo) || regraDeslFunc(velho, novo); if (e) return e; }
       if (c0 === 'desl') { e = regraDeslAuto(velho, novo); if (e) return e; }
@@ -1847,6 +2122,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'nfse') { e = regraNfseCanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'sc') { e = P2N.regraScAprov(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'notas') { e = regraNotaConf(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'notas') { e = P2Q.regraNota(conta, velho, novo); if (e) return e; } /* v141 */
       e = travaPonto(c0, velho, novo); if (e) return e;
       e = regrasJur1(c0, conta, velho, novo) || regrasJur2(c0, conta, velho, novo); if (e) return e;
     }
@@ -1908,6 +2184,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   async function rota(p, m, req, res, conta, u) {
     const R = async fn => { const b = await lerJson(req); const r = fn(b); if (r.reauth) { auditar(conta, req, 'PEDE_SENHA', p, null, null); if (END.exigirReauth(req, res)) return; return json(res, 409, { erro: 'Repita a ação.' }); } if (r.erro) return json(res, r.st || 403, { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro }); return json(res, 200, r); };
     if (m === 'POST' && (p === '/api/aprovar')) { await R(b => rotaAprovar(conta, req, b)); return true; }
+    if (await P2Q.rota(p, m, req, res, conta)) return true; /* v141 */
     if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }
     if (m === 'POST' && (p === '/api/competencia/fechar' || p === '/api/competencia/reabrir')) { await R(b => rotaCompetencia(p.endsWith('fechar') ? 'fechar' : 'reabrir', conta, req, b)); return true; }

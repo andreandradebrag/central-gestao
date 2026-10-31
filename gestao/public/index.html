@@ -389,7 +389,7 @@ function stockAll(){
     for(const m of list){
       const mq=+m.qtd||0;
       if(m.tipo==='entrada'){const cu=+m.custoUnit||0;const nq=q+mq;c=q>0?(q*c+mq*cu)/nq:cu;q=nq;costs.set(m.id,cu);}
-      else if(m.tipo==='saida'){costs.set(m.id,c);q-=mq;}
+      else if(m.tipo==='saida'){if(m.devFor&&+m.custoUnit>0){const cu=+m.custoUnit,nq=q-mq;costs.set(m.id,cu);c=nq>1e-9?Math.max(0,(q*c-mq*cu)/nq):c;q=nq;}else{costs.set(m.id,c);q-=mq;}}
       else if(m.tipo==='transf'){costs.set(m.id,c);}else{costs.set(m.id,c);q+=mq;}
     }
     res.set(pid,{saldo:q,custo:c,valor:q*c});
@@ -27233,9 +27233,364 @@ RH_PRE.push(()=>{try{if(typeof TUT==='undefined'||TUT.some(t=>t.id==='p2p'))retu
   'Nota recusada pelo servidor: aparece a lista do que falta (por exemplo, recebimento físico ou aprovação do pedido) e nada é gravado.',
   'Alçada padrão: se a empresa não configurou, pedidos e pagamentos acima de R$ 2.000 precisam de aprovação a partir da atualização; sem aprovadores cadastrados, aprova o dono ou o Administrador.'])});}catch(e){}});
 
+/* =====================================================================================================================
+   v141 (relatorios/feito_v141_p2p2.md): compras → nota → contas a pagar, entrega 2 (simplificações)
+   1. Fila única "O que precisa de ação" (primeira aba de Suprimentos › Recebimento de notas): junta notas para validar ou
+      lançar, XML ainda sem nota/pedido, falta de recebimento físico, pedido sem aprovação, divergência, compra pequena,
+      NFS-e de fornecedor e devolução sem saída física. Cada linha: o motivo, quem age (Comprador, Almoxarife, Fiscal,
+      Aprovador) e o botão. Filtro "Minhas pendências" pelo perfil; contador no menu e no Início. As abas antigas continuam.
+   2. Lançamento automático da nota que confere. ESCOLHA: roda no navegador do primeiro Fiscal/Administrador com o sistema
+      aberto (o cálculo da nota está no efetivarNota do navegador), com trava no servidor (/api/p2p/trava) e a MESMA rota
+      POST /api/nota/lancar com auto:true; o servidor confere tudo de novo e registra "sistema" na auditoria. Se faltar
+      alguma condição, a nota fica na fila com o motivo.
+   3. Compra pequena sem pedido (até o limite): categoria, projeto e aprovação do nível 1, sem cotação.
+   4. NFS-e de fornecedor/empreiteiro (XML ou PDF): arquivo fiscal, ligação com a medição (retenções conferidas) ou com o
+      pedido de serviço (vira nota de entrada e segue o lançamento normal).
+   5. Devolução ao fornecedor numa nota lançada (rota do servidor).
+   6. Avisos no chat (e por e-mail, pelo servidor) e e-mail do pedido ao fornecedor pelo servidor, com o PDF.
+   ===================================================================================================================== */
+const P2Q={fila:null,filaEm:0,filaErr:'',carregando:null,prom:null,autoId:null,silencio:0,msgs:[],avLog:[],avisados:new Set(),
+  auto:{rodando:false,em:0,lancadas:[],recusadas:[]},smtp:null};
+if(!ui.p2q)ui.p2q={minhas:true,q:''};
+const p2qLS=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){}return null;};
+const p2qPapel=()=>{if(store.mode!=='db'||me.owner)return 'admin';const p=PERFIS[me.perfil]||{};return (p&&!p.custom&&p.papel)||me.perfil||'';};
+const P2Q_QUEM={comprador:'Comprador',almoxarife:'Almoxarife',fiscal:'Fiscal',aprovador:'Aprovador'};
+function p2qEhAprov(){if(store.mode!=='db'||me.owner)return true;try{return !!((typeof podeAprovar==='function'&&podeAprovar())||finQuemAprova(1).includes(actorId()));}catch(e){return false;}}
+function p2qMeus(){const pp=p2qPapel(),s=new Set();if(pp==='admin'){Object.keys(P2Q_QUEM).forEach(k=>s.add(k));return s;}
+  if(['comprador','compras'].includes(pp))s.add('comprador');if(pp==='almoxarife')s.add('almoxarife');if(pp==='fiscal'||p2nPodeLancar())s.add('fiscal');if(p2qEhAprov())s.add('aprovador');return s;}
+/* configuração do recebimento (cfg da empresa; o servidor só deixa o administrador mudar: CFG_PROT) */
+function p2qCfg(){const c=cfg(),s=supCfg();const lim=c.p2pPequenaAte===''||c.p2pPequenaAte==null||isNaN(+c.p2pPequenaAte)?s.supSemPedMin:+c.p2pPequenaAte;
+  return {auto:c.p2pAuto!==false,autoDias:Math.max(1,+c.p2pAutoDias||45),pequena:c.p2pPequena!==false,lim:r2(lim),em:+c.p2pPequenaEm||0,conta:c.p2pPequenaConta===true};}
+const p2qAdmin=()=>store.mode!=='db'||me.owner||(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+const p2qMasc=d=>{d=digits(d);return d.length===11?'***.'+d.slice(3,6)+'.'+d.slice(6,9)+'-**':d.length===14?fmtDoc(d):d;};
+
+/* ---------- 3. compra pequena sem pedido (igual ao servidor: p2p.js › pequena) ---------- */
+function p2qPequena(n){if(!n||n.tipo!=='entrada'||n.pedId||n.status==='cancelada'||n.ex||n.medempId)return null;const q=p2qCfg();if(!q.pequena||!(q.lim>0))return null;
+  if(!q.em||!(+n.cr>=q.em))return null; /* só depois da ativação pelo servidor (cfg.p2pPequenaEm), sem retroagir */
+  const v=notaTotais(n).vNF;if(!(v>0)||v>q.lim+0.004||supSemPedIsenta(n.categoria))return null;
+  const temProj=!!(n.projId||(Array.isArray(n.rateioProj)&&n.rateioProj.length)||n.comum),falta=[];if(!String(n.categoria||'').trim())falta.push('categoria');if(!temProj)falta.push('projeto');
+  const a=n.pequenaAprov&&n.pequenaAprov.ok?n.pequenaAprov:null,ok=!!(a&&v<=(+a.valor||0)+0.01);
+  return {valor:r2(v),lim:q.lim,falta,aprov:ok,aprovMenor:!!(a&&!ok),recusada:!!(n.pequenaAprov&&n.pequenaAprov.dec==='nao')};}
+{const b0=supBloqueio;supBloqueio=function(n){const e=b0.apply(this,arguments)||[];const pq=n&&n.status==='rascunho'?p2qPequena(n):null;
+  if(pq){if(pq.falta.length)e.push('Compra pequena sem pedido ('+money(pq.valor)+', até '+money(pq.lim)+'): informe '+pq.falta.join(' e ')+' na nota.');
+    if(!pq.aprov)e.push(pq.recusada?'A compra pequena sem pedido foi recusada pelo gestor: '+(n.pequenaAprov.obs||''):pq.aprovMenor?'O valor da nota passou do que o gestor aprovou. Peça a aprovação de novo.':'Compra pequena sem pedido: falta a aprovação do gestor (nível 1), em Suprimentos › Recebimento de notas › O que precisa de ação.');}
+  return e.length?e:null;};}
+function p2qPodeAprovPeq(n){if(store.mode!=='db'||me.owner)return true;if(n&&n.crBy&&n.crBy===actorId())return false;let qa=[];try{qa=finQuemAprova(1);}catch(e){}
+  return qa.includes(actorId())||p2qPapel()==='diretoria'||(!qa.length&&p2qAdmin());}
+A.p2qPeqAprovar=d=>{const n=get('notas',d.id);if(!n)return;const pq=p2qPequena(n);if(!pq){toast('Esta nota não é uma compra pequena sem pedido.','neg');return;}
+  if(!p2qPodeAprovPeq(n)){toast('Quem aprova a compra pequena é o gestor (nível 1 da matriz de aprovadores), a diretoria ou, sem aprovador, o administrador. Quem registrou a nota não aprova.','neg');return;}
+  if(pq.falta.length){toast('Antes da aprovação, informe '+pq.falta.join(' e ')+' na nota.','neg');return;}
+  const nao=d.dec==='nao';
+  modal({title:(nao?'Recusar':'Aprovar')+' a compra pequena · NF '+(n.numero||'s/n'),body:'<p style="margin:0 0 8px">'+esc(parcNome(n.parcId))+' · '+money(pq.valor)+' · '+esc(n.categoria||'')+(n.projId?' · '+esc(projNome(n.projId)):'')+'</p><p class="sub" style="margin:0 0 8px">Compra sem pedido de até '+money(pq.lim)+': basta a aprovação simples do gestor, sem cotação.</p><label class="f"><span>'+(nao?'Motivo da recusa':'Comentário (opcional)')+'</span><textarea id="p2qObs" rows="2"></textarea></label>',
+    saveLabel:nao?'Recusar':'Aprovar',save:()=>{const obs=(($('#p2qObs')||{}).value||'').trim();if(nao&&!obs){toast('Informe o motivo.','neg');return false;}
+      if(!SEGA_SRV()){put('notas',Object.assign(cl(n),{pequenaAprov:{ok:!nao,dec:nao?'nao':'sim',por:actorId(),em:Date.now(),valor:pq.valor,obs}}));toast(nao?'Compra recusada.':'Compra aprovada.','pos');return;}
+      segaPost('/api/p2p/pequena/aprovar',{id:n.id,dec:nao?'nao':'sim',obs}).then(j=>{if(j&&j.data)segaLocal('notas',Object.assign({},j.data,{id:n.id}));toast(nao?'Compra recusada.':'Compra pequena aprovada. O Fiscal pode lançar a nota.','pos');render();},e=>toast((e&&e.message)||'Não foi possível gravar.','neg'));}});};
+Object.assign(ACT_GROUP,{p2qPeqAprovar:null});
+/* conta a pagar avulsa pequena (opcional; igual ao servidor: contaPequena) */
+function p2qContaPequena(l){const q=p2qCfg();if(!q.conta||!q.pequena||!l||l.tipo!=='pagar'||l.status==='cancelado')return false;
+  if(l.notaId||l.medempId||l.guia||l.transf||l.adtoId||l.retencaoDe||l.retPendDe||l.foFunc||!l.parcId||p2nConcLivre(l))return false;
+  if(!q.em||!(+l.cr>=q.em))return false;const v=+l.valor||0;if(!(v>0)||v>q.lim+0.004)return false;return !supSemPedIsenta(l.categoria);}
+{const p0=precisaAprov;precisaAprov=function(col,r){if(col==='lanc'&&p2qContaPequena(r))return true;return p0.apply(this,arguments);};}
+
+/* ---------- 1. fila "O que precisa de ação" ---------- */
+async function p2qCarregar(forcar){
+  if(!SEGA_SRV())return null;if(!forcar&&P2Q.fila&&Date.now()-P2Q.filaEm<60e3)return P2Q.fila;if(P2Q.carregando)return P2Q.carregando;
+  P2Q.carregando=(async()=>{try{const j=await segaPost('/api/p2p/fila',null,'GET');P2Q.fila=j;P2Q.filaErr='';}catch(e){P2Q.filaErr=(e&&e.message)||'erro';if(!P2Q.fila)P2Q.fila={xmls:[],nfsef:[]};}
+    finally{P2Q.filaEm=Date.now();P2Q.carregando=null;}if(ui.tab==='nfrec')schedule();return P2Q.fila;})();
+  return P2Q.carregando;}
+const p2qBtn=(a,l,c,attrs)=>'<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'"'+Object.entries(attrs||{}).map(([k,v])=>' data-'+k+'="'+esc(String(v))+'"').join('')+'>'+esc(l)+'</button>';
+function p2qSig(n){const cf=n.pedId?supConf(n):null,p=n.pedId?get('ped',n.pedId):null;return JSON.stringify([n.pedId||'',n.recebId||'',cf?cf.sig:'',notaTotais(n).vNF,p&&p.aprov&&p.aprov.ok?1:0,n.valid||'']);}
+/* nota que o automático lança (o servidor confere de novo) */
+function p2qAutoPronta(n){if(!n||n.tipo!=='entrada'||n.status!=='rascunho'||n.ex||n.valid==='recusada'||!digits(n.chave)||!n.pedId||!n.recebId||n.confPend)return false;
+  const p=get('ped',n.pedId);if(!p||p.status==='cancelado'||!supRecs(p).some(r=>r.id===n.recebId)||supPedSemAprov(p))return false;
+  const cf=supConf(n);if(!cf||cf.div)return false;if(supBloqueio(n))return false;return true;}
+function p2qItens(){
+  const out=[],cq=p2qCfg(),auto=cq.auto&&!!(typeof window!=='undefined'&&window.__SELFHOST);
+  const add=(o)=>out.push(Object.assign({em:''},o));
+  const nf=n=>'NF '+(n.numero||'s/n')+(n.serie?'/'+n.serie:'');
+  S.notas.forEach(n=>{
+    if(n.tipo!=='entrada'||n.ex)return;
+    if(n.status==='lancada'){
+      if(n.confPend&&!supConfAprov(n)){const a=n.confAprov||{};add({k:'div:'+n.id,tipo:'nota',ref:n,quem:a.comp?'aprovador':'comprador',motivo:'O XML que chegou depois diverge da nota já lançada: o pagamento fica travado até a aprovação.',acts:p2qBtn('supConfVer','Conferência','pri',{id:n.id}),em:n.recEm||n.emissao});}
+      (Array.isArray(n.devols)?n.devols:[]).forEach(dv=>{if(!dv.saidaFis&&(dv.itens||[]).some(x=>x.prodId))add({k:'dev:'+n.id+':'+dv.id,tipo:'dev',ref:n,quem:'almoxarife',motivo:'Devolução ao fornecedor registrada ('+money(dv.bruto)+', NF de devolução '+(dv.nfDev||dv.chDev||'')+'): confirme que o material saiu fisicamente.',acts:p2qBtn('p2qDevSaida','Confirmar saída','pri',{id:n.id,k:dv.id}),em:dv.data});});
+      return;}
+    if(n.status!=='rascunho'||n.valid==='recusada')return;
+    const base={tipo:'nota',ref:n,em:n.recEm||n.emissao};const linhas=[];
+    if(n.p2qMot&&n.p2qMot.sig===p2qSig(n))linhas.push({k:'mot:'+n.id,quem:n.p2qMot.quem||'fiscal',motivo:'O lançamento automático foi recusado pelo servidor: '+(n.p2qMot.motivos||[]).join(' '),acts:p2qBtn('editNota','Abrir','pri',{id:n.id})});
+    if(n.pedId){const p=get('ped',n.pedId);
+      if(!p)linhas.push({k:'ped:'+n.id,quem:'fiscal',motivo:'O pedido ligado à nota não existe mais. Ligue a nota ao pedido certo.',acts:p2qBtn('editNota','Abrir','pri',{id:n.id})});
+      else{
+        if(!n.recebId&&(n.chave||n.recebida))linhas.push({k:'rec:'+n.id,quem:'almoxarife',motivo:'Falta o recebimento físico do pedido nº '+p.numero+': registre o que chegou e escolha esta nota.',acts:(p.status!=='recebido'&&p.status!=='cancelado'?p2qBtn('pedReceber','Receber','pri',{id:p.id}):'')});
+        if(supPedSemAprov(p))linhas.push({k:'apr:'+n.id,quem:'aprovador',motivo:'O pedido nº '+p.numero+' ('+money(pedTotal(p))+') ainda não foi aprovado: a nota e o pagamento ficam travados.',acts:p2qBtn('nav','Aprovações','pri',{tab:'aprov'})});
+        const cf=supConf(n);if(cf&&cf.div&&!supConfAprov(n,cf)){const a=n.confAprov&&n.confAprov.sig===cf.sig?n.confAprov:{};
+          if(!a.comp)linhas.push({k:'dvc:'+n.id,quem:'comprador',motivo:'Divergência com o pedido nº '+p.numero+' em '+cf.div+' item(ns) (preço, quantidade ou item fora do pedido): falta a aprovação do comprador.',acts:p2qBtn('supConfVer','Conferência','pri',{id:n.id})});
+          if(!a.gest)linhas.push({k:'dvg:'+n.id,quem:'aprovador',motivo:'Divergência com o pedido nº '+p.numero+' em '+cf.div+' item(ns): falta a aprovação do solicitante ou gestor.',acts:p2qBtn('supConfVer','Conferência','pri',{id:n.id})});}
+      }
+    }else{
+      const pq=p2qPequena(n);
+      if(pq){if(pq.falta.length)linhas.push({k:'pqf:'+n.id,quem:'fiscal',motivo:'Compra pequena sem pedido ('+money(pq.valor)+'): informe '+pq.falta.join(' e ')+' para pedir a aprovação do gestor.',acts:p2qBtn('editNota','Abrir','pri',{id:n.id})});
+        else if(pq.recusada)linhas.push({k:'pqr:'+n.id,quem:'fiscal',motivo:'Compra pequena recusada pelo gestor: '+(n.pequenaAprov.obs||'')+'. Exclua a nota ou ligue a um pedido.',acts:p2qBtn('editNota','Abrir','',{id:n.id})});
+        else if(!pq.aprov)linhas.push({k:'pqa:'+n.id,quem:'aprovador',motivo:'Compra pequena sem pedido ('+money(pq.valor)+', até '+money(pq.lim)+'): aprovação simples do gestor, sem cotação.',acts:(p2qPodeAprovPeq(n)?p2qBtn('p2qPeqAprovar','Aprovar','pri',{id:n.id})+p2qBtn('p2qPeqAprovar','Recusar','dng',{id:n.id,dec:'nao'}):'')});}
+      else{const sp=supSemPed(n);const cs=supPedCands(n).filter(c=>c.sc>0);
+        if(sp&&!sp.ok)linhas.push({k:'sp:'+n.id,quem:'fiscal',motivo:'Nota de '+money(sp.valor)+' sem pedido (acima de '+money(supCfg().supSemPedMin)+'): ligue a um pedido'+(cs.length?' (sugerido nº '+cs[0].p.numero+')':'')+' ou informe o motivo e a justificativa. A conta segue a alçada de pagamento.',acts:p2qBtn('editNota','Abrir','pri',{id:n.id})});
+        else if(cs.length&&(n.chave||n.recebida))linhas.push({k:'sug:'+n.id,quem:'fiscal',motivo:'XML sem pedido identificado: confira se é do pedido nº '+cs[0].p.numero+(cs.length>1?' (há '+cs.length+' pedidos possíveis)':'')+'.',acts:p2qBtn('editNota','Ligar ao pedido','pri',{id:n.id})});}
+    }
+    if(!linhas.some(l=>!/^sug:/.test(l.k))){const bl=supBloqueio(n); /* a sugestão de pedido é só um aviso: a validação continua aparecendo */
+      if(bl)linhas.push({k:'bl:'+n.id,quem:'fiscal',motivo:bl.join(' '),acts:p2qBtn('editNota','Abrir','pri',{id:n.id})});
+      else if(auto&&p2qAutoPronta(n))linhas.push({k:'auto:'+n.id,quem:'fiscal',auto:true,motivo:'Tudo confere (pedido aprovado, recebimento físico e conferência dentro da tolerância): será lançada automaticamente quando um Fiscal estiver com o sistema aberto.',acts:p2qBtn('efetivarNota','Lançar agora','',{id:n.id})});
+      else if(isInbox(n)&&n.valid!=='validada')linhas.push({k:'val:'+n.id,quem:'fiscal',motivo:'Aguardando validação: confira a nota recebida e valide.',acts:p2qBtn('nfrecValidar','Validar','pri',{id:n.id})});
+      else linhas.push({k:'lan:'+n.id,quem:'fiscal',motivo:'Pronta para lançar (estoque e contas a pagar).',acts:p2qBtn(isInbox(n)?'nfrecLancar':'efetivarNota','Lançar','pri',{id:n.id})});}
+    linhas.forEach(l=>add(Object.assign({},base,l)));
+  });
+  /* XML de entrada que chegou (caixa nfe@, SEFAZ, Omie, envio manual) e ainda não virou nota */
+  ((P2Q.fila&&P2Q.fila.xmls)||[]).forEach(x=>{if(S.notas.some(n=>digits(n.chave)===x.chave&&n.status!=='cancelada'))return;
+    const pc=x.parcId?get('parc',x.parcId):null,ab=pc?S.ped.filter(p=>p.parcId===pc.id&&p.status!=='cancelado'&&p.status!=='recebido').length:0;
+    add({k:'xml:'+x.chave,tipo:'xml',ref:x,quem:'fiscal',em:x.emissao,motivo:'XML chegou ('+(NFR_ORIG[x.origem]||x.origem||'')+') e ainda não tem pedido identificado'+(pc?(ab?': '+ab+' pedido(s) em aberto deste fornecedor.':': nenhum pedido em aberto deste fornecedor.'):': fornecedor sem cadastro.'),acts:p2qBtn('p2qTrazerXml','Trazer para o recebimento','pri',{id:x.id})});});
+  /* NFS-e de fornecedor e empreiteiro */
+  ((P2Q.fila&&P2Q.fila.nfsef)||[]).forEach(r=>{if(r.situacao==='cancelada')return;const lg=r.lig;const ver=p2qBtn('p2qNfsVer','Ver','',{id:r.id});
+    if(!lg)add({k:'nfs:'+r.id,tipo:'nfsef',ref:r,quem:'fiscal',em:r.emissao,motivo:'NFS-e de serviço sem medição nem pedido: ligue à medição do empreiteiro, ao pedido de serviço ou lance como compra sem pedido.',acts:p2qBtn('p2qNfsMed','Ligar à medição','pri',{id:r.id})+p2qBtn('p2qNfsNota','Pedido / sem pedido','',{id:r.id})+ver});
+    else if(lg.tipo==='medicao'){const m=get('medemp',lg.id);
+      if(m&&m.status==='aguardando')add({k:'nfm:'+r.id,tipo:'nfsef',ref:r,quem:'aprovador',em:r.emissao,motivo:'NFS-e ligada à medição nº '+(lg.numero||'')+' do contrato '+(lg.ctr||'')+', que ainda aguarda aprovação (a conta a pagar nasce na aprovação).',acts:p2qBtn('nav','Medições','pri',{tab:'medemp'})+ver});
+      if((lg.div||[]).length&&!lg.aceita)add({k:'nfd:'+r.id,tipo:'nfsef',ref:r,quem:'fiscal',em:r.emissao,motivo:'Retenções da NFS-e diferentes das calculadas na medição nº '+(lg.numero||'')+': '+lg.div.map(d=>d.nome+' na nota '+money(d.nota)+' × medição '+money(d.med)).join('; ')+'.',acts:p2qBtn('p2qNfsAceitar','Aceitar a diferença','',{id:r.id})+ver});}
+  });
+  const ord={aprovador:0,almoxarife:1,comprador:2,fiscal:3};
+  return out.sort((a,b)=>String(a.em||'').localeCompare(String(b.em||''))||(ord[a.quem]-ord[b.quem]));
+}
+const p2qMinhas=its=>{const ms=p2qMeus();return its.filter(i=>ms.has(i.quem));};
+function p2qContagem(){try{return p2qMinhas(p2qItens()).filter(i=>!i.auto).length;}catch(e){return 0;}}
+function p2qView(){
+  if(SEGA_SRV()&&(!P2Q.fila||Date.now()-P2Q.filaEm>60e3))p2qCarregar(false);
+  const f=ui.p2q,todos=p2qItens(),ms=p2qMeus(),q=gsNorm(f.q||'');
+  let its=f.minhas?todos.filter(i=>ms.has(i.quem)):todos;
+  if(q)its=its.filter(i=>gsNorm([i.motivo,i.ref&&(i.ref.numero||''),i.ref&&i.ref.parcId?parcNome(i.ref.parcId):'',i.ref&&i.ref.parcNome||''].join(' ')).includes(q));
+  const cont=k=>todos.filter(i=>i.quem===k&&!i.auto).length,cq=p2qCfg();
+  const fora=(d,doc)=>doc?esc(/\*/.test(doc)?doc:p2qMasc(doc)):'';
+  const linha=i=>{const r=i.ref||{},forn=i.tipo==='xml'||i.tipo==='nfsef'?esc(r.parcNome||'—')+'<div class="sub mono">'+fora(0,r.parcDoc)+'</div>':esc(parcNome(r.parcId));
+    const doc=i.tipo==='xml'?'NF-e '+esc(r.numero||'s/n')+'/'+esc(r.serie||'1'):i.tipo==='nfsef'?'NFS-e '+esc(r.numero||'s/n'):'NF '+esc(r.numero||'s/n')+'/'+esc(r.serie||'1');
+    const val=i.tipo==='xml'||i.tipo==='nfsef'?money(r.valor):money(notaTotais(r).vNF);
+    return '<tr><td class="mono">'+fmtDate(i.em)+'</td><td class="mono">'+doc+'</td><td>'+forn+'</td><td class="num">'+val+'</td><td>'+esc(i.motivo)+(i.auto?' '+pill('automático','acc'):'')+'</td><td>'+pill(P2Q_QUEM[i.quem]||i.quem,i.quem==='aprovador'?'warn':i.quem==='almoxarife'?'acc':i.quem==='comprador'?'':'pos')+'</td><td class="act">'+i.acts+'</td></tr>';};
+  return '<div class="stack">'+
+    '<div class="kpis">'+kpi('Para você',String(todos.filter(i=>ms.has(i.quem)&&!i.auto).length),'pelo seu perfil',todos.some(i=>ms.has(i.quem)&&!i.auto)?'warn':'')+kpi('Comprador',String(cont('comprador')),'')+kpi('Almoxarife',String(cont('almoxarife')),'')+kpi('Fiscal',String(cont('fiscal')),todos.filter(i=>i.auto).length?todos.filter(i=>i.auto).length+' para lançar sozinha(s)':'')+kpi('Aprovador',String(cont('aprovador')),'')+'</div>'+
+    '<div class="note"><b>Uma fila só.</b> Tudo o que impede uma nota de virar estoque e conta a pagar aparece aqui, com quem deve agir. '+(cq.auto?'A nota que confere (XML ligado a um único pedido aprovado, recebimento físico registrado e conferência dentro da tolerância) é lançada sozinha'+(P2Q.auto.em?' · última verificação '+fmtDT(P2Q.auto.em):'')+'.':'O lançamento automático está desligado.')+' As abas antigas continuam ao lado.</div>'+
+    (P2Q.filaErr?'<p class="sub neg">Não foi possível buscar os XML no servidor: '+esc(P2Q.filaErr)+'</p>':'')+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_p2q" data-filter="p2q.q" value="'+esc(f.q||'')+'" placeholder="Número, fornecedor ou motivo"></label>'+
+    '<label class="f"><span>Mostrar</span><select id="s_p2qm" data-act="p2qMinhas">'+opt([['1','Minhas pendências'],['0','Todas']],f.minhas?'1':'0')+'</select></label>'+
+    '<div class="acts" style="align-self:flex-end">'+(p2nPodeLancar()&&SEGA_SRV()?p2qBtn('p2qAutoAgora','Verificar agora',''):'')+(nfrAcesso()?p2qBtn('p2qNfsReceber','Receber NFS-e de serviço',''):'')+(p2qAdmin()?p2qBtn('p2qRegras','Regras do recebimento',''):'')+'</div></div>'+
+    '<div class="tw"><table style="min-width:980px"><thead><tr><th>Data</th><th>Documento</th><th>Fornecedor</th><th class="num">Valor</th><th>O que falta</th><th>Quem age</th><th></th></tr></thead><tbody>'+
+    (its.length?its.map(linha).join(''):emptyRow(7,f.minhas?'Nada para você agora. Escolha “Todas” para ver as pendências dos outros perfis.':'Nenhuma pendência no recebimento de notas.'))+'</tbody></table></div></div>';
+}
+document.addEventListener('change',e=>{const t=e.target;if(t&&t.id==='s_p2qm'){ui.p2q.minhas=t.value==='1';p2qLS('cg.p2q.minhas.'+(me.uid||'local'),t.value);render();}});
+A.p2qMinhas=()=>{};
+{const v=p2qLS('cg.p2q.minhas.'+((typeof me!=='undefined'&&me.uid)||'local'));if(v==='0')ui.p2q.minhas=false;}
+/* aba nova, primeira e inicial */
+if(!NFR_ABAS.some(a=>a[0]==='acao'))NFR_ABAS.unshift(['acao','O que precisa de ação']);
+{const i=NFR_ABAS.findIndex(a=>a[0]==='lancar');if(i>=0)NFR_ABAS[i]=['lancar','Notas para lançar (todas)'];}
+if(ui.nfr&&(!ui.nfr.aba||ui.nfr.aba==='lancar'))ui.nfr.aba='acao';
+{const a0=nfrAbas;nfrAbas=function(){const h=a0.apply(this,arguments);const n=p2qContagem();return n?h.replace('data-v="acao">O que precisa de ação</button>','data-v="acao">O que precisa de ação <span class="pill neg">'+n+'</span></button>'):h;};}
+{const v0=V.nfrec;V.nfrec=function(){if(ui.nfr.aba!=='acao')return v0.apply(this,arguments);
+  return pageHead('Recebimento de notas','O que precisa de ação para cada nota virar estoque e conta a pagar: quem age e o botão de cada pendência.','<button class="btn pri" data-act="importXml">Receber XML do fornecedor</button>'+nfrBotoes())+nfrAbas()+p2qView();};}
+{const v0=V.arqf;V.arqf=function(){if(ui.nfr.aba==='acao')ui.nfr.aba='arq';return v0.apply(this,arguments);};}
+/* contador no menu e no Início */
+RH_POST.push(()=>{try{const n=p2qContagem();$$('#subnav [data-tab="nfrec"],#nav [data-tab="nfrec"]').forEach(b=>{const s=b.querySelector('.p2q-n');if(s)s.remove();if(n)b.insertAdjacentHTML('beforeend',' <span class="pill neg p2q-n" title="Pendências do recebimento de notas para você">'+n+'</span>');});}catch(e){}});
+{const a0=alertasNfrec;alertasNfrec=function(){const it=a0.apply(this,arguments);const n=p2qContagem();if(n)it.unshift(['nfrec',n+' pendência(s) no recebimento de notas para você (O que precisa de ação)',String(n)]);return it;};}
+A.p2qTrazerXml=d=>{const x=((P2Q.fila&&P2Q.fila.xmls)||[]).find(r=>r.id===d.id);if(!x){toast('Este XML não está mais na fila.','neg');return;}
+  if(!p2nPodeLancar()){toast(P2N_MSG_LANCA,'neg');return;}p2nLancarXml(x).then(()=>{P2Q.filaEm=0;});};
+A.p2qRegras=()=>{if(!p2qAdmin()){toast('Só um administrador altera as regras do recebimento.','neg');return;}const c=p2qCfg();
+  modal({title:'Regras do recebimento de notas',body:'<div class="fg">'+field('Lançar sozinha a nota que confere','p2pAuto','checkbox',c.auto,{full:true})+field('Só XML emitido nos últimos (dias)','p2pAutoDias','number',c.autoDias)+
+    field('Compra pequena sem pedido: aprovação simples do gestor (nível 1)','p2pPequena','checkbox',c.pequena,{full:true})+field('Limite da compra pequena (R$)','p2pPequenaAte','number',c.lim)+
+    field('Aplicar também às contas a pagar avulsas de fornecedor (sem nota)','p2pPequenaConta','checkbox',c.conta,{full:true})+'</div>'+
+    '<p class="sub" style="margin:8px 0 0">A nota que confere é lançada quando: o XML chegou, está ligado a um único pedido aprovado, o almoxarife registrou o recebimento físico e a conferência pedido × recebimento × nota ficou dentro das tolerâncias, sem item fora do pedido e sem nota repetida. O servidor confere tudo de novo e registra “lançada automaticamente” na auditoria. Se faltar qualquer condição, a nota fica em “O que precisa de ação” com o motivo.</p>'+
+    '<p class="sub" style="margin:6px 0 0">Compra pequena: nota sem pedido de até o limite exige categoria, projeto e a aprovação do gestor (sem cotação). Acima do limite continua valendo o pedido, ou o motivo com justificativa, e a conta segue a alçada de pagamento. Categorias isentas: '+esc(supCfg().supSemPedIsentas)+'.</p>',
+    saveLabel:'Salvar regras',save:root=>{const v=readForm(root),lim=r2(+v.p2pPequenaAte);if(!(lim>=0)){toast('Limite inválido.','neg');return false;}
+      put('cfg',Object.assign({},cfg(),{id:'empresa',p2pAuto:!!v.p2pAuto,p2pAutoDias:Math.max(1,Math.round(+v.p2pAutoDias||45)),p2pPequena:!!v.p2pPequena,p2pPequenaAte:lim,p2pPequenaConta:!!v.p2pPequenaConta}));toast('Regras do recebimento salvas.','pos');}});};
+Object.assign(ACT_GROUP,{p2qTrazerXml:null,p2qRegras:'cfg',p2qMinhas:null,p2qAutoAgora:null,p2qNfsReceber:null,p2qNfsVer:null,p2qNfsMed:null,p2qNfsNota:null,p2qNfsAceitar:null,p2qDevSaida:null,p2qDevolver:null,p2qDevSalvar:null});
+
+/* ---------- 2. lançamento automático ---------- */
+/* o envio do pacote ganha o sinal auto e devolve o resultado (mesmo texto e comportamento da v140 para o lançamento à mão) */
+p2nEnviar=function(id,cap){const auto=P2Q.autoId===id;P2Q.autoId=null;
+  const pr=(async()=>{P2N_ENV.add(id);
+    try{for(let k=0;k<3;k++){const c=chains.get('notas/'+id);if(!c)break;try{await c;}catch(e){}}
+      const r=await fetch('/api/nota/lancar',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(auto?{id,docs:cap.docs,auto:true}:{id,docs:cap.docs})});
+      let j={};try{j=await r.json();}catch(e){}
+      if(!r.ok){p2nDesfaz(cap);const ms=Array.isArray(j.motivos)&&j.motivos.length?j.motivos:[j.erro||('Erro '+r.status+' no servidor.')];
+        if(!auto)msgModal('A nota não foi lançada',ms.concat(['Nada foi gravado: estoque e contas a pagar continuam como estavam.']));return {ok:false,motivos:ms,st:r.status};}
+      (j.docs||[]).forEach(d=>{if(d&&d.col&&d.data)segaLocal(d.col,Object.assign({},d.data,{id:d.id}));});(j.dels||[]).forEach(d=>segaTira(d.col,d.id));
+      return {ok:true,j};
+    }catch(e){p2nDesfaz(cap);if(!auto)msgModal('A nota não foi lançada',['Sem conexão com o servidor. Nada foi gravado; tente de novo.']);return {ok:false,motivos:['Sem conexão com o servidor.'],st:0};}
+    finally{P2N_ENV.delete(id);}})();
+  if(auto)P2Q.prom=pr;return pr.then(x=>x.ok);};
+/* durante o automático, as janelas e avisos do lançamento à mão viram motivos guardados */
+{const m0=msgModal;msgModal=function(t,l){if(P2Q.silencio){P2Q.msgs.push.apply(P2Q.msgs,(l||[]).map(String));return;}return m0.apply(this,arguments);};}
+{const t0=toast;toast=function(){if(P2Q.silencio)return;return t0.apply(this,arguments);};}
+async function p2qTrava(k){try{await segaPost('/api/p2p/trava',{k});return true;}catch(e){return false;}}
+/* quem age, pelo texto dos motivos */
+const p2qQuemDe=ms=>{const t=gsNorm((ms||[]).join(' '));return /recebimento fisico/.test(t)?'almoxarife':/nao foi aprovado|aprovacao do comprador|solicitante|gestor/.test(t)?'aprovador':/divergencia/.test(t)?'comprador':'fiscal';};
+function p2qAviso(u,txt){if(!u)return false;P2Q.avLog.push({u,txt,em:Date.now()});try{return avisoChat(u,txt);}catch(e){return false;}}
+const p2qUsersPapel=(...ps)=>S.usr.filter(u=>u.uid&&u.ativo!==false&&ps.includes(((PERFIS[u.perfil]||{}).papel)||u.perfil)).map(u=>u.uid);
+function p2qAvisaQuem(quem,txt){let us=[];if(quem==='aprovador'){try{us=finQuemAprova(1);}catch(e){}}else us=quem==='comprador'?p2qUsersPapel('comprador','compras'):p2qUsersPapel(quem);
+  us.filter(u=>u!==actorId()).forEach(u=>p2qAviso(u,txt));return us;}
+async function p2qAutoNota(id){
+  const n0=get('notas',id);if(!p2qAutoPronta(n0))return {pulou:true};
+  const sig=p2qSig(n0);if(n0.p2qMot&&n0.p2qMot.sig===sig)return {pulou:true};
+  if(!(await p2qTrava('nota:'+id)))return {travada:true};
+  const n=get('notas',id);if(!p2qAutoPronta(n))return {pulou:true};
+  P2Q.msgs=[];P2Q.prom=null;P2Q.autoId=id;P2Q.silencio++;let r=false;
+  try{r=efetivarNota(id);}catch(e){P2Q.msgs.push(e.message||String(e));}finally{P2Q.silencio--;P2Q.autoId=null;}
+  let res=r===true&&P2Q.prom?await P2Q.prom:{ok:false,motivos:P2Q.msgs.length?P2Q.msgs.slice():['O lançamento não pôde ser montado.']};
+  if(res.ok){P2Q.auto.lancadas.push(id);return {ok:true};}
+  const cur=get('notas',id);P2Q.auto.recusadas.push({id,motivos:res.motivos});
+  if(cur&&cur.status==='rascunho'){const quem=p2qQuemDe(res.motivos);put('notas',Object.assign(cl(cur),{p2qMot:{sig:p2qSig(cur),motivos:res.motivos.slice(0,6),quem,em:Date.now()}}));
+    p2qAvisaQuem(quem,'A NF '+(cur.numero||'s/n')+' de '+parcNome(cur.parcId)+' não foi lançada automaticamente: '+res.motivos.slice(0,2).join(' ')+' Veja Suprimentos › Recebimento de notas › O que precisa de ação.');}
+  return {ok:false,motivos:res.motivos};
+}
+/* XML que chegou e ainda não virou nota: vira nota recebida quando dá para ligar sozinho (à nota do recebimento ou a um único pedido) */
+async function p2qAutoXml(x){
+  const pc=x.parcId?get('parc',x.parcId):null;if(!pc)return {pulou:'sem cadastro'};
+  const temPed=S.ped.some(p=>p.parcId===pc.id&&p.status!=='cancelado')||S.notas.some(a=>a.tipo==='entrada'&&a.parcId===pc.id&&a.pedId&&!a.chave&&a.status==='rascunho');if(!temPed)return {pulou:'sem pedido'};
+  if(S.notas.some(n=>digits(n.chave)===x.chave&&n.status!=='cancelada'))return {pulou:'já existe'};
+  if(!(await p2qTrava('xml:'+x.chave)))return {travada:true};
+  let t='';try{t=await nfrXmlTexto(x.id);}catch(e){return {erro:e.message};}
+  let n=null;try{n=parseNfe(t);}catch(e){return {erro:e.message};}
+  if(n.parcId!==pc.id)return {pulou:'outro fornecedor'};
+  Object.assign(n,{recebida:true,recEm:todayStr(),origem:'xml',autoXml:{em:Date.now(),via:actorId()}});
+  const alvo=supAlvoAuto(n);
+  if(alvo){put('notas',n);const v=supVincular(n.id,alvo.id);if(v&&v.ok){const a=get('notas',alvo.id);
+      if(a&&(a.confPend||(a.status==='rascunho'&&(supConf(a)||{}).div)))p2qAvisaQuem('comprador','A NF '+(a.numero||'s/n')+' de '+parcNome(a.parcId)+' chegou por XML com divergência em relação ao pedido. Veja Suprimentos › Recebimento de notas › O que precisa de ação.');
+      return {juntou:alvo.id};}
+    return {criou:n.id};}
+  const cs=supPedCands(n).filter(c=>c.sc>0&&c.aberto);
+  if(cs.length!==1)return {pulou:cs.length?'mais de um pedido':'nenhum pedido com os itens'};
+  const p=cs[0].p;n.pedId=p.id;if(!n.projId&&p.projId)n.projId=p.projId;supMapear(n,p);put('notas',n);
+  return {criou:n.id,pedId:p.id};
+}
+async function p2qAutoRodar(forcar){
+  if(P2Q.auto.rodando||!SEGA_SRV()||!p2nPodeLancar()||!p2qCfg().auto)return null;
+  if(!forcar&&Date.now()-P2Q.auto.em<30e3)return null;
+  P2Q.auto.rodando=true;const rel={xml:[],notas:[]};
+  try{
+    const fl=await p2qCarregar(true),lim=addDays(todayStr(),-p2qCfg().autoDias);
+    for(const x of ((fl&&fl.xmls)||[]))if(String(x.emissao||'')>=lim)rel.xml.push(Object.assign({chave:x.chave},await p2qAutoXml(x)));
+    for(const n of S.notas.filter(p2qAutoPronta).map(n=>n.id))rel.notas.push(Object.assign({id:n},await p2qAutoNota(n)));
+  }finally{P2Q.auto.rodando=false;P2Q.auto.em=Date.now();}
+  if(rel.notas.some(x=>x.ok))P2Q.filaEm=0;
+  return rel;}
+A.p2qAutoAgora=()=>{toast('Verificando as notas que conferem…');p2qAutoRodar(true).then(r=>{if(!r)return;const k=r.notas.filter(x=>x.ok).length,f=r.notas.filter(x=>x.motivos).length;toast(k||f?(k+' nota(s) lançada(s) automaticamente'+(f?', '+f+' com pendência (veja a fila)':'')+'.'):'Nenhuma nota pronta para lançar sozinha.','pos');render();});};
+{let tm=0;RH_POST.push(()=>{if(tm||!(typeof window!=='undefined'&&window.__SELFHOST)||store.mode!=='db')return;tm=setTimeout(()=>{tm=0;try{if(p2nPodeLancar()&&p2qCfg().auto)p2qAutoRodar(false);}catch(e){}},4000);});}
+
+/* ---------- 4. NFS-e de fornecedor e empreiteiro ---------- */
+const p2qNfs=id=>((P2Q.fila&&P2Q.fila.nfsef)||[]).find(r=>r.id===id)||null;
+A.p2qNfsReceber=()=>{if(!nfrAcesso()){toast('Seu perfil não envia notas ao arquivo fiscal.','neg');return;}
+  modal({title:'Receber NFS-e de serviço (fornecedor ou empreiteiro)',wide:true,nofocus:true,body:'<p class="sub" style="margin:0 0 8px">NFS-e em que a INA é a tomadora. Envie o XML (prefeitura ABRASF ou Padrão Nacional); se só tiver o PDF, envie o PDF e digite os dados dele. A nota fica no arquivo fiscal e é ligada sozinha à medição do empreiteiro quando o CNPJ/CPF e o valor conferem; as retenções da nota são comparadas com as da medição.</p>'+
+    '<div class="fg"><label class="f full"><span>XML da NFS-e (um ou vários)</span><input type="file" id="p2qNfsXml" accept=".xml" multiple></label></div><div class="sect">Ou: PDF da NFS-e</div>'+
+    '<div class="fg"><label class="f full"><span>PDF</span><input type="file" id="p2qNfsPdf" accept=".pdf,application/pdf"></label>'+field('Número da NFS-e','pnNum','text','')+field('Emissão','pnEm','date',todayStr())+field('CNPJ/CPF do prestador','pnDoc','text','')+field('Prestador (nome)','pnNome','text','')+field('Valor dos serviços (bruto)','pnBruto','number','')+field('Competência','pnComp','text','')+
+    field('ISS retido (R$)','pnIss','number','')+field('INSS retido (R$)','pnInss','number','')+field('IR retido (R$)','pnIr','number','')+field('CSLL retida (R$)','pnCsll','number','')+field('PIS retido (R$)','pnPis','number','')+field('COFINS retida (R$)','pnCofins','number','')+field('Descrição do serviço','pnDesc','text','',{full:true})+'</div>',
+    saveLabel:'Enviar',save:root=>{p2qNfsEnviar(root);return false;}});};
+async function p2qNfsEnviar(root){const fx=($('#p2qNfsXml')||{}).files||[],fp=($('#p2qNfsPdf')||{}).files||[];let body;
+  try{if(fx.length){const arquivos=[];for(const f of Array.from(fx).slice(0,50))arquivos.push({nome:f.name,xml:await f.text()});body={arquivos};}
+    else if(fp.length){const f=fp[0],b64=await new Promise((ok,err)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]||'');r.onerror=err;r.readAsDataURL(f);});const v=readForm(root);
+      body={pdf:{nome:f.name,b64},dados:{numero:v.pnNum,emissao:v.pnEm,prestDoc:v.pnDoc,prestNome:v.pnNome,bruto:+v.pnBruto||0,competencia:v.pnComp,desc:v.pnDesc,ret:{iss:+v.pnIss||0,inss:+v.pnInss||0,irrf:+v.pnIr||0,csll:+v.pnCsll||0,pis:+v.pnPis||0,cofins:+v.pnCofins||0}}};}
+    else{toast('Escolha o XML ou o PDF da NFS-e.','neg');return;}}catch(e){toast('Não foi possível ler o arquivo.','neg');return;}
+  try{const j=await segaPost('/api/arqfiscal/nfsef',body);closeModal();P2Q.filaEm=0;await p2qCarregar(true);
+    const its=j.itens||[],nov=its.filter(x=>x.r==='nova');
+    msgModal('NFS-e recebida(s)',[nov.length+' nova(s), '+its.filter(x=>x.r==='existente').length+' já estavam no arquivo, '+its.filter(x=>x.r==='ignorada').length+' ignorada(s).'].concat(its.map(x=>x.arquivo+': '+(x.r==='nova'?(x.lig==='ligada'?'ligada à medição do empreiteiro':x.lig==='divergente'?'ligada à medição, com diferença de retenção (veja a fila)':x.lig==='varias'?'mais de uma medição possível: ligue na fila':'sem medição: ligue na fila (medição, pedido ou compra sem pedido)'):x.r==='existente'?'já estava no arquivo':'ignorada: '+(x.motivo||'')))));render();}
+  catch(e){toast(e.message||'Não foi possível enviar.','neg');}}
+A.p2qNfsVer=d=>{const r=p2qNfs(d.id)||nfrLinha(d.id);if(!r){toast('NFS-e não encontrada.','neg');return;}const ret=r.ret||(r.nfsef&&r.nfsef.ret)||{},lg=r.lig;
+  modal({title:'NFS-e de serviço nº '+(r.numero||'s/n'),wide:true,nofocus:true,body:'<p style="margin:0 0 8px">'+esc(r.parcNome||'')+' <span class="sub mono">'+esc(/\*/.test(r.parcDoc||'')?r.parcDoc:p2qMasc(r.parcDoc||''))+'</span> · emitida em '+fmtDate(r.emissao)+(r.competencia?' · competência '+esc(r.competencia):'')+(r.semXml?' · '+pill('só PDF (dados digitados)','warn'):'')+'</p>'+
+    (r.desc?'<p class="sub" style="margin:0 0 8px">'+esc(r.desc)+'</p>':'')+'<div class="kpis">'+kpi('Valor bruto',money(r.bruto!=null?r.bruto:r.valor),'')+kpi('Retenções',money(sum(Object.values(ret),v=>+v||0)),P2Q_RET.filter(x=>+ret[x[0]]).map(x=>x[1]+' '+money(ret[x[0]])).join(' · ')||'nenhuma')+kpi('Líquido',money(r.liq),'','pos')+'</div>'+
+    (lg&&lg.tipo==='medicao'?'<div class="note" style="margin-top:8px">Ligada à medição nº '+esc(lg.numero||'')+' do contrato '+esc(lg.ctr||'')+(lg.k?' · medição: bruto '+money(lg.k.bruto)+', ISS '+money(lg.k.iss)+', INSS '+money(lg.k.inss):'')+((lg.div||[]).length?'<br><b>Diferenças:</b> '+lg.div.map(x=>esc(x.nome)+' nota '+money(x.nota)+' × medição '+money(x.med)).join('; ')+(lg.aceita?' · aceitas por '+nm(lg.aceita.por)+': '+esc(lg.aceita.obs):''):' · retenções conferem')+'</div>':lg&&lg.tipo==='nota'?'<div class="note" style="margin-top:8px">Virou a nota de entrada '+esc(((get('notas',lg.id)||{}).numero)||'')+' (segue o lançamento normal).</div>':''),
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><a class="btn" href="/api/arqfiscal/'+encodeURIComponent(r.id)+'/pdf" target="_blank" rel="noopener">PDF</a>'+(r.semXml?'':'<a class="btn" href="/api/arqfiscal/'+encodeURIComponent(r.id)+'/xml?baixar=1">Baixar XML</a>')});};
+const P2Q_RET=[['iss','ISS'],['inss','INSS'],['irrf','IR'],['csll','CSLL'],['pis','PIS'],['cofins','COFINS']];
+/* medições do empreiteiro (mesmo cadastro do prestador) ainda sem NFS-e */
+const p2qMedsDe=parcId=>S.medemp.filter(m=>['aprovada','aguardando'].includes(m.status)&&!m.nfsef&&(get('ctremp',m.ctrId)||{}).parcId===parcId);
+A.p2qNfsMed=async d=>{const r=p2qNfs(d.id);if(!r)return;let cands=[];try{cands=(await segaPost('/api/arqfiscal/'+encodeURIComponent(r.id)+'/nfsef-cands',null,'GET')).cands||[];}catch(e){}
+  const ids=new Set(cands.map(c=>c.id)),outras=r.parcId?p2qMedsDe(r.parcId).filter(m=>!ids.has(m.id)):[];
+  const op=cands.map(c=>[c.id,'Medição nº '+c.numero+' · contrato '+c.ctr+' · '+money(c.k.bruto)+' · '+(ME_ST[c.status]||[c.status])[0]+(c.div.length?' · diferença em '+c.div.map(x=>x.nome).join(', '):' · retenções conferem')]).concat(outras.map(m=>{const c=get('ctremp',m.ctrId);return [m.id,'Medição nº '+m.numero+' · contrato '+(c?c.numero:'')+' · '+money(meCalc(m,c).bruto)+' (valor diferente)'];}));
+  if(!op.length){msgModal('Nenhuma medição para ligar',['Não há medição aprovada ou aguardando aprovação deste empreiteiro sem NFS-e.'+(r.parcId?'':' O prestador não está cadastrado como fornecedor.'),'Se for serviço com pedido de compra, use "Pedido / sem pedido".']);return;}
+  modal({title:'Ligar a NFS-e nº '+(r.numero||'')+' à medição',body:'<p class="sub" style="margin:0 0 8px">'+esc(r.parcNome||'')+' · bruto '+money(r.bruto)+'. A conta a pagar continua sendo criada na aprovação da medição; aqui só se liga a nota e se conferem as retenções.</p>'+field('Medição','medId','select',op[0][0],{opts:op,full:true}),saveLabel:'Ligar',save:root=>{const v=readForm(root);
+    segaPost('/api/arqfiscal/'+encodeURIComponent(r.id)+'/nfsef-ligar',{medempId:v.medId}).then(()=>{P2Q.filaEm=0;p2qCarregar(true);toast('NFS-e ligada à medição.','pos');},e=>toast(e.message,'neg'));}});};
+A.p2qNfsAceitar=d=>{const r=p2qNfs(d.id);if(!r||!r.lig)return;
+  modal({title:'Aceitar a diferença de retenção',body:'<p style="margin:0 0 8px">'+(r.lig.div||[]).map(x=>esc(x.nome)+': nota '+money(x.nota)+' × medição '+money(x.med)).join('<br>')+'</p><label class="f"><span>Por que pode ser aceita (ex.: a contabilidade confirmou a retenção da nota)</span><textarea id="p2qAcObs" rows="2"></textarea></label>',saveLabel:'Aceitar',save:()=>{const obs=($('#p2qAcObs').value||'').trim();if(!obs){toast('Explique o motivo.','neg');return false;}
+    segaPost('/api/arqfiscal/'+encodeURIComponent(r.id)+'/nfsef-aceitar',{obs}).then(()=>{P2Q.filaEm=0;p2qCarregar(true);toast('Diferença aceita e registrada.','pos');},e=>toast(e.message,'neg'));}});};
+/* nota de entrada a partir da NFS-e (pedido de serviço, compra pequena ou sem pedido): segue o lançamento normal */
+function p2qNotaDeNfs(r,pedId){const pc=r.parcId?get('parc',r.parcId):null;if(!pc)return {err:'O prestador não está cadastrado como fornecedor. Cadastre em Fornecedores (com o CNPJ/CPF da nota) e tente de novo.'};
+  if(S.notas.some(n=>n.nfseChave===r.chave&&n.status!=='cancelada'))return {err:'Já existe nota de entrada criada a partir desta NFS-e.'};
+  const b=r2(+r.bruto||+r.valor||0),ret=r.ret||{},pc2=v=>b>0&&+v>0?(+v)/b*100:0,n=newNota('entrada'),p=pedId?get('ped',pedId):null;
+  Object.assign(n,{numero:String(r.numero||''),serie:'',emissao:r.emissao||todayStr(),parcId:pc.id,natOp:'Prestação de serviço (NFS-e)',categoria:'Serviços de terceiros',chave:'',nfseChave:r.chave,nfseArqf:r.id,modelo:'nfse',
+    itens:[{desc:(r.desc||('Serviço · NFS-e '+(r.numero||''))).slice(0,300),prodId:'',ncm:'',cfop:'1933',un:'SV',qtd:1,vUnit:b}],rIss:pc2(ret.iss),rInss:pc2(ret.inss),rIrrf:pc2(ret.irrf),rCsll:pc2(ret.csll),rPis:pc2(ret.pis),rCofins:pc2(ret.cofins)});
+  if(p){n.pedId=p.id;if(p.projId)n.projId=p.projId;if((p.itens||[]).length===1)n.itens[0].pedK=0;else supMapear(n,p);}
+  put('notas',n);return {ok:true,nota:get('notas',n.id)};}
+A.p2qNfsNota=d=>{const r=p2qNfs(d.id);if(!r)return;if(!p2nPodeLancar()){toast(P2N_MSG_LANCA,'neg');return;}
+  const peds=r.parcId?S.ped.filter(p=>p.parcId===r.parcId&&p.status!=='cancelado'&&p.status!=='recebido'):[],q=p2qCfg(),b=+r.bruto||+r.valor||0;
+  const op=[['','Sem pedido'+(q.pequena&&b<=q.lim+0.004?' (compra pequena: aprovação do gestor)':' (motivo e justificativa)')]].concat(peds.map(p=>[p.id,'Pedido nº '+p.numero+' · '+money(pedTotal(p))+' · '+((PED_ST[p.status]||[''])[0])]));
+  modal({title:'Lançar a NFS-e nº '+(r.numero||'')+' como nota de entrada',body:'<p class="sub" style="margin:0 0 8px">'+esc(r.parcNome||'')+' · '+money(b)+'. A nota de entrada é criada com o valor e as retenções da NFS-e e segue o fluxo normal (conferência e lançamento pelo Fiscal; a conta a pagar nasce no lançamento).</p>'+field('Pedido de serviço','pedId','select',peds[0]?peds[0].id:'',{opts:op,full:true}),saveLabel:'Criar a nota',save:root=>{const v=readForm(root),x=p2qNotaDeNfs(r,v.pedId);if(x.err){toast(x.err,'neg');return false;}
+    if(SEGA_SRV())segaPost('/api/arqfiscal/'+encodeURIComponent(r.id)+'/nfsef-ligar',{notaId:x.nota.id}).then(()=>{P2Q.filaEm=0;p2qCarregar(true);},()=>{});
+    setTimeout(()=>openNota(cl(get('notas',x.nota.id)||x.nota)),40);}});};
+/* arquivo fiscal: NFS-e de fornecedor abre o resumo (não é NF-e) */
+{const d0=A.nfrDanfe;A.nfrDanfe=d=>{const r=nfrLinha(d&&d.id);if(r&&r.modelo==='nfsef')return A.p2qNfsVer(d);return d0(d);};}
+{const p0=nfrBotoes;nfrBotoes=function(){const h=p0.apply(this,arguments);if(!nfrSelf()||!nfrAcesso()||ui.nfr.aba==='acao')return h;return '<button class="btn" data-act="p2qNfsReceber">Receber NFS-e de serviço</button>'+h;};}
+/* LGPD: CPF de empreiteiro pessoa física mascarado nas listas do arquivo fiscal */
+{const t0=nfrTabela;nfrTabela=function(){let h=t0.apply(this,arguments);const L=NFR.lista;if(!L||!L.itens)return h;L.itens.forEach(r=>{if(r.modelo==='nfsef'&&/^\d{11}$/.test(String(r.parcDoc||''))){const f=esc(nfrDocFmt(r.parcDoc));h=h.split('>'+f+'<').join('>'+esc(p2qMasc(r.parcDoc))+'<');}});return h;};}
+
+/* ---------- 5. devolução ao fornecedor ---------- */
+let P2QD=null;
+A.p2qDevolver=d=>{const n=get('notas',d.id);if(!n||n.tipo!=='entrada'||n.status!=='lancada'){toast('Só nota de entrada lançada tem devolução.','neg');return;}
+  if(!p2nPodeLancar()){toast('Quem registra a devolução ao fornecedor é o Fiscal ou um administrador. O almoxarife confirma a saída física.','neg');return;}
+  const ja=new Map();(n.devols||[]).forEach(v=>(v.itens||[]).forEach(x=>ja.set(+x.k,(ja.get(+x.k)||0)+(+x.qtd||0))));
+  P2QD={id:n.id};
+  modal({title:'Registrar devolução · NF '+(n.numero||'s/n')+' · '+parcNome(n.parcId),wide:true,nofocus:true,body:'<p class="sub" style="margin:0 0 8px">O estoque sai pelo custo de entrada, a conta a pagar em aberto desta nota é abatida (ou cancelada) e, se ela já foi paga, fica um crédito a receber do fornecedor. A NF de devolução é emitida no seu emissor fiscal; informe o número (ou envie o XML dela).</p>'+
+    '<div class="tw"><table style="min-width:640px"><thead><tr><th>Item</th><th class="num">Na nota</th><th class="num">Já devolvido</th><th class="num">Devolver agora</th></tr></thead><tbody>'+(n.itens||[]).map((it,k)=>'<tr><td>'+esc(it.desc)+(it.prodId?'':' <span class="sub">(sem estoque)</span>')+'</td><td class="num">'+fmtQ(it.qtd)+' '+esc(it.un||'')+'</td><td class="num">'+fmtQ(ja.get(k)||0)+'</td><td style="width:120px"><input type="number" step="any" min="0" data-p2qdk="'+k+'" value="" aria-label="Quantidade devolvida de '+esc(it.desc)+'"></td></tr>').join('')+'</tbody></table></div>'+
+    '<div class="fg" style="margin-top:10px">'+field('Motivo','dvMot','text','',{full:true})+field('Nº da NF de devolução emitida','dvNf','text','')+'<label class="f"><span>XML da NF de devolução (opcional)</span><input type="file" id="p2qDvXml" accept=".xml"></label>'+(n.pedId?field('Reabrir o saldo do pedido para o fornecedor substituir o material','dvSub','checkbox',false,{full:true}):'')+'</div>',
+    saveLabel:'Registrar devolução',save:root=>{p2qDevSalvar(root);return false;}});};
+async function p2qDevSalvar(root){if(!P2QD)return;const n=get('notas',P2QD.id);if(!n)return;const v=readForm(root),itens=$$('#mb [data-p2qdk]').map(el=>({k:+el.dataset.p2qdk,qtd:parseFloat(el.value)||0})).filter(x=>x.qtd>0);
+  if(!itens.length){toast('Informe a quantidade devolvida de pelo menos um item.','neg');return;}if(!String(v.dvMot||'').trim()){toast('Informe o motivo.','neg');return;}
+  let chDev='';const fx=($('#p2qDvXml')||{}).files||[];
+  if(fx.length){try{const t=await fx[0].text();const j=await segaPost('/api/arqfiscal/xml',{arquivos:[{nome:fx[0].name,xml:t}],origem:'upload'});const it=(j.itens||[])[0]||{};if(it.chave)chDev=it.chave;else if(it.motivo)toast('XML da devolução não guardado: '+it.motivo,'neg');}catch(e){toast('XML da devolução não guardado: '+e.message,'neg');}}
+  if(!String(v.dvNf||'').trim()&&!chDev){toast('Informe o número da NF de devolução (ou envie o XML dela).','neg');return;}
+  if(!SEGA_SRV()){toast('A devolução é registrada pelo servidor da empresa: abra o sistema pelo endereço da empresa.','neg');return;}
+  try{const j=await segaPost('/api/nota/devolver',{id:n.id,itens,motivo:v.dvMot,nfDev:v.dvNf,chDev,substituir:!!v.dvSub});(j.docs||[]).forEach(x=>segaLocal(x.col,Object.assign({},x.data,{id:x.id})));closeModal();P2QD=null;
+    const dv=j.dev||{};msgModal('Devolução registrada',['Valor devolvido: '+money(dv.bruto)+' (líquido '+money(dv.liquido)+').',dv.abatido?'Abatido das contas a pagar em aberto: '+money(dv.abatido)+'.':'Nenhuma conta em aberto para abater.',dv.credito?'A conta já estava paga: crédito a receber do fornecedor de '+money(dv.credito)+'.':'',dv.substituir?'O saldo do pedido foi reaberto para o fornecedor substituir.':'',(dv.itens||[]).some(x=>x.prodId)?'O almoxarife confirma a saída física na fila do recebimento.':''].filter(Boolean));
+    (dv.itens||[]).some(x=>x.prodId)&&p2qAvisaQuem('almoxarife','Devolução ao fornecedor registrada na NF '+(n.numero||'s/n')+' de '+parcNome(n.parcId)+': confirme a saída física do material (Recebimento de notas › O que precisa de ação).');}
+  catch(e){toast(e.message||'Não foi possível registrar a devolução.','neg');}}
+A.p2qDevSaida=d=>{const n=get('notas',d.id);if(!n)return;const pp=p2qPapel();if(!(pp==='admin'||pp==='almoxarife'||p2nPodeLancar())){toast('Quem confirma a saída física é o almoxarife.','neg');return;}
+  confirmBox('Confirmar que o material da devolução saiu fisicamente para o fornecedor?',()=>{segaPost('/api/nota/devolucao/saida',{id:n.id,devId:d.k}).then(j=>{if(j&&j.data)segaLocal('notas',Object.assign({},j.data,{id:n.id}));toast('Saída física confirmada.','pos');},e=>toast(e.message,'neg'));},'Confirmar saída');};
+{const v0=A.verNota;A.verNota=d=>{const r=v0(d);try{const n=get('notas',d&&d.id);if(!n||n.tipo!=='entrada')return r;
+  const ds=Array.isArray(n.devols)?n.devols:[];if(ds.length){const b=$('#mb');if(b)b.insertAdjacentHTML('beforeend','<div class="sect">Devoluções ao fornecedor</div>'+ds.map(x=>'<div class="li"><div>'+fmtDate(x.data)+' · '+money(x.bruto)+' · NF de devolução '+esc(x.nfDev||x.chDev||'')+' · '+esc(x.motivo||'')+'<div class="sub">'+(x.itens||[]).map(i=>esc(i.desc)+': '+fmtQ(i.qtd)).join(' · ')+(x.abatido?' · abatido '+money(x.abatido):'')+(x.credito?' · crédito '+money(x.credito):'')+(x.substituir?' · saldo do pedido reaberto':'')+' · '+(x.saidaFis?'saída física confirmada por '+nm(x.saidaFis.por):'saída física a confirmar')+'</div></div></div>').join(''));}
+  if(n.status==='lancada'&&p2nPodeLancar()&&SEGA_SRV()){const f=$('#mf');if(f)f.insertAdjacentHTML('afterbegin','<button class="btn" data-act="p2qDevolver" data-id="'+n.id+'">Registrar devolução</button>');}
+  if(n.lancAuto){const b=$('#mb');if(b)b.insertAdjacentHTML('afterbegin','<p class="sub" style="margin:0 0 8px">'+pill('Lançada automaticamente','acc')+' em '+fmtDT(n.lancAuto.em)+' (o servidor conferiu pedido, recebimento e conferência).</p>');}}catch(e){}return r;};}
+
+/* ---------- 6. avisos no chat ---------- */
+/* material chegou: quem pediu (solicitante da SC do pedido) */
+{const r0=supReceber;supReceber=function(pid,o){const r=r0.apply(this,arguments);try{if(r&&r.ok){const p=get('ped',pid),sc=p&&p.scId?get('sc',p.scId):null,u=sc?(sc.solUid||sc.crBy):'';
+  if(u&&u!==actorId())p2qAviso(u,'Chegou material do pedido de compra nº '+p.numero+(sc?' (sua solicitação nº '+sc.numero+')':'')+', recebido em '+fmtDate(r.rec.data)+'.');}}catch(e){}return r;};}
+/* pedido aprovado por mim agora há pouco: avisa o comprador (uma vez) */
+RH_POST.push(()=>{if(store.mode!=='db')return;try{const eu=actorId(),ag=Date.now();S.ped.forEach(p=>{const a=p.aprov;if(!a||!a.ok||a.por!==eu)return;const em=+a.em||+a.ts||0;if(!(ag-em<10*60e3))return;const k='pedap:'+p.id;if(P2Q.avisados.has(k)||p2qLS('cg.p2q.av.'+k))return;
+  P2Q.avisados.add(k);p2qLS('cg.p2q.av.'+k,'1');const u=p.crBy||matCfg().comprador;if(u&&u!==eu)p2qAviso(u,'O pedido de compra nº '+p.numero+' ('+money(pedTotal(p))+') foi aprovado e pode ser enviado ao fornecedor.');});}catch(e){}});
+/* e-mail do pedido ao fornecedor: pelo servidor, com o PDF, quando o SMTP está configurado (senão, o e-mail pronto de sempre) */
+{const e0=A.pedEmail;A.pedEmail=d=>{if(!SEGA_SRV())return e0(d);const p=get('ped',d.id);if(!p)return;
+  const seguir=smtp=>{if(!smtp)return e0(d);let cap=null;const em0=emailModal;emailModal=function(to,sub,body){cap={to,sub,body};};try{e0(d);}finally{emailModal=em0;}if(!cap)return;
+    modal({title:'Enviar o pedido nº '+p.numero+' ao fornecedor',wide:true,nofocus:true,body:'<div class="fg"><label class="f full"><span>Para</span><input readonly value="'+esc(cap.to||'(fornecedor sem e-mail cadastrado)')+'"></label>'+field('Copiar para (até 5, separados por vírgula)','pmCc','text','',{full:true})+'<label class="f full"><span>Assunto</span><input readonly value="'+esc(cap.sub)+'"></label></div><textarea id="p2qPmTxt" rows="12" style="margin-top:10px;font-family:var(--font-mono);font-size:12px">'+esc(cap.body)+'</textarea><p class="sub" style="margin:8px 0 0">O e-mail sai pelo servidor da empresa com o PDF do pedido em anexo e fica registrado no pedido.</p>',
+      foot:'<button class="btn" data-act="closeModal">Cancelar</button><button class="btn" data-act="p2qPmMailto">Abrir no meu e-mail</button><button class="btn pri" data-act="p2qPmEnviar">Enviar com o PDF</button>'});
+    P2Q.pm={id:p.id,cap};};
+  if(P2Q.smtp!==null)return seguir(P2Q.smtp);segaPost('/api/p2p/smtp',null,'GET').then(j=>{P2Q.smtp=!!(j&&j.smtp);seguir(P2Q.smtp);},()=>seguir(false));};}
+A.p2qPmMailto=()=>{const x=P2Q.pm;if(!x)return;emailModal(x.cap.to,x.cap.sub,($('#p2qPmTxt')||{}).value||x.cap.body,'E-mail ao fornecedor');};
+A.p2qPmEnviar=async()=>{const x=P2Q.pm;if(!x)return;const p=get('ped',x.id);if(!p)return;const texto=($('#p2qPmTxt')||{}).value||x.cap.body,cc=(($('#f_pmCc')||{}).value||'').split(/[,;\s]+/).filter(Boolean);
+  toast('Gerando o PDF do pedido…');let b64='';try{const blob=await docToPdf(pedDoc(p));b64=await new Promise((ok,err)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]||'');r.onerror=err;r.readAsDataURL(blob);});}catch(e){toast('Não foi possível gerar o PDF: '+e.message,'neg');return;}
+  try{const j=await segaPost('/api/ped/email',{id:p.id,pdf:b64,texto,cc});if(j&&j.data)segaLocal('ped',Object.assign({},j.data,{id:p.id}));closeModal();toast('Pedido enviado a '+(j.para||'fornecedor')+' com o PDF.','pos');}
+  catch(e){if(e&&e.st===503){P2Q.smtp=false;emailModal(x.cap.to,x.cap.sub,texto,'E-mail ao fornecedor');return;}toast(e.message||'O e-mail não foi enviado.','neg');}};
+Object.assign(ACT_GROUP,{p2qPmMailto:null,p2qPmEnviar:'comp'});
+
+/* ---------- textos ---------- */
+RH_PRE.push(()=>{try{if(typeof TUT==='undefined'||TUT.some(t=>t.id==='p2p2'))return;TUT.unshift({id:'p2p2',t:'Recebimento de notas: a fila "O que precisa de ação"',g:'comp',ver:'141',p:[
+  'A primeira aba de Suprimentos › Recebimento de notas junta tudo o que impede uma nota de virar estoque e conta a pagar: validação, XML sem pedido, recebimento físico, pedido sem aprovação, divergência, compra pequena, NFS-e de serviço e devolução. Cada linha diz quem age (Comprador, Almoxarife, Fiscal ou Aprovador) e tem o botão da ação. "Minhas pendências" mostra só o que é do seu perfil.',
+  'Nota que confere é lançada sozinha: XML ligado a um único pedido aprovado, recebimento físico registrado e conferência dentro das tolerâncias. O servidor confere tudo de novo e a auditoria registra "lançada automaticamente". Se faltar algo, a nota fica na fila com o motivo.',
+  'Compra pequena sem pedido (até o limite das regras, padrão R$ 1.000): basta categoria, projeto e a aprovação do gestor, sem cotação.',
+  'NFS-e de serviço de fornecedor ou empreiteiro: "Receber NFS-e de serviço" (XML ou PDF). Ela é ligada à medição do empreiteiro e as retenções são conferidas; se não houver medição, vira nota de entrada pelo pedido ou como compra sem pedido.',
+  'Devolução ao fornecedor: na nota lançada, "Registrar devolução" (itens, motivo e nº da NF de devolução). O estoque sai, a conta em aberto é abatida e, se já foi paga, fica um crédito a receber.']});}catch(e){}});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='140',APP_DATA='2026-10-30';
+const APP_VER='141',APP_DATA='2026-10-31';
 const CHANGELOG=[
+  ['141','2026-10-31',["Recebimento de notas: nova fila 'O que precisa de ação', com o motivo, quem deve agir e o botão da ação, e filtro 'Minhas pendências'.", 'A nota que confere com o pedido e o recebimento é lançada sozinha pelo servidor (dá para desligar). Compra pequena sem pedido, até R$ 1.000, exige categoria, projeto e aprovação do nível 1.', 'NFS-e de fornecedor e empreiteiro: importa o XML ou o PDF, liga à medição e confere as retenções. Devolução ao fornecedor: baixa o estoque e abate ou cancela a conta; se já foi paga, gera crédito.', 'Avisos automáticos no chat e por e-mail: solicitação para aprovar, pedido aprovado, material chegou e nota parada. O pedido vai ao fornecedor por e-mail com o PDF anexo.']],
   ['140','2026-10-30',['Compras e notas: a nota de entrada é lançada pelo servidor de uma vez (estoque e contas a pagar), pelo perfil Fiscal, com as travas de recebimento, aprovação, divergência e duplicidade conferidas no servidor. O Arquivo fiscal não cria mais conta direto do XML.', 'Alçadas de aprovação ligadas por padrão (até R$ 10 mil gestor, até R$ 100 mil diretoria, acima duas pessoas); sem aprovador cadastrado, o dono ou administrador aprova.', 'Perfis: Comprador faz solicitação, cotação e pedido; Fiscal valida e lança a nota; Almoxarife recebe; Financeiro programa e paga (não cria pedido). Toda solicitação de compra passa por aprovação. Conta criada pela conciliação fora de tarifas, impostos e transferências fica para aprovar.']],
   ['139','2026-10-29',['Documentos de habilitação: prazo para solicitar a renovação em cada documento (padrão do tipo: 30 dias para certidões demoradas e alvarás, 120 para a LO da CETESB, 15 para os demais). Etiqueta Renovar desde DD/MM, cartão Renovar agora, aviso no Início e por e-mail no dia certo, e botão Renovação solicitada para parar o aviso.']],
   ['138','2026-10-29',['Projetos: o campo Nome passa a se chamar Descrição (cadastro, criação a partir de proposta/contrato e importação).', 'Documentos e telas de consulta (OS de fabricação e de serviço, SC, cotação, pedido de compra, separação, romaneio, medição, relatórios, e-mails e CSV) mostram só o código do projeto; as listas de escolha e a busca rápida continuam com código e descrição.']],

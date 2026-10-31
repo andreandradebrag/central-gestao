@@ -769,10 +769,11 @@ module.exports = function (ctx) {
     }
     return { wh: w.length ? ' WHERE ' + w.join(' AND ') : '', a };
   }
-  const linha = r => ({ id: r.id, chave: r.chave, tipo: r.tipo, numero: r.numero, serie: r.serie, emissao: r.emissao, valor: r.valor, parcDoc: r.parc_doc, parcNome: r.parc_nome,
+  let linha = r => ({ id: r.id, chave: r.chave, tipo: r.tipo, numero: r.numero, serie: r.serie, emissao: r.emissao, valor: r.valor, parcDoc: r.parc_doc, parcNome: r.parc_nome,
     situacao: r.situacao, sitFonte: r.sit_fonte, sitMsg: r.sit_msg || undefined, sitEm: r.sit_em, origem: r.origem, vinc: r.vinc ? JSON.parse(r.vinc) : [], vincConf: r.vinc_conf || undefined,
     sug: r.sugest ? JSON.parse(r.sugest) : undefined, guardaAte: guardaAte(r.emissao), em: r.em, ass: r.ass, fila: r.sit_fila ? 1 : undefined,
     modelo: r.modelo || undefined, nfse: r.modelo === 'nfse' ? nfseResumo(r.nfse) : undefined }); /* v135 */
+  { const l0 = linha; linha = r => { const o = l0(r); if (r.modelo === 'nfsef') { o.parcDoc = mascaraCpf(r.parc_doc); try { const j = JSON.parse(r.nfse || '{}'); o.nfsef = { bruto: j.bruto, liq: j.liq, ret: j.ret, lig: j.lig ? { tipo: j.lig.tipo, numero: j.lig.numero, div: (j.lig.div || []).length, aceita: !!j.lig.aceita } : null, semXml: !!j.semXml }; } catch (e) { } } return o; }; } /* v141: NFS-e de fornecedor (CPF mascarado) */
   function listar(u, acc) {
     const f = filtros(u, acc), pg = Math.max(0, +u.searchParams.get('pg') || 0), n = Math.min(PAG_MAX, Math.max(10, +u.searchParams.get('n') || 50));
     const ord = u.searchParams.get('ord') === 'valor' ? 'valor DESC' : u.searchParams.get('ord') === 'antigas' ? 'emissao ASC, numero ASC' : 'emissao DESC, numero DESC';
@@ -1082,6 +1083,133 @@ module.exports = function (ctx) {
   }
   /* ===== fim v135 (funções) ===== */
 
+  /* ===== v141 (relatorios/feito_v141_p2p2.md): NFS-e RECEBIDAS de fornecedores e empreiteiros (tomador = a empresa) =====
+     Mesmos leitores da v135 (ABRASF 2.03 e Padrão Nacional) ou PDF com os dados digitados. Ficam no arquivo fiscal como
+     entrada de serviço (modelo 'nfsef', tipo 'entrada'), com o XML original (ou o PDF) e o resumo em arqf.nfse.
+     Ligação: à medição do empreiteiro (mesmo CNPJ/CPF do contrato e valor bruto igual, medição aprovada ou aguardando) — as
+     retenções da nota são conferidas contra as calculadas na medição (P2.retConf) e a diferença fica na fila do recebimento;
+     ou à nota de entrada criada a partir dela (pedido de serviço, compra pequena ou sem pedido), que segue o lançamento normal.
+     A conta a pagar do serviço continua nascendo na aprovação da medição ou no lançamento da nota (rota do servidor). */
+  const P2 = require('./p2p.js');
+  /* chave sem o CPF do prestador pessoa física (LGPD): no lugar do CPF vai um resumo (hash) dele */
+  const nfsefChave = d => d.chave ? normCh(d.chave) : normCh('NFSE-' + (String(d.prestDoc || '').length === 11 ? 'PF' + crypto.createHash('sha256').update('nfsef:' + d.prestDoc).digest('hex').slice(0, 14).toUpperCase() : d.prestDoc) + '-' + (d.cMun || '0') + '-' + semZeros(d.numero || '0'));
+  function nfsefJson(d, extra) {
+    return Object.assign({ padrao: d.padrao, numero: d.numero, codVerif: d.codVerif || '', competencia: d.competencia || '', desc: String(d.desc || '').slice(0, 2000), bruto: r2(d.bruto), liq: r2(d.liq), base: r2(d.base),
+      ret: { iss: r2((d.ret || {}).iss), inss: r2((d.ret || {}).inss), irrf: r2((d.ret || {}).irrf), csll: r2((d.ret || {}).csll), pis: r2((d.ret || {}).pis), cofins: r2((d.ret || {}).cofins) }, totRet: r2(d.totRet), iss: r2(d.iss), issRetido: !!d.issRetido,
+      prestPf: String(d.prestDoc || '').length === 11 || undefined, lig: null }, extra || {});
+  }
+  function nfsefMedCands(docP, bruto) {
+    const out = [], cs = new Map(col('ctremp').map(c => [c.id, c])), ps = new Map(col('parc').map(p => [p.id, p]));
+    for (const m of col('medemp')) {
+      if (!['aprovada', 'aguardando'].includes(m.status) || m.nfsef) continue;
+      const c = cs.get(m.ctrId), pa = c && ps.get(c.parcId); if (!pa || normDoc(pa.doc) !== docP) continue;
+      const k = P2.meCalc(m, c); if (Math.abs(k.bruto - bruto) <= Math.max(0.05, k.bruto * 0.005)) out.push({ m, c, k });
+    }
+    return out;
+  }
+  function nfsefLigarMed(row, nj, x, conta, conf, avisos) {
+    const div = P2.retConf(nj, x.k), ts = Date.now(), lig = { tipo: 'medicao', id: x.m.id, numero: x.m.numero || '', ctr: x.c.numero || '', ctrId: x.c.id, status: x.m.status, k: x.k, div, conf, em: ts, por: conta ? conta.id : null, aceita: null };
+    const m2 = Object.assign({}, docGet('medemp/' + x.m.id) || x.m, { nfsef: { id: row.id, ch: row.chave, numero: row.numero, emissao: row.emissao, bruto: nj.bruto, liq: nj.liq, ret: nj.ret, div, conf, em: ts, por: conta ? conta.id : null } });
+    docPutAv('medemp/' + x.m.id, m2, avisos);
+    const ls = (Array.isArray(x.m.lancIds) ? x.m.lancIds : []).map(id => docGet('lanc/' + id)).filter(l => l && l.parcId === x.c.parcId && !l.retencaoDe && !l.retPendDe);
+    if (ls[0]) docPutAv('lanc/' + ls[0].id, Object.assign({}, ls[0], { arqf: { id: row.id, ch: row.chave, n: String(row.numero || ''), sit: row.situacao || 'autorizada', conf, em: ts, mod: 'nfsef', bruto: nj.bruto, liq: nj.liq } }), avisos);
+    const nj2 = Object.assign({}, nj, { lig });
+    db.prepare('UPDATE arqf SET nfse=?, vinc=?, vinc_conf=?, vinc_em=?, vinc_por=? WHERE id=?').run(JSON.stringify(nj2), ls[0] ? JSON.stringify([ls[0].id]) : null, ls[0] ? 'medicao' : null, ts, conta ? conta.id : null, row.id);
+    return nj2;
+  }
+  /* guarda uma NFS-e recebida (d = leitura v135 ou dados do PDF); devolve {r, id, chave, motivo, lig} */
+  function nfsefGuardar(nome, buf, d, conta, emp, semXml) {
+    if (!d.prestDoc || !/^\d{11}$|^\d{14}$/.test(d.prestDoc)) return { r: 'ignorada', motivo: 'sem o CNPJ/CPF do prestador' };
+    if (emp.cnpjs.has(d.prestDoc)) return { r: 'ignorada', motivo: 'o prestador é a própria empresa: é NFS-e emitida (use "Importar NFS-e emitidas")' };
+    if (!semXml && !emp.cnpjs.has(d.tomDoc)) return { r: 'ignorada', motivo: 'o tomador não é a empresa (CNPJ ' + (d.tomPf ? mascaraCpf(d.tomDoc) : d.tomDoc || '?') + ')' };
+    if (d.padrao === 'nacional' && d.cStat && d.cStat !== '100') return { r: 'ignorada', motivo: 'NFS-e não gerada (cStat ' + d.cStat + ')' };
+    if (!(+d.bruto > 0)) return { r: 'ignorada', motivo: 'sem valor dos serviços' };
+    const chave = nfsefChave(d), ja = st.porChave.get(chave);
+    if (ja) return { r: 'existente', id: ja.id, chave };
+    const id = uid(16), ts = Date.now(), sit = d.cancelada ? 'cancelada' : 'autorizada', nj = nfsefJson(d, semXml ? { semXml: true } : {});
+    st.novo.run(id, chave, 'nfsef', 'entrada', null, null, mascaraCpf(d.prestDoc), d.prestNome || '', d.tomDoc || '', d.tomNome || '', d.prestDoc, d.prestNome || '', String(d.numero || ''), '', d.emissao || '', r2(d.bruto),
+      sit, semXml ? 'sem XML: dados digitados a partir do PDF da nota' : d.padrao === 'nacional' ? 'NFS-e do Ambiente Nacional (cStat ' + (d.cStat || '100') + ')' : 'NFS-e da prefeitura (código de verificação ' + (d.codVerif || '—') + ')',
+      ts, 0, d.codVerif || d.nDFSe || null, semXml ? 'pdf' : 'nfse', crypto.createHash('sha256').update(buf).digest('hex'), zlib.gzipSync(buf, { level: 9 }), buf.length, 'upload', String(nome || '').slice(0, 200), ts, conta ? conta.id : null, '[]', null, null, null);
+    db.prepare('UPDATE arqf SET nfse=? WHERE id=?').run(JSON.stringify(nj), id);
+    regOrigem(chave, 'upload');
+    const avisos = []; let lig = 'sem';
+    if (sit === 'autorizada') { const cs = nfsefMedCands(d.prestDoc, r2(d.bruto)); if (cs.length === 1) { const row = st.porId.get(id); const nj2 = nfsefLigarMed(row, nj, cs[0], conta, 'auto', avisos); lig = nj2.lig.div.length ? 'divergente' : 'ligada'; } else if (cs.length > 1) lig = 'varias'; }
+    return { r: 'nova', id, chave, lig, avisos };
+  }
+  const nfsefLinha = r => { let j = {}; try { j = JSON.parse(r.nfse || '{}'); } catch (e) { } return { id: r.id, chave: r.chave, numero: r.numero, emissao: r.emissao, valor: r.valor, parcDoc: mascaraCpf(r.parc_doc), parcNome: r.parc_nome, situacao: r.situacao, nfse: Object.assign({}, j, { desc: String(j.desc || '').slice(0, 400) }) }; };
+  async function rotaNfsef(p, m, req, res, conta, acc) {
+    const total = acc === 'total';
+    if (p === '/api/arqfiscal/nfsef' && m === 'POST') {
+      const b = await lerJsonLim(req, 16 * 1024 * 1024), emp = empresa();
+      if (!emp.cnpjs.size) { json(res, 409, { code: 'failed_precondition', erro: 'Informe o CNPJ da empresa em Sistema › Configurações antes de guardar notas no arquivo fiscal.' }); return true; }
+      const out = [], avisos = [];
+      db.exec('BEGIN');
+      try {
+        if (b.pdf) {
+          const buf = Buffer.from(String(b.pdf.b64 || ''), 'base64'), x = b.dados || {};
+          if (!ehPdf(buf)) throw { st: 400, msg: 'O arquivo não é um PDF.' }; if (buf.length > PDF_MAX) throw { st: 413, msg: 'PDF maior que ' + Math.round(PDF_MAX / 1048576) + ' MB.' };
+          const num = (n => isFinite(n) ? r2(n) : 0), d = { padrao: 'pdf', numero: String(x.numero || '').replace(/[^\w.\-\/]/g, '').slice(0, 30), prestDoc: normDoc(x.prestDoc).replace(/\D/g, ''), prestNome: String(x.prestNome || '').slice(0, 120), tomDoc: [...emp.cnpjs][0], emissao: /^\d{4}-\d{2}-\d{2}$/.test(String(x.emissao || '')) ? x.emissao : '', competencia: String(x.competencia || '').slice(0, 10),
+            bruto: num(+x.bruto), ret: {}, desc: String(x.desc || '').slice(0, 2000), cMun: 'PDF' };
+          ['iss', 'inss', 'irrf', 'csll', 'pis', 'cofins'].forEach(k => { d.ret[k] = num(+((x.ret || {})[k]) || 0); }); d.totRet = r2(Object.values(d.ret).reduce((s, v) => s + v, 0)); d.liq = num(+x.liq) || r2(d.bruto - d.totRet); d.issRetido = d.ret.iss > 0; d.iss = d.ret.iss;
+          if (!d.numero || !d.emissao) throw { st: 400, msg: 'Informe o número e a data de emissão da NFS-e.' };
+          const r = nfsefGuardar(b.pdf.nome || 'nfse.pdf', Buffer.from(''), d, conta, emp, true);
+          if (r.r === 'nova') { const row = st.porId.get(r.id); pdfGuardar(row, buf, String(b.pdf.nome || 'nfse.pdf'), 'manual', conta); }
+          out.push(Object.assign({ arquivo: b.pdf.nome || 'nfse.pdf' }, r, { avisos: undefined })); (r.avisos || []).forEach(a => avisos.push(a));
+        } else {
+          const arqs = Array.isArray(b.arquivos) ? b.arquivos.slice(0, 50) : [];
+          if (!arqs.length) throw { st: 400, msg: 'Envie de 1 a 50 arquivos XML de NFS-e.' };
+          for (const a of arqs) {
+            const buf = Buffer.from(String(a.xml || ''), 'utf8'); if (!buf.length || buf.length > MAX_XML) { out.push({ arquivo: a.nome, r: 'ignorada', motivo: 'arquivo vazio ou grande demais' }); continue; }
+            const x = textoNfse(buf), t = tipoNfse(x), ds = t === 'nacional' ? [lerNacional(x)] : t === 'abrasf' ? lerAbrasf(x) : [];
+            if (!ds.length) { out.push({ arquivo: a.nome, r: 'ignorada', motivo: t === 'nfe' ? 'é NF-e (mercadoria): use "Receber XML do fornecedor"' : 'não é XML de NFS-e (ABRASF ou Padrão Nacional)' }); continue; }
+            for (const d of ds) { const r = nfsefGuardar(a.nome, buf, d, conta, emp, false); (r.avisos || []).forEach(v => avisos.push(v)); out.push(Object.assign({ arquivo: a.nome }, r, { avisos: undefined })); }
+          }
+        }
+        db.exec('COMMIT');
+      } catch (e) { try { db.exec('ROLLBACK'); } catch (z) { } if (e && e.st) { json(res, e.st, { code: 'invalid_argument', erro: e.msg }); return true; } throw e; }
+      soltar(avisos);
+      auditar(conta, req, 'ARQF_NFSEF_IMPORTAR', 'arqfiscal/nfsef', null, { novas: out.filter(x => x.r === 'nova').length, existentes: out.filter(x => x.r === 'existente').length, ignoradas: out.filter(x => x.r === 'ignorada').length, chaves: out.filter(x => x.r === 'nova').map(x => x.chave).slice(0, 50), pdf: !!b.pdf });
+      json(res, 200, { itens: out, linhas: out.filter(x => x.id).map(x => nfsefLinha(st.porId.get(x.id))) }); return true;
+    }
+    const mm = p.match(/^\/api\/arqfiscal\/([A-Za-z0-9]{8,40})\/nfsef-(ligar|aceitar|cands)$/); if (!mm) return false;
+    const row = st.porId.get(mm[1]); if (!row || row.modelo !== 'nfsef') { json(res, 404, { code: 'not_found', erro: 'NFS-e de fornecedor não encontrada.' }); return true; }
+    let nj = {}; try { nj = JSON.parse(row.nfse || '{}'); } catch (e) { }
+    if (mm[2] === 'cands' && m === 'GET') { const cs = nfsefMedCands(row.parc_doc, r2(nj.bruto)), lim = col('medemp').filter(x => !x.nfsef && ['aprovada', 'aguardando'].includes(x.status));
+      json(res, 200, { cands: cs.map(x => ({ id: x.m.id, numero: x.m.numero, ctr: x.c.numero, status: x.m.status, k: x.k, div: P2.retConf(nj, x.k) })), outras: lim.length }); return true; }
+    const b = await lerJsonLim(req, 100000), avisos = [];
+    if (mm[2] === 'ligar' && m === 'POST') {
+      if (b.medempId) {
+        if (!total) { negar(res, conta, req, p, 'Seu perfil não liga NFS-e à medição.'); return true; }
+        const md = docGet('medemp/' + String(b.medempId)), c = md && docGet('ctremp/' + String(md.ctrId || ''));
+        if (!md || !c || !['aprovada', 'aguardando'].includes(md.status)) { json(res, 400, { code: 'invalid_argument', erro: 'Escolha uma medição aprovada ou aguardando aprovação.' }); return true; }
+        if (md.nfsef && md.nfsef.id !== row.id) { json(res, 409, { code: 'conflict', erro: 'Esta medição já tem NFS-e ligada.' }); return true; }
+        const pa = docGet('parc/' + String(c.parcId || '')) || {}; if (normDoc(pa.doc) !== row.parc_doc) { json(res, 409, { code: 'conflict', erro: 'O empreiteiro do contrato não é o prestador da NFS-e.' }); return true; }
+        db.exec('BEGIN'); try { nj = nfsefLigarMed(row, nj, { m: md, c, k: P2.meCalc(md, c) }, conta, 'manual', avisos); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch (z) { } throw e; }
+      } else if (b.notaId) {
+        const n = docGet('notas/' + String(b.notaId)); if (!n || n.tipo !== 'entrada' || normCh(n.nfseChave || '') !== row.chave) { json(res, 400, { code: 'invalid_argument', erro: 'A nota não foi criada a partir desta NFS-e.' }); return true; }
+        nj = Object.assign({}, nj, { lig: { tipo: 'nota', id: n.id, pedId: n.pedId || '', em: Date.now(), por: conta.id, conf: 'manual' } });
+        db.prepare('UPDATE arqf SET nfse=? WHERE id=?').run(JSON.stringify(nj), row.id);
+      } else if (b.desligar) {
+        if (!total) { negar(res, conta, req, p); return true; }
+        const lg = nj.lig; if (lg && lg.tipo === 'medicao') { const md = docGet('medemp/' + lg.id); if (md && md.nfsef && md.nfsef.id === row.id) { const m2 = Object.assign({}, md); delete m2.nfsef; docPutAv('medemp/' + md.id, m2, avisos); } }
+        nj = Object.assign({}, nj, { lig: null }); db.prepare('UPDATE arqf SET nfse=?, vinc=NULL, vinc_conf=NULL WHERE id=?').run(JSON.stringify(nj), row.id);
+      } else { json(res, 400, { code: 'invalid_argument', erro: 'Escolha a medição ou a nota.' }); return true; }
+      soltar(avisos); auditar(conta, req, 'ARQF_NFSEF_LIGAR', 'arqfiscal/' + row.chave, null, { lig: nj.lig ? { tipo: nj.lig.tipo, id: nj.lig.id, div: (nj.lig.div || []).length } : null });
+      json(res, 200, nfsefLinha(st.porId.get(row.id))); return true;
+    }
+    if (mm[2] === 'aceitar' && m === 'POST') {
+      if (!total) { negar(res, conta, req, p, 'Quem aceita a diferença de retenção é o Fiscal ou um administrador.'); return true; }
+      const lg = nj.lig; if (!lg || lg.tipo !== 'medicao' || !(lg.div || []).length) { json(res, 409, { code: 'conflict', erro: 'Esta NFS-e não tem diferença de retenção a aceitar.' }); return true; }
+      const obs = String(b.obs || '').trim().slice(0, 500); if (!obs) { json(res, 400, { code: 'invalid_argument', erro: 'Explique por que a retenção da nota pode ser aceita (ex.: a contabilidade confirmou).' }); return true; }
+      const ac = { por: conta.id, em: Date.now(), obs }; nj = Object.assign({}, nj, { lig: Object.assign({}, lg, { aceita: ac }) });
+      db.prepare('UPDATE arqf SET nfse=? WHERE id=?').run(JSON.stringify(nj), row.id);
+      const md = docGet('medemp/' + lg.id); if (md && md.nfsef && md.nfsef.id === row.id) docPutAv('medemp/' + md.id, Object.assign({}, md, { nfsef: Object.assign({}, md.nfsef, { aceita: ac }) }), avisos);
+      soltar(avisos); auditar(conta, req, 'ARQF_NFSEF_ACEITAR', 'arqfiscal/' + row.chave, null, { div: lg.div, obs });
+      json(res, 200, nfsefLinha(st.porId.get(row.id))); return true;
+    }
+    return false;
+  }
+  /* ===== fim v141 (funções) ===== */
   /* ---------- rotas ---------- */
   async function lerJsonLim(req, max) { const b = await lerCorpo(req, max); if (!b.length) return {}; try { return JSON.parse(b.toString('utf8')); } catch (e) { throw { st: 400, msg: 'JSON inválido.' }; } }
   const negar = (res, conta, req, p, msg) => { auditar(conta, req, 'ARQF_NEGADO', p, null, null); return json(res, 403, { code: 'not_granted', erro: msg || 'Seu perfil não tem acesso ao arquivo fiscal.' }); };
@@ -1150,7 +1278,7 @@ module.exports = function (ctx) {
       try {
         for (const r of ids) {
           const pasta = String(r.emissao || '0000').slice(0, 4) + '/' + (r.tipo === 'saida' ? 'saidas' : 'entradas') + '/';
-          await z.addGz(pasta + r.chave + (r.modelo === 'nfse' ? '-nfse.xml' : '-nfe.xml'), gx.get(r.id).xml); /* v135 */
+          await z.addGz(pasta + r.chave + (r.modelo === 'nfse' || r.modelo === 'nfsef' ? '-nfse.xml' : '-nfe.xml'), gx.get(r.id).xml); /* v135; v141: nfsef */
           for (const e of gev.all(r.chave)) await z.addGz(pasta + r.chave + '-evento-' + e.tp + '-' + (e.seq || '1') + '.xml', e.xml);
           csv.push([r.chave, r.tipo, r.numero, r.serie, r.emissao, r.parc_doc, '"' + String(r.parc_nome || '').replace(/"/g, '""') + '"', String(r.valor).replace('.', ','), r.situacao].join(';'));
         }
@@ -1210,6 +1338,7 @@ module.exports = function (ctx) {
       json(res, 200, linha(st.porId.get(row.id))); return true;
     }
     /* ===== fim v135 (rotas) ===== */
+    if (await rotaNfsef(p, m, req, res, conta, acc)) return true; /* v141: NFS-e de fornecedor */
     /* ===== v134: PDF original do fornecedor ===== */
     if (p === '/api/arqfiscal/pdf/config' && m === 'GET') { json(res, 200, { pdfMaxMb: PDF_MAX / 1048576, zipMaxMb: PDF_ZIP_MAX / 1048576, acesso: acc }); return true; }
     /* importar DANFEs em lote: o corpo é um ZIP de PDFs; cada PDF liga à nota pela chave do nome do arquivo */
