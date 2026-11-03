@@ -319,6 +319,30 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 **Avisos.** No chat: solicitação aguardando aprovação (aprovador), pedido aprovado (comprador), material chegou (quem pediu), nota parada ou com divergência (quem age). Por **e-mail**, quando o SMTP está configurado (seção 7.3): os mesmos eventos, enviados pelo servidor uma vez por evento (`P2P_AVISO_INTERVALO_S`, padrão 120 s; `P2P_AVISOS=0` desliga); o e-mail diário das aprovações passou a incluir as solicitações de compra e as compras pequenas. O **e-mail do pedido ao fornecedor** sai pelo servidor com o **PDF do pedido** em anexo (`POST /api/ped/email`), para o e-mail do cadastro do fornecedor; sem SMTP, continua o e-mail pronto (abrir no seu programa de e-mail).
 
+## 6.7. Medição ao cliente aprovada pelo Comercial, CIPA em abas e Ambiental no SST (v143)
+
+**Medição ao cliente: quem faz o quê.**
+- **Obra** (Obras › Medições ao cliente): lança o boletim, confere e usa **Enviar para aprovação**. Enquanto a medição aguarda, ela não pode ser alterada nem excluída. A tela não tem mais o botão Aprovar; fica para lançar, enviar e acompanhar. Tem a coluna **Projeto** (código, ex.: P412) e o filtro por projeto.
+- **Comercial** (Comercial › **Medições para aprovar**, com contador no menu): confere o boletim e **aprova** ou **devolve com o motivo**. O motivo fica no histórico da medição e vai para quem lançou pelo chat interno. A aprovação também avisa quem lançou.
+- **Segregação:** quem lançou ou enviou a medição não a aprova nem a devolve. O dono da página pode, depois de um aviso; é a mesma exceção que o servidor já tinha.
+- **Faturamento:** não mudou. Só depois de aprovada, **Faturar** cria a NFS-e em rascunho e, se houver retenção, a conta a receber da retenção.
+  - Quem aprova e também emite notas recebe logo a oferta de faturar.
+  - Para os outros, Faturar avisa que a NFS-e é criada por quem emite notas. Faturar precisa de Contratos, Notas e, com retenção, Financeiro: hoje são o administrador e o dono.
+- **Medições antigas:** as que estão em rascunho continuam funcionando; basta enviá-las. As aprovadas e as faturadas não mudam. A situação continua "Rascunho" até a aprovação, então enviada ou devolvida não conta como medido.
+- **Servidor:** `gestao/medapr.js`, ligado em `regras.js` logo depois de `regraMedCli`. Ele aceita a aprovação só de medição enviada (o dono pode direto) e a devolução só com motivo. O boletim enviado fica travado. Os carimbos (`envPor`, `envEm`, `devPor`, `devEm`, `devMotivo`) e o histórico `fluxoHist` são gravados só pelo servidor. A Diretoria também aprova e devolve. Com a ação "Aprovar" desligada no perfil (v142), a pessoa não aprova nem devolve.
+
+**Boletim de medição.** O rodapé traz "Emitido por [quem lançou ou enviou] em [data]" e "Aprovado por [nome] em [data]". O boletim não aprovado sai com a marca d'água **RASCUNHO – não aprovado** na tela, na impressão, no HTML e no PDF.
+
+**Obras › Resultado da obra.** O quadro da esquerda ficou compacto, com o valor logo ao lado de cada linha. O cabeçalho mostra só o código (ex.: "P412 · 10017197"); a descrição completa aparece ao passar o mouse. Em tela estreita, "Caixa do projeto" desce para baixo do quadro.
+
+**SST › Gestão da CIPA.** A página ganhou as abas **Visão geral · Membros · Reuniões e atas · Plano de trabalho**. As três telas saíram do menu do SST e do "Mais". Atalhos antigos (`#cipam`, `#cipar`, `#cipaa`), favoritos, Ctrl+K e links internos abrem a Gestão da CIPA na aba certa.
+
+**Ambiental.** A tela saiu do menu Qualidade e entrou no menu SST, com as mesmas abas: Documentos e licenças, Resíduos e MTR, Transportadores e destinadores, Indicadores e Checklist ISO 14001. A permissão não mudou: a tela e as coleções `ambdoc`, `ambres`, `ambforn`, `ambind` e `isochk` já eram do módulo SST. Quem tem só Qualidade não via a tela antes e continua sem ver; quem tem SST grava.
+
+**Painel do SST.** Novos botões **Emissão de RDA** (formulário novo do RDA dos técnicos) e **Entrega de EPI** (formulário novo de entrega), ao lado de "Registrar ocorrência". Só aparecem para quem grava RDA ou EPI: o Almoxarife vê só Entrega de EPI.
+
+**Implantar.** Suba juntos `gestao/medapr.js`, `gestao/regras.js` e `gestao/public/index.html`, depois reinicie o serviço `gestao`. Não há variável nova nem tabela nova.
+
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
 - Cada fornecedor convidado recebe um link próprio, `https://seu-dominio/cotacao/<código>`, que abre **sem login**. Ele vê só os itens do pedido, o prazo e o local de entrega, nunca os preços dos outros, e informa preço, marca, frete, prazo, pagamento e validade.

@@ -21665,7 +21665,7 @@ V.pnCom=()=>{const d=pn2Def('pnCom');if(!mayR(d.group))return pn2Sem(d);
   const goPend=S.opp.filter(o=>o.goReq&&o.goReq.st==='pendente');
   const vig=S.ctr.filter(x=>x.status==='vigente');
   const carteira=pn2Try('carteira',()=>r2(sum(vig,x=>Math.max(0,ctrAtual(x)-ctrMedido(x)))),0);
-  const medRasc=S.med.filter(m=>m.status==='rascunho'),medApr=S.med.filter(m=>m.status==='aprovada');
+  const medRasc=S.med.filter(m=>m.status==='rascunho'&&m.aprovSt==='enviada'),medApr=S.med.filter(m=>m.status==='aprovada');
   const filtros='<label class="f"><span>Resultado das propostas</span><select id="s_pncom_m" data-filter="pnCom.meses">'+opt([['3','Últimos 3 meses'],['6','Últimos 6 meses'],['12','Últimos 12 meses'],['24','Últimos 24 meses']],f.meses)+'</select></label>'+
     '<label class="f"><span>Área</span><select id="s_pncom_a" data-filter="pnCom.area">'+opt(OPP_AREA,f.area,'Todas')+'</select></label>';
   const kp='<div class="kpis">'+
@@ -21698,7 +21698,7 @@ V.pnCom=()=>{const d=pn2Def('pnCom');if(!mayR(d.group))return pn2Sem(d);
     return pn2Card('Contratos com clientes','vencendo em '+c.ctrVenceDias+' dias, alertas e reequilíbrio',pn2Lista(its.slice(0,12),'Nenhum contrato com alerta.')+pn2Mais(its.length,12),pn2Btn('ctr','Contratos'));});
   /* medições ao cliente */
   const meds=pn2Try('medicoes',()=>{const its=medRasc.concat(medApr).sort((a,b)=>String(a.fim||'').localeCompare(String(b.fim||''))).map(m=>{const x=get('ctr',m.ctrId)||{},t=medTot(m,x);
-      return pn2Li('Medição nº '+esc(m.numero||'—')+' · contrato <b>'+esc(x.numero||'—')+'</b>',esc(parcNome(x.parcId))+(m.fim?' · até '+fmtDate(m.fim):''),'<span class="mono">'+money(t.fat)+'</span> '+pill(m.status==='rascunho'?'a aprovar':'aprovada, sem faturar',m.status==='rascunho'?'warn':'acc'),pn2Btn('med'));});
+      return pn2Li('Medição nº '+esc(m.numero||'—')+' · contrato <b>'+esc(x.numero||'—')+'</b>',esc(parcNome(x.parcId))+(m.fim?' · até '+fmtDate(m.fim):''),'<span class="mono">'+money(t.fat)+'</span> '+pill(m.status==='rascunho'?'a aprovar':'aprovada, sem faturar',m.status==='rascunho'?'warn':'acc'),pn2Btn(m.status==='rascunho'?'medapr':'med'));});
     return pn2Card('Medições ao cliente','a aprovar e a faturar',pn2Lista(its.slice(0,10),'Nenhuma medição pendente.')+pn2Mais(its.length,10),pn2Btn('med','Medições ao cliente'));});
   /* pedidos de venda (grupo nf) */
   const psv=mayR('nf')?pn2Try('psv',()=>{const ls=(S.psv||[]).filter(p=>['orcamento','aprovado'].includes(p.status));if(!ls.length)return '';
@@ -28084,8 +28084,9 @@ const p6PodeCriar=(col,act)=>{try{if(ACT_GROUP[act]&&!mayW(ACT_GROUP[act]))retur
   const k='data-tab="acid">Registrar ocorrência</button>';if(b&&h.indexOf(k)>=0)h=h.replace(k,k+b);}catch(e){}return h;};}
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='142',APP_DATA='2026-11-03';
+const APP_VER='143',APP_DATA='2026-11-03';
 const CHANGELOG=[
+  ['143','2026-11-03',['Medições ao cliente: a obra prepara o boletim e envia para aprovação; o Comercial aprova ou devolve com motivo, na nova aba Medições para aprovar. Quem lançou não aprova. A lista tem a coluna e o filtro Projeto.', 'Boletim de medição com Emitido por e Aprovado por, e marca RASCUNHO enquanto não for aprovado.', 'SST: Gestão da CIPA com abas (Visão geral, Membros, Reuniões e atas, Plano de trabalho); Ambiental passa para o menu do SST; atalhos Emissão de RDA e Entrega de EPI no painel. Resultado da obra mais compacto.']],
   ['142','2026-11-03',['Perfis de acesso por função: cada módulo abre as funções (telas) dele, com Sem acesso, Consulta, Cria e altera ou Cria, altera e exclui. O nível do módulo preenche todas de uma vez.', 'Ações sensíveis à parte em cada perfil: aprovar, lançar nota de entrada, cancelar/estornar e exportar. Telas sem acesso somem do menu e os botões de gravar e excluir somem conforme o nível. O servidor aplica as mesmas regras.', 'Perfis padrão do sistema agora podem ser editados (menos o Administrador), com o botão Voltar ao original. Novo botão Ver como, que mostra o sistema como aquele perfil enxerga.']],
   ['141','2026-10-31',["Recebimento de notas: nova fila 'O que precisa de ação', com o motivo, quem deve agir e o botão da ação, e filtro 'Minhas pendências'.", 'A nota que confere com o pedido e o recebimento é lançada sozinha quando um Fiscal ou administrador está com o sistema aberto (dá para desligar). Compra pequena sem pedido, até R$ 1.000, exige categoria, projeto e aprovação do nível 1.', 'NFS-e de fornecedor e empreiteiro: importa o XML ou o PDF, liga à medição e confere as retenções. Devolução ao fornecedor: baixa o estoque e abate ou cancela a conta; se já foi paga, gera crédito.', 'Avisos automáticos no chat e por e-mail: solicitação para aprovar, pedido aprovado, material chegou e nota parada. O pedido vai ao fornecedor por e-mail com o PDF anexo.']],
   ['140','2026-10-30',['Compras e notas: a nota de entrada é lançada pelo servidor de uma vez (estoque e contas a pagar), pelo perfil Fiscal, com as travas de recebimento, aprovação, divergência e duplicidade conferidas no servidor. O Arquivo fiscal não cria mais conta direto do XML.', 'Alçadas de aprovação ligadas por padrão (até R$ 10 mil gestor, até R$ 100 mil diretoria, acima duas pessoas); sem aprovador cadastrado, o dono ou administrador aprova.', 'Perfis: Comprador faz solicitação, cotação e pedido; Fiscal valida e lança a nota; Almoxarife recebe; Financeiro programa e paga (não cria pedido). Toda solicitação de compra passa por aprovação. Conta criada pela conciliação fora de tarifas, impostos e transferências fica para aprovar.']],
