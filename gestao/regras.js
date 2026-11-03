@@ -974,8 +974,6 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (ns === 'aprovada' && vs !== 'aprovada') return erro('A medição de empreiteiro só é aprovada depois de enviada (Aguardando aprovação), por outra pessoa.');
     manter(); return null;
   }
-  /* v143: envio para aprovação, devolução com motivo e aprovação só de medição enviada (medapr.js; roda depois de regraMedCli) */
-  const MEDF = require('./medapr.js')({ ehDono, ehDiretor, gravaGrupo, erro, ipDe, igual, acaoNeg: typeof acaoNeg === 'function' ? acaoNeg : null });
   function regraMedCli(conta, req, velho, novo) {
     const v = velho || {}, vs = v.status || '', ns = novo.status || '';
     if (velho) { if (v.lancPor !== undefined) novo.lancPor = v.lancPor; else delete novo.lancPor; } else novo.lancPor = conta.id; /* quem lançou: só na criação */
@@ -1925,7 +1923,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
      ===================================================================== */
   const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf', 'alcPadrao', 'supSemPedMin', 'supSemPedIsentas', 'supTolQtd', 'p2pAuto', 'p2pAutoDias', 'p2pPequena', 'p2pPequenaAte', 'p2pPequenaEm', 'p2pPequenaConta']; /* v140: alcPadrao e as regras da nota sem pedido/tolerância (o servidor confere no lançamento) */ /* v125: osf = e-mail da fábrica e aprovadores da OS */
   /* v111: a Diretoria não lança, mas decide: liberação (docLib) e aprovação/recusa de medições, sem mudar outros campos */
-  const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq', 'aprovSt', 'devMotivo', 'devPor', 'devEm', 'envPor', 'envEm', 'fluxoHist'], /* v143: a diretoria também aprova e devolve (os carimbos são do servidor, medapr.js) */
+  const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
     fzpedfech: ['st', 'porConf', 'emConf', 'devObs', 'eventos'], opp: ['goAprov', 'goReq', 'goHist'] };
   const DECISAO_ST = { medemp: ['status', ['aprovada', 'recusada']], med: ['status', ['aprovada']], fzpedfech: ['st', ['confirmado', 'devolvido']] };
   function excecaoDiretoria(conta, p, velho, novo, m) {
@@ -2130,7 +2128,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'rdo') { e = regraAptRdo(velho, novo); if (e) return e; }
       if (c0 === 'func') { e = regraAptFunc(velho, novo) || regraDeslFunc(velho, novo); if (e) return e; }
       if (c0 === 'desl') { e = regraDeslAuto(velho, novo); if (e) return e; }
-      if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo) || MEDF(conta, req, velho, novo); if (e) return e; } /* v143: MEDF = medapr.js */
+      if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'fzpedfech') { e = regraPedFech(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */
