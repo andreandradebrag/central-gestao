@@ -74,6 +74,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const ehDono = conta => !!conta && conta.nivel === 'owner';
   const perfW = conta => { if (!conta) return []; if (conta.nivel === 'owner') return '*'; const pr = PERM.perfis[perfilDe(conta)]; return pr ? pr.w : []; };
   const gravaGrupo = (conta, ...gs) => { const w = perfW(conta); return w === '*' || gs.some(g => w.includes(g)); };
+  /* v142: ação sensível desligada no perfil (Sistema › Perfis de acesso › Ações sensíveis); o dono nunca perde */
+  const acaoNeg = (conta, k) => !ehDono(conta) && !!X.FN && X.FN.acaoNegada(defDe(conta), k);
   const r2 = n => Math.round((+n || 0) * 100) / 100;
   const ym = d => { const s = String(d || ''); return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : ''; };
   /* comparação estável (ordem das chaves e null/ausente não importam) */
@@ -128,6 +130,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     function podeLancar(conta) {
       if (ehDono(conta)) return true; const d = defDe(conta); if (!d) return false; if (d.w === '*') return true;
+      if (acaoNeg(conta, 'lancarNota')) return false; /* v142: ação "Lançar nota de entrada" desligada no perfil */
       const w = Array.isArray(d.w) ? d.w : []; if (!w.includes('nf')) return false;
       if (d.so && Array.isArray(d.so.nf) && !d.so.nf.includes('notas')) return false;
       if (Array.isArray(d.rascunho) && d.rascunho.includes('notas')) return false;
@@ -236,6 +239,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (!(a && a.ok)) return erro('A solicitação de compra precisa da aprovação de material antes de seguir para o comprador ou para a separação. Use Enviar: ela vai para Aguardando aprovação.', 409);
       if (velho && igual(v.aprovMat, a)) return null;
       if (a.auto === 'limite') { const lim = +((cfgEmp().matFluxo || {}).autoAte) || 0; if (!(lim > 0 && a.valorEst != null && +a.valorEst <= lim + 0.009)) return erro('O valor estimado passa do limite de aprovação automática: a solicitação precisa de aprovação.', 409); }
+      else if (acaoNeg(conta, 'aprovar')) return erro('Seu perfil não aprova (a ação "Aprovar" está desligada em Sistema › Perfis de acesso). Envie para aprovação.'); /* v142 */
       else if (!ehAprovMat(conta)) return erro('Só um aprovador de material aprova a solicitação de compra. Envie para aprovação.');
       else if (!a.auto && (v.solUid || novo.solUid) === conta.id && !ehDono(conta)) return erro('Quem pediu não aprova a própria solicitação.');
       novo.aprovMat = Object.assign({}, a, { por: conta.id, em: Date.now(), srv: 1 }); return null;
@@ -767,6 +771,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const c = String(b.col || ''), id = String(b.id || ''), dec = b.dec === 'nao' ? 'nao' : 'sim', obs = String(b.obs || '').trim().slice(0, 500), p = c + '/' + id;
     if ((!PROT[c] && c !== 'notas') || !/^[\w\-.|~@+=]{1,200}$/.test(id)) return erro('Item inválido.', 400);
     if (!pode(conta, p, 'w') || !perfilPermite(conta, p, 'w')) return erro('Seu perfil não aprova este tipo de item.'); /* quem aprova é decidido pela alçada e pelas listas de cada tipo, abaixo */
+    if (['lanc', 'ped', 'aprovsol', 'notas'].includes(c) && acaoNeg(conta, 'aprovar')) { auditar(conta, req, 'APROVAR_NEGADO_PERFIL', p, null, null); return erro('Seu perfil não aprova: a ação "Aprovar" está desligada em Sistema › Perfis de acesso. As alçadas de valor continuam na matriz de aprovadores.'); } /* v142 */
     const velho = doc(p); if (!velho) return erro('Item não encontrado.', 404);
     const n = JSON.parse(JSON.stringify(velho)), agora = Date.now(), ip = ipDe(req), eu = conta.id, dono = ehDono(conta);
     const ex = b.extra && typeof b.extra === 'object' ? b.extra : {};
@@ -969,6 +974,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (ns === 'aprovada' && vs !== 'aprovada') return erro('A medição de empreiteiro só é aprovada depois de enviada (Aguardando aprovação), por outra pessoa.');
     manter(); return null;
   }
+  /* v143: envio para aprovação, devolução com motivo e aprovação só de medição enviada (medapr.js; roda depois de regraMedCli) */
+  const MEDF = require('./medapr.js')({ ehDono, ehDiretor, gravaGrupo, erro, ipDe, igual, acaoNeg: typeof acaoNeg === 'function' ? acaoNeg : null });
   function regraMedCli(conta, req, velho, novo) {
     const v = velho || {}, vs = v.status || '', ns = novo.status || '';
     if (velho) { if (v.lancPor !== undefined) novo.lancPor = v.lancPor; else delete novo.lancPor; } else novo.lancPor = conta.id; /* quem lançou: só na criação */
@@ -1704,7 +1711,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
   /* v114: Técnico de SST (rhdocNr): em Documentos e ASO, só os certificados de NR */
   const docNr = d => /^NR-/.test(String((d && d.tipo) || ''));
-  const soNr = conta => { if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return false; const d = defDe(conta); return !!(d && !d.custom && d.rhdocNr); };
+  const soNr = conta => { if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return false; const d = defDe(conta); return !!(d && (!d.custom || d.temLim) && d.rhdocNr); }; /* v142: personalizado duplicado do Técnico de SST leva o limite */
   const ehSstAdm = conta => ehDono(conta) || perfilEm(conta, ['sst', 'ssttec', 'admin']) || !!((defDe(conta) || {}).custom && (defDe(conta).w || []).includes('sst')); /* v114: Gestor e Técnico de SST; personalizado que grava SST */
   /* ---- A1 ---- */
   function aptServ(fid, tid, pid) {
@@ -1918,7 +1925,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
      ===================================================================== */
   const CFG_PROT = ['alcPed', 'alcPag', 'aprovadores', 'alcNiv', 'supInvLim', 'aprovMatriz', 'aprovSubst', 'omieCorte', 'supTolPreco', 'osf', 'alcPadrao', 'supSemPedMin', 'supSemPedIsentas', 'supTolQtd', 'p2pAuto', 'p2pAutoDias', 'p2pPequena', 'p2pPequenaAte', 'p2pPequenaEm', 'p2pPequenaConta']; /* v140: alcPadrao e as regras da nota sem pedido/tolerância (o servidor confere no lançamento) */ /* v125: osf = e-mail da fábrica e aprovadores da OS */
   /* v111: a Diretoria não lança, mas decide: liberação (docLib) e aprovação/recusa de medições, sem mudar outros campos */
-  const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq'],
+  const DECISAO_DIR = { lanc: ['docLib', 'retLib'], medemp: ['docLib', 'retJ4', 'status', 'motivo', 'aprovPor', 'aprovEm', 'fixo', 'puFixo'], med: ['status', 'aprovPor', 'aprovEm', 'empLib', 'empLibReq', 'aprovSt', 'devMotivo', 'devPor', 'devEm', 'envPor', 'envEm', 'fluxoHist'], /* v143: a diretoria também aprova e devolve (os carimbos são do servidor, medapr.js) */
     fzpedfech: ['st', 'porConf', 'emConf', 'devObs', 'eventos'], opp: ['goAprov', 'goReq', 'goHist'] };
   const DECISAO_ST = { medemp: ['status', ['aprovada', 'recusada']], med: ['status', ['aprovada']], fzpedfech: ['st', ['confirmado', 'devolvido']] };
   function excecaoDiretoria(conta, p, velho, novo, m) {
@@ -2015,15 +2022,18 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (rec.length) return erro('Um perfil personalizado não pode ter: ' + rec.slice(0, 5).join(', ') + '. Usuários, configurações e lixeira ficam só com o Administrador.', 400);
     const o = novo.opc && typeof novo.opc === 'object' ? novo.opc : {}, opc = { rh: o.rh === true, banco: o.banco === true, frota: o.frota === true, dir: o.dir === true };
     const ativo = novo.ativo !== false;
+    /* v142: acesso por função (fn), ações sensíveis (acoes) e limites internos levados na duplicação (lim) */
+    const FNF = X.FN ? X.FN.funcoes(PERM) : {}, fn = X.FN ? X.FN.sanFn(novo.fn, FNF, g => !!mod[g]) : {}, acoes = X.FN ? X.FN.sanAcoes(novo.acoes) : {}, lim = X.FN ? X.FN.sanLim(novo.lim) : {};
     if (!ativo && (!velho || velho.ativo !== false)) { const n = perfcUsado(id); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas em Sistema › Usuários antes de desativar.', 409); }
     if (!END.reautenticado(req)) return { reauth: true }; /* criar ou mudar perfil pede a senha de novo */
     const v = velho || {}, agora = Date.now();
     const out = { id, nome: nome.slice(0, 60), desc: String(novo.desc || '').slice(0, 500), mod, opc, ativo, base: String(novo.base || v.base || '').slice(0, 40),
+      ...(Object.keys(fn).length ? { fn } : {}), ...(Object.keys(acoes).length ? { acoes } : {}), ...(Object.keys(lim).length ? { lim } : {}),
       criadoPor: v.criadoPor || conta.id, criadoEm: v.criadoEm || agora, alteradoPor: conta.id, alteradoEm: agora, ts: +novo.ts || agora };
     ['cr', 'crBy', 'ed', 'edBy'].forEach(k => { if (novo[k] !== undefined) out[k] = novo[k]; });
     Object.keys(novo).forEach(k => delete novo[k]); Object.assign(novo, out);
     auditar(conta, req, velho ? (ativo === (v.ativo !== false) ? 'PERFIL_ACESSO_ALTERADO' : (ativo ? 'PERFIL_ACESSO_REATIVADO' : 'PERFIL_ACESSO_DESATIVADO')) : 'PERFIL_ACESSO_CRIADO', p, null,
-      { nome: out.nome, mod, opc, ativo, pede: X.perfcCompilar ? X.perfcCompilar(out) : null });
+      { nome: out.nome, mod, opc, fn, acoes, lim, ativo, pede: X.perfcCompilar ? X.perfcCompilar(out) : null });
     return null;
   }
   /* v127: ajuste de perfil padrão (perfc/a_<perfil>): só o Administrador ou o dono, com a senha de novo e auditoria.
@@ -2034,6 +2044,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const s = p.split('/'); if (s.length !== 2) return erro('Caminho inválido.', 400);
     if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono ajustam perfis de acesso.');
     const m = PERFA_ID.exec(s[1]), base = m && m[1]; if (!base || !X.perfaBaseOk || !X.perfaBaseOk(base)) return erro('Perfil padrão inexistente.', 400);
+    if (base === 'admin') return erro('O perfil Administrador não se edita (evita trancar o sistema). Para um perfil parecido, use Duplicar.', 400); /* v142: decisão do dono */
     const mod = {}, rec = [], sist = X.PERFA_SISTEMA || ['usr', 'cfg', 'lixo'];
     for (const [g, v] of Object.entries(novo.mod && typeof novo.mod === 'object' ? novo.mod : {})) {
       if (!['w', 'r', 'n'].includes(v)) continue;
@@ -2044,14 +2055,17 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     }
     if (rec.length) return erro('Este perfil não pode ter: ' + rec.slice(0, 5).join(', ') + '. Usuários, configurações e lixeira ficam só com o Administrador.', 400);
     const o = novo.opc && typeof novo.opc === 'object' ? novo.opc : {}, opc = {}; if (typeof o.frota === 'boolean') opc.frota = o.frota;
+    /* v142: acesso por função (fn) e ações sensíveis (acoes); os limites internos do padrão continuam */
+    const FNF = X.FN ? X.FN.funcoes(PERM) : {}, fn = X.FN ? X.FN.sanFn(novo.fn, FNF, g => X.perfaEditavel(base, g)) : {}, acoes = X.FN ? X.FN.sanAcoes(novo.acoes) : {};
     if (!END.reautenticado(req)) return { reauth: true }; /* ajustar perfil pede a senha de novo */
     const v = velho || {}, agora = Date.now();
     const out = { id: s[1], base, ajuste: true, nome: String((PERF_BASE[base] || {}).nome || base).slice(0, 80), mod, opc, ativo: true,
+      ...(Object.keys(fn).length ? { fn } : {}), ...(Object.keys(acoes).length ? { acoes } : {}),
       criadoPor: v.criadoPor || conta.id, criadoEm: v.criadoEm || agora, alteradoPor: conta.id, alteradoEm: agora, ts: +novo.ts || agora };
     ['cr', 'crBy', 'ed', 'edBy'].forEach(k => { if (novo[k] !== undefined) out[k] = novo[k]; });
     Object.keys(novo).forEach(k => delete novo[k]); Object.assign(novo, out);
     const pede = X.perfaCompilar ? X.perfaCompilar(base, out) : null;
-    auditar(conta, req, 'PERFIL_PADRAO_AJUSTADO', p, null, { base, mod, opc, pede: pede ? { w: pede.w, r: pede.r, frotaTodos: !!pede.frotaTodos } : null });
+    auditar(conta, req, 'PERFIL_PADRAO_AJUSTADO', p, null, { base, mod, opc, fn, acoes, pede: pede ? { w: pede.w, r: pede.r, frotaTodos: !!pede.frotaTodos, so: pede.so || null, naoExclui: pede.naoExclui || null, acoesNao: pede.acoesNao || null } : null });
     return null;
   }
   function regraUsrPerfil(velho, novo) {
@@ -2062,7 +2076,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   function regraFina(conta, p, velho, novo, m) {
     if (ehDono(conta)) return null;
-    const d = defDe(conta), s = p.split('/'), c0 = s[0]; if (!d || d.custom || s.length !== 2) return null;
+    const d = defDe(conta), s = p.split('/'), c0 = s[0]; if (!d || (d.custom && !d.pf && !d.temLim) || s.length !== 2) return null; /* v142: personalizado com acesso por função ou limites levados na duplicação */
     const cp = d.campos && Array.isArray(d.campos[c0]) ? d.campos[c0] : null;
     if (cp) {
       if (m === 'DELETE' || !velho) return erro('Seu perfil não cria nem exclui este registro aqui; só registra ' + (c0 === 'ped' ? 'o recebimento do pedido' : 'o andamento') + '.');
@@ -2074,7 +2088,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (m === 'DELETE') { if (velho && velho.status !== 'rascunho') return erro('Seu perfil só exclui notas em rascunho.'); }
       else if ((velho && velho.status !== 'rascunho') || novo.status !== 'rascunho') return erro('Seu perfil só cria e altera notas em rascunho (do recebimento). Quem valida e lança a nota é o Fiscal (ou um administrador).');
     }
-    if (m === 'DELETE' && velho && Array.isArray(d.naoExclui) && d.naoExclui.includes(c0)) return erro('Seu perfil não exclui este registro (fica com o Gestor de segurança do trabalho ou um administrador).');
+    if (m === 'DELETE' && velho && Array.isArray(d.naoExclui) && d.naoExclui.includes(c0)) return erro(d.pf ? 'Seu perfil cria e altera, mas não exclui, este registro (Sistema › Perfis de acesso).' : 'Seu perfil não exclui este registro (fica com o Gestor de segurança do trabalho ou um administrador).');
     if (c0 === 'cfg' && m !== 'DELETE' && Array.isArray(d.cfgNao)) { const k = d.cfgNao.find(k => !igual((velho || {})[k], novo[k])); if (k) return erro('Seu perfil não altera esta configuração (' + k + '). Fica com o Gestor de segurança do trabalho ou um administrador.'); }
     return null;
   }
@@ -2083,6 +2097,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
     if (c0 === 'usr' && s.length === 2) { const e = regraUsrPerfil(velho, novo); if (e) return e; }
     { const e = regraFina(conta, p, velho, novo, 'PUT'); if (e) return e; }
+    if (s.length === 2 && X.FN && X.FN.ehCancelamento(c0, velho, novo) && acaoNeg(conta, 'cancelar')) return erro('Seu perfil não cancela nem estorna (a ação "Cancelar e estornar" está desligada em Sistema › Perfis de acesso).'); /* v142 */
     if (c0 === 'rhdoc' && soNr(conta) && ((velho && !docNr(velho)) || !docNr(novo))) return erro('Seu perfil registra só certificados de NR. ASO, contrato e os outros documentos ficam com o Gestor de segurança do trabalho ou o RH.');
     if (c0 === 'ctbfech') return erro('Fechar e reabrir competência só pelos botões de Fiscal › Fechamento (o servidor registra quem fez e o motivo).');
     /* autor carimbado pelo servidor */
@@ -2115,7 +2130,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'rdo') { e = regraAptRdo(velho, novo); if (e) return e; }
       if (c0 === 'func') { e = regraAptFunc(velho, novo) || regraDeslFunc(velho, novo); if (e) return e; }
       if (c0 === 'desl') { e = regraDeslAuto(velho, novo); if (e) return e; }
-      if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo); if (e) return e; }
+      if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo) || MEDF(conta, req, velho, novo); if (e) return e; } /* v143: MEDF = medapr.js */
       if (c0 === 'fzpedfech') { e = regraPedFech(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */

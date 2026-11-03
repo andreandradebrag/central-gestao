@@ -198,6 +198,7 @@ function preservarFunc(conta, p, novo) {
    só grava nos módulos dele. PERFIL_GRAVACAO=bloquear (padrão) recusa; PERFIL_GRAVACAO=avisar só registra o que
    seria bloqueado, para conferir antes. */
 let PERM = { perfis: {}, colecoes: {} };
+const FN = require('./permfn.js'); /* v142: permissão por função dentro do módulo */
 try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'utf8')); } catch (e) { console.log('perfis.json não encontrado: gravação por módulo desligada'); }
 /* ---- v114: perfis personalizados (Sistema › Perfis de acesso), guardados na coleção perfc ----
    Cada perfil: nome, descrição, mod {grupo: 'r'|'w'} e opc {rh, banco, frota, dir}. O servidor monta o perfil com o
@@ -215,7 +216,13 @@ function perfcCompilar(d) {
   for (const [g, v] of Object.entries((d && d.mod) || {})) { if (!perfcGrupoValido(g) || PERFC_SO_ADMIN.has(g)) continue; if (v === 'w' && !PERFC_SO_LEITURA.has(g)) w.push(g); else if (v === 'w' || v === 'r') r.push(g); }
   ['meu', 'ajuda'].forEach(g => { if (!r.includes(g)) r.push(g); });
   const o = (d && d.opc) || {};
-  return { w, r, custom: true, nome: String((d && d.nome) || '').slice(0, 60), sensRh: o.rh === true, banco: o.banco === true, frotaTodos: o.frota === true, aprovDir: o.dir === true };
+  const out = { w, r, custom: true, nome: String((d && d.nome) || '').slice(0, 60), sensRh: o.rh === true, banco: o.banco === true, frotaTodos: o.frota === true, aprovDir: o.dir === true };
+  /* v142: limites internos levados do perfil padrão na duplicação (só restringem) e o acesso por função */
+  if (typeof FN !== 'undefined') { /* (typeof: o teste t/run_perf2.js avalia esta função isolada) */
+    const lim = FN.sanLim(d && d.lim); if (Object.keys(lim).length) Object.assign(out, lim, { temLim: true });
+    FN.aplicar(out, d && d.fn, d && d.acoes, { PERM, todos: typeof perfaGrupos === 'function' ? perfaGrupos() : [] });
+  }
+  return out;
 }
 function perfcRecarregar() {
   if (!PERF_BASE_N) return; const novo = Object.assign({}, PERF_BASE);
@@ -247,6 +254,8 @@ function perfaCompilar(k, d) {
   out.r = tudoR && todos.every(g => w.includes(g) || r.includes(g)) ? '*' : r;
   if (b.so) { const so = {}; Object.keys(b.so).forEach(g => { if (out.w === '*' || out.w.includes(g)) so[g] = b.so[g]; }); out.so = so; }
   const o = (d && d.opc) || {}; if (typeof o.frota === 'boolean') out.frotaTodos = o.frota;
+  /* v142: acesso por função e ações sensíveis (o Administrador não se ajusta por função: evita trancar o sistema) */
+  if (typeof FN !== 'undefined' && k !== 'admin' && out.w !== '*') FN.aplicar(out, d && d.fn, d && d.acoes, { PERM, soLeitura: PERFA_SO_LEITURA.has(k), todos });
   return out;
 }
 perfcRecarregar();
@@ -1013,7 +1022,7 @@ async function rotear(req, res) {
 
 /* regras de negócio aplicadas pelo servidor (aprovações, bancos, competência, anexos, auditoria...) */
 const REG = require('./regras.js')({ db, q, json, html, lerJson, lerCorpo, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH,
-  papelDe, veRh, perfcCompilar, perfcGrupoValido, PERFC_ID, PERF_BASE, PERFC_PROIBIDOS, perfaCompilar, perfaBaseOk, perfaEditavel, PERFA_ID, PERFA_SISTEMA, /* v127 */
+  papelDe, veRh, perfcCompilar, perfcGrupoValido, PERFC_ID, PERF_BASE, PERFC_PROIBIDOS, perfaCompilar, perfaBaseOk, perfaEditavel, PERFA_ID, PERFA_SISTEMA, /* v127 */ FN, perfaGrupos, /* v142 */
   pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa, BACKUP });
 /* v111: a sincronização da Sólides não grava ponto (pmmes) de mês travado (Fontes do ponto) nem de competência fechada; o que foi ignorado vai para a auditoria */
 const solIgnorados = new Set();

@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-31T15:41:32.703Z",
+ "gerado": "2026-11-03T16:19:30.055Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1554,5 +1554,834 @@
    "ajuda",
    "Tutoriais e novidades"
   ]
- ]
+ ],
+ "funcoes": {
+  "fin": {
+   "aprovsol": [
+    "aprovsol",
+    "lanc",
+    "ped",
+    "notas"
+   ],
+   "lanc": [
+    "lanc",
+    "parc",
+    "prod",
+    "cat",
+    "plano",
+    "conta",
+    "proj",
+    "notas",
+    "ped",
+    "medemp",
+    "ctremp",
+    "adto",
+    "recor",
+    "nfse"
+   ],
+   "recor": [
+    "recor",
+    "lanc",
+    "parc",
+    "cat"
+   ],
+   "adto": [
+    "adto",
+    "adtoit",
+    "func",
+    "proj"
+   ],
+   "adtoit": [
+    "adtoit",
+    "adto",
+    "func"
+   ],
+   "remessa": [
+    "remessa",
+    "lanc",
+    "parc",
+    "conta"
+   ],
+   "orcfin": [
+    "orcfin"
+   ],
+   "ctbfech": [
+    "ctbfech",
+    "parc",
+    "prod"
+   ],
+   "med": [
+    "med",
+    "parc",
+    "prod",
+    "ctr",
+    "proj",
+    "nfse"
+   ],
+   "medemp": [
+    "medemp",
+    "parc",
+    "prod",
+    "ctremp",
+    "proj",
+    "lanc"
+   ],
+   "ctremp": [
+    "ctremp",
+    "medemp",
+    "parc",
+    "proj"
+   ]
+  },
+  "ctb": {
+   "ctbfech": [
+    "ctbfech"
+   ],
+   "fzpedfech": [
+    "fzpedfech"
+   ],
+   "fzportal": [
+    "fzportal"
+   ],
+   "lanc": [
+    "lanc",
+    "parc",
+    "cat",
+    "plano",
+    "conta",
+    "proj",
+    "notas",
+    "ped",
+    "medemp",
+    "ctremp",
+    "adto",
+    "recor",
+    "nfse"
+   ],
+   "med": [
+    "med",
+    "ctr",
+    "proj",
+    "parc",
+    "nfse"
+   ],
+   "nfse": [
+    "nfse",
+    "med",
+    "ctr",
+    "parc"
+   ],
+   "fzret": [
+    "fzret"
+   ]
+  },
+  "dir": {
+   "gar": [
+    "gar",
+    "proj"
+   ],
+   "ctr": [
+    "ctr",
+    "proj"
+   ],
+   "lanc": [
+    "lanc",
+    "proj",
+    "parc",
+    "cat",
+    "plano",
+    "conta",
+    "notas",
+    "ped",
+    "medemp",
+    "ctremp",
+    "adto",
+    "recor",
+    "nfse"
+   ],
+   "med": [
+    "med",
+    "proj",
+    "ctr",
+    "parc",
+    "nfse"
+   ],
+   "nc": [
+    "nc",
+    "proj"
+   ],
+   "proj": [
+    "proj"
+   ],
+   "pesq": [
+    "pesq",
+    "proj"
+   ]
+  },
+  "contas": {
+   "extrato": [
+    "extrato",
+    "lanc",
+    "conta"
+   ],
+   "conta": [
+    "conta"
+   ]
+  },
+  "nf": {
+   "psv": [
+    "psv",
+    "parc",
+    "prod",
+    "notas"
+   ],
+   "ped": [
+    "ped",
+    "sc",
+    "cot",
+    "acordo",
+    "notas",
+    "prod",
+    "parc"
+   ],
+   "notas": [
+    "notas",
+    "ped",
+    "sc",
+    "prod",
+    "parc",
+    "almox",
+    "mov"
+   ],
+   "nfse": [
+    "nfse",
+    "med",
+    "ctr",
+    "parc"
+   ],
+   "fzportal": [
+    "fzportal"
+   ]
+  },
+  "comp": {
+   "sc": [
+    "sc",
+    "parc",
+    "prod",
+    "almox",
+    "proj",
+    "sep",
+    "cot",
+    "ped"
+   ],
+   "cot": [
+    "cot",
+    "parc",
+    "prod",
+    "almox",
+    "sc",
+    "acordo"
+   ],
+   "notas": [
+    "notas",
+    "parc",
+    "prod",
+    "almox",
+    "ped",
+    "sc",
+    "mov"
+   ],
+   "acordo": [
+    "acordo",
+    "parc",
+    "prod",
+    "almox"
+   ],
+   "invaj": [
+    "invaj",
+    "parc",
+    "prod",
+    "almox",
+    "mov"
+   ],
+   "almox": [
+    "almox",
+    "parc",
+    "prod"
+   ],
+   "parc": [
+    "parc",
+    "prod",
+    "almox"
+   ],
+   "mov": [
+    "mov",
+    "parc",
+    "prod",
+    "almox",
+    "notas",
+    "ped",
+    "proj"
+   ],
+   "ped": [
+    "ped",
+    "parc",
+    "prod",
+    "almox",
+    "sc",
+    "cot",
+    "acordo",
+    "notas"
+   ],
+   "prod": [
+    "prod",
+    "parc",
+    "almox"
+   ],
+   "sep": [
+    "sep",
+    "sc",
+    "prod",
+    "almox"
+   ]
+  },
+  "est": {
+   "mov": [
+    "mov",
+    "prod",
+    "proj",
+    "almox",
+    "notas",
+    "ped"
+   ],
+   "prod": [
+    "prod",
+    "mov",
+    "proj",
+    "almox"
+   ],
+   "almox": [
+    "almox",
+    "proj",
+    "prod"
+   ],
+   "devobra": [
+    "devobra",
+    "proj",
+    "prod",
+    "almox",
+    "mov"
+   ],
+   "proj": [
+    "proj",
+    "prod",
+    "almox"
+   ],
+   "invaj": [
+    "invaj",
+    "almox",
+    "prod",
+    "mov"
+   ]
+  },
+  "proj": {
+   "proj": [
+    "proj"
+   ],
+   "etapa": [
+    "etapa"
+   ],
+   "rdo": [
+    "rdo",
+    "proj",
+    "etapa",
+    "func"
+   ],
+   "heaut": [
+    "heaut",
+    "func",
+    "proj"
+   ],
+   "mov": [
+    "mov",
+    "prod",
+    "almox",
+    "notas",
+    "ped",
+    "proj"
+   ],
+   "rmesf": [
+    "rmesf"
+   ],
+   "obrchk": [
+    "obrchk"
+   ],
+   "ctremp": [
+    "ctremp",
+    "medemp",
+    "parc",
+    "proj"
+   ],
+   "obrbase": [
+    "obrbase"
+   ],
+   "medemp": [
+    "medemp",
+    "ctremp",
+    "parc",
+    "proj",
+    "lanc"
+   ],
+   "obrprev": [
+    "obrprev"
+   ]
+  },
+  "cad": {
+   "parc": [
+    "parc"
+   ],
+   "transp": [
+    "transp"
+   ],
+   "servcat": [
+    "servcat"
+   ]
+  },
+  "plano": {
+   "cat": [
+    "cat",
+    "plano"
+   ],
+   "plano": [
+    "plano",
+    "cat"
+   ]
+  },
+  "rh": {
+   "func": [
+    "func"
+   ],
+   "ferias": [
+    "ferias"
+   ],
+   "moapr": [
+    "moapr"
+   ],
+   "bhimp": [
+    "bhimp"
+   ],
+   "bhlanc": [
+    "bhlanc",
+    "bhimp"
+   ],
+   "quadro": [
+    "quadro",
+    "rsreq"
+   ],
+   "rsreq": [
+    "rsreq"
+   ],
+   "adm": [
+    "adm"
+   ],
+   "desl": [
+    "desl"
+   ],
+   "dpmov": [
+    "dpmov"
+   ],
+   "afast": [
+    "afast"
+   ],
+   "dpsol": [
+    "dpsol"
+   ],
+   "rhdoc": [
+    "rhdoc",
+    "func"
+   ],
+   "jornada": [
+    "jornada"
+   ],
+   "feriado": [
+    "feriado"
+   ],
+   "fapac": [
+    "fapac"
+   ],
+   "emprest": [
+    "emprest"
+   ],
+   "chora": [
+    "chora"
+   ],
+   "vaga": [
+    "vaga"
+   ],
+   "cand": [
+    "cand"
+   ],
+   "aptid": [
+    "aptid"
+   ],
+   "tercsit": [
+    "tercsit"
+   ]
+  },
+  "frota": {
+   "veic": [
+    "veic"
+   ],
+   "vsai": [
+    "vsai",
+    "func",
+    "veic"
+   ],
+   "vrota": [
+    "vrota"
+   ],
+   "vabas": [
+    "vabas",
+    "veic"
+   ],
+   "vman": [
+    "vman",
+    "veic"
+   ],
+   "vfrete": [
+    "vfrete"
+   ],
+   "func": [
+    "func"
+   ],
+   "multa": [
+    "multa",
+    "veic",
+    "func"
+   ]
+  },
+  "ponto": {
+   "pmimp": [
+    "pmimp"
+   ],
+   "pmmes": [
+    "pmmes",
+    "pmimp",
+    "func",
+    "jornada",
+    "feriado"
+   ],
+   "func": [
+    "func",
+    "jornada",
+    "feriado"
+   ],
+   "feriado": [
+    "feriado",
+    "func",
+    "jornada"
+   ],
+   "ferias": [
+    "ferias",
+    "func",
+    "jornada",
+    "feriado"
+   ],
+   "jornada": [
+    "jornada",
+    "func",
+    "feriado"
+   ],
+   "ponto": [
+    "ponto",
+    "func",
+    "jornada",
+    "feriado"
+   ],
+   "afast": [
+    "afast",
+    "func",
+    "jornada",
+    "feriado"
+   ],
+   "heaut": [
+    "heaut",
+    "func",
+    "proj"
+   ],
+   "pfarq": [
+    "pfarq"
+   ],
+   "pajuste": [
+    "pajuste"
+   ]
+  },
+  "sst": {
+   "tterc": [
+    "tterc"
+   ],
+   "sstv": [
+    "sstv"
+   ],
+   "cipa": [
+    "cipa"
+   ],
+   "acid": [
+    "acid"
+   ],
+   "epi": [
+    "epi",
+    "func",
+    "prod"
+   ],
+   "ppp": [
+    "ppp"
+   ],
+   "pgrdoc": [
+    "pgrdoc",
+    "pgr"
+   ],
+   "pgr": [
+    "pgr"
+   ],
+   "isochk": [
+    "isochk"
+   ],
+   "ambdoc": [
+    "ambdoc"
+   ],
+   "ambind": [
+    "ambind"
+   ],
+   "ambres": [
+    "ambres"
+   ],
+   "ambforn": [
+    "ambforn"
+   ],
+   "psicamp": [
+    "psicamp"
+   ],
+   "pte": [
+    "pte"
+   ],
+   "sstdoc": [
+    "sstdoc"
+   ],
+   "integ": [
+    "integ"
+   ],
+   "aptlib": [
+    "aptlib"
+   ],
+   "treinc": [
+    "treinc",
+    "trein",
+    "func"
+   ],
+   "trein": [
+    "trein",
+    "treinc",
+    "func"
+   ],
+   "rda": [
+    "rda"
+   ],
+   "rel": [
+    "rel"
+   ],
+   "hht": [
+    "hht"
+   ],
+   "insp": [
+    "insp",
+    "pa"
+   ],
+   "pa": [
+    "pa"
+   ],
+   "cipam": [
+    "cipam"
+   ],
+   "cipar": [
+    "cipar"
+   ],
+   "cipaa": [
+    "cipaa"
+   ],
+   "aptid": [
+    "aptid"
+   ],
+   "rhdoc": [
+    "rhdoc",
+    "func"
+   ],
+   "tercsit": [
+    "tercsit"
+   ]
+  },
+  "ferr": {
+   "ferr": [
+    "ferr"
+   ],
+   "fmov": [
+    "fmov",
+    "ferr",
+    "proj"
+   ],
+   "fman": [
+    "fman",
+    "ferr"
+   ],
+   "obrextr": [
+    "obrextr"
+   ]
+  },
+  "jur": {
+   "proc": [
+    "proc"
+   ],
+   "procp": [
+    "procp"
+   ],
+   "riscoia": [
+    "riscoia"
+   ]
+  },
+  "lgpd": {
+   "lgpddesc": [
+    "lgpddesc"
+   ],
+   "lgpdreq": [
+    "lgpdreq"
+   ],
+   "lgpdinc": [
+    "lgpdinc"
+   ]
+  },
+  "agenda": {
+   "reun": [
+    "reun"
+   ]
+  },
+  "ctr": {
+   "opp": [
+    "opp"
+   ],
+   "hab": [
+    "hab"
+   ],
+   "ctr": [
+    "ctr"
+   ],
+   "med": [
+    "med",
+    "ctr",
+    "proj",
+    "parc",
+    "nfse"
+   ],
+   "eap": [
+    "eap"
+   ],
+   "acervo": [
+    "acervo"
+   ],
+   "acvc": [
+    "acvc"
+   ],
+   "reeq": [
+    "reeq"
+   ]
+  },
+  "serv": {
+   "os": [
+    "os",
+    "eqc",
+    "pmoc",
+    "parc"
+   ],
+   "pmoc": [
+    "pmoc",
+    "eqc",
+    "parc"
+   ],
+   "eqc": [
+    "eqc"
+   ]
+  },
+  "qual": {
+   "fvs": [
+    "fvs"
+   ],
+   "nc": [
+    "nc",
+    "gar",
+    "lanc"
+   ],
+   "trec": [
+    "trec"
+   ],
+   "gar": [
+    "gar"
+   ],
+   "os": [
+    "os",
+    "eqc",
+    "pmoc",
+    "parc"
+   ],
+   "pesq": [
+    "pesq"
+   ],
+   "pa": [
+    "pa"
+   ],
+   "procl": [
+    "procl"
+   ],
+   "procd": [
+    "procd",
+    "procl"
+   ]
+  },
+  "cfg": {
+   "arq": [
+    "arq"
+   ]
+  },
+  "meu": {
+   "intra": [
+    "intra"
+   ]
+  },
+  "fluxo": {
+   "idxbal": [
+    "idxbal"
+   ]
+  },
+  "folha": {
+   "fofi": [
+    "fofi",
+    "foimp",
+    "lanc"
+   ],
+   "foimp": [
+    "foimp"
+   ]
+  },
+  "empdoc": {
+   "tdoc": [
+    "tdoc"
+   ]
+  },
+  "fab": {
+   "osf": [
+    "osf",
+    "proj",
+    "sc",
+    "prod"
+   ]
+  }
+ }
 }

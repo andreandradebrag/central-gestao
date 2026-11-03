@@ -319,6 +319,30 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 **Avisos.** No chat: solicitação aguardando aprovação (aprovador), pedido aprovado (comprador), material chegou (quem pediu), nota parada ou com divergência (quem age). Por **e-mail**, quando o SMTP está configurado (seção 7.3): os mesmos eventos, enviados pelo servidor uma vez por evento (`P2P_AVISO_INTERVALO_S`, padrão 120 s; `P2P_AVISOS=0` desliga); o e-mail diário das aprovações passou a incluir as solicitações de compra e as compras pequenas. O **e-mail do pedido ao fornecedor** sai pelo servidor com o **PDF do pedido** em anexo (`POST /api/ped/email`), para o e-mail do cadastro do fornecedor; sem SMTP, continua o e-mail pronto (abrir no seu programa de e-mail).
 
+## 6.7. Medição ao cliente aprovada pelo Comercial, CIPA em abas e Ambiental no SST (v143)
+
+**Medição ao cliente: quem faz o quê.**
+- **Obra** (Obras › Medições ao cliente): lança o boletim, confere e usa **Enviar para aprovação**. Enquanto a medição aguarda, ela não pode ser alterada nem excluída. A tela não tem mais o botão Aprovar; fica para lançar, enviar e acompanhar. Tem a coluna **Projeto** (código, ex.: P412) e o filtro por projeto.
+- **Comercial** (Comercial › **Medições para aprovar**, com contador no menu): confere o boletim e **aprova** ou **devolve com o motivo**. O motivo fica no histórico da medição e vai para quem lançou pelo chat interno. A aprovação também avisa quem lançou.
+- **Segregação:** quem lançou ou enviou a medição não a aprova nem a devolve. O dono da página pode, depois de um aviso; é a mesma exceção que o servidor já tinha.
+- **Faturamento:** não mudou. Só depois de aprovada, **Faturar** cria a NFS-e em rascunho e, se houver retenção, a conta a receber da retenção.
+  - Quem aprova e também emite notas recebe logo a oferta de faturar.
+  - Para os outros, Faturar avisa que a NFS-e é criada por quem emite notas. Faturar precisa de Contratos, Notas e, com retenção, Financeiro: hoje são o administrador e o dono.
+- **Medições antigas:** as que estão em rascunho continuam funcionando; basta enviá-las. As aprovadas e as faturadas não mudam. A situação continua "Rascunho" até a aprovação, então enviada ou devolvida não conta como medido.
+- **Servidor:** `gestao/medapr.js`, ligado em `regras.js` logo depois de `regraMedCli`. Ele aceita a aprovação só de medição enviada (o dono pode direto) e a devolução só com motivo. O boletim enviado fica travado. Os carimbos (`envPor`, `envEm`, `devPor`, `devEm`, `devMotivo`) e o histórico `fluxoHist` são gravados só pelo servidor. A Diretoria também aprova e devolve. Com a ação "Aprovar" desligada no perfil (v142), a pessoa não aprova nem devolve.
+
+**Boletim de medição.** O rodapé traz "Emitido por [quem lançou ou enviou] em [data]" e "Aprovado por [nome] em [data]". O boletim não aprovado sai com a marca d'água **RASCUNHO – não aprovado** na tela, na impressão, no HTML e no PDF.
+
+**Obras › Resultado da obra.** O quadro da esquerda ficou compacto, com o valor logo ao lado de cada linha. O cabeçalho mostra só o código (ex.: "P412 · 10017197"); a descrição completa aparece ao passar o mouse. Em tela estreita, "Caixa do projeto" desce para baixo do quadro.
+
+**SST › Gestão da CIPA.** A página ganhou as abas **Visão geral · Membros · Reuniões e atas · Plano de trabalho**. As três telas saíram do menu do SST e do "Mais". Atalhos antigos (`#cipam`, `#cipar`, `#cipaa`), favoritos, Ctrl+K e links internos abrem a Gestão da CIPA na aba certa.
+
+**Ambiental.** A tela saiu do menu Qualidade e entrou no menu SST, com as mesmas abas: Documentos e licenças, Resíduos e MTR, Transportadores e destinadores, Indicadores e Checklist ISO 14001. A permissão não mudou: a tela e as coleções `ambdoc`, `ambres`, `ambforn`, `ambind` e `isochk` já eram do módulo SST. Quem tem só Qualidade não via a tela antes e continua sem ver; quem tem SST grava.
+
+**Painel do SST.** Novos botões **Emissão de RDA** (formulário novo do RDA dos técnicos) e **Entrega de EPI** (formulário novo de entrega), ao lado de "Registrar ocorrência". Só aparecem para quem grava RDA ou EPI: o Almoxarife vê só Entrega de EPI.
+
+**Implantar.** Suba juntos `gestao/medapr.js`, `gestao/regras.js` e `gestao/public/index.html`, depois reinicie o serviço `gestao`. Não há variável nova nem tabela nova.
+
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
 - Cada fornecedor convidado recebe um link próprio, `https://seu-dominio/cotacao/<código>`, que abre **sem login**. Ele vê só os itens do pedido, o prazo e o local de entrega, nunca os preços dos outros, e informa preço, marca, frete, prazo, pagamento e validade.
@@ -442,6 +466,19 @@ Para colocar no ar: (1) baixe do bucket (ou de `/data/backups`) o banco do dia, 
 ## Permissão de gravação por módulo
 
 O servidor confere se o perfil de cada pessoa pode gravar no módulo. Começa em `PERFIL_GRAVACAO=avisar`: nada é bloqueado e **Contas de acesso › Gravação por módulo** mostra o que seria recusado. Depois de conferir, mude para `PERFIL_GRAVACAO=bloquear` e implante.
+
+## Permissão por função dentro do módulo (v142)
+
+Em **Sistema › Perfis de acesso**, cada módulo abre e mostra as **funções** dele (Compras: Solicitações, Cotações, Separação, Acordos, Ajustes de inventário…; Financeiro: Lançamentos, Recorrências, Adiantamentos, Remessa, Orçamento, Medições de empreiteiro…). Para cada função: **Sem acesso**, **Consulta**, **Cria e altera** ou **Cria, altera e exclui**. O nível do módulo é um atalho que preenche todas as funções; quando elas diferem, o módulo mostra "Personalizado".
+
+- **Função = dado que o módulo grava** (as coleções do `perfis.json › colecoes`). O mapa das funções e do que cada uma lê fica em `perfis.json › funcoes`, gerado por `gen_perm.js` (rode-o a cada versão, como sempre). Sem `funcoes` (perfis.json antigo), o servidor usa `colecoes` e aplica do mesmo jeito.
+- **O servidor aplica igual** (`gestao/permfn.js`, chamado por `perfcCompilar` e `perfaCompilar`): o que a função não grava é recusado e vai para a auditoria (`PUT_NEGADO`, `DELETE_RECUSADO`); a coleção da função sem acesso não é entregue. O que uma função precisa ler de outra (o recebimento lê o pedido, o estoque lê o produto, a solicitação mostra a separação ligada) fica liberado **só para leitura**. Uma coleção que é função em dois módulos (ex.: Produtos em Estoque e em Compras) vale pelo maior nível dos dois; a tela avisa "também em …".
+- **Nada afrouxa**: dados de RH e salários, dados bancários, financeiro da empresa (só Financeiro, Fiscal, Administrador e Diretoria), Usuários, Configurações e Lixeira continuam com as regras de antes.
+- **Ações sensíveis** (marcar por perfil, à parte do nível de gravação): **Aprovar** (SC, pedido, pagamento e divergência da nota; as alçadas de valor continuam na matriz de aprovadores, esta opção só diz se a pessoa *pode* ser aprovadora), **Lançar nota de entrada** (rota `/api/nota/lancar`), **Cancelar e estornar** (situação cancelado/cancelada e estorno da baixa de conta) e **Exportar** (botões de CSV e planilhas). Só tiram poder: o valor inicial é o que o perfil já fazia. "Exportar" é aplicado na tela (o dado que a pessoa consulta já está no navegador dela); a cópia completa do banco continua só com o dono.
+- **Perfis padrão editáveis** por função ("Editar"), guardados em `perfc/a_<perfil>`, com **Voltar ao original**. A tela mostra o detalhe por função do padrão e os limites internos dele (só o recebimento, só rascunho, só certificados de NR…), que continuam valendo. O **Administrador não se edita** (evita trancar o sistema). **Duplicar** leva o acesso por função e os limites internos.
+- **Ver como**: mostra o menu e as telas como o perfil enxerga, só no seu navegador (a sessão não muda e nada é gravado nem enviado ao servidor). Uma faixa no topo avisa e tem o botão **Sair da simulação**.
+- **Compatibilidade**: perfil sem configuração por função funciona exatamente como antes ("Grava" antigo = cria, altera e exclui). Editar perfil continua pedindo a senha de novo e indo para a auditoria (`PERFIL_ACESSO_ALTERADO`, `PERFIL_PADRAO_AJUSTADO`, agora com o `fn` e as `acoes`).
+- Implantação: o arquivo novo `gestao/permfn.js` já está no `Dockerfile` (COPY). Suba a versão com o `perfis.json` novo (gerado por `gen_perm.js`).
 
 ## Verificação em duas etapas e sessões
 

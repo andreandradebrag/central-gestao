@@ -598,7 +598,7 @@ const MENU=[
  ['sis','Sistema',[['usr','Usuários'],['almox','Almoxarifados'],['cfg','Configurações'],['lgpd','Privacidade (LGPD)'],['lgpdtit','Direitos do titular'],['lgpdreq','Pedidos de titulares'],['lgpdinc','Incidentes'],['lixo','Lixeira'],['arq','Arquivo de meses antigos'],['imp','Importar cadastros']]]
 ];
 ui.mod='';
-const menuItems=m=>m[2].filter(i=>mayR(GROUP_OF_TAB[i[0]]));
+const menuItems=m=>m[2].filter(i=>mayR(GROUP_OF_TAB[i[0]])&&(typeof pfnTabOk!=='function'||pfnTabOk(i[0])));
 function modOf(tab){if(typeof RS_TABS!=='undefined'&&RS_TABS.includes(tab))tab='rs';
   const cur=MENU.find(m=>m[0]===ui.mod);
   if(cur&&menuItems(cur).some(i=>i[0]===tab))return cur;
@@ -636,7 +636,7 @@ function render(){
   const ss=aid?ae.selectionStart:null,se=aid?ae.selectionEnd:null;
   const c=cfg();
   me.perfil=resolvePerfil();
-  const nav=NAV.filter(n=>mayR(GROUP_OF_TAB[n[0]]));
+  const nav=NAV.filter(n=>mayR(GROUP_OF_TAB[n[0]])&&(typeof pfnTabOk!=='function'||pfnTabOk(n[0])));
   if(nav.length&&!nav.some(n=>n[0]===ui.tab))ui.tab=nav[0][0];
   $('#brandName').textContent=c.fantasia||'Central de Gestão';
   setMark(c);
@@ -6623,7 +6623,7 @@ V.fc90=()=>{
 /* ===== alçadas de aprovação ===== */
 GROUP_OF_TAB.aprov='fin';
 const alc=()=>{const c=cfg(),pd=p2nAlcPadrao(c);return {ped:pd.ped,pag:pd.pag,aprov:Array.isArray(c.aprovadores)?c.aprovadores:[],padrao:pd};};
-const podeAprovar=()=>store.mode!=='db'||me.owner||alc().aprov.includes(actorId())||p2nAprovFallback();
+const podeAprovar=()=>store.mode!=='db'||me.owner||((typeof pfnAcaoOk!=='function'||pfnAcaoOk('aprovar'))&&(alc().aprov.includes(actorId())||p2nAprovFallback()));
 function precisaAprov(col,r){const a=alc();if(col==='ped')return a.ped>0&&pedTotal(r)>a.ped&&r.status!=='cancelado';if(col==='lanc')return a.pag>0&&r.tipo==='pagar'&&(+r.valor||0)>a.pag&&r.status!=='cancelado';return false;}
 const aprovOk=(col,r)=>!precisaAprov(col,r)||(r.aprov&&r.aprov.ok);
 {const pe=A.pedEnviado;A.pedEnviado=d=>{const p=get('ped',d.id);if(p&&!aprovOk('ped',p)){toast('Pedido acima de '+money(alc().ped)+': precisa de aprovação antes de enviar (Financeiro › Aprovações).','neg');return;}return pe(d);};}
@@ -9867,7 +9867,7 @@ const GS_EXTRA=[
 GS_EXTRA.forEach(x=>{if(!GS_SRC.some(y=>y[0]===x[0]))GS_SRC.push(x);});
 function gsTelas(q){const t=gsNorm(q).split(/\s+/).filter(Boolean);if(!t.length)return [];
   const modOf=tab=>(MENU.find(m=>(m[2]||[]).some(x=>(Array.isArray(x)?x[0]:x)===tab))||[0,''])[1];
-  return NAV.filter(n=>mayR(GROUP_OF_TAB[n[0]])).map(n=>({tab:n[0],nome:n[1],mod:modOf(n[0])||n[2]||'',h:gsNorm([n[1],n[2],modOf(n[0]),GS_SIN[n[0]]||''].join(' '))})).filter(x=>t.every(w=>x.h.includes(w))).map(x=>Object.assign(x,{sc:t.reduce((a,w)=>a+(new RegExp('(^|\\s)'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).test(x.h)?2:0)+(gsNorm(x.nome).includes(w)?1:0),0)})).sort((a,b)=>b.sc-a.sc).slice(0,8);}
+  return NAV.filter(n=>mayR(GROUP_OF_TAB[n[0]])&&(typeof pfnTabOk!=='function'||pfnTabOk(n[0]))).map(n=>({tab:n[0],nome:n[1],mod:modOf(n[0])||n[2]||'',h:gsNorm([n[1],n[2],modOf(n[0]),GS_SIN[n[0]]||''].join(' '))})).filter(x=>t.every(w=>x.h.includes(w))).map(x=>Object.assign(x,{sc:t.reduce((a,w)=>a+(new RegExp('(^|\\s)'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).test(x.h)?2:0)+(gsNorm(x.nome).includes(w)?1:0),0)})).sort((a,b)=>b.sc-a.sc).slice(0,8);}
 {const g0=gsRender;gsRender=function(){g0();const b=$('#gsRes'),q=($('#gsQ')||{}).value||'';if(!b||!q.trim())return;const ts=gsTelas(q);if(!ts.length)return;
   const h='<div class="sect" style="margin-top:0">Telas</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">'+ts.map(x=>'<button class="btn sm" data-act="gsTela" data-tab="'+esc(x.tab)+'">'+esc((x.mod?x.mod+' › ':'')+x.nome)+'</button>').join('')+'</div>';
   if(/Nada encontrado/.test(b.innerHTML))b.innerHTML=h;else b.innerHTML=h+'<div class="sect">Registros</div>'+b.innerHTML;};}
@@ -12120,7 +12120,7 @@ function rdoMatSync(r){if(!r)return;const it=(r.matsol||[]).filter(x=>x.desc&&+x
   put('sc',base);
   if(novo){const ms=base.aprovUid?[base.aprovUid]:matCfg().aprov;ms.forEach(u=>avisoChat(u,'Solicitação de material nº '+base.numero+' da obra '+projNome(base.projId)+' ('+it.length+' item(ns), precisa até '+fmtDate(base.necessidade)+') aguarda a sua aprovação em Financeiro › Aprovações.'));toast('Pedido de material nº '+base.numero+' enviado para aprovação.','pos');}}
 {const s0=A.rdoSalvar;A.rdoSalvar=()=>{rdoLer();if(rdoCur){rdoCur.matsol=(rdoCur.matsol||[]).filter(x=>x.desc&&+x.qtd>0);if(rdoCur.matsol.length&&!rdoCur.scId)rdoCur.scId=uid();}const id=rdoCur&&rdoCur.id;const res=s0();if(res===false)return false;try{rdoMatSync(get('rdo',id));}catch(e){}return res;};}
-const podeAprovarMat=sc=>{if(store.mode!=='db'||me.owner)return true;const u=actorId(),m=matCfg();if(sc&&sc.solUid===u)return false;return (sc&&sc.aprovUid===u)||m.aprov.includes(u)||(typeof podeAprovar==='function'&&podeAprovar());};
+const podeAprovarMat=sc=>{if(store.mode!=='db'||me.owner)return true;if(typeof pfnAcaoOk==='function'&&!pfnAcaoOk('aprovar'))return false;const u=actorId(),m=matCfg();if(sc&&sc.solUid===u)return false;return (sc&&sc.aprovUid===u)||m.aprov.includes(u)||(typeof podeAprovar==='function'&&podeAprovar());};
 const matPend=()=>S.sc.filter(s=>s.status==='aprovacao').sort((a,b)=>String(a.necessidade).localeCompare(String(b.necessidade)));
 A.matAprovar=d=>{const sc=get('sc',d.id);if(!sc||sc.status!=='aprovacao')return;if(!podeAprovarMat(sc)){toast(sc.solUid===actorId()?'Quem pediu não aprova o próprio pedido.':'Você não está entre os aprovadores de material.','neg');return;}
   const nao=d.dec==='nao',al=scAloca(sc);
@@ -25168,7 +25168,7 @@ function mnGravar(v){if(!MN_OPS.some(o=>o[0]===v))v='atual';mnLS('cg.menuAp.'+mn
   try{if(typeof chStSave==='function'&&typeof CH!=='undefined'&&CH.st&&CH.st.desde&&CH.st.menuAp!==v)chStSave({menuAp:v});}catch(e){}return v;}
 const mnRecolhido=()=>mnLS('cg.menuRecolhe.'+mnUid())==='1';
 /* ---- módulos e telas que o perfil vê (mesmo filtro do menu atual, inclusive leSoTabs do perfil Fábrica) ---- */
-const mnTelaOk=tab=>{try{const p=PERFIS[me.perfil]||{};if(me.owner||!p.leSoTabs||typeof osfMenuOk!=='function')return true;return osfMenuOk(tab);}catch(e){return true;}};
+const mnTelaOk=tab=>{if(typeof pfnTabOk==='function'&&!pfnTabOk(tab))return false;try{const p=PERFIS[me.perfil]||{};if(me.owner||!p.leSoTabs||typeof osfMenuOk!=='function')return true;return osfMenuOk(tab);}catch(e){return true;}};
 const mnItens=m=>m?mItens(m).filter(i=>mnTelaOk(i[0])):[];
 function mnMods(){return MENU.filter(m=>areaVisivel(m)).map(m=>({m,its:mnItens(m)})).filter(x=>x.its.length);}
 function mnMod(id){const m=MENU.find(x=>x[0]===id);if(!m)return null;const its=mnItens(m);return its.length?{m,its}:null;}
@@ -27587,9 +27587,506 @@ RH_PRE.push(()=>{try{if(typeof TUT==='undefined'||TUT.some(t=>t.id==='p2p2'))ret
   'NFS-e de serviço de fornecedor ou empreiteiro: "Receber NFS-e de serviço" (XML ou PDF). Ela é ligada à medição do empreiteiro e as retenções são conferidas; se não houver medição, vira nota de entrada pelo pedido ou como compra sem pedido.',
   'Devolução ao fornecedor: na nota lançada, "Registrar devolução" (itens, motivo e nº da NF de devolução). O estoque sai, a conta em aberto é abatida e, se já foi paga, fica um crédito a receber.']});}catch(e){}});
 
+/* ===== v142: permissão por função dentro de cada módulo (Sistema › Perfis de acesso) =====
+   Pedido do dono: configurar quem acessa e/ou grava as FUNÇÕES de cada módulo, não só o módulo inteiro.
+   - Função = dado que o módulo grava (coleção do mapa módulo → coleções, o mesmo do perfis.json). Nome pela tela do menu
+     ou pelo nome da coleção (PFN_NOME, COL_NOME). Níveis: Sem acesso, Consulta, Cria e altera, Cria, altera e exclui.
+   - O perfil guarda só o que difere do nível do módulo: fn {grupo: {coleção: 'n'|'r'|'a'|'w'}} (personalizado c_… e
+     ajuste do padrão a_…). Perfil sem fn funciona exatamente como antes (o nível antigo "Grava" = cria, altera e exclui,
+     menos os limites internos do perfil padrão: so, naoExclui...).
+   - pfnAplicar (igual a deploy/gestao/permfn.js › aplicar) desce o fn para as regras que já existem: "so" (o que grava
+     dentro do módulo), "naoExclui" (não exclui) e a saída do módulo quando nenhuma função dele grava ou é lida.
+     O servidor ainda monta o "leSo" (o que lê): a função sem acesso não é entregue, menos o que outra função do perfil
+     precisa ler (dependência, só leitura).
+   - Ações sensíveis (acoes {aprovar, lancarNota, cancelar, exportar} = false): só retiram poder. Valor inicial = o que o
+     perfil já faz. As alçadas de valor continuam na matriz de aprovadores.
+   - Menu e telas: tela cuja função está sem acesso some; em Consulta somem os botões de criar e salvar; sem "exclui",
+     somem os de excluir (só nos perfis com acesso por função; os outros seguem como antes).
+   - Perfis padrão editáveis por função (a_<perfil>), com "Voltar ao original"; o Administrador não se edita.
+   - "Ver como": mostra o menu e as telas como o perfil enxerga, só neste navegador (a sessão não muda e nada é gravado). */
+const PFN_NIVS=['n','r','a','w'],PFN_NN={n:'Sem acesso',r:'Consulta',a:'Cria e altera',w:'Cria, altera e exclui'};
+const pfnI=v=>Math.max(0,PFN_NIVS.indexOf(v)),pfnMax=(a,b)=>pfnI(a)>=pfnI(b)?a:b,pfnMin=(a,b)=>pfnI(a)<=pfnI(b)?a:b;
+const PFN_FORA=new Set(['cfg','usr','lixo','lgpdc','implog','cm','pt','usrreq','perfc']);
+const PFN_ACOES=[['aprovar','Aprovar','Pode ser aprovador de solicitação de compra, pedido de compra, pagamento e divergência da nota. Quem aprova cada valor continua na matriz de aprovadores (alçadas).'],
+  ['lancarNota','Lançar nota de entrada','Valida e lança a nota (estoque e contas a pagar). Só vale para quem grava Notas fiscais sem a regra de "só rascunho".'],
+  ['cancelar','Cancelar e estornar','Cancela notas, pedidos, solicitações, contas e ordens, e estorna baixas de contas.'],
+  ['exportar','Exportar planilhas e relatórios','Botões de exportar (CSV e planilhas) das telas que o perfil consulta.']];
+const PFN_ACOES_K=PFN_ACOES.map(a=>a[0]);
+const PFN_ACT={aprovar:['aprovar','matAprovar','supConfAprovar','p2qPeqAprovar'],
+  cancelar:['estornar','lancCancelar','cancelarNota','pedCancel','scCancel','sepCancel','romCancel','psvCancel','nfseCancel','osCancelar','osfCancelar','remCancelar','adtoCancelar','devCancelar','foCancelar']};
+const PFN_EXPORTA=/(Csv|CsvArq)$|^export[A-Z]|Export$|Exportar$/;
+const PFN_DEL=/(^del[A-Z]|Del$|Del[A-Z]|Excluir$|^excluir|Remover$)/;
+const PFN_MSG={aprovar:'Seu perfil não aprova (ação "Aprovar" desligada em Sistema › Perfis de acesso).',lancarNota:'Seu perfil não lança nota de entrada (ação desligada em Sistema › Perfis de acesso).',
+  cancelar:'Seu perfil não cancela nem estorna (ação desligada em Sistema › Perfis de acesso).',exportar:'Seu perfil não exporta planilhas nem relatórios (ação desligada em Sistema › Perfis de acesso).'};
+const PFN_NOME={lanc:'Lançamentos (contas a pagar e a receber)',parc:'Cadastro de clientes e fornecedores',notas:'Notas fiscais',ped:'Pedidos de compra',prod:'Produtos',mov:'Movimentos de estoque',
+  almox:'Almoxarifados',func:'Colaboradores',ponto:'Marcações de ponto',med:'Medições ao cliente',medemp:'Medições de empreiteiro',ctremp:'Contratos de empreiteiro',invaj:'Ajustes de inventário',
+  sc:'Solicitações de compra',cot:'Cotações',acordo:'Acordos de preço',sep:'Separação de itens',adto:'Adiantamentos e caixinhas',adtoit:'Prestação de contas (comprovantes)',recor:'Recorrências',
+  remessa:'Remessa de pagamentos',orcfin:'Orçamento anual',aprovsol:'Pedidos de aprovação',ctbfech:'Fechamento contábil',nfse:'NFS-e (serviços)',heaut:'Autorizações de hora extra',rhdoc:'Documentos e ASO',
+  epi:'Controle de EPI',acid:'Acidentes',proj:'Obras (cadastro e rateio)',osf:'Ordens de fabricação',reun:'Reuniões (agenda)',veic:'Veículos',ferr:'Ferramentas e equipamentos',os:'Ordens de serviço',
+  fzportal:'Relatório do portal da NFS-e',fzpedfech:'Pedidos de fechamento do mês',idxbal:'Dados do balanço',extrato:'Extratos e conciliação',conta:'Contas bancárias',plano:'Plano de contas',cat:'Categorias'};
+/* o que uma função lê de outra (dependência, só leitura): as coleções da tela em que ela é o dado principal, os cadastros
+   de apoio das telas dela e os fluxos abaixo. Tela que junta muitas coleções (controles, conferências) não vale como
+   tela principal (o recebimento lê o pedido, o pedido lê a solicitação e a cotação...) */
+const PFN_APOIO=new Set(['parc','prod','proj','almox','cat','plano','conta','func','veic','ferr','transp','etapa','jornada','feriado','servcat']);
+const PFN_DEP={notas:['ped','sc','prod','parc','almox','mov'],ped:['sc','cot','acordo','notas','prod','parc'],sep:['sc','prod','almox'],cot:['sc','prod','parc','acordo'],sc:['prod','proj','sep','cot','ped'],
+  mov:['prod','almox','notas','ped','proj'],invaj:['prod','almox','mov'],devobra:['prod','almox','mov','proj'],lanc:['parc','cat','plano','conta','proj','notas','ped','medemp','ctremp','adto','recor','nfse'],
+  recor:['lanc','parc','cat'],remessa:['lanc','parc','conta'],aprovsol:['lanc','ped','notas'],adto:['adtoit','func','proj'],adtoit:['adto','func'],medemp:['ctremp','parc','proj','lanc'],ctremp:['medemp','parc','proj'],
+  med:['ctr','proj','parc','nfse'],nfse:['med','ctr','parc'],psv:['parc','prod','notas'],extrato:['lanc','conta'],rdo:['proj','etapa','func'],osf:['proj','sc','prod'],os:['eqc','pmoc','parc'],pmoc:['eqc','parc'],
+  vsai:['veic','func'],vabas:['veic'],vman:['veic'],multa:['veic','func'],fmov:['ferr','proj'],fman:['ferr'],epi:['func','prod'],trein:['func'],treinc:['trein','func'],rhdoc:['func'],heaut:['func','proj']};
+const PFN={sim:null,form:null,css:false,aviso:0};
+const pfnTem=(l,g)=>l==='*'||(Array.isArray(l)&&l.includes(g));
+const pfnHas=(o,k)=>!!o&&Object.prototype.hasOwnProperty.call(o,k);
+const pfnAvisa=m=>{const t=Date.now();if(t-PFN.aviso>1500){PFN.aviso=t;toast(m,'neg');}};
+function pfnEstilo(){if(PFN.css||typeof document==='undefined'||!document.createElement||!document.head)return;PFN.css=true;try{const st=document.createElement('style');st.textContent=
+  '.pfn-mod{border-bottom:1px solid var(--line)}.pfn-mh{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:6px 4px}'+
+  '.pfn-tg{background:none;border:0;padding:4px 0;font:inherit;color:inherit;text-align:left;cursor:pointer;flex:1;min-width:0;display:flex;gap:6px;align-items:flex-start}.pfn-tg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}'+
+  '.pfn-seta{display:inline-block;width:12px;flex:none;transition:transform .15s}.pfn-tg[aria-expanded="true"] .pfn-seta{transform:rotate(90deg)}'+
+  '.pfn-mh select{width:210px;flex:none;max-width:52%}.pfn-fs{padding:0 4px 8px 22px}table.pfn-ft{min-width:0!important;width:100%;border-collapse:collapse}'+
+  '.pfn-ft td{padding:5px 6px;border-bottom:1px dashed var(--line);vertical-align:top}.pfn-ft tr:last-child td{border-bottom:0}.pfn-ft td.pfn-sel{width:210px}.pfn-ft select{width:100%}'+
+  '.pfn-dif{font-size:11px;font-weight:600;color:var(--warn,#b54708)}.pfn-lim{margin:6px 0 0;padding-left:18px}.pfn-lim li{margin:2px 0}.pfn-acs label.f{align-items:flex-start}'+
+  '.pfn-foco{outline:2px solid var(--warn,#b54708);outline-offset:-2px;background:color-mix(in srgb,var(--warn,#b54708) 10%,transparent)}'+
+  '.pfn-sim{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin:0 0 12px;padding:10px 14px;border-radius:10px;border:2px solid var(--warn,#b54708);background:color-mix(in srgb,var(--warn,#b54708) 14%,var(--surface,#fff));color:var(--ink,inherit)}'+
+  '.pfn-sim b{font-size:15px}.pfn-sim .sub{color:inherit;opacity:.85}'+
+  '@media (max-width:640px){.pfn-mh{flex-wrap:wrap}.pfn-mh select{width:100%;max-width:none}.pfn-fs{padding-left:4px}.pfn-ft td.pfn-sel{width:46%}}';
+  document.head.appendChild(st);}catch(e){}}
+
+/* ---------- funções de cada módulo ---------- */
+let PFN_FUN_=null;
+const pfnOrd=(o,k)=>o[k]==null?1e5:o[k];
+const pfnTabColsAll=t=>{const M2=typeof MODS2!=='undefined'?MODS2:{};return [...new Set((TAB_COLS[t]||[]).concat(M2[t]&&M2[t].col?[M2[t].col]:[]))].filter(c=>!PFN_FORA.has(c));};
+/* {grupo: {coleção: {n: nome, telas: [abas], telasN: [nomes], le: [coleções que as telas dela leem]}}} */
+function pfnFuncoes(){if(PFN_FUN_)return PFN_FUN_;
+  const cm=p2ColMods(),lab={},ord={};let n=0;
+  MENU.forEach(m=>(m[2]||[]).forEach(i=>{if(lab[i[0]]==null){lab[i[0]]=i[1];ord[i[0]]=n++;}}));NAV.forEach(x=>{if(lab[x[0]]==null){lab[x[0]]=x[1];ord[x[0]]=n++;}});
+  const F={};Object.keys(cm).forEach(c=>{if(PFN_FORA.has(c))return;(cm[c]||[]).forEach(g=>{(F[g]=F[g]||{})[c]={n:'',telas:[],le:[c],o:1e6};});});
+  const M2=typeof MODS2!=='undefined'?MODS2:{},addLe=(f,x)=>{if(!PFN_FORA.has(x)&&!f.le.includes(x))f.le.push(x);};
+  Object.keys(GROUP_OF_TAB).sort((a,b)=>pfnOrd(ord,a)-pfnOrd(ord,b)).forEach(t=>{const g=GROUP_OF_TAB[t],m=F[g];if(!m)return;const cols=pfnTabColsAll(t),own=cols.filter(c=>m[c]);if(!own.length)return;
+    const prim=M2[t]&&M2[t].col&&m[M2[t].col]?M2[t].col:own.length<=2?own[0]:''; /* tela de controle/relatório (muitas coleções) não cria dependência */
+    own.forEach(c=>{const f=m[c];if(!f.telas.includes(t))f.telas.push(t);cols.forEach(x=>{if(c===prim||PFN_APOIO.has(x))addLe(f,x);});f.o=Math.min(f.o,pfnOrd(ord,t));});});
+  Object.keys(F).forEach(g=>Object.keys(F[g]).forEach(c=>(PFN_DEP[c]||[]).forEach(x=>addLe(F[g][c],x))));
+  const out={};Object.keys(F).forEach(g=>{const m=F[g];
+    Object.keys(m).forEach(c=>{const f=m[c],so=f.telas.length===1&&pfnTabColsAll(f.telas[0]).filter(x=>m[x]).length===1;
+      f.n=PFN_NOME[c]||(so&&lab[f.telas[0]])||COL_NOME[c]||(f.telas[0]&&lab[f.telas[0]])||c;f.telasN=f.telas.map(t=>lab[t]).filter(Boolean);});
+    out[g]={};Object.keys(m).sort((a,b)=>m[a].o-m[b].o||String(m[a].n).localeCompare(String(m[b].n))).forEach(c=>{out[g][c]=m[c];});});
+  if(store.ready)PFN_FUN_=out;return out;}
+/* para o gen_perm.js (perfis.json › funcoes): {grupo: {coleção: [o que lê]}} */
+function pfnFunDump(){const F=pfnFuncoes(),o={};Object.keys(F).forEach(g=>{o[g]={};Object.keys(F[g]).forEach(c=>{o[g][c]=F[g][c].le.slice();});});return o;}
+const pfnNomeCol=c=>{const F=pfnFuncoes();for(const g of Object.keys(F))if(F[g][c])return F[g][c].n;return PFN_NOME[c]||COL_NOME[c]||c;};
+
+/* ---------- cálculo (igual a permfn.js do servidor) ---------- */
+function pfnImplicito(p,g,c){if(pfnTem(p.w,g)){if(p.so&&Array.isArray(p.so[g])&&!p.so[g].includes(c))return 'r';if(Array.isArray(p.naoExclui)&&p.naoExclui.includes(c))return 'a';return 'w';}return pfnTem(p.r,g)?'r':'n';}
+function pfnSanFn(fn){const F=pfnFuncoes(),out={};if(!fn||typeof fn!=='object'||Array.isArray(fn))return out;
+  Object.keys(fn).forEach(g=>{const m=fn[g];if(!F[g]||!m||typeof m!=='object')return;Object.keys(m).forEach(c=>{if(pfnHas(F[g],c)&&PFN_NIVS.includes(m[c]))(out[g]=out[g]||{})[c]=m[c];});});return out;}
+function pfnSanAcoes(a){const o={};if(!a||typeof a!=='object')return o;PFN_ACOES_K.forEach(k=>{if(a[k]===false)o[k]=false;});return o;}
+const PFN_LIM_K=['campos','camposSt','rascunho','cfgNao','aptLibDia','rhdocNr'];
+function pfnSanLim(l){const out={};if(!l||typeof l!=='object'||Array.isArray(l))return out;const ok=x=>typeof x==='string'&&/^[a-z][a-zA-Z0-9]{0,30}$/.test(x);
+  const lista=v=>Array.isArray(v)?[...new Set(v.filter(ok))].slice(0,60):null;
+  ['campos','camposSt'].forEach(k=>{const o=l[k];if(!o||typeof o!=='object'||Array.isArray(o))return;const m={};Object.keys(o).forEach(c=>{if(!ok(c))return;const x=lista(o[c]);if(x&&x.length)m[c]=x;});if(Object.keys(m).length)out[k]=m;});
+  ['rascunho','cfgNao'].forEach(k=>{const x=lista(l[k]);if(x&&x.length)out[k]=x;});if(l.aptLibDia===true)out.aptLibDia=true;if(l.rhdocNr===true)out.rhdocNr=true;return out;}
+/* aplica fn e acoes ao perfil compilado p. o: {soLeitura, todos} */
+function pfnAplicar(p,fn,acoes,o){o=o||{};const an=Object.keys(pfnSanAcoes(acoes));if(an.length&&p.w!=='*')p.acoesNao=an;else delete p.acoesNao;
+  const F=pfnFuncoes(),f=pfnSanFn(fn);if(!Object.keys(f).length||p.w==='*')return p;
+  const fnNiv={},colNiv={};
+  Object.keys(F).forEach(g=>{if(!pfnTem(p.w,g)&&!pfnTem(p.r,g))return;const teto=pfnTem(p.w,g)&&!o.soLeitura?'w':'r';fnNiv[g]={};
+    Object.keys(F[g]).forEach(c=>{let v=pfnImplicito(p,g,c);const e=f[g]&&f[g][c];if(e)v=pfnMin(e,teto);fnNiv[g][c]=v;colNiv[c]=colNiv[c]?pfnMax(colNiv[c],v):v;});});
+  const todos=o.todos||[];let w=p.w==='*'?todos.slice():[...(p.w||[])],r=p.r==='*'?null:[...(p.r||[])];
+  const so={};Object.keys(p.so||{}).forEach(g=>{so[g]=(p.so[g]||[]).slice();});
+  const tira=g=>{if(r===null)r=todos.slice();r=r.filter(x=>x!==g);};let temN=false;
+  Object.keys(fnNiv).forEach(g=>{const m=fnNiv[g],cs=Object.keys(m);if(!cs.length)return;const mx=cs.map(c=>m[c]).reduce(pfnMax,'n');if(cs.some(c=>m[c]==='n'))temN=true;
+    if(w.includes(g)){if(pfnI(mx)<2){w=w.filter(x=>x!==g);delete so[g];if(mx==='r'&&r!==null&&!r.includes(g))r.push(g);}
+      else{const gr=cs.filter(c=>pfnI(m[c])>=2),extra=Array.isArray(so[g])?so[g].filter(c=>!pfnHas(m,c)):[];if(gr.length<cs.length||Array.isArray(so[g]))so[g]=[...new Set(gr.concat(extra))];}}
+    if(mx==='n'){w=w.filter(x=>x!==g);tira(g);}});
+  p.w=w;if(r!==null)p.r=r;else if(temN||p.leSo)p.r=todos.slice(); /* o servidor monta o leSo: com "*" ele seria ignorado */
+  if(Object.keys(so).length)p.so=so;else delete p.so;
+  const nx=[...new Set((p.naoExclui||[]).filter(c=>colNiv[c]===undefined||colNiv[c]!=='w').concat(Object.keys(colNiv).filter(c=>colNiv[c]==='a')))];
+  if(nx.length)p.naoExclui=nx;else delete p.naoExclui;
+  p.pf=true;p.fnNiv=fnNiv;p.colNiv=colNiv;return p;}
+/* nível de cada função de um perfil compilado (com ou sem acesso por função) */
+function pfnNiveis(p){const F=pfnFuncoes(),o={};Object.keys(F).forEach(g=>{o[g]={};Object.keys(F[g]).forEach(c=>{o[g][c]=p&&p.fnNiv&&p.fnNiv[g]&&p.fnNiv[g][c]?p.fnNiv[g][c]:p?pfnImplicito(p,g,c):'n';});});return o;}
+
+/* ---------- os perfis compilados passam a levar o acesso por função ---------- */
+{const c0=p2Compilar;p2Compilar=function(d){const o=c0.apply(this,arguments);try{const lim=pfnSanLim(d&&d.lim);if(Object.keys(lim).length)Object.assign(o,lim,{temLim:true});pfnAplicar(o,d&&d.fn,d&&d.acoes,{todos:u3Grupos()});}catch(e){}return o;};}
+{const c0=u3Compilar;u3Compilar=function(k,d){const o=c0.apply(this,arguments);try{if(k!=='admin'&&o.w!=='*')pfnAplicar(o,d&&d.fn,d&&d.acoes,{soLeitura:U3_SO_LEITURA.includes(k),todos:u3Grupos()});}catch(e){}return o;};}
+/* o ajuste do padrão é recompilado quando muda o fn ou as ações (antes: só módulo e opções) */
+u3Sync=function(){const docs=new Map();(S.perfc||[]).forEach(d=>{const m=d&&/^a_([a-z0-9]{2,30})$/.exec(d.id||'');if(m&&u3B()[m[1]]&&d.ajuste===true)docs.set(m[1],d);});
+  Object.keys(u3B()).forEach(k=>{const d=docs.get(k);if(!d){if(PERFIS[k]!==U3_ORIG[k])PERFIS[k]=U3_ORIG[k];return;}
+    const sig=JSON.stringify([d.mod||{},d.opc||{},d.fn||{},d.acoes||{}]);if(PERFIS[k]&&PERFIS[k].ajustado&&PERFIS[k].__u3sig===sig)return;
+    const x=u3Compilar(k,d);Object.defineProperty(x,'__u3sig',{value:sig,enumerable:false});PERFIS[k]=x;});};
+
+/* ---------- o que a pessoa pode (tela, gravação, ações) ---------- */
+const pfnPerfil=()=>PERFIS[me.perfil]||null;
+const pfnAtivo=()=>store.mode==='db'&&!me.owner;
+function pfnAcaoOk(k,pf){if(store.mode!=='db')return true;if(!pf&&me.owner)return true;const p=PERFIS[pf||me.perfil];return !(p&&p.w!=='*'&&Array.isArray(p.acoesNao)&&p.acoesNao.includes(k));}
+function pfnAcaoDe(act){if(!act)return '';if(PFN_ACT.aprovar.includes(act))return 'aprovar';if(PFN_ACT.cancelar.includes(act))return 'cancelar';if(PFN_EXPORTA.test(act)&&act!=='migrarExportar')return 'exportar';return '';}
+/* coleções próprias da tela no módulo dela */
+function pfnTabCols(tab,g){const F=pfnFuncoes()[g||GROUP_OF_TAB[tab]];if(!F)return [];return pfnTabColsAll(tab).filter(c=>F[c]);}
+/* tela some quando todas as funções dela estão sem acesso (só nos perfis com acesso por função) */
+function pfnTabOk(tab,pf){if(store.mode!=='db')return true;if(!pf&&me.owner)return true;const p=PERFIS[pf||me.perfil];if(!p||!p.fnNiv)return true;
+  const g=GROUP_OF_TAB[tab],m=p.fnNiv[g];if(!m)return true;const own=pfnTabCols(tab,g);if(!own.length)return Object.keys(m).length?Object.keys(m).some(c=>m[c]!=='n'):true;return own.some(c=>m[c]&&m[c]!=='n');}
+/* '' = pode; senão, a mensagem */
+function pfnPodeGravar(col,velho,exclui){if(!pfnAtivo())return '';const p=pfnPerfil();if(!p||!p.colNiv||!pfnHas(p.colNiv,col))return '';const v=p.colNiv[col],nm=pfnNomeCol(col),q='Seu perfil ('+(p.nome||me.perfil)+') ';
+  if(v==='n')return q+'não tem acesso a '+nm+'.';if(exclui)return v==='w'?'':pfnI(v)>=2?q+'cria e altera, mas não exclui: '+nm+'.':q+'só consulta '+nm+'.';return pfnI(v)>=2?'':q+'só consulta '+nm+'.';}
+{const p0=put;put=function(col,rec){if(PFN.sim){pfnAvisa('Simulação ("Ver como"): nada é gravado. Saia da simulação para trabalhar.');return (IDX[col]&&rec&&IDX[col].get(rec.id))||rec;}
+  if(store.mode==='db'&&rec&&IDX[col]){const ex=IDX[col].get(rec.id)||null,m=pfnPodeGravar(col,ex,false);if(m){pfnAvisa(m);return ex||rec;}}return p0.apply(this,arguments);};}
+{const d0=del;del=function(col,id){if(PFN.sim){pfnAvisa('Simulação ("Ver como"): nada é excluído.');return;}
+  if(store.mode==='db'&&IDX[col]){const ex=IDX[col].get(id);if(ex){const m=pfnPodeGravar(col,ex,true);if(m){pfnAvisa(m);return;}}}return d0.apply(this,arguments);};}
+/* personalizado com os limites levados do padrão (campos, rascunho, certificados de NR...): a tela avisa como no padrão */
+{const f0=p2PodeGravar;p2PodeGravar=function(){const d=p2Def(me.perfil);if(d&&d.custom&&(d.temLim||d.pf)&&!me.owner){d.custom=false;try{return f0.apply(this,arguments);}finally{d.custom=true;}}return f0.apply(this,arguments);};}
+/* lançar nota de entrada */
+{const f0=p2nPodeLancar;p2nPodeLancar=function(){if(!pfnAcaoOk('lancarNota'))return false;return f0.apply(this,arguments);};}
+/* ações sensíveis chamadas direto (atalhos, outras telas) */
+Object.keys(A).forEach(a=>{const k=pfnAcaoDe(a);if(!k||typeof A[a]!=='function')return;const f0=A[a];A[a]=function(){if(!pfnAcaoOk(k)){toast(PFN_MSG[k],'neg');return;}return f0.apply(this,arguments);};});
+try{if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('click',e=>{const el=e.target&&e.target.closest&&e.target.closest('[data-act]');if(!el)return;
+  const a=el.dataset.act,k=pfnAcaoDe(a);if(k&&!pfnAcaoOk(k)){e.stopImmediatePropagation();e.preventDefault();toast(PFN_MSG[k],'neg');return;}
+  const m=pfnBotaoNegado(a);if(m){e.stopImmediatePropagation();e.preventDefault();toast(m,'neg');}},true);}catch(e){}
+/* botão da tela atual que o nível da função não permite: '' = pode */
+function pfnBotaoNegado(a){if(!pfnAtivo())return '';const p=pfnPerfil();if(!p||!p.fnNiv)return '';const t=ui.tab,g=GROUP_OF_TAB[t],own=pfnTabCols(t,g);if(!own.length)return '';
+  const ag=ACT_GROUP[a];if(!ag)return '';const gs=new Set([g]);own.forEach(c=>(p2ColMods()[c]||[]).forEach(x=>gs.add(x)));if(!gs.has(ag))return '';
+  const mx=own.map(c=>p.colNiv[c]||'n').reduce(pfnMax,'n');if(pfnI(mx)>=3)return '';if(pfnI(mx)<2)return 'Seu perfil só consulta esta tela.';return PFN_DEL.test(a)?'Seu perfil cria e altera, mas não exclui, nesta tela.':'';}
+function pfnPosRender(){
+  if(PFN.sim){try{const v=$('#view');if(v&&v.insertAdjacentHTML)v.insertAdjacentHTML('afterbegin',pfnSimBarra());}catch(e){}}
+  if(!pfnAtivo())return;const p=pfnPerfil();if(!p)return;
+  $$('#view [data-act]').forEach(b=>{const a=b.dataset.act,k=pfnAcaoDe(a);if((k&&!pfnAcaoOk(k))||pfnBotaoNegado(a))b.remove();});}
+RH_POST.push(()=>{try{pfnPosRender();}catch(e){}});
+
+/* ---------- "Ver como" (simulação só no navegador) ---------- */
+function pfnSimBarra(){const s=PFN.sim;if(!s)return '';return '<div class="pfn-sim" role="status" aria-live="polite"><div><b>Simulação: você está vendo o sistema como o perfil "'+esc(s.nome)+'"</b>'+
+  '<div class="sub">Só neste navegador: a sua sessão continua a mesma e nada é gravado. Os dados na tela são os que você recebe; o servidor entrega a cada pessoa só o que o perfil dela permite.</div></div>'+
+  '<button class="btn pri" data-act="pfnSimSair">Sair da simulação</button></div>';}
+A.pfnVerComo=d=>{const k=d&&d.id;if(!(me.owner||mayW('usr'))){toast('Só o Administrador ou o dono usam "Ver como".','neg');return;}
+  if(!k||!PERFIS[k]||k==='admin'||PERFIS[k].inativo){toast('Escolha um perfil ativo (o Administrador já vê tudo).','neg');return;}
+  if(PFN.sim)A.pfnSimSair();pfnEstilo();try{closeModal();}catch(e){}
+  PFN.sim={k,owner:me.owner,nome:String(PERFIS[k].nome||k).replace(/\s*\(antigo[^)]*\)/,'')};me.owner=false;ui.tab='';ui.mod='';render();try{window.scrollTo(0,0);}catch(e){}
+  toast('Simulação ligada. Use "Sair da simulação" no topo para voltar.','pos');};
+A.pfnSimSair=()=>{const s=PFN.sim;if(!s)return;PFN.sim=null;me.owner=s.owner;ui.tab='perfc';ui.mod='sis';try{history.replaceState(null,'','#perfc');}catch(e){}render();try{window.scrollTo(0,0);}catch(e){}};
+{const r0=resolvePerfil;resolvePerfil=function(){if(PFN.sim){me.owner=false;try{r0.apply(this,arguments);}catch(e){}return PERFIS[PFN.sim.k]?PFN.sim.k:'pendente';}return r0.apply(this,arguments);};}
+RH_PRE.push(()=>{if(PFN.sim)me.owner=false;});
+try{if(typeof window!=='undefined'&&typeof window.fetch==='function'){const f0=window.fetch;window.fetch=function(url,o){const m=String((o&&o.method)||'GET').toUpperCase(),u=String(url&&url.url||url||'');
+  if(PFN.sim&&m!=='GET'&&m!=='HEAD'&&/\/api\//.test(u)&&!/\/api\/(room\/presence|stream)/.test(u))return Promise.reject(new Error('Simulação ("Ver como"): nada é enviado ao servidor.'));return f0.apply(this,arguments);};}}catch(e){}
+Object.assign(ACT_GROUP,{pfnVerComo:'usr',pfnSimSair:null,pfnOriginal:'usr'});
+
+/* ---------- resumo legível: nível por função e ações ---------- */
+{const r0=p2Resumo;p2Resumo=function(k){let t=r0.apply(this,arguments);const p=p2Def(k);if(!p||p.w==='*')return t;const F=pfnFuncoes(),ls={n:[],r:[],a:[]};
+  if(p.fnNiv)Object.keys(p.fnNiv).forEach(g=>{const m=p.fnNiv[g];Object.keys(m).forEach(c=>{const v=m[c];if(v==='w'||!ls[v])return;const vg=pfnTem(p.w,g)?'w':'r';if(v===vg)return;if((p.colNiv||{})[c]&&pfnI(p.colNiv[c])>pfnI(v))return;ls[v].push(F[g]&&F[g][c]?F[g][c].n:c);});});
+  const cap=a=>{const u=[...new Set(a)];return u.slice(0,10).join(', ')+(u.length>10?' e mais '+(u.length-10):'');};
+  const x=[];if(ls.n.length)x.push('sem acesso a: '+cap(ls.n));if(ls.r.length)x.push('só consulta: '+cap(ls.r));if(ls.a.length)x.push('cria e altera, sem excluir: '+cap(ls.a));
+  if(x.length)t+=' Por função: '+x.join('; ')+'.';
+  if(Array.isArray(p.acoesNao)&&p.acoesNao.length)t+=' Ações desligadas: '+p.acoesNao.map(a=>(PFN_ACOES.find(z=>z[0]===a)||[a,a])[1].toLowerCase()).join(', ')+'.';
+  return t;};}
+
+/* ---------- formulário: módulo → funções ---------- */
+const pfnModsForm=()=>(typeof u3ModsForm==='function'?u3ModsForm():P2_MODS).filter(m=>!['painel','dir','meu','ajuda'].includes(m[0]));
+/* perfil compilado a partir do documento do formulário (personalizado ou ajuste do padrão) */
+function pfnCompilarDoc(o,doc){return o.tipo==='padrao'?u3Compilar(o.k,doc||{}):p2Compilar(Object.assign({nome:'x'},doc||{}));}
+function pfnTeto(o,g){if(o.tipo==='padrao')return U3_SO_LEITURA.includes(o.k)?'r':'w';return P2_SO_LEITURA.includes(g)?'r':'w';}
+/* disponibilidade de cada ação sensível no perfil (sem as ações desligadas) */
+function pfnAcaoBase(o,p,k){if(!p)return false;if(k==='exportar')return true;if(k==='aprovar')return !(o.tipo==='padrao'&&U3_SO_LEITURA.includes(o.k));
+  if(k==='cancelar')return p.w==='*'||(Array.isArray(p.w)&&p.w.length>0);
+  if(k==='lancarNota'){if(p.w==='*')return true;const w=Array.isArray(p.w)?p.w:[];if(!w.includes('nf'))return false;if(p.so&&Array.isArray(p.so.nf)&&!p.so.nf.includes('notas'))return false;if(Array.isArray(p.rascunho)&&p.rascunho.includes('notas'))return false;return true;}
+  return true;}
+/* limites internos (padrão, ou levados na duplicação) por coleção, para a tela */
+function pfnLimCol(p,c){const x=[];if(!p)return x;if(p.campos&&p.campos[c])x.push(c==='ped'?'só registra o recebimento (não cria nem exclui pedido)':'só registra o andamento (não cria nem exclui)');
+  if(p.camposSt&&p.camposSt[c])x.push('muda a situação só para: '+p.camposSt[c].join(', '));if(Array.isArray(p.rascunho)&&p.rascunho.includes(c))x.push('só em rascunho (quem valida e lança é o Fiscal)');
+  if(p.rhdocNr&&c==='rhdoc')x.push('só certificados de NR');if(p.aptLibDia&&c==='aptlib')x.push('libera só para o dia de hoje');return x;}
+function pfnLimTexto(p){const t=[];if(!p)return t;if(p.campos)t.push('Em '+Object.keys(p.campos).map(c=>pfnNomeCol(c).toLowerCase()).join(' e ')+': só registra o recebimento ou o andamento (não cria nem exclui).');
+  if(Array.isArray(p.rascunho))t.push('Notas: só em rascunho (do recebimento). Quem valida e lança é o Fiscal.');if(Array.isArray(p.cfgNao))t.push('Não altera a matriz de NRs nem as configurações de SST.');
+  if(p.aptLibDia)t.push('Libera aptidão só para o dia de hoje.');if(p.rhdocNr)t.push('Em Documentos e ASO, vê e registra só os certificados de NR.');if(p.leSo)t.push('Lê só parte do que os módulos dele mostram (ex.: Fábrica: em Compras, só solicitações e produtos).');return t;}
+/* o formulário em estado puro (testável): sel = {nome, desc, mods {g: nível}, fns {g: {c: nível}}, acoes {k: bool}, opc {k: bool}} */
+function pfnSelDeForm(v){const sel={nome:v.nome,desc:v.desc,mods:{},fns:{},acoes:{},opc:{}};
+  Object.keys(v).forEach(k=>{let m;if((m=/^pfnm_(.+)$/.exec(k)))sel.mods[m[1]]=v[k];else if((m=/^pfnf_(.+?)__(.+)$/.exec(k)))(sel.fns[m[1]]=sel.fns[m[1]]||{})[m[2]]=v[k];
+    else if((m=/^pfna_(.+)$/.exec(k)))sel.acoes[m[1]]=v[k]===true;else if((m=/^o_(.+)$/.exec(k)))sel.opc[m[1]]=v[k]===true;});return sel;}
+/* sel inicial a partir de um documento */
+function pfnSelDeDoc(o,doc){const p=pfnCompilarDoc(o,doc),niv=pfnNiveis(p),F=pfnFuncoes(),sel={nome:(doc&&doc.nome)||'',desc:(doc&&doc.desc)||'',mods:{},fns:{},acoes:{},opc:{}};
+  pfnModsForm().forEach(([g])=>{const cs=Object.keys(F[g]||{});if(cs.length){sel.fns[g]={};cs.forEach(c=>{sel.fns[g][c]=niv[g][c];});const vs=cs.map(c=>niv[g][c]);sel.mods[g]=vs.every(x=>x===vs[0])?vs[0]:'p';}
+    else{const m=pfnTem(p.w,g)?'w':pfnTem(p.r,g)?'r':'n';sel.mods[g]=m;}});
+  PFN_ACOES_K.forEach(k=>{sel.acoes[k]=pfnAcaoBase(o,p,k)&&!(Array.isArray(p.acoesNao)&&p.acoesNao.includes(k));});
+  if(o.tipo==='padrao')sel.opc.frota=!!p.frotaTodos;else{const oo=(doc&&doc.opc)||{};P2_OPC.forEach(([k])=>{sel.opc[k]=oo[k]===true;});}
+  return sel;}
+/* documento (perfc) a partir do formulário */
+function pfnDocDe(o,sel){const F=pfnFuncoes(),mod={},fn={},M={};
+  pfnModsForm().forEach(([g])=>{const cs=Object.keys(F[g]||{}),teto=pfnTeto(o,g);
+    if(cs.length){const fs=(sel.fns||{})[g]||{},vs=cs.map(c=>pfnMin(PFN_NIVS.includes(fs[c])?fs[c]:'n',teto)),mx=vs.reduce(pfnMax,'n');M[g]={v:mx==='n'?'n':pfnI(mx)>=2?'w':'r',cs,vs};}
+    else{const v=(sel.mods||{})[g];M[g]={v:(v==='w'||v==='a')&&teto==='w'?'w':(v==='r'||v==='w'||v==='a')?'r':'n',cs:[],vs:[]};}});
+  if(o.tipo==='padrao'){const b=u3B()[o.k];Object.keys(M).forEach(g=>{const bv=u3ModoDe(b,g)||'n';if(M[g].v!==bv)mod[g]=M[g].v;});
+    const opc={};if(typeof (sel.opc||{}).frota==='boolean'&&sel.opc.frota!==!!b.frotaTodos)opc.frota=sel.opc.frota;
+    const p0=u3Compilar(o.k,{mod,opc});Object.keys(M).forEach(g=>M[g].cs.forEach((c,i)=>{const im=pfnImplicito(p0,g,c);if(M[g].vs[i]!==im)(fn[g]=fn[g]||{})[c]=M[g].vs[i];}));
+    const acoes={};PFN_ACOES_K.forEach(k=>{if(pfnAcaoBase(o,p0,k)&&(sel.acoes||{})[k]===false)acoes[k]=false;});return {mod,opc,fn,acoes};}
+  Object.keys(M).forEach(g=>{if(M[g].v==='n')return;mod[g]=M[g].v;M[g].cs.forEach((c,i)=>{if(M[g].vs[i]!==M[g].v)(fn[g]=fn[g]||{})[c]=M[g].vs[i];});});
+  const opc={};P2_OPC.forEach(([k])=>{opc[k]=(sel.opc||{})[k]===true;});
+  const lim=pfnSanLim(o.d&&o.d.lim),p0=p2Compilar({nome:'x',mod,opc,lim}),acoes={};PFN_ACOES_K.forEach(k=>{if(pfnAcaoBase(o,p0,k)&&(sel.acoes||{})[k]===false)acoes[k]=false;});
+  return {nome:String(sel.nome||'').replace(/\s+/g,' ').trim(),desc:String(sel.desc||'').slice(0,500),mod,opc,fn,acoes,lim};}
+/* grava: '' = gravou; senão, o erro */
+function pfnSalvar(o,sel){const x=pfnDocDe(o,sel),vazio=v=>!v||!Object.keys(v).length;
+  if(o.tipo==='padrao'){const k=o.k,b=u3B()[k];if(!b)return 'Perfil não encontrado.';if(k==='admin')return 'O perfil Administrador não se edita (evita trancar o sistema). Para um perfil parecido, use Duplicar.';
+    const aj=u3AjDoc(k);
+    if(vazio(x.mod)&&vazio(x.opc)&&vazio(x.fn)&&vazio(x.acoes)){if(aj){del('perfc',u3AjId(k));toast('Sem diferença do original: o perfil voltou ao original do sistema.','pos');}else toast('Nada mudou em relação ao original.');return '';}
+    const rec=Object.assign(aj?cl(aj):{},{id:u3AjId(k),base:k,ajuste:true,nome:b.nome||k,mod:x.mod,opc:x.opc,fn:x.fn,acoes:x.acoes,ativo:true});['fn','acoes'].forEach(q=>{if(vazio(rec[q]))delete rec[q];});
+    put('perfc',rec);toast('Perfil ajustado. Já vale para quem usa '+(b.nome||k)+'.','pos');return '';}
+  const nome=x.nome;if(nome.length<3)return 'Dê um nome ao perfil (ao menos 3 letras).';
+  if(!Object.keys(x.mod).some(g=>!P2_SO_LEITURA.includes(g)))return 'Escolha ao menos um módulo ou função para consultar ou gravar.';
+  const d=o.d||{},outro=p2Lista().find(k=>k!==d.id&&PERFIS[k]&&!PERFIS[k].inativo&&String((get('perfc',k)||PERFIS[k]).nome||'').toLowerCase()===nome.toLowerCase());if(outro)return 'Já existe um perfil com este nome.';
+  const id=d.id&&P2_ID.test(d.id)?d.id:'c_'+uid(10).toLowerCase().replace(/[^a-z0-9]/g,'x');const ant=get('perfc',id);
+  const rec=Object.assign(ant?cl(ant):{},{id,nome:nome.slice(0,60),desc:x.desc,mod:x.mod,opc:x.opc,fn:x.fn,acoes:x.acoes,lim:x.lim,ativo:ant?ant.ativo!==false:true,base:d.base||(ant&&ant.base)||''});
+  ['fn','acoes','lim'].forEach(q=>{if(vazio(rec[q]))delete rec[q];});put('perfc',rec);toast('Perfil salvo. Já aparece em Sistema › Usuários.','pos');return '';}
+function pfnOptsMod(teto,temF){const o=[['n','Sem acesso'],['r','Consulta']];if(teto==='w')o.push(temF?['a','Cria e altera']:['w','Grava']);if(teto==='w'&&temF)o.push(['w','Cria, altera e exclui']);return o;}
+function pfnFormHtml(o,sel,foco){const F=pfnFuncoes(),p=pfnCompilarDoc(o,o.tipo==='padrao'?(u3AjDoc(o.k)||{}):o.d),ehPad=o.tipo==='padrao',b=ehPad?u3B()[o.k]:null,nb=b?pfnNiveis(u3Compilar(o.k,{})):null;
+  const lim=ehPad?b:pfnSanLim(o.d&&o.d.lim);
+  const lin=([g,nm])=>{const cs=Object.keys(F[g]||{}),teto=pfnTeto(o,g),mv=sel.mods[g]||'n';
+    const mop=pfnOptsMod(teto,cs.length).concat(cs.length>1?[['p','Personalizado (por função)']]:[]);
+    const msel='<select data-f="pfnm_'+esc(g)+'" aria-label="Acesso ao módulo '+esc(nm)+'">'+mop.map(([v,t])=>'<option value="'+v+'"'+(v===mv?' selected':'')+(v==='p'?' disabled':'')+'>'+esc(t)+'</option>').join('')+'</select>';
+    const fl=cs.map(c=>{const f=F[g][c],v=(sel.fns[g]||{})[c]||'n',ops=PFN_NIVS.filter(x=>pfnI(x)<=pfnI(teto)),lc=pfnLimCol(lim,c),dif=nb&&nb[g]&&nb[g][c]!==v;
+      const tb=Object.keys(F).filter(g2=>g2!==g&&F[g2][c]&&sel.fns[g2]&&pfnI(sel.fns[g2][c])>pfnI(v)).map(g2=>'também em '+((P2_MODS.find(m=>m[0]===g2)||[g2,g2])[1]).split(':')[0]+': '+PFN_NN[sel.fns[g2][c]].toLowerCase());
+      return '<tr data-pfnc="'+esc(g)+'|'+esc(c)+'"><td><b style="font-weight:600">'+esc(f.n)+'</b>'+(f.telasN.length?'<div class="sub">Telas: '+esc(f.telasN.join(', '))+'</div>':'')+(lc.length?'<div class="sub">Limite interno: '+esc(lc.join('; '))+'</div>':'')+(tb.length?'<div class="sub">'+esc(tb.join('; '))+' (vale o maior)</div>':'')+
+        (dif?'<div class="pfn-dif">original do sistema: '+esc(PFN_NN[nb[g][c]])+'</div>':'')+'</td><td class="pfn-sel"><select data-f="pfnf_'+esc(g)+'__'+esc(c)+'" aria-label="'+esc(f.n)+' ('+esc(nm)+')">'+opt(ops.map(x=>[x,PFN_NN[x]]),v)+'</select></td></tr>';}).join('');
+    const aberto=g===foco||(mv==='p');
+    return '<div class="pfn-mod'+(g===foco?' pfn-foco':'')+'" data-pfng="'+esc(g)+'"><div class="pfn-mh">'+(cs.length?'<button type="button" class="pfn-tg" data-pfntg="'+esc(g)+'" aria-expanded="'+(aberto?'true':'false')+'"><span class="pfn-seta" aria-hidden="true">▸</span><span><span>'+esc(nm)+'</span><span class="sub" style="display:block">'+cs.length+' função(ões)'+(mv==='p'?' · personalizado':'')+'</span>'+(g===foco?'<span class="sub" style="display:block"><b>Permissão em conflito na Segregação de funções</b></span>':'')+'</span></button>':'<span class="pfn-tg" style="cursor:default"><span class="pfn-seta"></span><span>'+esc(nm)+'<span class="sub" style="display:block">sem funções separadas</span></span></span>')+msel+'</div>'+
+      (cs.length?'<div class="pfn-fs"'+(aberto?'':' hidden')+'><table class="pfn-ft"><tbody>'+fl+'</tbody></table></div>':'')+'</div>';};
+  const acs=PFN_ACOES.map(([k,n,h])=>{const disp=pfnAcaoBase(o,pfnCompilarDoc(o,Object.assign({},o.tipo==='padrao'?(u3AjDoc(o.k)||{}):o.d,{acoes:{}})),k);
+    return '<label class="f chk full"><input type="checkbox" data-f="pfna_'+k+'" id="f_pfna_'+k+'"'+(sel.acoes[k]?' checked':'')+(disp?'':' disabled')+'><span>'+esc(n)+'<div class="sub">'+esc(h)+(disp?'':' Não disponível neste perfil (ele não faz isso hoje).')+'</div></span></label>';}).join('');
+  const lt=pfnLimTexto(lim);
+  const topo=ehPad?'<div class="note" style="margin:0 0 10px">Perfil padrão <b>'+esc(b.nome||o.k)+'</b>: o ajuste vale para '+(u3Usam(o.k)===1?'a pessoa que usa':u3Usam(o.k)?'as '+u3Usam(o.k)+' pessoas que usam':'quem vier a usar')+' este perfil e o servidor aplica as mesmas regras. Salvar pede a sua senha de novo e fica na auditoria. "Voltar ao original" desfaz o ajuste.'+(U3_SO_LEITURA.includes(o.k)?' Este perfil só consulta: não ganha gravação.':'')+'</div>'
+    :'<div class="fg">'+field('Nome do perfil','nome','text',sel.nome||'',{ph:'Ex.: Assistente de compras'})+field('Para quem (descrição)','desc','text',sel.desc||'',{full:true})+'</div>';
+  const opcs=ehPad?field('Ver todos os locais da frota','o_frota','checkbox',!!sel.opc.frota,{full:true})+(()=>{const q=p2Opcoes(o.k),sn=x=>x?'sim':'não';return '<p class="sub" style="margin:4px 0 0">Do perfil padrão (para outra combinação use Duplicar): dados de RH e salários: '+sn(q.rh)+' · dados bancários: '+sn(q.banco)+' · aprovar como diretoria: '+sn(q.dir)+'.</p>';})()
+    :P2_OPC.map(([k,n,h])=>field(n,'o_'+k,'checkbox',sel.opc[k]===true,{full:true}).replace('</span></label>','<div class="sub">'+esc(h)+'</div></span></label>')).join('');
+  return '<div id="pfnForm">'+(o.avisos||'')+topo+
+    '<div class="sect">Módulos e funções</div><p class="sub" style="margin:0 0 6px">O nível do módulo preenche todas as funções dele; abra o módulo para escolher função a função (aparece "Personalizado" quando elas diferem). Consulta: vê as telas e os dados. Cria e altera: também cadastra e edita. Cria, altera e exclui: também exclui. O que uma função precisa ler de outra (o recebimento lê o pedido, o estoque lê o produto) fica liberado só para leitura. Usuários, perfis, configurações e lixeira ficam só com o Administrador.</p>'+
+    '<div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:8px" id="pfnTab">'+pfnModsForm().map(lin).join('')+'</div>'+
+    (lt.length?'<div class="sect">Limites internos '+(ehPad?'do perfil padrão':'levados do perfil de origem')+'</div><ul class="pfn-lim sub">'+lt.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><p class="sub" style="margin:2px 0 0">Esses limites continuam valendo em qualquer nível escolhido acima.</p>':'')+
+    '<div class="sect">Ações sensíveis</div><p class="sub" style="margin:0 0 4px">Valem à parte do nível de gravação. Desmarque para tirar a ação deste perfil.</p><div class="pfn-acs">'+acs+'</div>'+
+    '<div class="sect">Opções</div>'+opcs+
+    '<div class="sect">O que este perfil pode fazer</div><p class="sub" id="pfnRes" style="margin:0">'+esc(pfnResumoSel(o,sel))+'</p></div>';}
+function pfnResumoSel(o,sel){const x=pfnDocDe(o,sel);if(o.tipo==='padrao'){const k=o.k,p0=PERFIS[k];PERFIS[k]=u3Compilar(k,x);try{return p2Resumo(k);}finally{PERFIS[k]=p0;}}
+  const k='__pfprev';PERFIS[k]=p2Compilar(Object.assign({nome:x.nome||'Novo perfil'},x));try{return p2Resumo(k);}finally{delete PERFIS[k];}}
+function pfnForm(o,foco){if(!(me.owner||mayW('usr'))){toast('Só o Administrador ou o dono alteram perfis de acesso.','neg');return;}
+  if(o.tipo==='padrao'&&o.k==='admin'){toast('O perfil Administrador não se edita (evita trancar o sistema). Use Duplicar para um perfil parecido.','neg');return;}
+  pfnEstilo();PFN.form=o;const sel=o.sel||pfnSelDeDoc(o,o.tipo==='padrao'?(u3AjDoc(o.k)||{}):o.d);
+  const aj=o.tipo==='padrao'&&u3AjDoc(o.k),kv=o.tipo==='padrao'?o.k:(o.d&&o.d.id&&PERFIS[o.d.id]?o.d.id:'');
+  const titulo=o.titulo||(o.tipo==='padrao'?'Editar perfil padrão: '+((u3B()[o.k]||{}).nome||o.k):'Novo perfil de acesso');
+  modal({title:titulo,wide:true,nofocus:true,body:pfnFormHtml(o,sel,foco),
+    foot:'<button class="btn" data-act="closeModal">Cancelar</button>'+(aj?'<button class="btn" data-act="pfnOriginal" data-id="'+esc(o.k)+'">Voltar ao original</button>':'')+(kv&&!(PERFIS[kv]||{}).inativo?'<button class="btn" data-act="pfnVerComo" data-id="'+esc(kv)+'" title="Mostra o menu e as telas como este perfil (salvo) enxerga">Ver como</button>':'')+'<button class="btn pri" data-act="modalSave">Salvar perfil</button>',
+    save:root=>{const e=pfnSalvar(o,pfnSelDeForm(readForm(root)));if(e){toast(e,'neg');return false;}}});
+  if(foco)setTimeout(()=>{try{const el=document.querySelector('#pfnForm [data-pfng="'+foco+'"]');if(el){el.scrollIntoView({block:'center'});const s=el.querySelector('select');if(s)s.focus();}}catch(e){}},60);}
+/* módulo preenche as funções; função diferente mostra "Personalizado" */
+try{if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('change',e=>{const t=e.target;if(!t||!t.closest||!t.closest('#pfnForm')||!PFN.form)return;const f=$('#pfnForm');const k=t.dataset&&t.dataset.f||'';let m;
+    if((m=/^pfnm_(.+)$/.exec(k))&&t.value!=='p'){const g=m[1];$$('select[data-f^="pfnf_'+g+'__"]',f).forEach(s=>{const ok=[...s.options].map(x=>x.value);s.value=ok.includes(t.value)?t.value:ok[ok.length-1];});}
+    else if((m=/^pfnf_(.+?)__/.exec(k))){const g=m[1],ss=$$('select[data-f^="pfnf_'+g+'__"]',f),vs=ss.map(s=>s.value),ms=f.querySelector('select[data-f="pfnm_'+g+'"]');if(ms)ms.value=vs.every(v=>v===vs[0])?vs[0]:(ms.querySelector('option[value="p"]')?'p':vs.reduce(pfnMax,'n'));}
+    try{const r=$('#pfnRes');if(r)r.textContent=pfnResumoSel(PFN.form,pfnSelDeForm(readForm(f)));}catch(err){}});
+  document.addEventListener('click',e=>{const b=e.target&&e.target.closest&&e.target.closest('[data-pfntg]');if(!b)return;const w=b.closest('.pfn-mod'),fs=w&&w.querySelector('.pfn-fs');if(!fs)return;const ab=fs.hidden;fs.hidden=!ab;b.setAttribute('aria-expanded',ab?'true':'false');});}}catch(e){}
+
+/* ---------- ações da tela de perfis ---------- */
+A.perfcNovo=()=>{if(!(me.owner||mayW('usr'))){toast('Só o Administrador cria perfis.','neg');return;}pfnForm({tipo:'custom',d:{mod:{chat:'w',agenda:'w'},opc:{}},titulo:'Novo perfil de acesso'});};
+A.perfcEdit=d=>{const pc=get('perfc',d.id);if(pc&&P2_ID.test(d.id)){pfnForm({tipo:'custom',d:cl(pc),titulo:'Editar perfil: '+pc.nome},d.g||'');return;}
+  if(u3B()[d.id]){pfnForm({tipo:'padrao',k:d.id},d.g||'');return;}toast('Perfil não encontrado.','neg');};
+A.u3Ajustar=d=>A.perfcEdit(d);
+A.u3EditPerfil=d=>{const k=d.id;if(!PERFIS[k])return;ui.mod='sis';ui.tab='perfc';try{history.replaceState(null,'','#perfc');}catch(e){}render();A.perfcEdit({id:k});};
+A.perfcDup=d=>{if(!(me.owner||mayW('usr'))){toast('Só o Administrador cria perfis.','neg');return;}const k=d.id,p=PERFIS[k];if(!p)return;const pc=get('perfc',k);let doc;
+  if(pc&&P2_ID.test(k))doc={mod:cl(pc.mod||{}),opc:cl(pc.opc||{}),fn:cl(pc.fn||{}),acoes:cl(pc.acoes||{}),lim:cl(pc.lim||{})};
+  else{const mod={},m0=p2ModDe(k);Object.keys(m0).forEach(g=>{if(m0[g])mod[g]=m0[g];});const q=p2Opcoes(k),niv=pfnNiveis(p),F=pfnFuncoes(),fn={};
+    Object.keys(mod).forEach(g=>Object.keys(F[g]||{}).forEach(c=>{const tt=P2_SO_LEITURA.includes(g)?'r':mod[g],v=pfnMin(niv[g][c],tt==='w'?'w':'r');if(v!==tt)(fn[g]=fn[g]||{})[c]=v;}));
+    const lim={};if(p.w!=='*')PFN_LIM_K.forEach(x=>{if(p[x]!=null&&p[x]!==false)lim[x]=cl(p[x]);});
+    const acoes={};(p.acoesNao||[]).forEach(a=>{acoes[a]=false;});doc={mod,opc:{rh:q.rh,banco:q.banco,frota:q.frota,dir:q.dir},fn,acoes,lim:pfnSanLim(lim)};}
+  const av=[];if(p.w==='*')av.push('A cópia do Administrador não inclui Usuários, perfis, Configurações e Lixeira: isso fica só com o Administrador.');
+  if(Object.keys(doc.fn||{}).length||Object.keys(doc.lim||{}).length)av.push('A cópia leva o acesso por função e os limites internos do perfil de origem (o que só consulta, o que não exclui, só rascunho, só o recebimento...). Revise antes de salvar.');
+  if(['sst','ssttec'].includes(p2Papel(k))&&!p.custom)av.push('Na cópia, quem grava "CIPA e segurança do trabalho" lê e grava ASO, acidentes e terceiros, como o perfil de SST'+(p2Papel(k)==='ssttec'?' (o Técnico vê o ASO só como apto ou inapto; a cópia lê o ASO inteiro, menos em Documentos e ASO, que continua só com os certificados de NR)':'')+'.');
+  pfnForm({tipo:'custom',d:Object.assign(doc,{nome:'Cópia de '+String((pc&&pc.nome)||p.nome||k).replace(/\s*\(antigo[^)]*\)/,''),desc:(pc&&pc.desc)||'',base:k}),titulo:'Duplicar perfil',
+    avisos:av.length?'<div class="note" style="margin:0 0 10px">'+av.map(esc).join('<br>')+'</div>':''});};
+A.pfnOriginal=d=>{const k=d.id,b=u3B()[k];if(!b||!u3AjDoc(k)){toast('Este perfil já está como o original do sistema.');return;}
+  if(!(me.owner||mayW('usr'))){toast('Só o Administrador ou o dono alteram perfis de acesso.','neg');return;}
+  confirmBox('Voltar o perfil "'+esc(b.nome||k)+'" ao original do sistema? O ajuste (módulos, funções e ações) é desfeito para todas as pessoas que usam este perfil (pede a sua senha de novo).',()=>{del('perfc',u3AjId(k));toast('Perfil de volta ao original do sistema.','pos');},'Voltar ao original');};
+A.u3Padrao=A.pfnOriginal;
+/* lista: Administrador não se edita, "Ver como" em cada perfil, marca de "por função" */
+{const v0=V.perfc;V.perfc=function(){let h=v0.apply(this,arguments);if(!(me.owner||mayW('usr')))return h;pfnEstilo();
+  h=h.replace('<button class="btn sm pri" data-act="u3Ajustar" data-id="admin">Ajustar</button>','<span class="sub" title="O Administrador não se edita: evita trancar o sistema">não se edita</span>');
+  Object.keys(PERFIS).forEach(k=>{const p=PERFIS[k];if(!p||k==='admin'||p.inativo||/^__/.test(k))return;const dup='<button class="btn sm" data-act="perfcDup" data-id="'+esc(k)+'">Duplicar</button>';if(!h.includes(dup))return;
+    h=h.replace(dup,dup+'<button class="btn sm" data-act="pfnVerComo" data-id="'+esc(k)+'" title="Mostra o menu e as telas como este perfil enxerga (simulação, sem trocar a sua sessão)">Ver como</button>');
+    if(p.pf||(Array.isArray(p.acoesNao)&&p.acoesNao.length)){const nm='<b>'+esc(p.custom&&get('perfc',k)?get('perfc',k).nome:(p.nome||k))+'</b>';const i=h.indexOf(nm);if(i>=0)h=h.slice(0,i+nm.length)+' '+pill('por função','acc')+h.slice(i+nm.length);}});
+  return h.split('data-act="u3Padrao"').join('data-act="pfnOriginal"').split('>Voltar ao padrão<').join('>Voltar ao original<').split('"Voltar ao padrão" desfaz').join('"Voltar ao original" desfaz')
+    .replace('"Ajustar" muda o acesso módulo a módulo','"Ajustar" muda o acesso por módulo e por função').split('>Ajustar</button>').join('>Editar</button>')
+    .replace('O Administrador não perde o acesso a Sistema.','O perfil Administrador não se edita (evita trancar o sistema). "Ver como" mostra o sistema como o perfil enxerga, sem trocar a sua sessão.');};}
+/* Sistema › Usuários: a tabela de perfis marca o acesso por função (G* = grava só parte do módulo, como antes) */
+
+/* ===== v143 (relatorios/feito_v143_parte6.md): parte 6 — Resultado da obra compacto, medições ao cliente com projeto,
+   aprovação da medição pelo Comercial, boletim com emissão/aprovação e marca d'água, CIPA em abas, Ambiental no SST e
+   atalhos de RDA e entrega de EPI no Painel do SST.
+   Fluxo da medição ao cliente (campo aprovSt; a situação continua 'rascunho' até aprovar, então nada do que conta
+   "medido" muda):
+     rascunho ──Enviar para aprovação (Obras)──▶ aprovSt 'enviada' ──Aprovar (Comercial)──▶ status 'aprovada' ──Faturar──▶ NFS-e em rascunho
+                                                     └──Devolver com motivo (Comercial)──▶ aprovSt 'devolvida' ──corrigir e enviar de novo──┘
+   Carimbos: envPor/envEm, devPor/devEm/devMotivo e fluxoHist [{ac,por,em,motivo}]. No servidor quem carimba é
+   deploy/gestao/medapr.js (ligado em regras.js, logo depois de regraMedCli). ===== */
+const P6={cipaUlt:'',donoOk:false,fatDepois:'',aviso:(u,txt)=>avisoChat(u,txt)}; /* aviso: chat interno (o teste troca) */
+const P6_CIPA_ABAS=[['cipa','Visão geral'],['cipam','Membros'],['cipar','Reuniões e atas'],['cipaa','Plano de trabalho']];
+const P6_CIPA_SUB=['cipam','cipar','cipaa'];
+/* código curto do projeto: até o primeiro " - " (rproj: "P412 · 10017197") ou até o primeiro " · "/" - " (lista: "P412") */
+function p6ProjTxt(pid){const p=pid&&get('proj',pid);if(!p)return '';return String(p.codigo||'').trim()||String(p.nome||'').trim();}
+function p6ProjCurto(pid,soCodigo){const s=p6ProjTxt(pid);if(!s)return '—';const c=s.split(soCodigo?/\s+[·\-–]\s+/:/\s+[-–]\s+/)[0].trim()||s;return c.length>40?c.slice(0,38)+'…':c;}
+function p6ProjCompleto(pid){const p=pid&&get('proj',pid);if(!p)return '';const c=String(p.codigo||'').trim(),n=String(p.nome||'').trim();return c&&n&&c.indexOf(n)<0?c+' · '+n:(c||n);}
+/* nome para documento e histórico: nunca "Você" (o boletim impresso circula) */
+function p6Nome(id){if(!id)return '—';const n=nameOf(id);if(n!=='Você'&&n!=='Usuário'&&n!=='Este navegador')return n;const u=S.usr.find(x=>x.uid===id);return (u&&(u.apelido||u.nome))||(id===me.uid&&me.nome)||n;}
+const p6Css=t=>{try{const st=document.createElement('style');st.textContent=t;if(document.head&&document.head.appendChild)document.head.appendChild(st);}catch(e){}};
+p6Css('.p6rp{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}.p6rp>.tw{flex:0 1 auto;max-width:100%}.p6rp>.card{flex:1 1 320px;min-width:min(100%,300px)}'+
+  '.p6rp table.p6rpt{width:auto;min-width:0!important}.p6rp table.p6rpt td,.p6rp table.p6rpt th{padding-right:14px}.p6rp table.p6rpt td:first-child{max-width:360px}.p6rp table.p6rpt td.num,.p6rp table.p6rpt th.num{white-space:nowrap}'+
+  '.p6rp table.p6rpt thead th:first-child{white-space:nowrap}.p6cod{cursor:help}'+
+  '@media (max-width:760px){.p6rp>.tw,.p6rp>.card{flex:1 1 100%}}'+
+  '.p6tag{display:block;margin-top:3px;font-size:11px;line-height:1.2;color:var(--muted);white-space:nowrap}.p6mot{display:block;margin-top:3px;font-size:11.5px;color:var(--neg);max-width:260px;white-space:normal}'+
+  'td.act .p6nota{display:inline-block;font-size:11.5px;color:var(--muted);vertical-align:middle;margin:0 4px}');
+
+/* ---------- 1. Obras › Resultado da obra: quadro compacto ---------- */
+{const v0=V.rproj;V.rproj=function(){let h=v0.apply(this,arguments);try{const f=ui.rproj||{};if(!f.proj)return h;
+  const k='<div class="g2"><div class="tw"><table><thead><tr><th>'+esc(projNome(f.proj))+'</th>';
+  if(h.indexOf(k)<0)return h;
+  const tit=p6ProjCompleto(f.proj)||projNome(f.proj);
+  h=h.replace(k,'<div class="g2 p6rp"><div class="tw"><table class="p6rpt" style="min-width:0!important"><thead><tr><th><span class="p6cod" title="'+esc(tit)+'">'+esc(p6ProjCurto(f.proj,false))+'</span></th>');}catch(e){}return h;};}
+
+/* ---------- 2 e 3. medições ao cliente: projeto, filtro, envio e aprovação pelo Comercial ---------- */
+ui.med=Object.assign({ctr:'',st:'',proj:''},ui.med||{});ui.medapr={proj:''};
+const P6_MED_ST=[['rascunho','Rascunho','warn'],['enviada','Aguardando aprovação','acc'],['devolvida','Devolvida','neg'],['aprovada','Aprovada','acc'],['faturada','Faturada','pos']];
+const p6MedK=m=>!m?'':m.status==='rascunho'?(m.aprovSt==='enviada'||m.aprovSt==='devolvida'?m.aprovSt:'rascunho'):(m.status||'rascunho');
+const p6MedSt=m=>{const k=p6MedK(m),x=P6_MED_ST.find(y=>y[0]===k);return x?[x[1],x[2]]:(MED_ST[m.status]||[m.status||'—','']);};
+const p6MedPid=m=>((m&&get('ctr',m.ctrId))||{}).projId||'';
+const p6Eu=u=>!!u&&!fzOutra(u);
+/* quem lançou ou enviou é "você" (a segregação vale para os dois) */
+const p6MedMinha=m=>p6Eu(fzMedAutor(m))||p6Eu(m&&m.envPor);
+const p6PodeAprovMed=()=>(mayW('ctr')||fzDiretor())&&(typeof pfnAcaoOk!=='function'||me.owner||pfnAcaoOk('aprovar'));
+const p6MedPend=()=>S.med.filter(m=>m.status==='rascunho'&&m.aprovSt==='enviada');
+const p6MedContagem=()=>{try{if(!p6PodeAprovMed())return 0;return p6MedPend().filter(m=>!p6MedMinha(m)).length;}catch(e){return 0;}};
+const p6Hist=(m,ac,motivo)=>{const h=Array.isArray(m.fluxoHist)?m.fluxoHist.slice(-49):[];h.push(Object.assign({ac,por:actorId(),em:Date.now()},motivo?{motivo}:{}));return h;};
+function p6ProjOpts(){const ids=[...new Set(S.med.map(p6MedPid).filter(Boolean))];return ids.map(id=>{const t=p6ProjCompleto(id)||p6ProjCurto(id,true);return [id,t.length>90?t.slice(0,88)+'…':t];}).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt-BR',{numeric:true}));}
+function p6ProjCel(m){const pid=p6MedPid(m);return pid?'<b class="mono" title="'+esc(p6ProjCompleto(pid))+'">'+esc(p6ProjCurto(pid,true))+'</b>':'<span class="sub">—</span>';}
+function p6SitCel(m){const st=p6MedSt(m),n=m.nfseId&&get('nfse',m.nfseId);let h=pill(st[0],st[1]);
+  if(m.status==='rascunho'&&p6MedMinha(m))h+='<span class="p6tag" title="Quem lançou ou enviou não aprova a própria medição">lançada por você</span>';
+  if(p6MedK(m)==='enviada'&&m.envEm)h+='<span class="p6tag">enviada em '+fmtDT(m.envEm).slice(0,10)+(m.envPor?' por '+esc(nameOf(m.envPor)):'')+'</span>';
+  if(p6MedK(m)==='devolvida'&&m.devMotivo)h+='<span class="p6mot" title="'+esc(m.devMotivo)+'">Motivo: '+esc(String(m.devMotivo).slice(0,120))+(String(m.devMotivo).length>120?'…':'')+'</span>';
+  if(n)h+='<span class="p6tag">NFS-e '+esc(n.numOficial||n.numero||'')+'</span>';return h;}
+/* liberação acima do empenho (a mesma regra da v111; antes os botões entravam junto do Aprovar) */
+function p6EmpBtns(m){try{if(m.status!=='rascunho')return '';const c=get('ctr',m.ctrId),x=fzMedEmp(m,c);if(!x||!x.acima||fzMedLibOk(m,x.dep))return '';
+  return fzDiretor()?'<button class="btn sm" data-act="fzMedLib" data-id="'+m.id+'">Liberar acima do empenho</button>':(m.empLibReq?'<span class="p6nota">liberação pedida à diretoria</span>':'<button class="btn sm" data-act="fzMedLibPedir" data-id="'+m.id+'">Pedir liberação</button>');}catch(e){return '';}}
+function p6MedFiltra(f){return S.med.filter(m=>(!f.ctr||m.ctrId===f.ctr)&&(!f.proj||p6MedPid(m)===f.proj)&&(!f.st||p6MedK(m)===f.st)).sort((a,b)=>String(b.fim).localeCompare(String(a.fim)));}
+/* Obras › Medições ao cliente: lançar, enviar e acompanhar (sem Aprovar) */
+V.med=()=>{const f=ui.med,rows=p6MedFiltra(f);
+  const pend=p6MedPend().length,dev=S.med.filter(m=>p6MedK(m)==='devolvida').length;
+  return pageHead('Medições','Boletins de medição por contrato: quantidade de cada item no período, acumulado, reajuste e retenção. A obra prepara e envia para aprovação; o Comercial aprova ou devolve com o motivo. Depois de aprovada, ao faturar, a NFS-e é criada em rascunho.')+
+  '<div class="stack">'+(pend||dev?'<div class="note">'+(pend?pend+' medição(ões) aguardando aprovação do Comercial. ':'')+(dev?dev+' devolvida(s) para correção: veja o motivo na situação, corrija e envie de novo.':'')+'</div>':'')+
+  '<div class="bar"><label class="f"><span>Projeto</span><select id="s_med_proj" data-filter="med.proj">'+opt(p6ProjOpts(),f.proj,'Todos')+'</select></label><label class="f grow"><span>Contrato</span><select id="s_med_ctr" data-filter="med.ctr">'+opt(S.ctr.map(c=>[c.id,c.numero+' · '+parcNome(c.parcId)]),f.ctr,'Todos')+'</select></label><label class="f"><span>Situação</span><select id="s_med_st" data-filter="med.st">'+opt(P6_MED_ST.map(x=>[x[0],x[1]]),f.st,'Todas')+'</select></label></div>'+
+  '<div class="tw"><table style="min-width:980px"><thead><tr><th>Projeto</th><th>Contrato</th><th>Nº</th><th>Período</th><th class="num">A faturar</th><th class="num">Retenção</th><th>Situação</th><th></th></tr></thead><tbody>'+
+  (rows.length?rows.map(m=>{const c=get('ctr',m.ctrId)||{},t=medTot(m,c),k=p6MedK(m);
+    const acts='<button class="btn sm" data-act="medVer" data-id="'+m.id+'">Boletim</button>'+
+      (k==='rascunho'||k==='devolvida'?'<button class="btn sm" data-act="medEdit" data-id="'+m.id+'">Editar</button>'+p6EmpBtns(m)+'<button class="btn sm pri" data-act="p6MedEnviar" data-id="'+m.id+'">'+(k==='devolvida'?'Reenviar para aprovação':'Enviar para aprovação')+'</button><button class="btn sm dng" data-act="medDel" data-id="'+m.id+'">Excluir</button>':
+       k==='enviada'?p6EmpBtns(m)+'<span class="p6nota">com o Comercial</span>':
+       k==='aprovada'?'<button class="btn sm pri" data-act="medFaturar" data-id="'+m.id+'">Faturar</button>':'');
+    return '<tr><td>'+p6ProjCel(m)+'</td><td>'+esc(c.numero||'—')+'<div class="sub">'+esc(parcNome(c.parcId))+'</div></td><td>'+esc(m.numero)+'</td><td class="mono">'+fmtDate(m.ini)+' a '+fmtDate(m.fim)+'</td><td class="num">'+money(t.fat)+'</td><td class="num">'+money(t.ret)+'</td><td>'+p6SitCel(m)+'</td><td class="act">'+acts+'</td></tr>';}).join(''):emptyRow(8,'Nenhuma medição. Abra um contrato e clique em Medir.'))+'</tbody></table></div></div>';};
+/* Comercial › Medições para aprovar */
+novaTab('medapr','Medições para aprovar','Comercial','ctr','comer','ctr');
+TAB_COLS.medapr=['med'];DBW_TABCOLS.medapr=['med','ctr','proj','nfse'];DBW_TABCOLS.med=[...new Set((DBW_TABCOLS.med||[]).concat(['med','ctr','proj','nfse']))];
+V.medapr=()=>{const f=ui.medapr,pode=p6PodeAprovMed();
+  const pend=p6MedPend().filter(m=>!f.proj||p6MedPid(m)===f.proj).sort((a,b)=>(+a.envEm||0)-(+b.envEm||0));
+  const lim=Date.now()-30*864e5,dec=[];S.med.forEach(m=>(m.fluxoHist||[]).forEach(x=>{if((x.ac==='aprovada'||x.ac==='devolvida')&&+x.em>=lim&&(!f.proj||p6MedPid(m)===f.proj))dec.push({m,x});}));dec.sort((a,b)=>b.x.em-a.x.em);
+  const apr=S.med.filter(m=>m.status==='aprovada'),dev=S.med.filter(m=>p6MedK(m)==='devolvida');
+  const pid0=pend.map(p6MedPid);
+  return pageHead('Medições para aprovar','Boletins de medição enviados pelas obras. Confira o boletim e aprove (o faturamento fica liberado e a NFS-e é criada em rascunho) ou devolva com o motivo, que vai para o histórico e para quem lançou. Quem lançou ou enviou a medição não a aprova.')+
+  '<div class="stack"><div class="kpis">'+kpi('Aguardando aprovação',String(pend.length),money(sum(pend,m=>medTot(m).fat)),pend.length?'warn':'')+kpi('Devolvidas para correção',String(dev.length),'com a obra',dev.length?'neg':'')+kpi('Aprovadas sem faturar',String(apr.length),money(sum(apr,m=>medTot(m).fat)))+'</div>'+
+  (pode?'':'<div class="note">Seu perfil consulta esta lista. Quem aprova é quem grava em Contratos (Comercial) ou a diretoria.</div>')+
+  '<div class="bar"><label class="f"><span>Projeto</span><select id="s_medapr_proj" data-filter="medapr.proj">'+opt(p6ProjOpts().filter(o=>pid0.includes(o[0])||o[0]===f.proj),f.proj,'Todos')+'</select></label></div>'+
+  '<div class="tw"><table style="min-width:980px"><thead><tr><th>Projeto</th><th>Contrato</th><th>Nº</th><th>Período</th><th class="num">A faturar</th><th>Enviada</th><th>Situação</th><th></th></tr></thead><tbody>'+
+  (pend.length?pend.map(m=>{const c=get('ctr',m.ctrId)||{},t=medTot(m,c),minha=p6MedMinha(m);
+    const acts='<button class="btn sm" data-act="medVer" data-id="'+m.id+'">Boletim</button>'+p6EmpBtns(m)+
+      (minha&&!me.owner?'<span class="p6nota" title="Quem lançou ou enviou não aprova">outra pessoa aprova</span>':'<button class="btn sm pri" data-act="p6MedAprovar" data-id="'+m.id+'">Aprovar</button><button class="btn sm" data-act="p6MedDevolver" data-id="'+m.id+'">Devolver</button>');
+    return '<tr><td>'+p6ProjCel(m)+'</td><td>'+esc(c.numero||'—')+'<div class="sub">'+esc(parcNome(c.parcId))+'</div></td><td>'+esc(m.numero)+'</td><td class="mono">'+fmtDate(m.ini)+' a '+fmtDate(m.fim)+'</td><td class="num">'+money(t.fat)+(t.ret?'<div class="sub">retenção '+money(t.ret)+'</div>':'')+'</td><td>'+(m.envEm?fmtDT(m.envEm):'—')+'<div class="sub">'+esc(m.envPor?nameOf(m.envPor):(fzMedAutor(m)?nameOf(fzMedAutor(m)):''))+'</div></td><td>'+p6SitCel(m)+'</td><td class="act">'+acts+'</td></tr>';}).join(''):emptyRow(8,'Nenhuma medição aguardando aprovação.'))+'</tbody></table></div>'+
+  '<div class="card"><h2>Decididas nos últimos 30 dias</h2>'+(dec.length?'<div class="list">'+dec.slice(0,20).map(({m,x})=>{const c=get('ctr',m.ctrId)||{};return '<div class="li"><div><div class="t">'+esc(p6ProjCurto(p6MedPid(m),true))+' · medição nº '+esc(m.numero)+' · contrato '+esc(c.numero||'—')+'</div><div class="sub">'+(x.ac==='aprovada'?'Aprovada':'Devolvida')+' por '+esc(p6Nome(x.por))+' em '+fmtDT(x.em)+(x.motivo?' · motivo: '+esc(x.motivo):'')+'</div></div>'+pill(x.ac==='aprovada'?'Aprovada':'Devolvida',x.ac==='aprovada'?'pos':'neg')+'</div>';}).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma decisão no período.</p>')+'</div></div>';};
+/* enviar para aprovação (Obras) */
+A.p6MedEnviar=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'){toast('Só medições em rascunho são enviadas para aprovação.','neg');return;}
+  if(m.aprovSt==='enviada'){toast('Esta medição já está aguardando aprovação.','neg');return;}
+  const c=get('ctr',m.ctrId);if(!c){toast('Contrato da medição não encontrado.','neg');return;}
+  if(!(medTot(m,c).fat>0)){toast('A medição está sem valor.','neg');return;}
+  confirmBox('Enviar a medição nº '+esc(m.numero)+' do contrato '+esc(c.numero||'')+' ('+money(medTot(m,c).fat)+') para aprovação do Comercial? Enquanto aguarda, ela não pode ser alterada.',()=>{
+    put('med',Object.assign(cl(m),{aprovSt:'enviada',envPor:actorId(),envEm:Date.now(),fluxoHist:p6Hist(m,'enviada')}));toast('Medição enviada para aprovação do Comercial.','pos');},'Enviar para aprovação');};
+/* aprovar (Comercial): passa pelo A.medAprovar de sempre (segregação, empenho, inspeção antes de medir) */
+A.p6MedAprovar=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'||m.aprovSt!=='enviada'){toast('Esta medição não está aguardando aprovação.','neg');return;}
+  if(!p6PodeAprovMed()){toast('Seu perfil não aprova medição ao cliente.','neg');return;}
+  const seg=()=>{P6.fatDepois=m.id;A.medAprovar({id:m.id});};
+  if(p6MedMinha(m)){if(!me.owner){msgModal('Esta medição ainda não pode ser aprovada',['Quem lançou ou enviou a medição ('+nameOf(fzMedAutor(m)||m.envPor)+') não pode aprová-la. Peça a outra pessoa do Comercial ou da diretoria.']);return;}
+    confirmBox('Você mesmo lançou ou enviou esta medição. Como dono da página, você pode aprovar mesmo assim; a aprovação fica registrada com o seu nome. Continuar?',()=>{P6.donoOk=true;setTimeout(()=>{try{seg();}finally{P6.donoOk=false;}},0);},'Aprovar mesmo assim');return;}
+  seg();};
+/* o dono que lançou passa pela segregação só quando confirmou o aviso acima (o servidor também só aceita o dono) */
+{const f0=fzMedAprovErro;fzMedAprovErro=function(m,c){const e=f0.apply(this,arguments);if(e&&e.autor&&P6.donoOk&&me.owner)return f0(Object.assign({},m,{lancPor:'',crBy:''}),c);return e;};}
+/* a aprovação só sai de uma medição enviada; de qualquer lugar que chame */
+{const a0=A.medAprovar;A.medAprovar=d=>{const m=get('med',d.id);if(m&&m.status==='rascunho'&&m.aprovSt!=='enviada'){P6.fatDepois='';msgModal('Esta medição ainda não foi enviada para aprovação',['A obra usa "Enviar para aprovação" em Obras › Medições ao cliente; depois o Comercial aprova em Comercial › Medições para aprovar.']);return;}return a0(d);};}
+/* devolver com motivo (Comercial) */
+A.p6MedDevolver=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'||m.aprovSt!=='enviada'){toast('Esta medição não está aguardando aprovação.','neg');return;}
+  if(!p6PodeAprovMed()){toast('Seu perfil não devolve medição ao cliente.','neg');return;}
+  if(p6MedMinha(m)&&!me.owner){toast('Quem lançou ou enviou a medição não decide sobre ela.','neg');return;}
+  const c=get('ctr',m.ctrId)||{};
+  modal({title:'Devolver a medição nº '+m.numero,body:'<p style="margin:0 0 8px">Contrato '+esc(c.numero||'—')+' · '+esc(parcNome(c.parcId))+' · '+money(medTot(m,c).fat)+'</p><label class="f full"><span>Motivo da devolução *</span><textarea id="p6DevMot" rows="3" maxlength="500" placeholder="O que a obra precisa corrigir"></textarea></label><p class="sub" style="margin:8px 0 0">O motivo fica no histórico da medição e vai para quem lançou pelo chat interno.</p>',
+    saveLabel:'Devolver',save:()=>{const mot=String(($('#p6DevMot')||{}).value||'').trim();if(mot.length<5){toast('Escreva o motivo da devolução (pelo menos 5 caracteres).','neg');return false;}
+      const atual=get('med',m.id)||m;put('med',Object.assign(cl(atual),{aprovSt:'devolvida',devPor:actorId(),devEm:Date.now(),devMotivo:mot.slice(0,500),fluxoHist:p6Hist(atual,'devolvida',mot.slice(0,500))}));
+      const txt='Medição nº '+m.numero+' do contrato '+(c.numero||'')+' foi devolvida pelo Comercial ('+nameOf(actorId())+'). Motivo: '+mot.slice(0,300)+'. Corrija em Obras › Medições ao cliente e envie de novo.';
+      [...new Set([fzMedAutor(atual),atual.envPor].filter(Boolean))].forEach(u=>{try{P6.aviso(u,txt);}catch(e){}});
+      toast('Medição devolvida para a obra.','pos');}});};
+/* carimbo da aprovação no fluxo e aviso a quem lançou; logo depois, o faturamento de sempre (NFS-e em rascunho) */
+{const p0=put;put=function(col,rec){if(col==='med'&&rec&&rec.id&&rec.status==='aprovada'){const ex=get('med',rec.id);
+    if(ex&&ex!==rec&&ex.status==='rascunho'){rec.aprovSt='aprovada';rec.fluxoHist=p6Hist(ex,'aprovada');
+      const r=p0.apply(this,arguments);const id=rec.id;
+      try{const c=get('ctr',rec.ctrId)||{},txt='Medição nº '+rec.numero+' do contrato '+(c.numero||'')+' foi aprovada pelo Comercial ('+nameOf(actorId())+').';[...new Set([fzMedAutor(ex),ex.envPor].filter(Boolean))].forEach(u=>{try{P6.aviso(u,txt);}catch(e){}});}catch(e){}
+      if(P6.fatDepois===id){P6.fatDepois='';setTimeout(()=>{const x=get('med',id);if(!x||x.status!=='aprovada')return;if(p6PodeFaturar(x))A.medFaturar({id});else toast('Medição aprovada. A NFS-e em rascunho é criada em Faturar (Obras › Medições ao cliente) por quem emite notas: Fiscal com Contratos ou administrador.','pos');},60);}
+      return r;}}
+  return p0.apply(this,arguments);};}
+/* faturar cria a NFS-e (módulo Notas) e, com retenção, a conta a receber (Financeiro): sem essas permissões o servidor
+   recusaria a nota e a medição ficaria "faturada" sem NFS-e; avisa antes (a lógica do faturamento não muda) */
+function p6PodeFaturar(m){if(store.mode!=='db'||me.owner)return true;const c=m&&get('ctr',m.ctrId);let ret=0;try{ret=medTot(m,c).ret;}catch(e){}return mayW('ctr')&&mayW('nf')&&(!(ret>0)||mayW('fin'));}
+{const f0=A.medFaturar;A.medFaturar=d=>{const m=get('med',d.id);if(m&&m.status==='aprovada'&&!p6PodeFaturar(m)){msgModal('Seu perfil não cria a NFS-e desta medição',['Faturar cria a NFS-e em rascunho (módulo Notas)'+((()=>{try{return medTot(m,get('ctr',m.ctrId)).ret>0;}catch(e){return false;}})()?' e a conta a receber da retenção (Financeiro)':'')+'. Peça a quem emite as notas: Fiscal com acesso a Contratos ou um administrador.']);return;}return f0(d);};}
+/* enquanto aguarda o Comercial, não se edita nem se exclui */
+{const e0=A.medEdit;A.medEdit=d=>{const m=get('med',d.id);if(m&&m.status==='rascunho'&&m.aprovSt==='enviada'){toast('A medição está aguardando aprovação do Comercial e não pode ser alterada. Se precisar corrigir, peça para devolverem.','neg');return;}return e0(d);};}
+{const e0=A.medDel;A.medDel=d=>{const m=get('med',d.id);if(m&&m.status==='rascunho'&&m.aprovSt==='enviada'){toast('A medição está aguardando aprovação do Comercial e não pode ser excluída.','neg');return;}return e0(d);};}
+Object.assign(ACT_GROUP,{p6MedEnviar:'ctr',p6MedAprovar:'ctr',p6MedDevolver:'ctr'});
+/* v142: Aprovar e Devolver a medição contam como a ação sensível "Aprovar" do perfil (Sistema › Perfis de acesso) */
+if(typeof PFN_ACT!=='undefined'&&PFN_ACT&&Array.isArray(PFN_ACT.aprovar))['p6MedAprovar','p6MedDevolver','medAprovar'].forEach(a=>{if(!PFN_ACT.aprovar.includes(a))PFN_ACT.aprovar.push(a);});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{p6MedEnviar:'Manda o boletim para o Comercial aprovar. Enquanto aguarda, a medição não pode ser alterada.',p6MedAprovar:'Aprova a medição (quem lançou não aprova). Em seguida o sistema oferece criar a NFS-e em rascunho.',p6MedDevolver:'Devolve a medição para a obra corrigir, com o motivo.'});
+/* contador no menu (Comercial › Medições para aprovar) e no Início */
+RH_POST.push(()=>{try{const n=p6MedContagem();$$('#subnav [data-tab="medapr"],#nav [data-tab="medapr"]').forEach(b=>{const s=b.querySelector('.p6-n');if(s)s.remove();if(n)b.insertAdjacentHTML('beforeend',' <span class="pill neg p6-n" title="Medições aguardando a sua aprovação">'+n+'</span>');});}catch(e){}});
+{const a0=alertasCtr;alertasCtr=function(){const it=a0.apply(this,arguments);try{const n=p6MedContagem();if(n)it.unshift(['medapr',n+' medição(ões) ao cliente aguardando aprovação do Comercial',String(n)]);}catch(e){}return it;};}
+
+/* ---------- 4. boletim de medição: emitido por / aprovado por e marca d'água ---------- */
+{const d0=medDoc;medDoc=function(m){const o=d0.apply(this,arguments);try{o.situacao=p6MedSt(m)[0];o.p6med={id:m.id};}catch(e){}return o;};}
+function p6MedAud(m){const em=m.envPor||fzMedAutor(m),qd=m.envEm||m.cr||m.ts||'';
+  const ap=m.status==='aprovada'||m.status==='faturada';
+  return '<div class="doc-aud nobreak" style="margin-top:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 24px;font-size:12px;color:#111a27">'+
+    '<div><span style="color:#586379">Emitido por</span> <b>'+esc(em?p6Nome(em):'—')+'</b>'+(qd?' em '+fmtDT(qd):'')+'</div>'+
+    '<div><span style="color:#586379">Aprovado por</span> '+(ap&&m.aprovPor?'<b>'+esc(p6Nome(m.aprovPor))+'</b>'+(m.aprovEm?' em '+fmtDT(m.aprovEm):''):'<b>—</b> '+esc(p6MedK(m)==='enviada'?'(aguardando aprovação do Comercial)':p6MedK(m)==='devolvida'?'(devolvida para correção)':'(não aprovado)'))+'</div></div>';}
+function p6MarcaDagua(n){let s='';for(let k=0;k<n;k++)s+='<span style="position:absolute;left:50%;top:'+(160+k*820)+'px;transform:translate(-50%,0) rotate(-28deg);font:700 64px/1 Arial,Helvetica,sans-serif;color:rgba(179,38,30,.15);white-space:nowrap;letter-spacing:.04em">RASCUNHO – não aprovado</span>';
+  return '<div class="p6wm" aria-hidden="true" style="position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;pointer-events:none;z-index:3">'+s+'</div>';}
+{const d0=docHtml;docHtml=function(o){let h=d0.apply(this,arguments);try{const m=o&&o.p6med&&get('med',o.p6med.id);if(!m)return h;
+  const f='<div class="doc-f nobreak">';if(h.indexOf(f)>=0)h=h.replace(f,p6MedAud(m)+f);
+  if(m.status==='rascunho'){const rows=((o.tables||[])[0]||{rows:[]}).rows.length;h=h.replace('<div class="doc">','<div class="doc" style="position:relative">'+p6MarcaDagua(Math.max(1,Math.min(40,1+Math.floor(rows/14)))));}}catch(e){}return h;};}
+
+/* ---------- 5. SST › Gestão da CIPA em abas (Membros, Reuniões e atas, Plano de trabalho) ---------- */
+/* os três saem dos menus; atalhos, favoritos, Ctrl+K e links que abrem cipam/cipar/cipaa caem na aba certa */
+MENU.forEach(m=>{for(let i=m[2].length-1;i>=0;i--)if(P6_CIPA_SUB.includes(m[2][i][0]))m[2].splice(i,1);});
+ui.cipaAba='cipa';
+RH_PRE.push(()=>{if(P6_CIPA_SUB.includes(ui.tab)){ui.cipaAba=ui.tab;ui.tab='cipa';P6.cipaUlt='cipa';try{if(location.hash&&/^#cipa[mra]$/.test(location.hash))history.replaceState(null,'','#cipa');}catch(e){}return;}
+  if(ui.tab==='cipa'&&P6.cipaUlt!=='cipa')ui.cipaAba='cipa';P6.cipaUlt=ui.tab;});
+{const v0=V.cipa;V.cipa=function(){const a=P6_CIPA_ABAS.some(x=>x[0]===ui.cipaAba)?ui.cipaAba:'cipa';const h=a==='cipa'?v0.apply(this,arguments):V[a]();
+  return comAbas(h,subAbas('cipaAba',P6_CIPA_ABAS).replace('role="tablist"','role="tablist" aria-label="Gestão da CIPA"'));};}
+DBW_TABCOLS.cipa=[...new Set((DBW_TABCOLS.cipa||[]).concat(['cipa','cipam','cipar','cipaa','func']))];
+
+/* ---------- 6. Ambiental sai de Qualidade e vai para o SST ---------- */
+/* a permissão não muda: a tela amb e as coleções ambdoc, ambres, ambforn, ambind e isochk já são do módulo SST
+   (GROUP_OF_TAB.amb='sst'); quem tinha só Qualidade não via a tela (o menu filtra por mayR do módulo da tela) */
+{const q=MENU.find(m=>m[0]==='qsgi'),s=MENU.find(m=>m[0]==='sstq');
+  if(q){const i=q[2].findIndex(x=>x[0]==='amb');if(i>=0)q[2].splice(i,1);}
+  if(s&&!s[2].some(x=>x[0]==='amb')){const j=s[2].findIndex(x=>x[0]==='pgrdoc');s[2].splice(j<0?s[2].length:j+1,0,['amb','Ambiental']);}
+  const n=NAV.find(x=>x[0]==='amb');if(n&&s)n[2]=s[1];}
+
+/* ---------- 7. Painel do SST: Emissão de RDA e Entrega de EPI ---------- */
+const p6PodeCriar=(col,act)=>{try{if(ACT_GROUP[act]&&!mayW(ACT_GROUP[act]))return false;if(typeof A[act]!=='function')return false;if(typeof p2PodeGravar==='function'&&p2PodeGravar(col,null,{id:'novo'},false))return false;if(typeof pfnPodeGravar==='function'&&pfnPodeGravar(col,null,false))return false;return true;}catch(e){return false;}};
+{const v0=V.pnSst;if(typeof v0==='function')V.pnSst=function(){let h=v0.apply(this,arguments);try{
+  const b=(p6PodeCriar('rda','rdaNovo')?'<button class="btn" data-act="rdaNovo" title="Novo relatório diário de atividades (RDA) do técnico">Emissão de RDA</button>':'')+(p6PodeCriar('epi','epiNovo')?'<button class="btn" data-act="epiNovo" title="Nova entrega de EPI (ficha do colaborador)">Entrega de EPI</button>':'');
+  const k='data-tab="acid">Registrar ocorrência</button>';if(b&&h.indexOf(k)>=0)h=h.replace(k,k+b);}catch(e){}return h;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='141',APP_DATA='2026-10-31';
+const APP_VER='142',APP_DATA='2026-11-03';
 const CHANGELOG=[
+  ['142','2026-11-03',['Perfis de acesso por função: cada módulo abre as funções (telas) dele, com Sem acesso, Consulta, Cria e altera ou Cria, altera e exclui. O nível do módulo preenche todas de uma vez.', 'Ações sensíveis à parte em cada perfil: aprovar, lançar nota de entrada, cancelar/estornar e exportar. Telas sem acesso somem do menu e os botões de gravar e excluir somem conforme o nível. O servidor aplica as mesmas regras.', 'Perfis padrão do sistema agora podem ser editados (menos o Administrador), com o botão Voltar ao original. Novo botão Ver como, que mostra o sistema como aquele perfil enxerga.']],
   ['141','2026-10-31',["Recebimento de notas: nova fila 'O que precisa de ação', com o motivo, quem deve agir e o botão da ação, e filtro 'Minhas pendências'.", 'A nota que confere com o pedido e o recebimento é lançada sozinha quando um Fiscal ou administrador está com o sistema aberto (dá para desligar). Compra pequena sem pedido, até R$ 1.000, exige categoria, projeto e aprovação do nível 1.', 'NFS-e de fornecedor e empreiteiro: importa o XML ou o PDF, liga à medição e confere as retenções. Devolução ao fornecedor: baixa o estoque e abate ou cancela a conta; se já foi paga, gera crédito.', 'Avisos automáticos no chat e por e-mail: solicitação para aprovar, pedido aprovado, material chegou e nota parada. O pedido vai ao fornecedor por e-mail com o PDF anexo.']],
   ['140','2026-10-30',['Compras e notas: a nota de entrada é lançada pelo servidor de uma vez (estoque e contas a pagar), pelo perfil Fiscal, com as travas de recebimento, aprovação, divergência e duplicidade conferidas no servidor. O Arquivo fiscal não cria mais conta direto do XML.', 'Alçadas de aprovação ligadas por padrão (até R$ 10 mil gestor, até R$ 100 mil diretoria, acima duas pessoas); sem aprovador cadastrado, o dono ou administrador aprova.', 'Perfis: Comprador faz solicitação, cotação e pedido; Fiscal valida e lança a nota; Almoxarife recebe; Financeiro programa e paga (não cria pedido). Toda solicitação de compra passa por aprovação. Conta criada pela conciliação fora de tarifas, impostos e transferências fica para aprovar.']],
   ['139','2026-10-29',['Documentos de habilitação: prazo para solicitar a renovação em cada documento (padrão do tipo: 30 dias para certidões demoradas e alvarás, 120 para a LO da CETESB, 15 para os demais). Etiqueta Renovar desde DD/MM, cartão Renovar agora, aviso no Início e por e-mail no dia certo, e botão Renovação solicitada para parar o aviso.']],
