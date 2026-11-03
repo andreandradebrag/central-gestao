@@ -3274,12 +3274,17 @@ function addHistBtns(html,tab){
       const ids=[];let m;const rx=/data-(?:rid|id)="([^"]+)"/g;
       while((m=rx.exec(tr)))ids.push(m[1]);
       if(!ids.length)return tr;
-      let add='';
-      if(dr&&IDX[dr[0]]){const id=ids.find(i=>IDX[dr[0]].has(i));if(id)add+='<button class="btn sm" data-act="'+dr[1]+'" data-id="'+id+'">Visualizar</button>';}
+      let add='',vis='';
+      if(dr&&IDX[dr[0]]){const id=ids.find(i=>IDX[dr[0]].has(i));if(id)vis='<button class="btn sm" data-act="'+dr[1]+'" data-id="'+id+'" title="Ver o documento sem editar">Visualizar</button>';}
       let hit=null;
       for(const id of ids){const c=cols.find(cc=>IDX[cc]&&IDX[cc].has(id));if(c){hit=[c,id];break;}}
       if(hit)add+='<button class="btn sm ghost" data-act="hist" data-col="'+hit[0]+'" data-id="'+hit[1]+'" title="Quem criou e editou">Histórico</button>';
-      return add?tr.slice(0,k)+add+tr.slice(k):tr;
+      if(vis){const t0=tr.lastIndexOf('<td',k);const a0=t0<0?-1:tr.indexOf('<div class="acts',t0);
+        if(a0>=0&&a0<k){const g=tr.indexOf('>',a0)+1;tr=tr.slice(0,g)+vis+tr.slice(g);}
+        else if(t0>=0){const g=tr.indexOf('>',t0)+1;tr=tr.slice(0,g)+vis+tr.slice(g);}
+        else add=vis+add;}
+      const k2=tr.lastIndexOf('</td>');
+      return add?tr.slice(0,k2)+add+tr.slice(k2):tr;
     });
   }
   let extra='';
@@ -28191,8 +28196,9 @@ if(typeof PFN_ACT!=='undefined'&&PFN_ACT&&Array.isArray(PFN_ACT.aprovar)&&!PFN_A
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{p6MedReabrir:'Volta a medição aprovada ou faturada para rascunho, com o motivo. Faturada: exclui o rascunho da NFS-e e cancela a retenção.'});
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='144',APP_DATA='2026-11-03';
+const APP_VER='144.1',APP_DATA='2026-11-03';
 const CHANGELOG=[
+  ['144.1','2026-11-03',['Pedidos de compra e demais documentos (solicitação, cotação, separação, pedido de serviço): o botão Visualizar passa a ser o primeiro da linha, para ver o documento sem entrar em Editar. Antes ele ficava no fim da linha e saía da tela.']],
   ['144','2026-11-03',['Medições ao cliente: botão Reabrir para medição aprovada ou faturada, com motivo, histórico e aviso a quem lançou. A medição volta para rascunho e a obra corrige e reenvia.', 'Se a medição já foi faturada com a NFS-e em rascunho, o rascunho da NFS-e é excluído e a conta da retenção é cancelada junto, tudo de uma vez pelo servidor. NFS-e já emitida precisa ser cancelada antes; competência fechada e retenção já recebida bloqueiam.']],
   ['143','2026-11-03',['Medições ao cliente: a obra prepara o boletim e envia para aprovação; o Comercial aprova ou devolve com motivo, na nova aba Medições para aprovar. Quem lançou não aprova. A lista tem a coluna e o filtro Projeto.', 'Boletim de medição com Emitido por e Aprovado por, e marca RASCUNHO enquanto não for aprovado.', 'SST: Gestão da CIPA com abas (Visão geral, Membros, Reuniões e atas, Plano de trabalho); Ambiental passa para o menu do SST; atalhos Emissão de RDA e Entrega de EPI no painel. Resultado da obra mais compacto.']],
   ['142','2026-11-03',['Perfis de acesso por função: cada módulo abre as funções (telas) dele, com Sem acesso, Consulta, Cria e altera ou Cria, altera e exclui. O nível do módulo preenche todas de uma vez.', 'Ações sensíveis à parte em cada perfil: aprovar, lançar nota de entrada, cancelar/estornar e exportar. Telas sem acesso somem do menu e os botões de gravar e excluir somem conforme o nível. O servidor aplica as mesmas regras.', 'Perfis padrão do sistema agora podem ser editados (menos o Administrador), com o botão Voltar ao original. Novo botão Ver como, que mostra o sistema como aquele perfil enxerga.']],
