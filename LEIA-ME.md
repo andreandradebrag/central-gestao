@@ -498,6 +498,14 @@ Em **Sistema › Perfis de acesso**, cada módulo abre e mostra as **funções**
 - **Compatibilidade**: perfil sem configuração por função funciona exatamente como antes ("Grava" antigo = cria, altera e exclui). Editar perfil continua pedindo a senha de novo e indo para a auditoria (`PERFIL_ACESSO_ALTERADO`, `PERFIL_PADRAO_AJUSTADO`, agora com o `fn` e as `acoes`).
 - Implantação: o arquivo novo `gestao/permfn.js` já está no `Dockerfile` (COPY). Suba a versão com o `perfis.json` novo (gerado por `gen_perm.js`).
 
+### Gestor e Técnico de segurança do trabalho (v145)
+
+Os dois perfis padrão (e o antigo "Segurança do trabalho", que segue o Gestor) passaram a vir **de fábrica** com parte de Obras e de Pessoal em **Sem acesso**, função a função (`perfis.json › perfis › sstgestor/ssttec › padFn`):
+- **Gestor** não vê: Obras e rateio, Contratos e Medições de empreiteiros, Resultado da obra, Relatório mensal, Colaboradores, Férias, Apropriação do mês, Banco de horas, Recrutamento e seleção, Admissões, Desligamentos, Solicitações, Empréstimos, Jornadas e Custo-hora por função.
+- **Técnico** não vê, além dessas: Curva S, Horas extras (pedidos), Materiais da obra, Mão de obra por obra, Quadro de pessoal por obra, Movimentações e Afastamentos.
+- A tela some do menu, das abas, do "Mais", do Ctrl+K, dos favoritos e dos atalhos; aberta pelo endereço mostra "sem acesso". O servidor deixa de entregar o que era só dessas telas (inclusive o custo-hora). Continua entregando, **só como apoio** das telas que eles usam (`leDep`), o cadastro de colaboradores (sem salário, CPF nem banco: ASO, EPI, treinamentos, aptidão, integração, CIPA) e as jornadas (HHT e índices); ao Técnico também os movimentos de material e a linha de base (Painel da obra, Índices de SST, Mobilização).
+- Um ajuste salvo em Sistema › Perfis de acesso (`perfc/a_sstgestor`, `perfc/a_ssttec`) continua valendo por cima, função a função; "Voltar ao original" volta a este padrão novo. Basta implantar com o `perfis.json` novo; não há arquivo novo no servidor.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

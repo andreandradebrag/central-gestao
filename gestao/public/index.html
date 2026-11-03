@@ -637,7 +637,7 @@ function render(){
   const c=cfg();
   me.perfil=resolvePerfil();
   const nav=NAV.filter(n=>mayR(GROUP_OF_TAB[n[0]])&&(typeof pfnTabOk!=='function'||pfnTabOk(n[0])));
-  if(nav.length&&!nav.some(n=>n[0]===ui.tab))ui.tab=nav[0][0];
+  let semTela=false;if(nav.length&&!nav.some(n=>n[0]===ui.tab)){if(typeof pfnTelaNegada==='function'&&pfnTelaNegada(ui.tab))semTela=true;else ui.tab=nav[0][0];}
   $('#brandName').textContent=c.fantasia||'Central de Gestão';
   setMark(c);
   {const nv=$('#nav'),sb=$('#subnav'),sx=nv?nv.scrollLeft:0,sy=nv?nv.scrollTop:0,bx=sb?sb.scrollLeft:0;renderMenu();
@@ -649,7 +649,7 @@ function render(){
   let html;
   if(!store.ready)html='<div class="empty">Carregando dados…</div>';
   else if(!nav.length)html=acessoScreen();
-  else html=(V[ui.tab]||V.painel)();
+  else html=semTela?pfnSemAcessoHtml(ui.tab):(V[ui.tab]||V.painel)();
   const rolAnt=rolGuardar();
   $('#view').innerHTML=addVendaBtns(addAnexBtns(addHistBtns(html,ui.tab),ui.tab),ui.tab);
   rolRestaurar(rolAnt);
@@ -5247,7 +5247,7 @@ function gsFind(q){
   const out=[];
   GS_SRC.forEach(s=>{
     const [col,lab,txt,show,go]=s,tab=go({})[0];
-    if(!mayR(GROUP_OF_TAB[tab]))return;
+    if(!mayR(GROUP_OF_TAB[tab])||(typeof pfnTabOk==='function'&&!pfnTabOk(tab)))return;
     (S[col]||[]).forEach(r=>{const h=gsNorm(txt(r));if(t.every(w=>h.includes(w)))out.push({col,id:r.id,lab,show:show(r),r});});
   });
   return out.slice(0,40);
@@ -13567,7 +13567,7 @@ const favGrava=v=>{try{localStorage.setItem(FAV_K(),JSON.stringify(v.slice(0,8))
 const favTem=t=>favLer().includes(t);
 const tabNome=t=>{for(const m of MENU){const i=m[2].find(x=>x[0]===t);if(i)return i[1];}const n=NAV.find(x=>x[0]===t);return n?n[1]:t;};
 A.favAlterna=()=>{const v=favLer(),t=ui.tab,i=v.indexOf(t);if(i>=0){v.splice(i,1);toast('Tela tirada dos favoritos.');}else{if(v.length>=8){toast('Máximo de 8 favoritos. Tire um antes.','neg');return;}v.push(t);toast('“'+tabNome(t)+'” fixada nos favoritos (★ no topo).','pos');}favGrava(v);render();};
-A.favMenu=(d,el)=>{if(MNU.aberto==='fav'){popFechar();return;}const v=favLer().filter(t=>mayR(GROUP_OF_TAB[t]));
+A.favMenu=(d,el)=>{if(MNU.aberto==='fav'){popFechar();return;}const v=favLer().filter(t=>mayR(GROUP_OF_TAB[t])&&(typeof pfnTabOk!=='function'||pfnTabOk(t)));
   popAbrir(el,'<div class="pop-sec">Favoritos</div>'+(v.length?v.map(t=>'<button class="pop-it'+(t===ui.tab?' on':'')+'" data-act="nav" data-tab="'+esc(t)+'">★ '+esc(tabNome(t))+'</button>').join(''):'<p class="pop-vazio">Nenhum favorito. Abra uma tela e clique em ☆ Favoritar, no fim da barra de abas.</p>'),'fav');};
 /* + Novo */
 const NOVO_OPC=[['Conta a pagar','pag','novoLanc',{tipo:'pagar'}],['Conta a receber','rec','novoLanc',{tipo:'receber'}],['Solicitação de compra','sc','scNovo'],['Cotação','cot','cotNova'],['Pedido de compra','ped','pedNovo'],['Diário de obra','rdo','rdoNovo'],
@@ -28201,9 +28201,81 @@ Object.assign(ACT_GROUP,{p6MedReabrir:'ctr'});
 if(typeof PFN_ACT!=='undefined'&&PFN_ACT&&Array.isArray(PFN_ACT.aprovar)&&!PFN_ACT.aprovar.includes('p6MedReabrir'))PFN_ACT.aprovar.push('p6MedReabrir');
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{p6MedReabrir:'Volta a medição aprovada ou faturada para rascunho, com o motivo. Faturada: exclui o rascunho da NFS-e e cancela a retenção.'});
 
+/* ===== v145: o que o Gestor e o Técnico de segurança do trabalho enxergam (relatorios/feito_v145_sstperf.md) =====
+   Pedido do dono: tirar do Gestor e do Técnico de SST as telas de Obras e de Pessoal que não são do trabalho deles.
+   A mudança é no PRÓPRIO perfil padrão (vale em qualquer instalação e aparece no detalhe por função de Sistema › Perfis de
+   acesso), pelo mecanismo da v142 (permissão por função):
+     - padFn: nível de fábrica das funções (só 'n' = sem acesso). O ajuste salvo do padrão (perfc/a_<perfil>) continua
+       prevalecendo: o fn dele vale por cima do padFn, função a função (o servidor faz o mesmo em permfn.js › aplicar).
+     - leDep: o que o perfil continua LENDO só como apoio das telas que ele usa, mesmo com a função sem acesso (o SST lê o
+       cadastro de colaboradores para ASO, EPI, treinamentos, aptidão, integração e CIPA; HHT e índices leem as jornadas;
+       Painel da obra e Índices de SST leem os movimentos de material; Mobilização lê a linha de base). Só vale dentro do
+       que o módulo já lê: nunca dá acesso novo. Dados sensíveis (salário, CPF, banco) continuam fora (server.js › redFunc).
+     - telasNao: telas sem função própria (Contratos e Medições de empreiteiros, Resultado da obra, Curva S, Mão de obra por
+       obra, Recrutamento e seleção) somem do menu enquanto a função-chave delas (SSTP_CHAVE) estiver sem acesso.
+   O servidor deixa de entregar o que era só dessas telas (leSo calculado de padFn + leDep em permfn.js; custo-hora em
+   regras.js › podeLer). Tela fora do perfil aberta pelo endereço (#aba) mostra "sem acesso". */
+const SSTP_CHAVE={ctremp:['proj','ctremp'],medemp:['proj','medemp'],rproj:['proj','proj'],curva:['proj','obrbase'],mo:['rh','chora'],rs:['rh','vaga'],rsind:['rh','vaga']};
+const SSTP_N=l=>Object.fromEntries(l.map(c=>[c,'n']));
+const SSTP_RH_G=['func','ferias','moapr','bhimp','bhlanc','rsreq','vaga','cand','adm','desl','dpsol','emprest','jornada','chora'];
+const SSTP_DEF={
+  sstgestor:{padFn:{proj:SSTP_N(['proj','rmesf','ctremp','medemp']),rh:SSTP_N(SSTP_RH_G)},
+    leDep:{rh:['func','jornada']},telasNao:['ctremp','medemp','rproj','rs','rsind'],
+    desc:'Tudo de SST: EPI, treinamentos e matriz de NRs, integração, CIPA, acidentes e CAT, PGR, terceiros e documentos dos empreiteiros, ASO e documentos dos colaboradores, liberações de aptidão. Em Obras: cronograma, Curva S, diário, horas extras, materiais, mão de obra e mobilização. No Pessoal: quadro por obra, movimentações, afastamentos, documentos e ASO, eSocial, feriados, índices e FAP. O cadastro de colaboradores é lido só para ASO, EPI, treinamentos, aptidão e CIPA (sem salário). Consulta ferramentas e frota. Não vê folha, salários, financeiro, contratos e medições de empreiteiros, resultado da obra nem férias, banco de horas, admissões, desligamentos e recrutamento.'},
+  ssttec:{padFn:{proj:SSTP_N(['proj','obrbase','heaut','mov','rmesf','ctremp','medemp']),rh:SSTP_N(SSTP_RH_G.concat(['quadro','dpmov','afast']))},
+    leDep:{rh:['func','jornada'],proj:['mov','obrbase']},telasNao:['curva','ctremp','medemp','mo','rproj','rs','rsind'],
+    desc:'Dia a dia de SST: EPI, treinamentos, integração, inspeções, registro de acidente e quase acidente, terceiros e checklist dos empreiteiros, liberações de aptidão do dia. Não altera PGR, matriz de NRs, configurações de SST nem CIPA (eleição e membros) e não exclui acidente. Vê o ASO só como apto/inapto e validade. Em Obras: cronograma, diário e mobilização. No Pessoal: documentos e ASO, eSocial, feriados, índices e FAP. O cadastro de colaboradores é lido só para ASO, EPI, treinamentos, aptidão e CIPA (sem salário).'}
+};
+/* o perfil antigo "Segurança do trabalho" é o Gestor de antes: segue o Gestor */
+SSTP_DEF.sst={padFn:SSTP_DEF.sstgestor.padFn,leDep:SSTP_DEF.sstgestor.leDep,telasNao:SSTP_DEF.sstgestor.telasNao};
+Object.keys(SSTP_DEF).forEach(k=>{const p=PERFIS[k];if(!p||p.custom)return;const d=SSTP_DEF[k];
+  p.padFn=JSON.parse(JSON.stringify(d.padFn));p.leDep=JSON.parse(JSON.stringify(d.leDep));p.telasNao=d.telasNao.slice();if(d.desc)p.desc=d.desc;});
+U3_BASE_=null; /* a cópia do padrão (u3B) passa a levar padFn, leDep e telasNao */
+/* fn do perfil por cima do padrão de fábrica, função a função */
+function sstpMescla(pad,fn){const o={};[pad||{},fn||{}].forEach(x=>{if(!x||typeof x!=='object')return;Object.keys(x).forEach(g=>{const m=x[g];if(!m||typeof m!=='object')return;o[g]=Object.assign(o[g]||{},m);});});return o;}
+{const a0=pfnAplicar;pfnAplicar=function(p,fn,acoes,o){if(p&&!p.custom&&p.padFn&&p.w!=='*')fn=sstpMescla(p.padFn,fn);return a0.call(this,p,fn,acoes,o);};}
+/* o padrão sem ajuste também sai compilado (com o nível por função), para o menu e o detalhe */
+const SSTP_CACHE={};
+{const s0=u3Sync;u3Sync=function(){const r=s0.apply(this,arguments);if(!store.ready||store.mode!=='db')return r; /* antes de carregar e no modo local (e no gen_perm.js) fica o padrão como está escrito */
+  Object.keys(u3B()).forEach(k=>{const b=u3B()[k];if(!b||!b.padFn||PERFIS[k]!==U3_ORIG[k])return;let x=SSTP_CACHE[k];
+    if(!x){x=u3Compilar(k,{});delete x.ajustado;SSTP_CACHE[k]=x;}PERFIS[k]=x;});return r;};}
+/* limites levados na duplicação: telas fora do menu e leitura de apoio */
+PFN_LIM_K.push('telasNao','leDep');
+const SSTP_ID=/^[a-z][a-zA-Z0-9]{0,30}$/;
+function sstpSanTelas(v){return Array.isArray(v)?[...new Set(v.filter(x=>typeof x==='string'&&SSTP_ID.test(x)))].slice(0,60):[];}
+function sstpSanDep(v){const o={};if(!v||typeof v!=='object'||Array.isArray(v))return o;Object.keys(v).forEach(g=>{if(!SSTP_ID.test(g))return;const l=sstpSanTelas(v[g]);if(l.length)o[g]=l;});return o;}
+{const s0=pfnSanLim;pfnSanLim=function(l){const out=s0.apply(this,arguments);if(l&&typeof l==='object'&&!Array.isArray(l)){const t=sstpSanTelas(l.telasNao),d=sstpSanDep(l.leDep);if(t.length)out.telasNao=t;if(Object.keys(d).length)out.leDep=d;}return out;};}
+/* tela sem função própria: some enquanto a função-chave estiver sem acesso */
+function sstpTelaFora(p,tab){if(!p||p.w==='*'||!Array.isArray(p.telasNao)||!p.telasNao.includes(tab))return false;const k=SSTP_CHAVE[tab];if(!k||!p.fnNiv)return true;
+  const v=p.fnNiv[k[0]]&&p.fnNiv[k[0]][k[1]];return !v||v==='n';}
+{const t0=pfnTabOk;pfnTabOk=function(tab,pf){if(!t0.apply(this,arguments))return false;if(store.mode!=='db')return true;if(!pf&&me.owner)return true;return !sstpTelaFora(PERFIS[pf||me.perfil],tab);};}
+/* tela do menu que o perfil não vê (pelo acesso por função): aberta pelo endereço, mostra "sem acesso" */
+function pfnTelaNegada(tab){try{if(store.mode!=='db'||me.owner||!tab||!V[tab]||!NAV.some(n=>n[0]===tab))return false;return mayR(GROUP_OF_TAB[tab])&&!pfnTabOk(tab);}catch(e){return false;}}
+function pfnSemAcessoHtml(tab){const n=(NAV.find(x=>x[0]===tab)||[])[1]||tab,p=PERFIS[me.perfil]||{};
+  return pageHead(n,'')+'<div class="card"><div class="empty" role="alert">Seu perfil ('+esc(p.nome||me.perfil)+') não tem acesso a esta tela. Use o menu para abrir as telas do seu perfil; se precisar desta, peça ao administrador (Sistema › Perfis de acesso).</div></div>';}
+/* atalhos (painéis, Início, avisos, favoritos): botão para tela sem acesso some; o clique direto é recusado */
+const sstpNavFora=el=>{const a=el&&el.dataset&&el.dataset.act;if(a!=='nav'&&a!=='pn2Ir')return false;const t=el.dataset.tab;return !!t&&pfnTelaNegada(t);};
+RH_POST.push(()=>{try{if(store.mode!=='db'||me.owner)return;$$('[data-act="nav"][data-tab],[data-act="pn2Ir"][data-tab]').forEach(b=>{if(sstpNavFora(b))b.remove();});}catch(e){}});
+try{if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('click',e=>{const el=e.target&&e.target.closest&&e.target.closest('[data-act]');if(!el||!sstpNavFora(el))return;
+  e.stopImmediatePropagation();e.preventDefault();toast('Seu perfil não tem acesso a esta tela.','neg');},true);}catch(e){}
+/* ajuste do padrão: o que difere do padrão DE FÁBRICA (com o padFn), para "Consulta" voltar a valer por cima do "Sem acesso" */
+{const d0=pfnDocDe;pfnDocDe=function(o,sel){const x=d0.apply(this,arguments);if(!o||o.tipo!=='padrao')return x;const b=u3B()[o.k];if(!b||!b.padFn)return x;
+  const F=pfnFuncoes(),fn=x.fn||{};Object.keys(b.padFn).forEach(g=>{const m=b.padFn[g]||{};if(!F[g])return;const teto=pfnTeto(o,g);
+    Object.keys(m).forEach(c=>{if(!F[g][c])return;const fs=((sel&&sel.fns)||{})[g]||{},v=pfnMin(PFN_NIVS.includes(fs[c])?fs[c]:'n',teto);
+      if(v===m[c]){if(fn[g])delete fn[g][c];}else (fn[g]=fn[g]||{})[c]=v;});
+    if(fn[g]&&!Object.keys(fn[g]).length)delete fn[g];});
+  x.fn=fn;return x;};}
+/* detalhe do perfil: telas fora do menu e o que é lido só como apoio */
+{const l0=pfnLimTexto;pfnLimTexto=function(p){const t=l0.apply(this,arguments);if(!p)return t;
+  if(Array.isArray(p.telasNao)&&p.telasNao.length){const nm=p.telasNao.map(x=>(NAV.find(n=>n[0]===x)||[])[1]).filter(Boolean);if(nm.length)t.push('Telas sem função própria fora do menu: '+nm.join(', ')+'.');}
+  if(p.leDep&&typeof p.leDep==='object'){const cs=[...new Set(Object.values(p.leDep).flat())];if(cs.length)t.push('Lê só como apoio das telas que usa (sem abrir a tela): '+cs.map(c=>pfnNomeCol(c)).join(', ')+(cs.includes('func')?' (do colaborador: nome, função, obra, ASO, EPI e treinamentos; sem salário, CPF nem banco)':'')+'.');}
+  return t;};}
+{const c0=pfnLimCol;pfnLimCol=function(p,c){const x=c0.apply(this,arguments);if(p&&p.leDep&&Object.values(p.leDep).some(l=>Array.isArray(l)&&l.includes(c)))x.push('lido só como apoio das telas que o perfil usa');return x;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='144.2',APP_DATA='2026-11-03';
+const APP_VER='145',APP_DATA='2026-11-03';
 const CHANGELOG=[
+  ['145','2026-11-03',['Perfis de SST: o Gestor de segurança do trabalho deixa de ver Obras e rateio, contratos e medições de empreiteiros, resultado e relatório mensal da obra, e as telas de Pessoal de colaboradores, férias, apropriação, banco de horas, recrutamento, admissões, desligamentos, solicitações, empréstimos, jornadas e custo-hora.', 'O Técnico de segurança do trabalho deixa de ver também Curva S, horas extras, materiais e mão de obra por obra, quadro de pessoal, movimentações e afastamentos. As telas de ASO, EPI, treinamentos, aptidão e CIPA continuam funcionando; o servidor deixou de entregar os dados das telas tiradas.']],
   ['144.2','2026-11-03',['Pedidos de compra, solicitações, cotações, separação e pedidos de serviço: os botões de cada linha ficam em duas linhas, para todos aparecerem sem rolar a tabela para o lado.']],
   ['144.1','2026-11-03',['Pedidos de compra e demais documentos (solicitação, cotação, separação, pedido de serviço): o botão Visualizar passa a ser o primeiro da linha, para ver o documento sem entrar em Editar. Antes ele ficava no fim da linha e saía da tela.']],
   ['144','2026-11-03',['Medições ao cliente: botão Reabrir para medição aprovada ou faturada, com motivo, histórico e aviso a quem lançou. A medição volta para rascunho e a obra corrige e reenvia.', 'Se a medição já foi faturada com a NFS-e em rascunho, o rascunho da NFS-e é excluído e a conta da retenção é cancelada junto, tudo de uma vez pelo servidor. NFS-e já emitida precisa ser cancelada antes; competência fechada e retenção já recebida bloqueiam.']],

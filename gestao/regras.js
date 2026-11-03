@@ -1462,7 +1462,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if ((c0 === 'nfse' || (c0 === 'notas' && data && data.tipo === 'saida')) && !veFaturamento(conta)) return false; /* v115.2 */
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
-    if (c0 === 'chora' && leChora(conta)) return true; /* v120 */
+    if (c0 === 'chora' && leChora(conta) && !leSoFora(conta, c0)) return true; /* v120; v145: menos quem tem o custo-hora fora do perfil (leSo: Gestor e Técnico de SST) */
     if (c0 === 'proj' && soFabProj(conta)) return true; /* v125: só código, nome, situação e cliente (redigir) */
     if (leSoFora(conta, c0)) return false; /* v125: leSo do perfil (Fábrica: em Compras, só solicitações e produtos) */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;

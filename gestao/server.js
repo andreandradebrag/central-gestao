@@ -205,6 +205,9 @@ try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'ut
    mesmo formato do perfis.json (w, r) e o junta aos perfis padrão. Nunca tem '*', papel, "so" nem os módulos de
    Usuários, Configurações e Lixeira: um perfil personalizado nunca tem mais poder que o Administrador. */
 const PERF_BASE = PERM.perfis || {}, PERF_BASE_N = Object.keys(PERF_BASE).length;
+/* v145: cópia dos perfis padrão como vêm do perfis.json; o Gestor e o Técnico de SST trazem o nível de fábrica por função
+   (padFn) e são compilados abaixo (perfaCompilar parte desta cópia, para o ajuste salvo prevalecer função a função) */
+const PERF_RAW = JSON.parse(JSON.stringify(PERF_BASE));
 const PERFC_PROIBIDOS = new Set(['usr', 'cfg', 'lixo']), PERFC_SO_LEITURA = new Set(['painel', 'dir', 'meu', 'ajuda']);
 const PERFC_ID = /^c_[a-z0-9]{4,24}$/;
 /* v115: Painel do Início e Painel da diretoria (com os indicadores) são só do Administrador, do dono e da Diretoria: o perfil
@@ -242,7 +245,7 @@ const perfaBaseOk = b => !!PERF_BASE[b] && !PERFA_FORA.has(b);
 const perfaGrupos = () => [...new Set((PERM.modulos || []).map(m => m[0]).concat(['meu', 'agenda', 'chat', 'ajuda']))];
 const perfaEditavel = (k, g) => perfaGrupos().includes(g) && !PERFA_NAO_EDITA.has(g) && !PERFA_SISTEMA.includes(g);
 function perfaCompilar(k, d) {
-  const b = PERF_BASE[k], todos = perfaGrupos(), tudoW = b.w === '*', tudoR = b.r === '*';
+  const b = typeof PERF_RAW !== 'undefined' && PERF_RAW[k] && PERF_RAW[k].padFn ? PERF_RAW[k] : PERF_BASE[k], /* (typeof: t/run_usr3.js avalia esta função isolada) */ todos = perfaGrupos(), tudoW = b.w === '*', tudoR = b.r === '*';
   let w = tudoW ? todos.slice() : [...new Set(b.w || [])], r = tudoR ? todos.slice() : [...new Set(b.r || [])];
   for (const [g, v] of Object.entries((d && d.mod) || {})) {
     if (!perfaEditavel(k, g) || !['w', 'r', 'n'].includes(v)) continue;
@@ -257,6 +260,13 @@ function perfaCompilar(k, d) {
   /* v142: acesso por função e ações sensíveis (o Administrador não se ajusta por função: evita trancar o sistema) */
   if (typeof FN !== 'undefined' && k !== 'admin' && out.w !== '*') FN.aplicar(out, d && d.fn, d && d.acoes, { PERM, soLeitura: PERFA_SO_LEITURA.has(k), todos });
   return out;
+}
+/* v145: perfis padrão com acesso por função de fábrica (padFn): Gestor e Técnico de segurança do trabalho (e o antigo SST) */
+if (typeof FN !== 'undefined' && typeof PERF_RAW !== 'undefined') for (const [k, b] of Object.entries(PERF_RAW)) {
+  if (!b || b.custom || !b.padFn || b.w === '*' || k === 'admin') continue;
+  const x = FN.aplicar(JSON.parse(JSON.stringify(b)), undefined, undefined, { PERM, soLeitura: PERFA_SO_LEITURA.has(k), todos: perfaGrupos() });
+  delete x.pf; /* as mensagens do padrão continuam as de antes (regras.js › regraFina) */
+  PERF_BASE[k] = x;
 }
 perfcRecarregar();
 const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'bloquear').toLowerCase() === 'avisar' ? 'avisar' : 'bloquear';

@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-03T18:38:47.260Z",
+ "gerado": "2026-11-03T23:16:06.241Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -362,6 +362,43 @@
     "ajuda"
    ],
    "papel": "sst",
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n"
+    },
+    "rh": {
+     "func": "n",
+     "ferias": "n",
+     "moapr": "n",
+     "bhimp": "n",
+     "bhlanc": "n",
+     "rsreq": "n",
+     "vaga": "n",
+     "cand": "n",
+     "adm": "n",
+     "desl": "n",
+     "dpsol": "n",
+     "emprest": "n",
+     "jornada": "n",
+     "chora": "n"
+    }
+   },
+   "leDep": {
+    "rh": [
+     "func",
+     "jornada"
+    ]
+   },
+   "telasNao": [
+    "ctremp",
+    "medemp",
+    "rproj",
+    "rs",
+    "rsind"
+   ],
    "sensRh": true,
    "nome": "Gestor de segurança do trabalho"
   },
@@ -410,6 +447,55 @@
     "nrCurso",
     "isstPar"
    ],
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "obrbase": "n",
+     "heaut": "n",
+     "mov": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n"
+    },
+    "rh": {
+     "func": "n",
+     "ferias": "n",
+     "moapr": "n",
+     "bhimp": "n",
+     "bhlanc": "n",
+     "rsreq": "n",
+     "vaga": "n",
+     "cand": "n",
+     "adm": "n",
+     "desl": "n",
+     "dpsol": "n",
+     "emprest": "n",
+     "jornada": "n",
+     "chora": "n",
+     "quadro": "n",
+     "dpmov": "n",
+     "afast": "n"
+    }
+   },
+   "leDep": {
+    "rh": [
+     "func",
+     "jornada"
+    ],
+    "proj": [
+     "mov",
+     "obrbase"
+    ]
+   },
+   "telasNao": [
+    "curva",
+    "ctremp",
+    "medemp",
+    "mo",
+    "rproj",
+    "rs",
+    "rsind"
+   ],
    "aptLibDia": true,
    "rhdocNr": true,
    "nome": "Técnico de segurança do trabalho"
@@ -447,6 +533,43 @@
     "frota",
     "meu",
     "ajuda"
+   ],
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n"
+    },
+    "rh": {
+     "func": "n",
+     "ferias": "n",
+     "moapr": "n",
+     "bhimp": "n",
+     "bhlanc": "n",
+     "rsreq": "n",
+     "vaga": "n",
+     "cand": "n",
+     "adm": "n",
+     "desl": "n",
+     "dpsol": "n",
+     "emprest": "n",
+     "jornada": "n",
+     "chora": "n"
+    }
+   },
+   "leDep": {
+    "rh": [
+     "func",
+     "jornada"
+    ]
+   },
+   "telasNao": [
+    "ctremp",
+    "medemp",
+    "rproj",
+    "rs",
+    "rsind"
    ],
    "sensRh": true,
    "antigo": true,

@@ -55,6 +55,9 @@ function sanLim(l) {
   for (const k of ['campos', 'camposSt']) { const o = l[k]; if (!o || typeof o !== 'object' || Array.isArray(o)) continue; const m = {}; for (const [c, v] of Object.entries(o)) { if (!ID_OK.test(c)) continue; const x = lista(v); if (x && x.length) m[c] = x; } if (Object.keys(m).length) out[k] = m; }
   for (const k of ['rascunho', 'cfgNao']) { const x = lista(l[k]); if (x && x.length) out[k] = x; }
   if (l.aptLibDia === true) out.aptLibDia = true; if (l.rhdocNr === true) out.rhdocNr = true;
+  /* v145: telas sem função própria fora do menu (só na tela) e leitura de apoio (leDep: só dentro do que o módulo já lê) */
+  const tn = lista(l.telasNao); if (tn && tn.length) out.telasNao = tn;
+  if (l.leDep && typeof l.leDep === 'object' && !Array.isArray(l.leDep)) { const m = {}; for (const [g, v] of Object.entries(l.leDep)) { if (!ID_OK.test(g)) continue; const x = lista(v); if (x && x.length) m[g] = x; } if (Object.keys(m).length) out.leDep = m; }
   return out;
 }
 /* nível de cada função sem o fn (o que o perfil já fazia): módulo que grava = cria, altera e exclui, menos o que o "so"
@@ -63,9 +66,18 @@ function implicito(p, g, c) {
   if (tem(p.w, g)) { if (p.so && Array.isArray(p.so[g]) && !p.so[g].includes(c)) return 'r'; if (Array.isArray(p.naoExclui) && p.naoExclui.includes(c)) return 'a'; return 'w'; }
   return tem(p.r, g) ? 'r' : 'n';
 }
-/* aplica fn e acoes ao perfil compilado p (muda p). o: {PERM, soLeitura, todos: [grupos]} */
+/* v145: fn por cima do nível de fábrica do perfil padrão (padFn), função a função */
+function mescla(pad, fn) {
+  const o = {};
+  for (const x of [pad, fn]) { if (!x || typeof x !== 'object' || Array.isArray(x)) continue; for (const [g, m] of Object.entries(x)) { if (!m || typeof m !== 'object' || Array.isArray(m)) continue; o[g] = Object.assign(o[g] || {}, m); } }
+  return o;
+}
+/* aplica fn e acoes ao perfil compilado p (muda p). o: {PERM, soLeitura, todos: [grupos]}
+   v145: perfil padrão com padFn (Gestor e Técnico de SST): o fn do ajuste vale por cima dele; leDep = o que continua
+   lido só como apoio das telas que o perfil usa (entra na dependência de leitura; nunca passa do que o módulo já lê) */
 function aplicar(p, fn, acoes, o) {
   o = o || {}; const PERM = o.PERM || {};
+  if (p && !p.custom && p.padFn && p.w !== '*') fn = mescla(p.padFn, fn);
   const an = Object.keys(sanAcoes(acoes)); if (an.length && p.w !== '*') p.acoesNao = an;
   const F = funcoes(PERM), f = sanFn(fn, F);
   if (!Object.keys(f).length || p.w === '*') return p;
@@ -97,6 +109,7 @@ function aplicar(p, fn, acoes, o) {
      as funções com acesso precisam (dependência, só leitura) */
   const dep = new Set();
   for (const [g, m] of Object.entries(fnNiv)) for (const [c, v] of Object.entries(m)) if (v !== 'n') (F[g][c] || [c]).forEach(x => dep.add(x));
+  if (p.leDep && typeof p.leDep === 'object') for (const l of Object.values(p.leDep)) if (Array.isArray(l)) l.forEach(x => { if (!FORA.has(x)) dep.add(x); });
   const L = leituraPorGrupo(PERM), leSo = Object.assign({}, p.leSo || {});
   for (const [g, m] of Object.entries(fnNiv)) {
     if (!Object.values(m).includes('n')) continue;
@@ -116,4 +129,4 @@ function ehCancelamento(c0, velho, novo) {
   if (c0 === 'lanc' && velho.pago && !novo.pago) return true; /* estorno da baixa */
   return false;
 }
-module.exports = { NIVS, ACOES, FORA, funcoes, leituraPorGrupo, sanFn, sanAcoes, sanLim, implicito, aplicar, acaoNegada, ehCancelamento };
+module.exports = { NIVS, ACOES, FORA, mescla, funcoes, leituraPorGrupo, sanFn, sanAcoes, sanLim, implicito, aplicar, acaoNegada, ehCancelamento };
