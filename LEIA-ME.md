@@ -343,6 +343,24 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 **Implantar.** Suba juntos `gestao/medapr.js`, `gestao/regras.js` e `gestao/public/index.html`, depois reinicie o serviço `gestao`. Não há variável nova nem tabela nova.
 
+## 6.8. Reabrir medição ao cliente (v144)
+
+**Para que serve.** Corrigir uma medição que já foi aprovada (ou até faturada) sem apagar nada: ela volta para rascunho, com o motivo, e a obra corrige e envia de novo para aprovação.
+
+**Quem reabre.** Quem aprova: quem grava em Contratos (Comercial) ou a diretoria, com a ação **Aprovar** ligada no perfil (Sistema › Perfis de acesso). O dono sempre pode. O botão **Reabrir** fica em Obras › Medições ao cliente (nas aprovadas e faturadas) e no novo quadro **Aprovadas e faturadas** de Comercial › Medições para aprovar. O motivo é obrigatório (pelo menos 5 letras).
+
+**O que acontece, conforme a situação.**
+- **Aprovada (ainda não faturada):** volta para rascunho com a situação **Reaberta**. A aprovação anterior deixa de valer (quem aprovou e quando saem da medição e ficam no histórico).
+- **Faturada, NFS-e ainda em rascunho:** além disso, o rascunho da NFS-e é **excluído** e a conta a receber da retenção é **cancelada** (fica no Financeiro como cancelada, com o motivo). Isso mexe em Notas e no Financeiro: só reabre quem também grava esses módulos (Fiscal com acesso a Contratos ou administrador). Para os outros, a tela explica quem pode.
+- **Faturada, NFS-e já emitida na prefeitura:** não reabre. Cancele a nota no sistema da prefeitura e registre o cancelamento em Fiscal › NFS-e (serviços) › Cancelar (o pedido é aprovado por outra pessoa do Financeiro). Com a NFS-e cancelada, Reabrir fica liberado: cancela a retenção e a NFS-e cancelada fica guardada no histórico da medição.
+- **Bloqueios com explicação:** retenção que já teve recebimento (estorne antes no Financeiro) e competência fechada da conta da retenção (um administrador reabre em Fiscal › Fechamento e exportação).
+
+**Depois de reaberta.** A obra vê "Reaberta", com quem reabriu, quando e o motivo. Ela edita e usa **Reenviar para aprovação**; daí segue o fluxo da seção 6.7. Quem lançou recebe o aviso pelo chat interno. A medição reaberta não se exclui (só o dono), para não perder o histórico. O boletim volta a sair com a marca **RASCUNHO – não aprovado** e traz o **Histórico da medição** (enviada, aprovada, reaberta, com os motivos). Em "Decididas nos últimos 30 dias" a reabertura também aparece.
+
+**Servidor.** Tudo passa pela rota `POST /api/med/reabrir` (`gestao/medapr.js`, ligada em `regras.js`), numa transação só: a medição, a exclusão da NFS-e em rascunho e o cancelamento da retenção são gravados juntos ou nada é gravado. Cada documento passa pelas regras de sempre (permissão do módulo, competência fechada, ação "Cancelar e estornar"). Os carimbos (`reabPor`, `reabEm`, `reabMotivo`), o histórico `fluxoHist` e a lista `nfseAnt` (NFS-e canceladas da medição) são do servidor. Pela gravação comum, uma medição aprovada ou faturada não volta para rascunho e não se exclui. A auditoria registra `MEDICAO_REABERTA` e as tentativas recusadas (`MEDICAO_REABRIR_RECUSADO`).
+
+**Implantar.** Suba juntos `gestao/medapr.js`, `gestao/regras.js` e `gestao/public/index.html` e reinicie o serviço `gestao`. Não há arquivo novo, variável nova nem tabela nova (o `Dockerfile` já copia o `medapr.js`).
+
 ## 7. Cotações com fornecedores (Compras › Cotações)
 
 - Cada fornecedor convidado recebe um link próprio, `https://seu-dominio/cotacao/<código>`, que abre **sem login**. Ele vê só os itens do pedido, o prazo e o local de entrega, nunca os preços dos outros, e informa preço, marca, frete, prazo, pagamento e validade.

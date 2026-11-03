@@ -979,6 +979,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   function regraMedCli(conta, req, velho, novo) {
     const v = velho || {}, vs = v.status || '', ns = novo.status || '';
     if (velho) { if (v.lancPor !== undefined) novo.lancPor = v.lancPor; else delete novo.lancPor; } else novo.lancPor = conta.id; /* quem lançou: só na criação */
+    if (MEDF.reabrindo && MEDF.reabrindo(novo)) return null; /* v144: reabertura montada pela rota POST /api/med/reabrir (medapr.js) */
     { const a = v.empLib, b = novo.empLib; /* liberação acima do empenho: só a diretoria, com justificativa */
       if (!igual(a, b) && b != null) {
         if (a && String(a.just || '') === String(b.just || '')) novo.empLib = a;
@@ -2184,6 +2185,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'pt' && s.length === 4 && s[2] === 'fa' && !(ehDono(conta) || gravaGrupo(conta, 'fin'))) return erro('Só o Financeiro altera o resumo de adiantamentos.');
     if (c0 === 'remessa' && velho.status !== 'cancelada' && !(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Cancele a remessa em vez de excluir.');
     if (c0 === 'epi' && velho.assin && !(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Entrega de EPI assinada não pode ser excluída.');
+    if (c0 === 'med' && s.length === 2 && !velho.ex && (velho.aprovSt === 'reaberta' || velho.status !== 'rascunho') && !ehDono(conta)) return erro(velho.status !== 'rascunho' ? 'Medição aprovada ou faturada não se exclui. Use Reabrir medição.' : 'Medição reaberta não se exclui: corrija e envie de novo para aprovação (o histórico da aprovação fica guardado).'); /* v144 */
     return null;
   }
   function depois(conta, req, metodo, p, antes, depois_, v) {
@@ -2196,10 +2198,13 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   /* =====================================================================
      ROTAS
      ===================================================================== */
+  /* v144: reabrir medição ao cliente (medapr.js › rotaReabrir; uma transação: medição, NFS-e em rascunho e retenção) */
+  const MEDR = require('./medapr.js').rotaReabrir({ doc, col, db, q, avisarDoc, depois, auditar, erro, ipDe, ehDono, ehDiretor, gravaGrupo, acaoNeg, pode, perfilPermite, gravacaoPermitida, excecaoGravacao, antesGravar, antesExcluir });
   async function rota(p, m, req, res, conta, u) {
     const R = async fn => { const b = await lerJson(req); const r = fn(b); if (r.reauth) { auditar(conta, req, 'PEDE_SENHA', p, null, null); if (END.exigirReauth(req, res)) return; return json(res, 409, { erro: 'Repita a ação.' }); } if (r.erro) return json(res, r.st || 403, { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro }); return json(res, 200, r); };
     if (m === 'POST' && (p === '/api/aprovar')) { await R(b => rotaAprovar(conta, req, b)); return true; }
     if (await P2Q.rota(p, m, req, res, conta)) return true; /* v141 */
+    if (m === 'POST' && p === '/api/med/reabrir') { const b = await lerJson(req), r = MEDR(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro } : r); return true; } /* v144 */
     if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }
     if (m === 'POST' && (p === '/api/competencia/fechar' || p === '/api/competencia/reabrir')) { await R(b => rotaCompetencia(p.endsWith('fechar') ? 'fechar' : 'reabrir', conta, req, b)); return true; }

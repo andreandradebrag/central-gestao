@@ -27941,8 +27941,8 @@ p6Css('.p6rp{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}.p6rp>.
 
 /* ---------- 2 e 3. medições ao cliente: projeto, filtro, envio e aprovação pelo Comercial ---------- */
 ui.med=Object.assign({ctr:'',st:'',proj:''},ui.med||{});ui.medapr={proj:''};
-const P6_MED_ST=[['rascunho','Rascunho','warn'],['enviada','Aguardando aprovação','acc'],['devolvida','Devolvida','neg'],['aprovada','Aprovada','acc'],['faturada','Faturada','pos']];
-const p6MedK=m=>!m?'':m.status==='rascunho'?(m.aprovSt==='enviada'||m.aprovSt==='devolvida'?m.aprovSt:'rascunho'):(m.status||'rascunho');
+const P6_MED_ST=[['rascunho','Rascunho','warn'],['enviada','Aguardando aprovação','acc'],['devolvida','Devolvida','neg'],['reaberta','Reaberta','warn'],['aprovada','Aprovada','acc'],['faturada','Faturada','pos']];
+const p6MedK=m=>!m?'':m.status==='rascunho'?(m.aprovSt==='enviada'||m.aprovSt==='devolvida'||m.aprovSt==='reaberta'?m.aprovSt:'rascunho'):(m.status||'rascunho');
 const p6MedSt=m=>{const k=p6MedK(m),x=P6_MED_ST.find(y=>y[0]===k);return x?[x[1],x[2]]:(MED_ST[m.status]||[m.status||'—','']);};
 const p6MedPid=m=>((m&&get('ctr',m.ctrId))||{}).projId||'';
 const p6Eu=u=>!!u&&!fzOutra(u);
@@ -27965,27 +27965,27 @@ function p6EmpBtns(m){try{if(m.status!=='rascunho')return '';const c=get('ctr',m
 function p6MedFiltra(f){return S.med.filter(m=>(!f.ctr||m.ctrId===f.ctr)&&(!f.proj||p6MedPid(m)===f.proj)&&(!f.st||p6MedK(m)===f.st)).sort((a,b)=>String(b.fim).localeCompare(String(a.fim)));}
 /* Obras › Medições ao cliente: lançar, enviar e acompanhar (sem Aprovar) */
 V.med=()=>{const f=ui.med,rows=p6MedFiltra(f);
-  const pend=p6MedPend().length,dev=S.med.filter(m=>p6MedK(m)==='devolvida').length;
+  const pend=p6MedPend().length,dev=S.med.filter(m=>p6MedK(m)==='devolvida'||p6MedK(m)==='reaberta').length;
   return pageHead('Medições','Boletins de medição por contrato: quantidade de cada item no período, acumulado, reajuste e retenção. A obra prepara e envia para aprovação; o Comercial aprova ou devolve com o motivo. Depois de aprovada, ao faturar, a NFS-e é criada em rascunho.')+
-  '<div class="stack">'+(pend||dev?'<div class="note">'+(pend?pend+' medição(ões) aguardando aprovação do Comercial. ':'')+(dev?dev+' devolvida(s) para correção: veja o motivo na situação, corrija e envie de novo.':'')+'</div>':'')+
+  '<div class="stack">'+(pend||dev?'<div class="note">'+(pend?pend+' medição(ões) aguardando aprovação do Comercial. ':'')+(dev?dev+' devolvida(s) ou reaberta(s) para correção: veja o motivo na situação, corrija e envie de novo.':'')+'</div>':'')+
   '<div class="bar"><label class="f"><span>Projeto</span><select id="s_med_proj" data-filter="med.proj">'+opt(p6ProjOpts(),f.proj,'Todos')+'</select></label><label class="f grow"><span>Contrato</span><select id="s_med_ctr" data-filter="med.ctr">'+opt(S.ctr.map(c=>[c.id,c.numero+' · '+parcNome(c.parcId)]),f.ctr,'Todos')+'</select></label><label class="f"><span>Situação</span><select id="s_med_st" data-filter="med.st">'+opt(P6_MED_ST.map(x=>[x[0],x[1]]),f.st,'Todas')+'</select></label></div>'+
   '<div class="tw"><table style="min-width:980px"><thead><tr><th>Projeto</th><th>Contrato</th><th>Nº</th><th>Período</th><th class="num">A faturar</th><th class="num">Retenção</th><th>Situação</th><th></th></tr></thead><tbody>'+
   (rows.length?rows.map(m=>{const c=get('ctr',m.ctrId)||{},t=medTot(m,c),k=p6MedK(m);
     const acts='<button class="btn sm" data-act="medVer" data-id="'+m.id+'">Boletim</button>'+
-      (k==='rascunho'||k==='devolvida'?'<button class="btn sm" data-act="medEdit" data-id="'+m.id+'">Editar</button>'+p6EmpBtns(m)+'<button class="btn sm pri" data-act="p6MedEnviar" data-id="'+m.id+'">'+(k==='devolvida'?'Reenviar para aprovação':'Enviar para aprovação')+'</button><button class="btn sm dng" data-act="medDel" data-id="'+m.id+'">Excluir</button>':
+      (k==='rascunho'||k==='devolvida'||k==='reaberta'?'<button class="btn sm" data-act="medEdit" data-id="'+m.id+'">Editar</button>'+p6EmpBtns(m)+'<button class="btn sm pri" data-act="p6MedEnviar" data-id="'+m.id+'">'+(k==='devolvida'||k==='reaberta'?'Reenviar para aprovação':'Enviar para aprovação')+'</button>'+(k==='reaberta'?'':'<button class="btn sm dng" data-act="medDel" data-id="'+m.id+'">Excluir</button>'):
        k==='enviada'?p6EmpBtns(m)+'<span class="p6nota">com o Comercial</span>':
-       k==='aprovada'?'<button class="btn sm pri" data-act="medFaturar" data-id="'+m.id+'">Faturar</button>':'');
+       k==='aprovada'?'<button class="btn sm pri" data-act="medFaturar" data-id="'+m.id+'">Faturar</button>'+rmdBtn(m):k==='faturada'?rmdBtn(m):'');
     return '<tr><td>'+p6ProjCel(m)+'</td><td>'+esc(c.numero||'—')+'<div class="sub">'+esc(parcNome(c.parcId))+'</div></td><td>'+esc(m.numero)+'</td><td class="mono">'+fmtDate(m.ini)+' a '+fmtDate(m.fim)+'</td><td class="num">'+money(t.fat)+'</td><td class="num">'+money(t.ret)+'</td><td>'+p6SitCel(m)+'</td><td class="act">'+acts+'</td></tr>';}).join(''):emptyRow(8,'Nenhuma medição. Abra um contrato e clique em Medir.'))+'</tbody></table></div></div>';};
 /* Comercial › Medições para aprovar */
 novaTab('medapr','Medições para aprovar','Comercial','ctr','comer','ctr');
 TAB_COLS.medapr=['med'];DBW_TABCOLS.medapr=['med','ctr','proj','nfse'];DBW_TABCOLS.med=[...new Set((DBW_TABCOLS.med||[]).concat(['med','ctr','proj','nfse']))];
 V.medapr=()=>{const f=ui.medapr,pode=p6PodeAprovMed();
   const pend=p6MedPend().filter(m=>!f.proj||p6MedPid(m)===f.proj).sort((a,b)=>(+a.envEm||0)-(+b.envEm||0));
-  const lim=Date.now()-30*864e5,dec=[];S.med.forEach(m=>(m.fluxoHist||[]).forEach(x=>{if((x.ac==='aprovada'||x.ac==='devolvida')&&+x.em>=lim&&(!f.proj||p6MedPid(m)===f.proj))dec.push({m,x});}));dec.sort((a,b)=>b.x.em-a.x.em);
-  const apr=S.med.filter(m=>m.status==='aprovada'),dev=S.med.filter(m=>p6MedK(m)==='devolvida');
+  const lim=Date.now()-30*864e5,dec=[];S.med.forEach(m=>(m.fluxoHist||[]).forEach(x=>{if((x.ac==='aprovada'||x.ac==='devolvida'||x.ac==='reaberta')&&+x.em>=lim&&(!f.proj||p6MedPid(m)===f.proj))dec.push({m,x});}));dec.sort((a,b)=>b.x.em-a.x.em);
+  const apr=S.med.filter(m=>m.status==='aprovada'),dev=S.med.filter(m=>p6MedK(m)==='devolvida'||p6MedK(m)==='reaberta');
   const pid0=pend.map(p6MedPid);
   return pageHead('Medições para aprovar','Boletins de medição enviados pelas obras. Confira o boletim e aprove (o faturamento fica liberado e a NFS-e é criada em rascunho) ou devolva com o motivo, que vai para o histórico e para quem lançou. Quem lançou ou enviou a medição não a aprova.')+
-  '<div class="stack"><div class="kpis">'+kpi('Aguardando aprovação',String(pend.length),money(sum(pend,m=>medTot(m).fat)),pend.length?'warn':'')+kpi('Devolvidas para correção',String(dev.length),'com a obra',dev.length?'neg':'')+kpi('Aprovadas sem faturar',String(apr.length),money(sum(apr,m=>medTot(m).fat)))+'</div>'+
+  '<div class="stack"><div class="kpis">'+kpi('Aguardando aprovação',String(pend.length),money(sum(pend,m=>medTot(m).fat)),pend.length?'warn':'')+kpi('Devolvidas ou reabertas',String(dev.length),'com a obra',dev.length?'neg':'')+kpi('Aprovadas sem faturar',String(apr.length),money(sum(apr,m=>medTot(m).fat)))+'</div>'+
   (pode?'':'<div class="note">Seu perfil consulta esta lista. Quem aprova é quem grava em Contratos (Comercial) ou a diretoria.</div>')+
   '<div class="bar"><label class="f"><span>Projeto</span><select id="s_medapr_proj" data-filter="medapr.proj">'+opt(p6ProjOpts().filter(o=>pid0.includes(o[0])||o[0]===f.proj),f.proj,'Todos')+'</select></label></div>'+
   '<div class="tw"><table style="min-width:980px"><thead><tr><th>Projeto</th><th>Contrato</th><th>Nº</th><th>Período</th><th class="num">A faturar</th><th>Enviada</th><th>Situação</th><th></th></tr></thead><tbody>'+
@@ -27993,7 +27993,7 @@ V.medapr=()=>{const f=ui.medapr,pode=p6PodeAprovMed();
     const acts='<button class="btn sm" data-act="medVer" data-id="'+m.id+'">Boletim</button>'+p6EmpBtns(m)+
       (minha&&!me.owner?'<span class="p6nota" title="Quem lançou ou enviou não aprova">outra pessoa aprova</span>':'<button class="btn sm pri" data-act="p6MedAprovar" data-id="'+m.id+'">Aprovar</button><button class="btn sm" data-act="p6MedDevolver" data-id="'+m.id+'">Devolver</button>');
     return '<tr><td>'+p6ProjCel(m)+'</td><td>'+esc(c.numero||'—')+'<div class="sub">'+esc(parcNome(c.parcId))+'</div></td><td>'+esc(m.numero)+'</td><td class="mono">'+fmtDate(m.ini)+' a '+fmtDate(m.fim)+'</td><td class="num">'+money(t.fat)+(t.ret?'<div class="sub">retenção '+money(t.ret)+'</div>':'')+'</td><td>'+(m.envEm?fmtDT(m.envEm):'—')+'<div class="sub">'+esc(m.envPor?nameOf(m.envPor):(fzMedAutor(m)?nameOf(fzMedAutor(m)):''))+'</div></td><td>'+p6SitCel(m)+'</td><td class="act">'+acts+'</td></tr>';}).join(''):emptyRow(8,'Nenhuma medição aguardando aprovação.'))+'</tbody></table></div>'+
-  '<div class="card"><h2>Decididas nos últimos 30 dias</h2>'+(dec.length?'<div class="list">'+dec.slice(0,20).map(({m,x})=>{const c=get('ctr',m.ctrId)||{};return '<div class="li"><div><div class="t">'+esc(p6ProjCurto(p6MedPid(m),true))+' · medição nº '+esc(m.numero)+' · contrato '+esc(c.numero||'—')+'</div><div class="sub">'+(x.ac==='aprovada'?'Aprovada':'Devolvida')+' por '+esc(p6Nome(x.por))+' em '+fmtDT(x.em)+(x.motivo?' · motivo: '+esc(x.motivo):'')+'</div></div>'+pill(x.ac==='aprovada'?'Aprovada':'Devolvida',x.ac==='aprovada'?'pos':'neg')+'</div>';}).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma decisão no período.</p>')+'</div></div>';};
+  '<div class="card"><h2>Decididas nos últimos 30 dias</h2>'+(dec.length?'<div class="list">'+dec.slice(0,20).map(({m,x})=>{const c=get('ctr',m.ctrId)||{};return '<div class="li"><div><div class="t">'+esc(p6ProjCurto(p6MedPid(m),true))+' · medição nº '+esc(m.numero)+' · contrato '+esc(c.numero||'—')+'</div><div class="sub">'+(RMD_AC[x.ac]||x.ac)+' por '+esc(p6Nome(x.por))+' em '+fmtDT(x.em)+(x.motivo?' · motivo: '+esc(x.motivo):'')+'</div></div>'+pill(RMD_AC[x.ac]||x.ac,x.ac==='aprovada'?'pos':x.ac==='reaberta'?'warn':'neg')+'</div>';}).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma decisão no período.</p>')+'</div></div>';};
 /* enviar para aprovação (Obras) */
 A.p6MedEnviar=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'){toast('Só medições em rascunho são enviadas para aprovação.','neg');return;}
   if(m.aprovSt==='enviada'){toast('Esta medição já está aguardando aprovação.','neg');return;}
@@ -28083,9 +28083,117 @@ const p6PodeCriar=(col,act)=>{try{if(ACT_GROUP[act]&&!mayW(ACT_GROUP[act]))retur
   const b=(p6PodeCriar('rda','rdaNovo')?'<button class="btn" data-act="rdaNovo" title="Novo relatório diário de atividades (RDA) do técnico">Emissão de RDA</button>':'')+(p6PodeCriar('epi','epiNovo')?'<button class="btn" data-act="epiNovo" title="Nova entrega de EPI (ficha do colaborador)">Entrega de EPI</button>':'');
   const k='data-tab="acid">Registrar ocorrência</button>';if(b&&h.indexOf(k)>=0)h=h.replace(k,k+b);}catch(e){}return h;};}
 
+/* ===== v144 (relatorios/feito_v144_reabmed.md): Reabrir medição ao cliente.
+   Quem aprova (quem grava Contratos ou a diretoria, com a ação "Aprovar" do perfil; o dono sempre) volta uma medição
+   aprovada ou faturada para rascunho, com o motivo (aprovSt 'reaberta'; a obra corrige e envia de novo):
+     aprovada ─────────────────────────────Reabrir (motivo)──▶ rascunho/reaberta ──Enviar para aprovação──▶ fluxo da v143
+     faturada, NFS-e em rascunho ──────────Reabrir──▶ exclui o rascunho da NFS-e e cancela a retenção ──▶ rascunho/reaberta
+     faturada, NFS-e emitida ──────────────bloqueia: cancele na prefeitura e registre o cancelamento (Fiscal › NFS-e)
+     faturada, NFS-e cancelada ────────────Reabrir──▶ cancela a retenção; a NFS-e cancelada fica em nfseAnt ──▶ rascunho
+   Com servidor próprio tudo vai numa transação só (POST /api/med/reabrir, deploy/gestao/medapr.js › rotaReabrir), que
+   confere cada passo e carimba reabPor/reabEm/reabMotivo e o fluxoHist. Sem servidor (página publicada), a tela grava na
+   ordem NFS-e → retenção → medição: se parar no meio, a medição continua faturada e Reabrir de novo termina o que faltou.
+   Este módulo entra pelo patch115.py (antes do marcador v14, logo depois de new_parte6.js). ===== */
+const RMD={env:new Set()};
+const RMD_QUEM_FAT='Reabrir uma medição faturada exclui o rascunho da NFS-e (módulo Notas) e cancela a conta a receber da retenção (Financeiro). Peça a quem emite as notas: Fiscal com acesso a Contratos ou um administrador.';
+const rmdLetras=t=>String(t||'').replace(/[^A-Za-zÀ-ÿ]/g,'').length;
+const rmdMes=m=>String(m).slice(5,7)+'/'+String(m).slice(0,4);
+/* o que a reabertura vai fazer (passos) ou por que ainda não pode (bloq) */
+function rmdPlano(m){const o={bloq:[],passos:[],nfse:null,nfseDel:false,nfseCanc:false,ret:null};if(!m)return o;
+  if(m.status==='faturada'){
+    const n=m.nfseId?get('nfse',m.nfseId):null;
+    const emit=(n&&n.status!=='rascunho'&&n.status!=='cancelada')?n:S.nfse.find(x=>x.medId===m.id&&x.status!=='rascunho'&&x.status!=='cancelada');
+    if(emit){o.bloq.push('A NFS-e '+(emit.numOficial||emit.numero||'')+' desta medição já foi emitida na prefeitura.','Para reabrir: cancele a nota no sistema da prefeitura e registre o cancelamento aqui, em Fiscal › NFS-e (serviços) › Cancelar (o pedido de cancelamento é aprovado por outra pessoa do Financeiro). Depois de cancelada, a medição pode ser reaberta.');return o;}
+    if(n&&n.status==='rascunho'){const lk=S.lanc.find(l=>l.nfseId===n.id&&l.status!=='cancelado');
+      if(lk)o.bloq.push('O rascunho da NFS-e tem uma conta a receber ligada ('+(lk.desc||'')+', '+money(lk.valor)+'). Cancele essa conta no Financeiro antes de reabrir.');
+      o.nfse=n;o.nfseDel=true;o.passos.push('O rascunho da NFS-e '+(n.numero?'RPS '+n.numero+' ':'')+'('+money(n.valor)+') é excluído.');}
+    else if(n&&n.status==='cancelada'){o.nfse=n;o.nfseCanc=true;o.passos.push('A NFS-e '+(n.numOficial||n.numero||'')+' já está cancelada e fica guardada no histórico da medição.');}
+    const l=m.retLancId?get('lanc',m.retLancId):null;
+    if(l&&l.status!=='cancelado'){
+      if(l.pago)o.bloq.push('A conta a receber da retenção ('+money(l.valor)+') já tem recebimento em '+fmtDate(l.pago)+'. Estorne o recebimento no Financeiro antes de reabrir a medição.');
+      else{o.ret=l;o.passos.push('A conta a receber da retenção contratual ('+money(l.valor)+', vence '+fmtDate(l.venc)+') é cancelada (fica no Financeiro como cancelada).');
+        const c=l.comp||ym(l.venc);if(c&&fzFechados().has(c))o.bloq.push('A competência '+rmdMes(c)+' da conta a receber da retenção está fechada. Um administrador precisa reabrir em Fiscal › Fechamento e exportação, informando o motivo; depois a medição pode ser reaberta.');}}
+  }
+  o.passos.push('A medição volta para rascunho (Reaberta). A aprovação anterior deixa de valer: a obra corrige e envia de novo para aprovação. O motivo fica no histórico e vai para quem lançou pelo chat interno.');
+  return o;}
+/* faturada: mexe em Notas (exclui a NFS-e em rascunho) e no Financeiro (cancela a retenção) */
+/* quem não lê Notas ou o Financeiro nem enxerga a NFS-e e a retenção: pelo nfseId/retLancId a tela sabe que precisa */
+function rmdPodeFat(o,m){if(store.mode!=='db'||me.owner)return '';
+  if(m&&m.nfseId&&(!o.nfse||o.nfseDel)&&(!mayW('nf')||(o.nfseDel&&pfnPodeGravar('nfse',o.nfse,true))))return 'nf';
+  if(m&&m.retLancId&&(o.ret||!get('lanc',m.retLancId))&&(!mayW('fin')||(o.ret&&pfnPodeGravar('lanc',o.ret,false))))return 'fin';
+  if(o.ret&&!pfnAcaoOk('cancelar'))return 'cancelar';
+  return '';}
+function rmdAvisa(m,mot,txtFat){const c=get('ctr',m.ctrId)||{};
+  const txt='Medição nº '+m.numero+' do contrato '+(c.numero||'')+' foi reaberta por '+nameOf(actorId())+'. Motivo: '+String(mot).slice(0,300)+'.'+(txtFat?' '+txtFat:'')+' Corrija em Obras › Medições ao cliente e envie de novo para aprovação.';
+  [...new Set([fzMedAutor(m),m.envPor].filter(Boolean))].forEach(u=>{try{P6.aviso(u,txt);}catch(e){}});}
+/* sem servidor próprio: grava na ordem segura (a medição por último) */
+function rmdLocal(m,o,mot){const agora=Date.now(),ev={motivo:mot,de:m.status};
+  if(o.nfseDel){if(get('nfse',o.nfse.id))del('nfse',o.nfse.id);ev.nfse={id:o.nfse.id,num:o.nfse.numero||'',st:'excluida'};}
+  else if(o.nfseCanc)ev.nfse={id:o.nfse.id,num:o.nfse.numOficial||o.nfse.numero||'',st:'cancelada'};
+  if(o.ret){const l=get('lanc',o.ret.id);if(l&&l.status!=='cancelado')put('lanc',Object.assign(cl(l),{status:'cancelado',cancel:{motivo:'Medição nº '+m.numero+' reaberta: '+mot,por:actorId(),em:agora},obs:[l.obs,'Cancelado em '+fmtDate(todayStr())+' (medição reaberta): '+mot].filter(Boolean).join(' ')}));ev.ret={id:o.ret.id,valor:+o.ret.valor||0,st:'cancelada'};}
+  const atual=get('med',m.id)||m,n=cl(atual),ant=(Array.isArray(atual.nfseAnt)?atual.nfseAnt:[]).slice(-20);
+  if(o.nfseCanc&&!ant.includes(o.nfse.id))ant.push(o.nfse.id);
+  ['aprovPor','aprovEm','aprovIp','nfseId','retLancId','fatEm'].forEach(k=>delete n[k]);
+  const h=p6Hist(atual,'reaberta',mot);Object.assign(h[h.length-1],ev);
+  Object.assign(n,{status:'rascunho',aprovSt:'reaberta',reabPor:actorId(),reabEm:agora,reabMotivo:mot,fluxoHist:h});if(ant.length)n.nfseAnt=ant;else delete n.nfseAnt;
+  put('med',n);return true;}
+function rmdFeito(m,o,mot){const fe=[o.nfseDel?'o rascunho da NFS-e foi excluído':'',o.ret?'a conta a receber da retenção foi cancelada':''].filter(Boolean);
+  rmdAvisa(m,mot,fe.length?(fe.join(' e ').replace(/^./,c=>c.toUpperCase())+'.'):'');
+  toast('Medição reaberta: voltou para rascunho'+(fe.length?'; '+fe.join(' e '):'')+'.','pos');}
+A.p6MedReabrir=d=>{const m=get('med',d.id);
+  if(!m||(m.status!=='aprovada'&&m.status!=='faturada')){toast('Só medição aprovada ou faturada é reaberta.','neg');return;}
+  if(!p6PodeAprovMed()){msgModal('Seu perfil não reabre medição ao cliente',['Quem reabre é quem aprova: quem grava em Contratos (Comercial) ou a diretoria'+(typeof pfnAcaoOk==='function'&&!pfnAcaoOk('aprovar')?', com a ação "Aprovar" ligada no perfil (Sistema › Perfis de acesso)':'')+'.']);return;}
+  if(RMD.env.has(m.id)){toast('A reabertura desta medição já está sendo gravada. Aguarde.','neg');return;}
+  const o=rmdPlano(m);
+  if(o.bloq.length){msgModal('Esta medição ainda não pode ser reaberta',o.bloq);return;}
+  const sem=m.status==='faturada'?rmdPodeFat(o,m):'';
+  if(sem){msgModal('Seu perfil não desfaz o faturamento desta medição',[sem==='cancelar'?'Reabrir cancela a conta a receber da retenção, e o seu perfil está sem a ação "Cancelar e estornar" (Sistema › Perfis de acesso).':'',RMD_QUEM_FAT].filter(Boolean));return;}
+  const c=get('ctr',m.ctrId)||{};
+  modal({title:'Reabrir a medição nº '+m.numero,body:'<p style="margin:0 0 8px">Contrato '+esc(c.numero||'—')+' · '+esc(parcNome(c.parcId))+' · '+money(medTot(m,c).fat)+' · '+esc(p6MedSt(m)[0])+'</p>'+
+    '<div class="note" style="margin:0 0 10px"><b>O que acontece</b><ul style="margin:6px 0 0;padding-left:18px">'+o.passos.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul></div>'+
+    '<label class="f full"><span>Motivo da reabertura *</span><textarea id="rmdMot" rows="3" maxlength="500" placeholder="O que precisa ser corrigido no boletim"></textarea></label>',
+    saveLabel:'Reabrir medição',save:()=>{const mot=String(($('#rmdMot')||{}).value||'').trim().slice(0,500);
+      if(rmdLetras(mot)<5){toast('Escreva o motivo da reabertura (pelo menos 5 letras).','neg');return false;}
+      const atual=get('med',m.id);if(!atual||(atual.status!=='aprovada'&&atual.status!=='faturada')){toast('A medição mudou enquanto a janela estava aberta. Atualize a tela.','neg');return;}
+      const o2=rmdPlano(atual);if(o2.bloq.length){msgModal('Esta medição ainda não pode ser reaberta',o2.bloq);return;}
+      if(typeof SEGA_SRV==='function'&&SEGA_SRV()){RMD.env.add(m.id);
+        segaPost('/api/med/reabrir',{id:m.id,motivo:mot}).then(j=>{(j.docs||[]).forEach(x=>{if(x&&x.col&&x.data)segaLocal(x.col,Object.assign({},x.data,{id:x.id}));});(j.dels||[]).forEach(x=>segaTira(x.col,x.id));rmdFeito(atual,o2,mot);})
+          .catch(e=>msgModal('A medição não foi reaberta',[e.message||'Erro no servidor.','Nada foi alterado: a medição, a NFS-e e a conta da retenção continuam como estavam.'])).finally(()=>RMD.env.delete(m.id));return;}
+      rmdLocal(atual,o2,mot);rmdFeito(atual,o2,mot);}});};
+/* reaberta: não se exclui (o histórico da aprovação e da NFS-e cancelada fica guardado); o dono pode */
+{const e0=A.medDel;A.medDel=d=>{const m=get('med',d.id);if(m&&m.status==='rascunho'&&m.aprovSt==='reaberta'&&!me.owner){toast('Medição reaberta não se exclui: corrija e envie de novo para aprovação.','neg');return;}return e0(d);};}
+/* situação: motivo da reabertura embaixo, como o da devolução */
+{const f0=p6SitCel;p6SitCel=function(m){let h=f0.apply(this,arguments);try{if(p6MedK(m)==='reaberta'){const t=String(m.reabMotivo||'');
+  h=h.replace(/(<\/span>)/,'$1'+(m.reabEm?'<span class="p6tag">reaberta em '+fmtDT(m.reabEm).slice(0,10)+(m.reabPor?' por '+esc(nameOf(m.reabPor)):'')+'</span>':'')+(t?'<span class="p6mot" title="'+esc(t)+'">Motivo: '+esc(t.slice(0,120))+(t.length>120?'…':'')+'</span>':''));}}catch(e){}return h;};}
+/* boletim: "Aprovado por — (reaberta…)" e o histórico da medição quando houve reabertura */
+{const f0=p6MedAud;p6MedAud=function(m){const h=f0.apply(this,arguments);if(p6MedK(m)!=='reaberta')return h;
+  return h.replace('(não aprovado)','(reaberta para correção'+(m.reabEm?' em '+fmtDT(m.reabEm):'')+(m.reabPor?' por '+esc(p6Nome(m.reabPor)):'')+'; a aprovação anterior não vale)');};}
+const RMD_AC={enviada:'Enviada para aprovação',devolvida:'Devolvida',aprovada:'Aprovada',reaberta:'Reaberta'};
+function rmdHistHtml(m){const h=Array.isArray(m&&m.fluxoHist)?m.fluxoHist:[];if(!h.some(x=>x&&x.ac==='reaberta'))return '';
+  return '<div class="doc-hist nobreak" style="margin-top:12px;font-size:11.5px;line-height:1.45;color:#111a27"><div style="color:#586379;margin-bottom:2px">Histórico da medição</div>'+
+    h.map(x=>'<div>'+(x.em?fmtDT(x.em):'—')+' · <b>'+esc(RMD_AC[x.ac]||x.ac||'')+'</b> por '+esc(p6Nome(x.por))+(x.motivo?' · motivo: '+esc(x.motivo):'')+
+      (x.ac==='reaberta'&&x.nfse?' · NFS-e '+esc(x.nfse.num||'')+(x.nfse.st==='excluida'?' (rascunho excluído)':' (cancelada)'):'')+(x.ac==='reaberta'&&x.ret?' · retenção de '+money(x.ret.valor)+' cancelada':'')+'</div>').join('')+'</div>';}
+{const d0=docHtml;docHtml=function(o){let h=d0.apply(this,arguments);try{const m=o&&o.p6med&&get('med',o.p6med.id),hh=m&&rmdHistHtml(m);if(!hh)return h;
+  const f='<div class="doc-f nobreak">';if(h.indexOf(f)>=0)h=h.replace(f,hh+f);}catch(e){}return h;};}
+/* Comercial › Medições para aprovar: aprovadas e faturadas, com Reabrir */
+function rmdBtn(m){return p6PodeAprovMed()&&(m.status==='aprovada'||m.status==='faturada')?'<button class="btn sm" data-act="p6MedReabrir" data-id="'+m.id+'" title="Volta a medição para rascunho, com o motivo">Reabrir</button>':'';}
+{const v0=V.medapr;V.medapr=function(){let h=v0.apply(this,arguments);try{const f=ui.medapr||{};
+  const L=S.med.filter(m=>(m.status==='aprovada'||m.status==='faturada')&&(!f.proj||p6MedPid(m)===f.proj)).sort((a,b)=>(+b.aprovEm||0)-(+a.aprovEm||0)||String(b.fim).localeCompare(String(a.fim))).slice(0,30);
+  const card='<div class="card"><h2>Aprovadas e faturadas</h2><p class="sub" style="margin:0 0 8px">Precisa corrigir uma medição já aprovada? Use Reabrir: ela volta para rascunho com o motivo. Se já foi faturada, o rascunho da NFS-e é excluído e a retenção cancelada; com a NFS-e emitida, cancele a nota antes.</p>'+
+    (L.length?'<div class="tw"><table style="min-width:0!important"><thead><tr><th>Projeto</th><th>Contrato</th><th>Nº</th><th class="num">A faturar</th><th>Situação</th><th></th></tr></thead><tbody>'+L.map(m=>{const c=get('ctr',m.ctrId)||{};
+      return '<tr><td>'+p6ProjCel(m)+'</td><td>'+esc(c.numero||'—')+'</td><td>'+esc(m.numero)+'</td><td class="num">'+money(medTot(m,c).fat)+'</td><td>'+p6SitCel(m)+'</td><td class="act"><button class="btn sm" data-act="medVer" data-id="'+m.id+'">Boletim</button>'+rmdBtn(m)+'</td></tr>';}).join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Nenhuma medição aprovada ou faturada.</p>')+'</div>';
+  const k='<div class="card"><h2>Decididas nos últimos 30 dias</h2>';if(h.indexOf(k)>=0)h=h.replace(k,card+k);}catch(e){}return h;};}
+/* conferência medições x NFS-e: a NFS-e cancelada de uma medição reaberta não é "avulsa" */
+{const f0=fzNfseAvulsas;fzNfseAvulsas=function(){const r=f0.apply(this,arguments);try{const ant=new Set();S.med.forEach(m=>(m.nfseAnt||[]).forEach(i=>ant.add(i)));return ant.size?r.filter(n=>!ant.has(n.id)):r;}catch(e){return r;}};}
+Object.assign(ACT_GROUP,{p6MedReabrir:'ctr'});
+/* v142: Reabrir conta como a ação "Aprovar"; o cancelamento da retenção, como "Cancelar e estornar" (conferido acima e no servidor) */
+if(typeof PFN_ACT!=='undefined'&&PFN_ACT&&Array.isArray(PFN_ACT.aprovar)&&!PFN_ACT.aprovar.includes('p6MedReabrir'))PFN_ACT.aprovar.push('p6MedReabrir');
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{p6MedReabrir:'Volta a medição aprovada ou faturada para rascunho, com o motivo. Faturada: exclui o rascunho da NFS-e e cancela a retenção.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='143',APP_DATA='2026-11-03';
+const APP_VER='144',APP_DATA='2026-11-03';
 const CHANGELOG=[
+  ['144','2026-11-03',['Medições ao cliente: botão Reabrir para medição aprovada ou faturada, com motivo, histórico e aviso a quem lançou. A medição volta para rascunho e a obra corrige e reenvia.', 'Se a medição já foi faturada com a NFS-e em rascunho, o rascunho da NFS-e é excluído e a conta da retenção é cancelada junto, tudo de uma vez pelo servidor. NFS-e já emitida precisa ser cancelada antes; competência fechada e retenção já recebida bloqueiam.']],
   ['143','2026-11-03',['Medições ao cliente: a obra prepara o boletim e envia para aprovação; o Comercial aprova ou devolve com motivo, na nova aba Medições para aprovar. Quem lançou não aprova. A lista tem a coluna e o filtro Projeto.', 'Boletim de medição com Emitido por e Aprovado por, e marca RASCUNHO enquanto não for aprovado.', 'SST: Gestão da CIPA com abas (Visão geral, Membros, Reuniões e atas, Plano de trabalho); Ambiental passa para o menu do SST; atalhos Emissão de RDA e Entrega de EPI no painel. Resultado da obra mais compacto.']],
   ['142','2026-11-03',['Perfis de acesso por função: cada módulo abre as funções (telas) dele, com Sem acesso, Consulta, Cria e altera ou Cria, altera e exclui. O nível do módulo preenche todas de uma vez.', 'Ações sensíveis à parte em cada perfil: aprovar, lançar nota de entrada, cancelar/estornar e exportar. Telas sem acesso somem do menu e os botões de gravar e excluir somem conforme o nível. O servidor aplica as mesmas regras.', 'Perfis padrão do sistema agora podem ser editados (menos o Administrador), com o botão Voltar ao original. Novo botão Ver como, que mostra o sistema como aquele perfil enxerga.']],
   ['141','2026-10-31',["Recebimento de notas: nova fila 'O que precisa de ação', com o motivo, quem deve agir e o botão da ação, e filtro 'Minhas pendências'.", 'A nota que confere com o pedido e o recebimento é lançada sozinha quando um Fiscal ou administrador está com o sistema aberto (dá para desligar). Compra pequena sem pedido, até R$ 1.000, exige categoria, projeto e aprovação do nível 1.', 'NFS-e de fornecedor e empreiteiro: importa o XML ou o PDF, liga à medição e confere as retenções. Devolução ao fornecedor: baixa o estoque e abate ou cancela a conta; se já foi paga, gera crédito.', 'Avisos automáticos no chat e por e-mail: solicitação para aprovar, pedido aprovado, material chegou e nota parada. O pedido vai ao fornecedor por e-mail com o PDF anexo.']],
