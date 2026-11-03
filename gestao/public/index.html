@@ -3265,6 +3265,9 @@ function setMark(c){
 /* ---------- decoração das telas: Histórico, Visualizar, Visualizar / PDF ---------- */
 const DOC_ROW={ped:['ped','pedPrint'],psv:['psv','psvPrint'],sc:['sc','scPrint'],sep:['sep','sepPrint'],cot:['cot','cotPrint']};
 const NO_REPORT=new Set(['painel','cfg','usr']);
+try{if(!document.getElementById('css_rowacts2')){const st=document.createElement('style');st.id='css_rowacts2';
+  st.textContent='td.rowacts2{white-space:normal!important;min-width:300px;max-width:360px;text-align:right}td.rowacts2>.btn{margin:2px 0 2px 4px}@media (max-width:700px){td.rowacts2{min-width:0;max-width:none;text-align:left}}';
+  document.head.appendChild(st);}}catch(e){}
 function addHistBtns(html,tab){
   if(typeof html!=='string'||html.indexOf('class="ph"')<0)return html;
   const cols=TAB_COLS[tab]||[],dr=DOC_ROW[tab];
@@ -3284,7 +3287,10 @@ function addHistBtns(html,tab){
         else if(t0>=0){const g=tr.indexOf('>',t0)+1;tr=tr.slice(0,g)+vis+tr.slice(g);}
         else add=vis+add;}
       const k2=tr.lastIndexOf('</td>');
-      return add?tr.slice(0,k2)+add+tr.slice(k2):tr;
+      if(add)tr=tr.slice(0,k2)+add+tr.slice(k2);
+      if(dr){const t1=tr.lastIndexOf('<td');if(t1>=0&&tr.indexOf('>',t1)>0){const tag=tr.slice(t1,tr.indexOf('>',t1)+1);
+        if(!/rowacts2/.test(tag)){const nt=/class="/.test(tag)?tag.replace('class="','class="rowacts2 '):tag.replace('<td','<td class="rowacts2"');tr=tr.slice(0,t1)+nt+tr.slice(t1+tag.length);}}}
+      return tr;
     });
   }
   let extra='';
@@ -28196,8 +28202,9 @@ if(typeof PFN_ACT!=='undefined'&&PFN_ACT&&Array.isArray(PFN_ACT.aprovar)&&!PFN_A
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{p6MedReabrir:'Volta a medição aprovada ou faturada para rascunho, com o motivo. Faturada: exclui o rascunho da NFS-e e cancela a retenção.'});
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='144.1',APP_DATA='2026-11-03';
+const APP_VER='144.2',APP_DATA='2026-11-03';
 const CHANGELOG=[
+  ['144.2','2026-11-03',['Pedidos de compra, solicitações, cotações, separação e pedidos de serviço: os botões de cada linha ficam em duas linhas, para todos aparecerem sem rolar a tabela para o lado.']],
   ['144.1','2026-11-03',['Pedidos de compra e demais documentos (solicitação, cotação, separação, pedido de serviço): o botão Visualizar passa a ser o primeiro da linha, para ver o documento sem entrar em Editar. Antes ele ficava no fim da linha e saía da tela.']],
   ['144','2026-11-03',['Medições ao cliente: botão Reabrir para medição aprovada ou faturada, com motivo, histórico e aviso a quem lançou. A medição volta para rascunho e a obra corrige e reenvia.', 'Se a medição já foi faturada com a NFS-e em rascunho, o rascunho da NFS-e é excluído e a conta da retenção é cancelada junto, tudo de uma vez pelo servidor. NFS-e já emitida precisa ser cancelada antes; competência fechada e retenção já recebida bloqueiam.']],
   ['143','2026-11-03',['Medições ao cliente: a obra prepara o boletim e envia para aprovação; o Comercial aprova ou devolve com motivo, na nova aba Medições para aprovar. Quem lançou não aprova. A lista tem a coluna e o filtro Projeto.', 'Boletim de medição com Emitido por e Aprovado por, e marca RASCUNHO enquanto não for aprovado.', 'SST: Gestão da CIPA com abas (Visão geral, Membros, Reuniões e atas, Plano de trabalho); Ambiental passa para o menu do SST; atalhos Emissão de RDA e Entrega de EPI no painel. Resultado da obra mais compacto.']],
