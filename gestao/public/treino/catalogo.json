@@ -1,0 +1,14 @@
+{
+ "versao": 1,
+ "obs": "Catálogo dos treinamentos do sistema (v151). Curso novo: crie public/treino/<pasta>/conteudo.json (capítulos com passos e perguntas, imagens em <pasta>/img) e acrescente uma entrada aqui. perfisPadrao vale até o Administrador escolher os perfis em Sistema › Treinamentos.",
+ "cursos": [
+  {
+   "id": "almox",
+   "pasta": "almox",
+   "titulo": "Escola do Almoxarifado",
+   "publico": "Almoxarife",
+   "resumo": "As rotinas do dia a dia do almoxarifado na Central de Gestão, passo a passo, com as telas do sistema (dados de exemplo): recebimento às cegas, entrada no estoque, separação, romaneio, devolução de sobras, ferramentas, EPI e inventário. Cada capítulo termina com perguntas rápidas.",
+   "perfisPadrao": ["almoxarife", "compras"]
+  }
+ ]
+}

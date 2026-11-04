@@ -1,0 +1,1021 @@
+{
+ "capitulos": [
+  {
+   "id": "receb",
+   "titulo": "Recebimento de material",
+   "objetivo": "Conferir a entrega do fornecedor contando só as quantidades (às cegas) e registrar o recebimento do pedido de compra.",
+   "duracao_min": 4,
+   "passos": [
+    {
+     "img": "img/c1_p1.jpg",
+     "w": 1440,
+     "h": 900,
+     "titulo": "Abra Suprimentos › Pedidos de compra e clique em Receber",
+     "texto": "Quando o caminhão chega, localize o pedido do fornecedor (aqui, o nº 120 da Distribuidora Exemplo Ltda) e clique em Receber na linha dele.",
+     "dica": "Os valores aparecem como \"—\": o almoxarife confere sem ver preços. É de propósito.",
+     "destaque": {
+      "x": 83.31,
+      "y": 55.66,
+      "w": 5.12,
+      "h": 3.6
+     }
+    },
+    {
+     "img": "img/c1_p2.jpg",
+     "w": 1048,
+     "h": 538,
+     "titulo": "Confira item por item na coluna \"Recebido agora\"",
+     "texto": "A janela mostra o pedido, o que já foi recebido e o saldo. Conte fisicamente o material e deixe em \"Recebido agora\" exatamente o que chegou em bom estado. O campo vem preenchido com o saldo: corrija sempre que a contagem for diferente.",
+     "dica": "Não há preço nesta tela. Não confira valores — só quantidades.",
+     "destaque": {
+      "x": 2.86,
+      "y": 20.53,
+      "w": 94.27,
+      "h": 35.22
+     }
+    },
+    {
+     "img": "img/c1_p3.jpg",
+     "w": 1048,
+     "h": 538,
+     "titulo": "Faltou? Digite só o que chegou",
+     "texto": "Chegaram 48 disjuntores dos 50 pedidos: digite 48. O pedido fica \"parcialmente recebido\" e os 2 que faltam continuam como saldo a receber (o comprador cobra o fornecedor).",
+     "dica": "Sobra: o sistema só aceita até 5% acima do saldo do pedido; o excedente deve voltar com o motorista. Avaria: não conte o item danificado, anote no canhoto da NF e avise o comprador.",
+     "destaque": {
+      "x": 85.35,
+      "y": 37.6,
+      "w": 10.64,
+      "h": 7.22
+     }
+    },
+    {
+     "img": "img/c1_p4.jpg",
+     "w": 1048,
+     "h": 538,
+     "titulo": "Confira data, conferente e destino",
+     "texto": "Data do recebimento e \"Conferido por\" já vêm preenchidos com hoje e o seu nome. Em \"Destino do material\" deixe \"Entrada no estoque\"; use \"envio direto para a obra\" só quando o material nem vai para a prateleira (o romaneio é montado sozinho).",
+     "destaque": {
+      "x": 40.71,
+      "y": 60.29,
+      "w": 18.59,
+      "h": 7.99
+     }
+    },
+    {
+     "img": "img/c1_p5.jpg",
+     "w": 1048,
+     "h": 538,
+     "titulo": "Clique em Registrar recebimento",
+     "texto": "Ao registrar, o sistema guarda o recebimento físico (quem conferiu, quando e quanto) e cria o rascunho da nota de entrada com as quantidades que você contou.",
+     "destaque": {
+      "x": 80.87,
+      "y": 88.37,
+      "w": 16.37,
+      "h": 7.36
+     }
+    },
+    {
+     "img": "img/c1_p6.jpg",
+     "w": 1440,
+     "h": 900,
+     "titulo": "Veja a conferência pedido × recebido × nota",
+     "texto": "O rascunho da NF abre sozinho. Na parte \"Pedido de compra e conferência\", cada item mostra Pedido, Recebido e Na nota. Divergência de quantidade dentro da tolerância aparece como \"Confere\".",
+     "dica": "Divergência de PREÇO não é com o almoxarife: quem resolve é o Fiscal, na validação da nota, com a aprovação do comprador e do solicitante.",
+     "destaque": {
+      "x": 15.69,
+      "y": 82.9,
+      "w": 68.61,
+      "h": 17.1
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Chegaram 95 eletrodutos de um pedido de 100. O que você digita em \"Recebido agora\"?",
+     "opcoes": [
+      "100, porque é o que está no pedido",
+      "95, o que foi contado",
+      "0, e espera o resto chegar"
+     ],
+     "certa": 1,
+     "explica": "Registre só o que chegou de fato. O pedido fica parcialmente recebido e o saldo de 5 continua em aberto."
+    },
+    {
+     "pergunta": "O preço da nota do fornecedor está diferente do pedido. Quem resolve?",
+     "opcoes": [
+      "O almoxarife, corrigindo o preço no recebimento",
+      "O Fiscal, na validação da nota (com a aprovação do comprador e do solicitante)",
+      "Ninguém: o sistema aceita automaticamente"
+     ],
+     "certa": 1,
+     "explica": "O recebimento é às cegas: o almoxarife não vê nem decide preço. A divergência de preço é tratada na validação da nota."
+    },
+    {
+     "pergunta": "Duas caixas de disjuntores chegaram amassadas e com peças quebradas. O que fazer?",
+     "opcoes": [
+      "Contar tudo e avisar depois",
+      "Não contar o que está avariado, anotar no canhoto da NF e avisar o comprador",
+      "Recusar o pedido inteiro no sistema"
+     ],
+     "certa": 1,
+     "explica": "Só entra no \"Recebido agora\" o que está em condições de uso; a avaria fica anotada no documento do transporte para o comprador tratar com o fornecedor."
+    }
+   ]
+  },
+  {
+   "id": "entrada",
+   "titulo": "Entrada no estoque",
+   "objetivo": "Indicar almoxarifado e prateleira de cada item recebido e consultar o saldo depois do lançamento da nota.",
+   "duracao_min": 3,
+   "passos": [
+    {
+     "img": "img/c2_p1.jpg",
+     "w": 1048,
+     "h": 894,
+     "titulo": "Digite o número da NF que veio com o material",
+     "texto": "No rascunho da nota, informe o número impresso na NF do fornecedor (aqui, 4587). Os demais dados fiscais o Fiscal confere.",
+     "destaque": {
+      "x": 2.77,
+      "y": 14.15,
+      "w": 18.59,
+      "h": 4.95
+     }
+    },
+    {
+     "img": "img/c2_p2.jpg",
+     "w": 1440,
+     "h": 900,
+     "titulo": "Escolha o almoxarifado e a prateleira de cada item",
+     "texto": "Role a tabela de itens para a direita. Em cada linha, escolha o Almoxarifado (Almoxarifado Tuiuti) e a Prateleira onde o material vai ser guardado (A1, A2, B1…). É assim que o saldo fica localizado.",
+     "dica": "Guarde o material na mesma prateleira informada aqui; senão o inventário vai acusar diferença.",
+     "destaque": {
+      "x": 0,
+      "y": 51.21,
+      "w": 84.31,
+      "h": 21.06
+     }
+    },
+    {
+     "img": "img/c2_p3.jpg",
+     "w": 1440,
+     "h": 900,
+     "titulo": "Clique em Salvar rascunho",
+     "texto": "O almoxarife salva a nota como rascunho. Quem lança é o Fiscal: só no lançamento o estoque recebe a entrada e a conta a pagar é criada.",
+     "dica": "Se aparecer o botão \"Salvar e lançar\", não use: seu perfil grava só o rascunho.",
+     "destaque": {
+      "x": 66.28,
+      "y": 91.97,
+      "w": 9.35,
+      "h": 4.4
+     }
+    },
+    {
+     "img": "img/c2_p4.jpg",
+     "w": 1440,
+     "h": 640,
+     "titulo": "Acompanhe o pedido parcialmente recebido",
+     "texto": "Depois do recebimento, o pedido 120 mostra que ainda falta parte da entrega. Quando o restante chegar, use Receber de novo: o sistema mostra só o saldo.",
+     "destaque": {
+      "x": 61.35,
+      "y": 76.15,
+      "w": 14.07,
+      "h": 13.65
+     }
+    },
+    {
+     "img": "img/c2_p5.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "Consulte o saldo em Suprimentos › Estoque",
+     "texto": "Com a nota lançada pelo Fiscal, o saldo já soma a entrada: o cabo foi de 12 para 22 rolos. A coluna Localização mostra almoxarifado e prateleira.",
+     "dica": "Saldo que não mudou depois do recebimento = nota ainda em rascunho. Fale com o Fiscal.",
+     "destaque": {
+      "x": 2.85,
+      "y": 64.13,
+      "w": 94.31,
+      "h": 8.89
+     }
+    },
+    {
+     "img": "img/c2_p6.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Veja tudo o que há em cada prateleira",
+     "texto": "Em Almoxarifados › Ver itens você vê os produtos e as ferramentas do almoxarifado, filtra por prateleira e imprime a relação.",
+     "destaque": {
+      "x": 2.86,
+      "y": 34.42,
+      "w": 94.27,
+      "h": 48.08
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Você registrou o recebimento, mas o saldo do produto não aumentou. Qual a causa mais provável?",
+     "opcoes": [
+      "A nota ainda está em rascunho e não foi lançada pelo Fiscal",
+      "O almoxarifado está inativo",
+      "O pedido foi cancelado"
+     ],
+     "certa": 0,
+     "explica": "A entrada no estoque acontece quando o Fiscal lança a nota; até lá ela fica em rascunho."
+    },
+    {
+     "pergunta": "Para que serve informar a prateleira no rascunho da nota?",
+     "opcoes": [
+      "Para calcular o imposto",
+      "Para o saldo ficar localizado e o inventário por prateleira bater",
+      "Para avisar o comprador"
+     ],
+     "certa": 1,
+     "explica": "A prateleira é o endereço do material: aparece no Estoque, em Ver itens e na lista de contagem do inventário."
+    }
+   ]
+  },
+  {
+   "id": "separacao",
+   "titulo": "Da solicitação da obra à separação",
+   "objetivo": "Atender a solicitação de material da obra com o que já existe no estoque.",
+   "duracao_min": 3,
+   "passos": [
+    {
+     "img": "img/c3_p1.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "A solicitação da obra chega em Suprimentos › Solicitações",
+     "texto": "A encarregada da obra P501 enviou a SC nº 1 (cabo, disjuntores, eletrodutos e luvas). Tudo tem saldo: a coluna Separar mostra 4 itens e Comprar, 0. A linha avisa \"separação a criar pelo almoxarife\".",
+     "destaque": {
+      "x": 2.85,
+      "y": 80.65,
+      "w": 94.31,
+      "h": 10.96
+     }
+    },
+    {
+     "img": "img/c3_p2.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Clique em Criar separação",
+     "texto": "Quem envia a solicitação na obra não grava a separação: essa é a rotina do almoxarife. O aviso no alto da tela lista as solicitações com separação a criar.",
+     "dica": "O mesmo aviso aparece em Separação de itens.",
+     "destaque": {
+      "x": 15.66,
+      "y": 44.17,
+      "w": 8.17,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c3_p3.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Abra Separação de itens e clique em Ver",
+     "texto": "A separação nº 1 foi criada como Pendente, ligada à SC 1 e à obra P501. Os itens ficam reservados: não podem ser usados por outra solicitação.",
+     "destaque": {
+      "x": 79.91,
+      "y": 74.11,
+      "w": 3.16,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c3_p4.jpg",
+     "w": 1048,
+     "h": 392,
+     "titulo": "Separe conferindo a quantidade e o saldo físico",
+     "texto": "A janela lista a quantidade a separar e o saldo físico de hoje. Pegue os itens nas prateleiras e junte no ponto de expedição. Para levar a lista impressa, use Visualizar na linha da separação.",
+     "destaque": {
+      "x": 2.86,
+      "y": 28.17,
+      "w": 94.27,
+      "h": 50.27
+     }
+    },
+    {
+     "img": "img/c3_p5.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Clique em Marcar separado",
+     "texto": "Com tudo separado e conferido, clique em Marcar separado. A separação passa a \"Separado, aguardando entrega\".",
+     "destaque": {
+      "x": 82.8,
+      "y": 74.11,
+      "w": 8.6,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c3_p6.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "A separação está pronta para o romaneio",
+     "texto": "Agora a linha mostra Romaneio e Entregar. Para material que vai para a obra, use o romaneio (próximo capítulo): ele dá baixa no estoque e acompanha a carga.",
+     "dica": "\"Entregar\" sem romaneio é para retirada no balcão do almoxarifado.",
+     "destaque": {
+      "x": 85.64,
+      "y": 74.11,
+      "w": 5.76,
+      "h": 5.22
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Chegou uma SC da obra com o aviso \"separação a criar pelo almoxarife\". O que fazer?",
+     "opcoes": [
+      "Esperar o comprador cotar",
+      "Clicar em Criar separação: os itens com saldo ficam reservados para a obra",
+      "Dar saída no estoque direto pela tela Estoque"
+     ],
+     "certa": 1,
+     "explica": "A separação é rotina do almoxarife. Ela reserva o material; a baixa acontece no despacho do romaneio (ou na entrega no balcão)."
+    },
+    {
+     "pergunta": "Terminou de juntar os itens de uma separação. Qual o próximo passo no sistema?",
+     "opcoes": [
+      "Marcar separado",
+      "Excluir a solicitação",
+      "Fazer um ajuste de estoque"
+     ],
+     "certa": 0,
+     "explica": "\"Marcar separado\" avisa que a carga está pronta e libera o romaneio de envio."
+    }
+   ]
+  },
+  {
+   "id": "romaneio",
+   "titulo": "Romaneio de envio para a obra",
+   "objetivo": "Gerar o romaneio a partir da separação, acrescentar itens, despachar (baixa no estoque) e confirmar o recebimento na obra.",
+   "duracao_min": 5,
+   "passos": [
+    {
+     "img": "img/c4_p1.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Em Romaneios de envio, clique em Gerar das separações",
+     "texto": "O botão mostra quantas separações prontas ainda não têm romaneio.",
+     "destaque": {
+      "x": 75.2,
+      "y": 31.15,
+      "w": 13.13,
+      "h": 6.39
+     }
+    },
+    {
+     "img": "img/c4_p2.jpg",
+     "w": 668,
+     "h": 252,
+     "titulo": "Marque as separações da mesma carga e clique em Gerar",
+     "texto": "Junte no mesmo romaneio as separações que vão no mesmo veículo, de preferência para a mesma obra.",
+     "destaque": {
+      "x": 5.39,
+      "y": 51.44,
+      "w": 5.09,
+      "h": 13.47
+     }
+    },
+    {
+     "img": "img/c4_p3.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Confira o destino e quem recebe",
+     "texto": "O romaneio já vem com a obra P501 e o endereço da obra. Informe quem recebe, o telefone e o responsável pelas ferramentas na obra (obrigatório quando vai ferramenta).",
+     "destaque": {
+      "x": 21.74,
+      "y": 23.61,
+      "w": 18.59,
+      "h": 4.83
+     }
+    },
+    {
+     "img": "img/c4_p4.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Informe o transporte",
+     "texto": "Escolha o modo (veículo próprio, transportadora ou retirada), o veículo e o motorista, e as datas previstas de saída e de chegada.",
+     "destaque": {
+      "x": 2.77,
+      "y": 66.41,
+      "w": 18.59,
+      "h": 7.38
+     }
+    },
+    {
+     "img": "img/c4_p5.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Acrescente itens que não estavam na separação",
+     "texto": "Em \"Produto do estoque\", escolha o item (o saldo aparece ao lado), digite a quantidade e clique em + Produto. Aqui foram 2 caixas de parafuso M8 pedidas por telefone.",
+     "dica": "O mesmo vale para volume avulso (+ Item avulso), que não mexe no estoque.",
+     "destaque": {
+      "x": 2.77,
+      "y": 86.97,
+      "w": 7.86,
+      "h": 3.64
+     }
+    },
+    {
+     "img": "img/c4_p6.jpg",
+     "w": 1048,
+     "h": 900,
+     "titulo": "Inclua ferramentas na mesma carga",
+     "texto": "Em \"Ferramenta ou equipamento\", escolha o item disponível no almoxarifado (aqui, a furadeira F-001) e clique em + Ferramenta. No despacho ela passa a constar na obra, sob a responsabilidade da pessoa indicada.",
+     "destaque": {
+      "x": 59.67,
+      "y": 91.56,
+      "w": 9.83,
+      "h": 3.6
+     }
+    },
+    {
+     "img": "img/c4_p7.jpg",
+     "w": 1048,
+     "h": 900,
+     "titulo": "Confira a lista e preencha volumes e peso",
+     "texto": "Os itens da separação vêm travados; os acrescentados podem ser ajustados. Volumes e peso ajudam na conferência da carga.",
+     "destaque": {
+      "x": 2.77,
+      "y": 36.12,
+      "w": 94.47,
+      "h": 46.21
+     }
+    },
+    {
+     "img": "img/c4_p8.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Clique em Salvar romaneio",
+     "texto": "O romaneio fica \"Em montagem\" até o despacho. Ainda dá para editar.",
+     "destaque": {
+      "x": 84.39,
+      "y": 92.96,
+      "w": 12.84,
+      "h": 4.45
+     }
+    },
+    {
+     "img": "img/c4_p9.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Carregou e conferiu? Clique em Despachar",
+     "texto": "Use Imprimir para tirar 2 vias: uma vai com a carga e volta assinada pela obra.",
+     "destaque": {
+      "x": 85.11,
+      "y": 78.14,
+      "w": 6.12,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c4_p10.jpg",
+     "w": 668,
+     "h": 214,
+     "titulo": "Confirme o despacho",
+     "texto": "Ao despachar, o estoque dá baixa nos produtos (o custo vai para a obra), a separação é concluída e as ferramentas passam a constar na obra.",
+     "dica": "Se faltar saldo, o sistema não deixa despachar e mostra o item. Confira a prateleira antes de ajustar qualquer coisa.",
+     "destaque": {
+      "x": 80.49,
+      "y": 70.79,
+      "w": 15.17,
+      "h": 18.48
+     }
+    },
+    {
+     "img": "img/c4_p11.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Quando a carga chegar, clique em Confirmar recebimento",
+     "texto": "O romaneio fica \"Em trânsito\". Com a via assinada pela obra (ou pela própria encarregada no sistema), registre o recebimento.",
+     "destaque": {
+      "x": 85.28,
+      "y": 78.14,
+      "w": 11.04,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c4_p12.jpg",
+     "w": 1048,
+     "h": 649,
+     "titulo": "Registre o que a obra recebeu de fato",
+     "texto": "Para cada item, informe a quantidade recebida e, se houver, a observação (avaria, falta). Aqui uma barra de eletroduto chegou quebrada.",
+     "destaque": {
+      "x": 2.86,
+      "y": 28.33,
+      "w": 94.27,
+      "h": 52.26
+     }
+    },
+    {
+     "img": "img/c4_p13.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Romaneio entregue (com divergência registrada)",
+     "texto": "Com diferença, a situação fica \"Entregue com divergência\" e o documento impresso mostra o que foi recebido. Diferenças precisam ser apuradas: se o material não saiu, ele continua na prateleira e aparece no inventário.",
+     "destaque": {
+      "x": 70.56,
+      "y": 78.79,
+      "w": 14.1,
+      "h": 4.19
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Em que momento o estoque dá baixa no material enviado para a obra?",
+     "opcoes": [
+      "Ao salvar o romaneio",
+      "Ao clicar em Despachar",
+      "Quando a obra confirma o recebimento"
+     ],
+     "certa": 1,
+     "explica": "O despacho é a saída física: baixa os produtos, conclui as separações e registra as ferramentas na obra."
+    },
+    {
+     "pergunta": "Você vai mandar uma furadeira junto com o material. O que o sistema exige?",
+     "opcoes": [
+      "Nada, ferramenta não entra no romaneio",
+      "O responsável pelas ferramentas na obra",
+      "A aprovação do Fiscal"
+     ],
+     "certa": 1,
+     "explica": "Sem o responsável na obra o despacho é bloqueado: a ferramenta fica sob a responsabilidade dessa pessoa."
+    },
+    {
+     "pergunta": "A obra recebeu 19 de 20 barras porque uma quebrou. Como registrar?",
+     "opcoes": [
+      "Confirmar 20 e resolver depois",
+      "Informar 19 no recebimento e anotar a avaria na observação",
+      "Cancelar o romaneio"
+     ],
+     "certa": 1,
+     "explica": "O recebimento com quantidade e observação deixa a divergência registrada para apuração."
+    }
+   ]
+  },
+  {
+   "id": "devolucao",
+   "titulo": "Devolução de sobras da obra",
+   "objetivo": "Registrar e conferir o material que sobrou na obra e volta ao almoxarifado.",
+   "duracao_min": 3,
+   "passos": [
+    {
+     "img": "img/c5_p1.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Em Devolução de sobras, clique em Nova devolução",
+     "texto": "Use quando a obra devolve material que saiu do estoque e não foi usado.",
+     "destaque": {
+      "x": 87.91,
+      "y": 27.88,
+      "w": 9.32,
+      "h": 6.39
+     }
+    },
+    {
+     "img": "img/c5_p2.jpg",
+     "w": 1048,
+     "h": 627,
+     "titulo": "Escolha a obra e informe o que volta",
+     "texto": "Ao escolher a obra, aparece o que saiu do estoque para ela e ainda não voltou. Digite a quantidade a devolver e o estado (novo, sobra de corte…).",
+     "dica": "O sistema não aceita devolver mais do que foi enviado para a obra.",
+     "destaque": {
+      "x": 2.86,
+      "y": 40.41,
+      "w": 94.27,
+      "h": 46.11
+     }
+    },
+    {
+     "img": "img/c5_p3.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Quando o material chegar, clique em Conferir e receber",
+     "texto": "A devolução fica \"Aguardando conferência\". Imprima o romaneio de retorno pelo botão Imprimir para acompanhar a carga.",
+     "destaque": {
+      "x": 77.02,
+      "y": 84.04,
+      "w": 9.1,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c5_p4.jpg",
+     "w": 1048,
+     "h": 418,
+     "titulo": "Conte e confirme as quantidades recebidas",
+     "texto": "Informe o que chegou de fato e clique em Confirmar recebimento. O material volta ao estoque pelo custo médio e o mesmo valor sai do custo da obra.",
+     "destaque": {
+      "x": 2.86,
+      "y": 40.25,
+      "w": 94.27,
+      "h": 33.43
+     }
+    },
+    {
+     "img": "img/c5_p5.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Devolução recebida",
+     "texto": "Pronto: a situação muda para \"Recebida\" e o saldo do estoque já inclui as sobras. Guarde o material na prateleira de origem.",
+     "destaque": {
+      "x": 76.72,
+      "y": 81.66,
+      "w": 5.72,
+      "h": 4.19
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "A obra quer devolver 30 disjuntores, mas só recebeu 14 do estoque. O que acontece?",
+     "opcoes": [
+      "O sistema aceita os 30",
+      "O sistema recusa: a obra só pode devolver o que recebeu do estoque e ainda não voltou",
+      "Os 16 a mais viram compra"
+     ],
+     "certa": 1,
+     "explica": "A devolução é limitada ao que saiu do estoque para a obra, para não inflar o saldo."
+    },
+    {
+     "pergunta": "Quando o saldo do estoque aumenta numa devolução de sobras?",
+     "opcoes": [
+      "Quando a obra registra a devolução",
+      "Quando o almoxarife confere e confirma o recebimento",
+      "No fim do mês"
+     ],
+     "certa": 1,
+     "explica": "O estoque só recebe depois da conferência no almoxarifado."
+    }
+   ]
+  },
+  {
+   "id": "ferramentas",
+   "titulo": "Equipamentos e ferramentas",
+   "objetivo": "Enviar ferramentas para a obra com responsável, registrar o retorno e encaminhar o que voltou com defeito para a manutenção.",
+   "duracao_min": 4,
+   "passos": [
+    {
+     "img": "img/c6_p1.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "Em Equipamentos › Envio e retorno, clique em Envio",
+     "texto": "A tela separa os itens em Almoxarifado, Em obras e Manutenção. A furadeira que foi no romaneio já aparece na obra P501, junto com a escada (devolução atrasada).",
+     "destaque": {
+      "x": 92.5,
+      "y": 22.74,
+      "w": 4.73,
+      "h": 5.21
+     }
+    },
+    {
+     "img": "img/c6_p2.jpg",
+     "w": 1048,
+     "h": 512,
+     "titulo": "Escolha a obra e o responsável",
+     "texto": "Informe a obra (P502), o responsável que vai responder pelas ferramentas (Marcos Lima), a data de saída e a devolução prevista.",
+     "dica": "Sem o responsável o sistema não registra o envio.",
+     "destaque": {
+      "x": 21.74,
+      "y": 31.25,
+      "w": 18.59,
+      "h": 8.4
+     }
+    },
+    {
+     "img": "img/c6_p3.jpg",
+     "w": 1048,
+     "h": 512,
+     "titulo": "Marque os itens e clique em Registrar envio",
+     "texto": "Marque um ou vários itens — aqui o multímetro e o alicate amperímetro. Só aparecem itens disponíveis no almoxarifado ou já em obra (que são transferidos).",
+     "dica": "Depois do envio, imprima o termo de responsabilidade (botão Termo da obra) e colha a assinatura.",
+     "destaque": {
+      "x": 2.77,
+      "y": 55.41,
+      "w": 94.47,
+      "h": 19.89
+     }
+    },
+    {
+     "img": "img/c6_p4.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "Na volta, clique em Retorno",
+     "texto": "Os itens enviados aparecem em \"Em obras\", agrupados por obra, com a devolução prevista. Atrasos ficam em destaque.",
+     "destaque": {
+      "x": 86.74,
+      "y": 22.74,
+      "w": 5.76,
+      "h": 5.21
+     }
+    },
+    {
+     "img": "img/c6_p5.jpg",
+     "w": 1048,
+     "h": 468,
+     "titulo": "Marque o que voltou e informe o estado",
+     "texto": "Marque cada item que retornou, escolha o almoxarifado de destino e o estado. A escada voltou da P501 com um degrau trincado: escolha \"Com defeito\". Item com defeito ou danificado vai direto para a manutenção; item perdido fica registrado para cobrança ou baixa.",
+     "destaque": {
+      "x": 2.77,
+      "y": 48.05,
+      "w": 94.47,
+      "h": 9.41
+     }
+    },
+    {
+     "img": "img/c6_p6.jpg",
+     "w": 1048,
+     "h": 468,
+     "titulo": "Clique em Registrar retorno",
+     "texto": "O envio da escada é encerrado e a manutenção é aberta automaticamente.",
+     "destaque": {
+      "x": 83.98,
+      "y": 86.62,
+      "w": 13.26,
+      "h": 8.46
+     }
+    },
+    {
+     "img": "img/c6_p7.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Acompanhe em Manutenção de equipamentos",
+     "texto": "A escada aparece com a manutenção aberta e fica indisponível para envio até a manutenção ser concluída.",
+     "destaque": {
+      "x": 2.85,
+      "y": 78.61,
+      "w": 94.31,
+      "h": 10.35
+     }
+    },
+    {
+     "img": "img/c6_p8.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Quando o item voltar da oficina, clique em Concluir",
+     "texto": "Informe a data de conclusão, o que foi feito e a próxima manutenção ou inspeção. O item volta a ficar disponível no almoxarifado.",
+     "destaque": {
+      "x": 78.02,
+      "y": 81.21,
+      "w": 5.15,
+      "h": 5.22
+     }
+    },
+    {
+     "img": "img/c6_p9.jpg",
+     "w": 668,
+     "h": 802,
+     "titulo": "Registre a conclusão",
+     "texto": "A data de conclusão já vem com hoje. Descreva o serviço e clique em Salvar. Para mandar à oficina um item que está no almoxarifado, use Nova manutenção (ou Envio › Manutenção).",
+     "destaque": {
+      "x": 4.34,
+      "y": 30.47,
+      "w": 30.04,
+      "h": 5.77
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Uma ferramenta voltou da obra danificada. O que fazer no Retorno?",
+     "opcoes": [
+      "Marcar como \"Bom\" e consertar depois",
+      "Escolher o estado de defeito/danificado: ela vai direto para a manutenção",
+      "Excluir a ferramenta"
+     ],
+     "certa": 1,
+     "explica": "Assim ela fica indisponível para envio até a manutenção ser concluída."
+    },
+    {
+     "pergunta": "Por que o envio de ferramenta pede o responsável na obra?",
+     "opcoes": [
+      "Para calcular o frete",
+      "Para saber quem responde pela ferramenta enquanto ela está fora",
+      "Porque o sistema pede o CPF"
+     ],
+     "certa": 1,
+     "explica": "O responsável assina o termo e responde pela ferramenta até o retorno."
+    }
+   ]
+  },
+  {
+   "id": "epi",
+   "titulo": "Entrega de EPI",
+   "objetivo": "Registrar a entrega de EPI na ficha do colaborador, dando baixa no estoque de EPI.",
+   "duracao_min": 3,
+   "passos": [
+    {
+     "img": "img/c7_p1.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "Em SST › Controle de EPI, clique em Nova entrega",
+     "texto": "A lista mostra as entregas de cada colaborador, com CA, troca prevista e situação. O CA vencido aparece em vermelho: esse EPI não pode continuar em uso.",
+     "destaque": {
+      "x": 89.07,
+      "y": 22.74,
+      "w": 8.15,
+      "h": 5.21
+     }
+    },
+    {
+     "img": "img/c7_p2.jpg",
+     "w": 668,
+     "h": 890,
+     "titulo": "Escolha o colaborador e o EPI",
+     "texto": "Selecione o colaborador (Rafael Souza) e o EPI. Informe o nº do CA, a quantidade e a vida útil prevista: se a troca ficar em branco, ela é calculada a partir da entrega.",
+     "dica": "Confira a validade do CA antes de entregar: CA vencido não pode ser entregue.",
+     "destaque": {
+      "x": 4.34,
+      "y": 11.63,
+      "w": 91.32,
+      "h": 4.83
+     }
+    },
+    {
+     "img": "img/c7_p3.jpg",
+     "w": 668,
+     "h": 890,
+     "titulo": "Dê baixa no estoque de EPI e salve",
+     "texto": "Em \"Dar baixa no estoque de EPI\", escolha o item do estoque (o saldo aparece ao lado). Assim a ficha e o estoque andam juntos. Depois clique em Salvar.",
+     "destaque": {
+      "x": 4.34,
+      "y": 71.01,
+      "w": 91.32,
+      "h": 4.83
+     }
+    },
+    {
+     "img": "img/c7_p4.jpg",
+     "w": 668,
+     "h": 623,
+     "titulo": "O colaborador assina a entrega",
+     "texto": "Ao salvar, abre a assinatura da entrega com o termo da NR-6. O colaborador assina com o dedo (celular/tablet) ou com o mouse e você clica em Registrar assinatura. Data e hora ficam guardadas.",
+     "dica": "Se não der para assinar na hora, cancele: a ficha fica \"sem assinatura\" e o colaborador pode confirmar pela Minha área.",
+     "destaque": {
+      "x": 4.34,
+      "y": 32.96,
+      "w": 85.03,
+      "h": 30.17
+     }
+    },
+    {
+     "img": "img/c7_p5.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "A entrega fica na ficha do colaborador",
+     "texto": "A nova linha mostra o colaborador, o EPI, o CA, a troca prevista e a situação da ficha. Pelo botão Ficha você imprime a Ficha de EPI do colaborador.",
+     "destaque": {
+      "x": 2.85,
+      "y": 67.16,
+      "w": 97.15,
+      "h": 8.51
+     }
+    },
+    {
+     "img": "img/c7_p6.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "Confira o estoque de EPI",
+     "texto": "Em \"Ver e editar o estoque de EPI\" o capacete já mostra a baixa (de 15 para 14) e a coluna \"Entregue (30 dias)\".",
+     "destaque": {
+      "x": 2.78,
+      "y": 43.26,
+      "w": 94.44,
+      "h": 38.93
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Ao registrar a entrega de um capacete, o que garante que o estoque de EPI baixe?",
+     "opcoes": [
+      "Escolher o item em \"Dar baixa no estoque de EPI\"",
+      "Nada: o estoque de EPI é separado e não baixa",
+      "Fazer um ajuste de inventário no fim do mês"
+     ],
+     "certa": 0,
+     "explica": "Com o item do estoque escolhido, a entrega baixa o saldo e fica na ficha ao mesmo tempo."
+    },
+    {
+     "pergunta": "O CA do óculos venceu. Pode entregar?",
+     "opcoes": [
+      "Sim, se estiver novo",
+      "Não: EPI com CA vencido não pode ser entregue",
+      "Sim, anotando na observação"
+     ],
+     "certa": 1,
+     "explica": "O controle mostra \"CA vencido em uso\" justamente para impedir o uso de EPI sem certificado válido."
+    }
+   ]
+  },
+  {
+   "id": "inventario",
+   "titulo": "Inventário: contagem às cegas e ajustes",
+   "objetivo": "Contar o estoque sem olhar o saldo do sistema, registrar o balanço e entender a aprovação das diferenças grandes.",
+   "duracao_min": 4,
+   "passos": [
+    {
+     "img": "img/c8_p1.jpg",
+     "w": 1440,
+     "h": 620,
+     "titulo": "Em Ajustes de inventário, clique em Contar estoque",
+     "texto": "A contagem é por almoxarifado. O aviso do próximo inventário aparece em Almoxarifados.",
+     "destaque": {
+      "x": 88.2,
+      "y": 27.88,
+      "w": 9.02,
+      "h": 6.39
+     }
+    },
+    {
+     "img": "img/c8_p2.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Marque \"Lista às cegas\" e imprima a lista",
+     "texto": "Com a opção marcada, Imprimir / PDF gera a lista sem o saldo do sistema. Conte prateleira por prateleira e anote o que encontrou, sem consultar o saldo.",
+     "dica": "Item encontrado que não está na lista: anote no verso e avise.",
+     "destaque": {
+      "x": 2.77,
+      "y": 93.73,
+      "w": 2.48,
+      "h": 2.92
+     }
+    },
+    {
+     "img": "img/c8_p3.jpg",
+     "w": 1048,
+     "h": 890,
+     "titulo": "Digite as quantidades contadas",
+     "texto": "De volta à tela, digite em \"Contagem\" o que foi contado em cada item e marque as ferramentas encontradas. A diferença aparece ao lado.",
+     "dica": "A contagem fica guardada neste navegador até você registrar o balanço.",
+     "destaque": {
+      "x": 2.86,
+      "y": 4.75,
+      "w": 94.27,
+      "h": 48.07
+     }
+    },
+    {
+     "img": "img/c8_p4.jpg",
+     "w": 668,
+     "h": 406,
+     "titulo": "Registre o balanço",
+     "texto": "O sistema resume as diferenças. As pequenas entram no estoque na hora; as que passam do limite em R$ por item ficam \"aprovação\" e só mexem no estoque depois que outra pessoa aprovar.",
+     "destaque": {
+      "x": 74.27,
+      "y": 84.59,
+      "w": 21.39,
+      "h": 9.75
+     }
+    },
+    {
+     "img": "img/c8_p5.jpg",
+     "w": 1440,
+     "h": 760,
+     "titulo": "Diferenças grandes aguardam aprovação de outra pessoa",
+     "texto": "Os ajustes acima do limite aparecem como \"Aguardando aprovação\". Quem contou não pode aprovar o próprio ajuste: o gestor ou outra pessoa autorizada aprova ou recusa (pedindo recontagem).",
+     "dica": "Antes de pedir aprovação, reconte: diferença costuma ser material na prateleira errada ou romaneio não despachado.",
+     "destaque": {
+      "x": 67.05,
+      "y": 86.66,
+      "w": 12.81,
+      "h": 3.42
+     }
+    }
+   ],
+   "quiz": [
+    {
+     "pergunta": "Por que a contagem deve ser às cegas?",
+     "opcoes": [
+      "Para ser mais rápida",
+      "Para quem conta não ser influenciado pelo saldo do sistema",
+      "Porque o almoxarife não pode ver quantidades"
+     ],
+     "certa": 1,
+     "explica": "Contando sem ver o saldo, a diferença real aparece; quem conta \"para bater\" esconde perdas e erros."
+    },
+    {
+     "pergunta": "Você contou e registrou uma diferença acima do limite. Quem aprova?",
+     "opcoes": [
+      "Você mesmo, logo em seguida",
+      "Outra pessoa autorizada (gestor/aprovador)",
+      "O fornecedor"
+     ],
+     "certa": 1,
+     "explica": "O sistema não deixa quem registrou a contagem aprovar o próprio ajuste."
+    },
+    {
+     "pergunta": "A contagem do cabo deu 1 rolo a menos. O que fazer antes de aceitar a perda?",
+     "opcoes": [
+      "Recontar e procurar em outras prateleiras e romaneios em aberto",
+      "Ajustar direto, sem conferir",
+      "Excluir o produto"
+     ],
+     "certa": 0,
+     "explica": "Muitas diferenças são de endereço ou de documentos pendentes; a recontagem evita ajuste indevido."
+    }
+   ]
+  }
+ ]
+}

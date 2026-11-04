@@ -94,7 +94,8 @@ const CORES = ['#2457d6', '#0e7c66', '#b54708', '#7a2eb8', '#c11574', '#2e7d32',
 const NIV = { view: 1, interact: 2, admin: 3, owner: 4 };
 const RULES = [
   ['', 'admin', 'admin'], ['usr', 'interact', 'admin'], ['usrreq', 'admin', 'admin'], ['usrreq/{self}', 'interact', 'interact'],
-  ['cm', 'interact', 'owner'], ['cm/{self}', 'interact', 'interact'], ['pt', 'admin', 'admin'], ['pt/{self}', 'interact', 'interact']
+  ['cm', 'interact', 'owner'], ['cm/{self}', 'interact', 'interact'], ['pt', 'admin', 'admin'], ['pt/{self}', 'interact', 'interact'],
+  ['treino/{self}', 'interact', 'interact'] /* v151: progresso de treinamento (treino/<conta>/c/<curso>); a regra fina está em treino.js */
 ];
 function regra(p, contaId) {
   const seg = p.split('/').filter(Boolean);
@@ -159,7 +160,7 @@ const AREAS_PROPRIAS = new Set(['cm', 'pt', 'usrreq']);
 function perfilPermite(conta, p, modo) {
   if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true; /* colaborador: valem as regras de nível */
   const c0 = p.split('/')[0], pf = perfilDe(conta), pp = papelDe(pf), d = PERM.perfis[pf];
-  if (c0 === 'cm' || c0 === 'usrreq') return true;
+  if (c0 === 'cm' || c0 === 'usrreq' || c0 === 'treino') return true; /* v151: treino (próprio progresso) decidido em treino.js */
   if (c0 === 'pt') { if (p.split('/')[1] === conta.id) return true; if (ehAdtoc(p) && gravaFin(conta)) return true; if (d && d.custom && d.sensRh && (d.w || []).includes('rh')) return true; /* v114: personalizado que grava RH com dados de RH */ return modo === 'w' ? (pp === 'admin' || pp === 'rh') : PERF_RH.has(pp); }
   if (c0 === 'perfc') return modo === 'r' || pp === 'admin';
   if (c0 === 'rhdoc' && d && !d.custom && d.rhdocNr && !SOMENTE_LEITURA.has(pf)) return true; /* v114: Técnico de SST: só certificados de NR (filtro e recusa em regras.js › rhdocNr) */ /* v114: perfis personalizados: todos leem (sem dado pessoal); só o Administrador (e o dono) grava */
@@ -273,7 +274,7 @@ if (typeof FN !== 'undefined' && typeof PERF_RAW !== 'undefined') for (const [k,
 }
 perfcRecarregar();
 const MODO_GRAV = (process.env.PERFIL_GRAVACAO || 'bloquear').toLowerCase() === 'avisar' ? 'avisar' : 'bloquear';
-const LIVRES = new Set(['cfg', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'usr']);
+const LIVRES = new Set(['cfg', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'usr', 'treino']); /* v151: treino = área própria (só o dono do progresso grava; treino.js) */
 function gravacaoPermitida(conta, p) {
   if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
   const pf = perfilDe(conta), pr = PERM.perfis[pf]; if (!pr || pr.w === '*') return true;

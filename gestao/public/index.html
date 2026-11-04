@@ -29339,9 +29339,254 @@ RH_POST.push(()=>{try{if(!(typeof SEGA_SRV==='function'&&SEGA_SRV()))return;
   const eu=actorId(),ag=Date.now();(S.ped||[]).forEach(p=>{const a=p.aceite;if(!a||!(ag-a.em<15*60e3)||p.crBy!==eu)return;const k='ppdf.av.'+p.id+'.'+a.em;if(PPDF.av.has(k))return;PPDF.av.add(k);
     let ja=false;try{ja=!!localStorage.getItem(k);localStorage.setItem(k,'1');}catch(e){}if(!ja)toast(a.ok?parcNome(p.parcId)+' aceitou o pedido nº '+p.numero+'.':parcNome(p.parcId)+' não pode atender o pedido nº '+p.numero+': '+(a.motivo||''),a.ok?'pos':'neg');});}catch(e){}});
 
+/* ===== v151: treinamentos dentro do sistema (relatorios/feito_v151_treino.md) =====
+   Cursos passo a passo com as telas do próprio sistema, feitos aqui mesmo (sem conta externa). Curso 1: Escola do Almoxarifado.
+   - Conteúdo servido pelo servidor: /treino/catalogo.json e /treino/<pasta>/conteudo.json + imagens (carregados sob demanda);
+     a lista de cursos de cada pessoa vem de /api/treino/cursos (o servidor decide pelo perfil; treino.js).
+   - Progresso por pessoa e curso em treino/<conta>/c/<curso> (cada um grava só o próprio; o servidor refaz os totais).
+   - Telas: Treinamentos do sistema (treinos: lista e player), Minha área › Cursos do sistema, card em Ajuda e no painel
+     do setor de quem tem curso pendente, e Sistema › Treinamentos (treinadm: perfis por curso, acompanhamento e zerar).
+   Nada aqui é do almoxarifado: o player só lê capítulos { id, titulo, objetivo, duracao_min, passos[{img,w,h,titulo,texto,dica,destaque}], quiz[{pergunta,opcoes,certa,explica}] }. */
+const TRN={cur:null,busy:false,erro:'',t:0,cont:{},contBusy:{},contErro:{},prog:{},acomp:null,acompBusy:false,acompErro:'',acompT:0,salvo:'',tutOk:false};
+ui.trn={curso:'',cap:0,passo:0,modo:'passos',resp:{}};
+ui.trnaf={curso:'',sit:'',q:''};
+NAV.push(['treinos','Treinamentos do sistema','Ajuda'],['treinadm','Treinamentos','Sistema']);
+GROUP_OF_TAB.treinos='ajuda';GROUP_OF_TAB.treinadm='usr';
+{const m=MENU.find(x=>x[0]==='meu');if(m&&!m[2].some(i=>i[0]==='treinos'))m[2].push(['treinos','Treinamentos do sistema']);
+ const s=MENU.find(x=>x[0]==='sis');if(s&&!s[2].some(i=>i[0]==='treinadm')){const k=s[2].findIndex(i=>i[0]==='usr');s[2].splice(k<0?s[2].length:k+1,0,['treinadm','Treinamentos']);}}
+if(typeof PFN_FORA!=='undefined')PFN_FORA.add('treino'); /* mesmo FORA do servidor (permfn.js): treino nunca é função */
+Object.assign(ACT_GROUP,{trnCfgSalvar:'usr',trnCfgPadrao:'usr',trnZerar:'usr'});
+MEU_ABAS.push(['cursos','Cursos do sistema']);
+{const css='.trn-top{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between;margin:0 0 14px}'+
+ '.trn-prog{min-width:220px;flex:0 1 320px}.trn-bar{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;border:1px solid var(--line)}.trn-bar>i{display:block;height:100%;background:var(--accent);transition:width .3s}'+
+ '.trn-wrap{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;align-items:start}'+
+ '.trn-trilha{display:flex;flex-direction:column;gap:6px;position:sticky;top:12px}'+
+ '.trn-cap{appearance:none;font:inherit;color:var(--fg);text-align:left;cursor:pointer;display:grid;grid-template-columns:40px 1fr;gap:10px;align-items:center;padding:9px 10px;border-radius:6px;border:1px solid transparent;background:transparent}'+
+ '.trn-cap:hover{background:var(--hover)}.trn-cap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.trn-cap[aria-current="true"]{background:var(--surface);border-color:var(--line)}'+
+ '.trn-cod{font:600 12px/1 var(--font-mono);text-align:center;padding:8px 0;border-radius:4px;background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}'+
+ '.trn-cap.feito .trn-cod{background:var(--pos-soft);color:var(--pos);border:1px solid var(--pos)}.trn-cap b{display:block;font-weight:600;line-height:1.25}.trn-cap .sub{display:block;font-size:12px}'+
+ '.trn-mon{padding:0;overflow:hidden}.trn-mh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}'+
+ '.trn-mh h2{margin:0;font:600 18px/1.2 var(--font-disp)}.trn-pn{font:500 12.5px/1 var(--font-mono);color:var(--muted)}'+
+ '.trn-tela{position:relative;background:#0b1114;line-height:0;overflow:hidden;cursor:zoom-in;display:block;width:100%;border:0;padding:0}'+
+ '.trn-tela img{width:100%;height:auto;display:block}'+
+ '.trn-hl{position:absolute;border:3px solid #e7a21b;border-radius:6px;box-shadow:0 0 0 9999px rgba(10,16,20,.42);pointer-events:none;animation:trnPulso 1.6s ease-in-out infinite}'+
+ '@keyframes trnPulso{0%,100%{outline:0 solid rgba(231,162,27,0)}50%{outline:8px solid rgba(231,162,27,.38)}}@media (prefers-reduced-motion:reduce){.trn-hl{animation:none}}'+
+ '.trn-amp{position:absolute;right:8px;bottom:8px;line-height:1;font:600 12px var(--font-body);background:rgba(10,16,20,.72);color:#fff;padding:6px 8px;border-radius:4px}'+
+ '.trn-leg{padding:14px 16px;display:grid;gap:6px}.trn-leg h3{margin:0;font:600 19px/1.25 var(--font-disp)}.trn-leg p{margin:0;max-width:75ch}'+
+ '.trn-dica{background:var(--warn-soft);color:var(--fg);border-left:4px solid var(--warn);padding:8px 10px;border-radius:4px;max-width:75ch}'+
+ '.trn-ctl{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:0 16px 16px;flex-wrap:wrap}'+
+ '.trn-dots{display:flex;gap:5px;flex-wrap:wrap}.trn-dots i{width:9px;height:9px;border-radius:50%;background:var(--line)}.trn-dots i.on{background:var(--accent)}'+
+ '.trn-quiz{padding:16px;display:grid;gap:18px}.trn-q{display:grid;gap:8px}.trn-q h4{margin:0;font-size:15px;font-weight:600;max-width:75ch}'+
+ '.trn-op{appearance:none;font:inherit;color:var(--fg);text-align:left;cursor:pointer;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface);max-width:75ch}'+
+ '.trn-op:hover{border-color:var(--accent)}.trn-op:focus-visible{outline:2px solid var(--accent)}.trn-op.certa{background:var(--pos-soft);border-color:var(--pos)}.trn-op.errada{background:var(--neg-soft);border-color:var(--neg)}.trn-op[aria-disabled="true"]{cursor:default}'+
+ '.trn-exp{font-size:13.5px;color:var(--muted);max-width:75ch}.trn-fim{padding:20px 16px;display:grid;gap:10px}.trn-fim h3{margin:0;font:600 22px/1.2 var(--font-disp)}'+
+ '.trn-cursos{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}.trn-curso{display:grid;gap:10px;align-content:start}.trn-curso h2{margin:0}'+
+ '.trn-pfs{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 14px;margin:8px 0}.trn-pfs label{display:flex;gap:8px;align-items:center;font-size:13px}'+
+ '.trn-pend{border-left:4px solid var(--accent);margin:0 0 14px}'+
+ '.trn-zoom{overflow:auto;max-height:76vh;width:100%;max-width:calc(100vw - 40px);-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom}.trn-zi{position:relative;line-height:0;max-width:none}.trn-zi img{width:100%;height:auto;display:block}'+
+ '@media (max-width:860px){.trn-wrap{grid-template-columns:minmax(0,1fr)}.trn-trilha{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px}.trn-cap{min-width:170px}}';
+ try{if(typeof document!=='undefined'&&document.head&&document.head.insertAdjacentHTML)document.head.insertAdjacentHTML('beforeend','<style id="trnCss">'+css+'</style>');}catch(e){}}
+
+/* ---------- dados ---------- */
+const trnOk=()=>!!(typeof window!=='undefined'&&window.__SELFHOST);
+function trnApi(m,url,body){return fetch(url,{method:m,credentials:'same-origin',headers:body!==undefined?{'content-type':'application/json'}:{},body:body!==undefined?JSON.stringify(body):undefined}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.erro||('Erro '+r.status));return j;});}
+function trnCarregar(force){
+  if(!trnOk())return;if(TRN.busy){if(force)TRN.denovo=true;return;}if(!force&&(TRN.cur||TRN.erro))return;TRN.busy=true;TRN.denovo=false;
+  trnApi('GET','/api/treino/cursos').then(j=>{TRN.cur=j;TRN.erro='';(j.cursos||[]).forEach(c=>{const loc=TRN.prog[c.id];if(loc&&loc._pend)return;if(c.prog)TRN.prog[c.id]=c.prog;else delete TRN.prog[c.id];});})
+    .catch(e=>{TRN.erro=e.message||String(e);}).finally(()=>{TRN.busy=false;TRN.t=Date.now();if(TRN.denovo)trnCarregar(true);schedule();});}
+const trnCurso=id=>((TRN.cur&&TRN.cur.cursos)||[]).find(c=>c.id===id)||null;
+/* conteúdo validado: só capítulos com passos; perguntas com opções e resposta certa válidas */
+function trnValida(j){const caps=(j&&Array.isArray(j.capitulos)?j.capitulos:[]).filter(c=>c&&c.id&&Array.isArray(c.passos)&&c.passos.length).map(c=>({id:String(c.id),titulo:String(c.titulo||c.id),objetivo:String(c.objetivo||''),min:+c.duracao_min||0,
+  passos:c.passos.filter(p=>p&&p.img).map(p=>({img:String(p.img),w:+p.w||1440,h:+p.h||900,titulo:String(p.titulo||''),texto:String(p.texto||''),dica:p.dica?String(p.dica):'',d:p.destaque&&+p.destaque.w>0?{x:+p.destaque.x||0,y:+p.destaque.y||0,w:+p.destaque.w,h:+p.destaque.h||0}:null})),
+  quiz:(Array.isArray(c.quiz)?c.quiz:[]).filter(q=>q&&Array.isArray(q.opcoes)&&q.opcoes.length>1&&+q.certa>=0&&+q.certa<q.opcoes.length).map(q=>({pergunta:String(q.pergunta||''),opcoes:q.opcoes.map(String),certa:+q.certa,explica:String(q.explica||'')}))}));
+  return {capitulos:caps};}
+function trnConteudo(id){const c=trnCurso(id);if(!c)return null;if(TRN.cont[id])return TRN.cont[id];if(TRN.contBusy[id]||TRN.contErro[id])return null;TRN.contBusy[id]=true;
+  fetch('/treino/'+encodeURIComponent(c.pasta)+'/conteudo.json',{credentials:'same-origin'}).then(r=>{if(!r.ok)throw new Error('Erro '+r.status);return r.json();})
+    .then(j=>{const v=trnValida(j);if(!v.capitulos.length)throw new Error('Conteúdo vazio.');TRN.cont[id]=v;}).catch(e=>{TRN.contErro[id]=e.message||String(e);}).finally(()=>{TRN.contBusy[id]=false;schedule();});return null;}
+const trnImg=(c,p)=>'/treino/'+encodeURIComponent(c.pasta)+'/'+String(p.img).split('/').map(encodeURIComponent).join('/');
+/* resumo do progresso de um curso (puro): capítulos feitos, acertos, próximo capítulo e situação */
+function trnResumo(caps,pr){const cs=caps||[],d=(pr&&pr.caps)||{};let feitos=0,acertos=0,total=0,prox=-1;
+  cs.forEach((c,i)=>{const x=d[c.id];if(x&&x.feito){feitos++;acertos+=+x.acertos||0;total+=+x.total||0;}else if(prox<0)prox=i;});
+  const n=cs.length,concl=n>0&&feitos===n;return {feitos,n,acertos,total,pct:n?Math.round(100*feitos/n):0,prox:prox<0?0:prox,concluido:concl,concluidoEm:concl?((pr&&pr.concluido)||null):null,sit:concl?'concluido':feitos||(pr&&pr.ini)?'andamento':'nao'};}
+const TRN_SIT={nao:['Não começou',''],andamento:['Em andamento','warn'],concluido:['Concluído','pos']};
+const trnSitPill=s=>pill((TRN_SIT[s]||TRN_SIT.nao)[0],(TRN_SIT[s]||TRN_SIT.nao)[1]);
+/* resultado de um capítulo (puro): acertos das respostas dadas */
+const trnAcertos=(cap,resp)=>(cap.quiz||[]).filter((q,i)=>resp&&resp[i]===q.certa).length;
+async function trnSalvar(cid){
+  const d=TRN.prog[cid];if(!d||!me.uid||!store.db)return false;
+  if(typeof PFN!=='undefined'&&PFN.sim){toast('Simulação ("Ver como"): o progresso não é gravado.');return false;}
+  const rec={caps:d.caps||{},ini:d.ini||Date.now(),tent:d.tent||0,ult:d.ult||null};
+  try{await store.db.collection('treino/'+me.uid+'/c').doc(cid).set(rec);delete d._pend;TRN.salvo='ok';trnCarregar(true);schedule();return true;}
+  catch(e){TRN.salvo='erro';toast('Não foi possível salvar o progresso agora: '+(e.message||e)+'. Ele fica nesta tela até você sair.','neg');schedule();return false;}}
+
+/* ---------- lista de cursos ---------- */
+function trnCursoCard(c){const r=trnResumo(c.caps,TRN.prog[c.id]||c.prog);
+  const bt=r.concluido?'<button class="btn" data-act="trnAbrir" data-c="'+esc(c.id)+'">Rever</button><button class="btn pri" data-act="trnCert" data-c="'+esc(c.id)+'">Certificado</button>':'<button class="btn pri" data-act="trnAbrir" data-c="'+esc(c.id)+'">'+(r.sit==='nao'?'Começar':'Continuar')+'</button>';
+  return '<div class="card trn-curso"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap"><h2>'+esc(c.titulo)+'</h2>'+trnSitPill(r.sit)+'</div>'+
+    (c.publico?'<div>'+pill('Perfil '+c.publico,'acc')+(c.paraVoce?'':' <span class="sub">(você vê por ser administrador)</span>')+'</div>':'')+
+    (c.resumo?'<p style="margin:0">'+esc(c.resumo)+'</p>':'')+
+    '<div class="sub">'+c.caps.length+' capítulos · '+(c.passos||0)+' passos · '+(c.perguntas||0)+' perguntas · cerca de '+Math.max(1,c.minutos||0)+' min</div>'+
+    '<div><div class="sub" style="margin:0 0 4px">'+r.feitos+' de '+r.n+' capítulos'+(r.total?' · '+r.acertos+' de '+r.total+' acertos':'')+(r.concluidoEm?' · concluído em '+fmtDate(new Date(r.concluidoEm-3*3600e3).toISOString()):'')+'</div><div class="trn-bar"><i style="width:'+r.pct+'%"></i></div></div>'+
+    '<div class="acts" style="justify-content:flex-start">'+bt+'</div></div>';}
+function trnListaHtml(){
+  if(!trnOk())return '<div class="note">Os treinamentos ficam no sistema instalado no servidor da empresa (app). Abra pelo endereço do sistema.</div>';
+  if(!TRN.cur){if(!TRN.erro)trnCarregar();return TRN.erro?'<div class="card"><p style="margin:0">Não foi possível carregar os treinamentos: '+esc(TRN.erro)+'</p><div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="trnRecarregar">Tentar de novo</button></div></div>':'<div class="empty">Carregando treinamentos…</div>';}
+  const cs=TRN.cur.cursos||[];
+  return (cs.length?'<div class="trn-cursos">'+cs.map(trnCursoCard).join('')+'</div>':'<div class="card"><p style="margin:0">Nenhum treinamento liberado para o seu perfil por enquanto.</p></div>');}
+function trnCardPend(){
+  if(!TRN.cur||!(TRN.cur.pendentes>0))return '';
+  const ps=(TRN.cur.cursos||[]).filter(c=>c.paraVoce&&c.situacao!=='concluido');if(!ps.length)return '';
+  return '<div class="card trn-pend" id="trnPend"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0 0 4px">Treinamento pendente</h2>'+
+    ps.map(c=>{const r=trnResumo(c.caps,TRN.prog[c.id]||c.prog);return '<div><b>'+esc(c.titulo)+'</b> <span class="sub">· '+r.feitos+' de '+r.n+' capítulos · cerca de '+Math.max(1,c.minutos||0)+' min</span></div>';}).join('')+
+    '<p class="sub" style="margin:4px 0 0">Feito aqui mesmo, no seu ritmo. O progresso fica salvo na sua conta.</p></div><div class="acts">'+ps.slice(0,2).map(c=>'<button class="btn pri" data-act="trnAbrir" data-c="'+esc(c.id)+'">'+((TRN.prog[c.id]||c.prog)?'Continuar':'Começar')+(ps.length>1?': '+esc(c.titulo):'')+'</button>').join('')+'</div></div></div>';}
+
+/* ---------- player ---------- */
+function trnPlayerHtml(c,C){
+  const s=ui.trn,pr=TRN.prog[c.id]||{},r=trnResumo(C.capitulos,pr);
+  if(s.cap>=C.capitulos.length)s.cap=0;const cap=C.capitulos[s.cap];if(s.passo>=cap.passos.length)s.passo=0;
+  const trilha='<nav class="trn-trilha" aria-label="Capítulos">'+C.capitulos.map((k,i)=>{const x=(pr.caps||{})[k.id];return '<button class="trn-cap'+(x&&x.feito?' feito':'')+'" data-act="trnCap" data-i="'+i+'" aria-current="'+(i===s.cap)+'"><span class="trn-cod">'+(x&&x.feito?'✓':String(i+1).padStart(2,'0'))+'</span><span><b>'+esc(k.titulo)+'</b><span class="sub">'+k.passos.length+' passos · '+(k.min||3)+' min'+(x&&x.feito?' · '+x.acertos+'/'+x.total+' acertos':'')+'</span></span></button>';}).join('')+'</nav>';
+  let mon;
+  if(s.modo==='passos'){const p=cap.passos[s.passo],d=p.d,ult=s.passo===cap.passos.length-1;
+    mon='<div class="trn-mh"><h2>'+esc(cap.titulo)+'</h2><span class="trn-pn">Passo '+(s.passo+1)+' de '+cap.passos.length+'</span></div>'+
+      '<button class="trn-tela" data-act="trnZoom" aria-label="Ampliar a tela"><img src="'+esc(trnImg(c,p))+'" alt="Tela do sistema: '+esc(p.titulo)+'" width="'+p.w+'" height="'+p.h+'">'+(d?'<span class="trn-hl" style="left:'+d.x+'%;top:'+d.y+'%;width:'+d.w+'%;height:'+d.h+'%"></span>':'')+'<span class="trn-amp">Ampliar</span></button>'+
+      '<div class="trn-leg">'+(s.passo===0&&cap.objetivo?'<p class="sub">Objetivo: '+esc(cap.objetivo)+'</p>':'')+'<h3>'+esc(p.titulo)+'</h3><p>'+esc(p.texto)+'</p>'+(p.dica?'<div class="trn-dica"><b>Atenção:</b> '+esc(p.dica)+'</div>':'')+'</div>'+
+      '<div class="trn-ctl"><button class="btn" data-act="trnAnt"'+(s.passo===0?' disabled':'')+'>← Anterior</button><div class="trn-dots" aria-hidden="true">'+cap.passos.map((_,i)=>'<i class="'+(i<=s.passo?'on':'')+'"></i>').join('')+'</div><button class="btn pri" data-act="trnProx">'+(ult?(cap.quiz.length?'Responder perguntas →':'Concluir capítulo'):'Próximo →')+'</button></div>';
+    const nx=cap.passos[s.passo+1]||(C.capitulos[s.cap+1]||{passos:[]}).passos[0];if(nx&&typeof Image!=='undefined'){try{const im=new Image();im.src=trnImg(c,nx);}catch(e){}}
+  }else if(s.modo==='quiz'){const rs=s.resp[cap.id]||{},nr=Object.keys(rs).length;
+    mon='<div class="trn-mh"><h2>'+esc(cap.titulo)+': perguntas</h2><span class="trn-pn">'+nr+' de '+cap.quiz.length+' respondidas</span></div><div class="trn-quiz">'+
+      cap.quiz.map((q,qi)=>{const sel=rs[qi];return '<div class="trn-q"><h4>'+(qi+1)+'. '+esc(q.pergunta)+'</h4>'+q.opcoes.map((o,oi)=>{let cl='trn-op';if(sel!=null){if(oi===q.certa)cl+=' certa';else if(oi===sel)cl+=' errada';}return '<button class="'+cl+'" data-act="trnResp" data-q="'+qi+'" data-o="'+oi+'"'+(sel!=null?' aria-disabled="true"':'')+'>'+esc(o)+'</button>';}).join('')+(sel!=null?'<div class="trn-exp">'+(sel===q.certa?'<b>Certo.</b> ':'<b>Não é essa.</b> ')+esc(q.explica)+'</div>':'')+'</div>';}).join('')+'</div>'+
+      '<div class="trn-ctl"><button class="btn" data-act="trnRever">← Rever os passos</button><button class="btn pri" data-act="trnConcluir"'+(nr<cap.quiz.length?' disabled':'')+'>Concluir capítulo</button></div>';
+  }else{const x=(pr.caps||{})[cap.id]||{},prox=s.cap<C.capitulos.length-1;
+    if(r.concluido){const dt=pr.concluido||Date.now();
+      mon='<div class="trn-fim"><div>'+pill('Curso concluído','pos')+'</div><h3>'+esc(c.titulo)+'</h3><p style="margin:0">Parabéns, '+esc((TRN.cur&&TRN.cur.eu&&TRN.cur.eu.nome)||me.nome||'')+'! Você concluiu os '+r.n+' capítulos em '+fmtDT(dt)+' e acertou '+r.acertos+' de '+r.total+' perguntas.</p>'+
+        '<div class="acts" style="justify-content:flex-start"><button class="btn pri" data-act="trnCert" data-c="'+esc(c.id)+'">Visualizar / PDF do certificado</button><button class="btn" data-act="trnRefazer">Refazer este capítulo</button><button class="btn" data-act="trnVoltar">Voltar aos treinamentos</button></div></div>';}
+    else mon='<div class="trn-fim"><div>'+pill('Capítulo concluído','pos')+'</div><h3>'+esc(cap.titulo)+'</h3><p style="margin:0">Você acertou '+(x.acertos||0)+' de '+(x.total||0)+' perguntas.'+((x.acertos||0)<(x.total||0)?' Vale rever os passos das perguntas que errou.':'')+'</p>'+
+      '<p class="sub" style="margin:0">'+(TRN.salvo==='erro'?'O progresso não foi salvo. Tente concluir de novo.':TRN.salvo==='ok'?'Progresso salvo na sua conta: '+r.feitos+' de '+r.n+' capítulos.':'Salvando o progresso…')+'</p>'+
+      '<div class="acts" style="justify-content:flex-start"><button class="btn" data-act="trnRefazer">Refazer o capítulo</button>'+(prox?'<button class="btn pri" data-act="trnSeguinte">Próximo capítulo →</button>':'<button class="btn pri" data-act="trnCap" data-i="'+r.prox+'">Ir ao capítulo que falta</button>')+'</div></div>';
+  }
+  return '<div class="trn-top"><div class="acts" style="justify-content:flex-start"><button class="btn" data-act="trnVoltar">← Treinamentos</button></div><div class="trn-prog"><div class="sub" style="margin:0 0 4px">'+r.feitos+' de '+r.n+' capítulos concluídos'+(r.total?' · '+r.acertos+'/'+r.total+' acertos':'')+'</div><div class="trn-bar"><i style="width:'+r.pct+'%"></i></div></div></div>'+
+    '<div class="trn-wrap">'+trilha+'<section class="card trn-mon" aria-live="polite">'+mon+'</section></div>';}
+V.treinos=()=>{
+  const sub='Cursos passo a passo com as telas do próprio sistema e perguntas rápidas, feitos aqui mesmo. O progresso fica salvo na sua conta.';
+  const adm=TRN.cur&&TRN.cur.admin&&mayR('usr');
+  const acts=adm?'<button class="btn" data-act="nav" data-tab="treinadm">Perfis e acompanhamento</button>':'';
+  if(ui.trn.curso&&TRN.cur){const c=trnCurso(ui.trn.curso);
+    if(c){const C=trnConteudo(c.id);
+      if(C)return pageHead(c.titulo,c.publico?'Treinamento · perfil '+c.publico:'Treinamento')+trnPlayerHtml(c,C);
+      if(TRN.contErro[c.id])return pageHead(c.titulo,'')+'<div class="card"><p style="margin:0">Não foi possível abrir o conteúdo deste treinamento: '+esc(TRN.contErro[c.id])+'</p><div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="trnVoltar">← Treinamentos</button><button class="btn" data-act="trnConteudoDeNovo" data-c="'+esc(c.id)+'">Tentar de novo</button></div></div>';
+      return pageHead(c.titulo,'')+'<div class="empty">Carregando o treinamento…</div>';}
+    ui.trn.curso='';}
+  let h=pageHead('Treinamentos do sistema',sub,acts)+'<div class="stack">'+trnListaHtml();
+  if(TRN.cur&&TRN.cur.acomp&&!adm)h+=trnAcompCard(false);
+  return h+'</div>';
+};
+{const v0=V.meu;V.meu=function(){if(ui.meu.aba!=='cursos')return v0.apply(this,arguments);return pageHead('Cursos do sistema','Treinamentos passo a passo com as telas do próprio sistema. Faça no seu ritmo; o progresso fica salvo na sua conta.')+meuAbas()+'<div class="stack">'+trnListaHtml()+'</div>';};}
+/* card no painel (Início e painéis dos setores) para quem tem curso pendente */
+{const emb=k=>{const v0=V[k];if(typeof v0!=='function')return;V[k]=function(){const h=v0.apply(this,arguments);if(typeof h!=='string'||h.indexOf('id="trnPend"')>=0)return h;const c=trnCardPend();return c?c+h:h;};};
+ emb('painel');(typeof window!=='undefined'&&Array.isArray(window.PAINEIS_SETOR)?window.PAINEIS_SETOR:[]).forEach(p=>{if(p&&p.id)emb(p.id);});}
+/* carrega a lista ao abrir o sistema (uma vez) e de novo a cada 10 min; o card de Ajuda entra quando a tela de tutoriais existe */
+RH_POST.push(()=>{
+  if(!store.ready||!trnOk())return;
+  if(!TRN.busy&&Date.now()-TRN.t>(TRN.erro?60e3:600e3))trnCarregar(true);
+  /* aviso uma vez por sessão (a primeira tela de muitos perfis não é o painel) */
+  if(TRN.cur&&TRN.cur.pendentes>0&&!TRN.avisado&&ui.tab!=='treinos'&&typeof toastAct==='function'){TRN.avisado=true;let ja=false;try{ja=sessionStorage.getItem(LS+'-trnav')==='1';sessionStorage.setItem(LS+'-trnav','1');}catch(e){}
+    const c=(TRN.cur.cursos||[]).find(x=>x.paraVoce&&x.situacao!=='concluido');if(c&&!ja)toastAct('Você tem um treinamento pendente: '+c.titulo+'.','Abrir',()=>A.trnAbrir({c:c.id}));}
+  if(ui.tab==='treinadm'&&mayR('usr')&&!TRN.acomp&&!TRN.acompBusy&&!TRN.acompErro)trnAcompCarregar();
+  if(ui.tab==='treinos'&&!ui.trn.curso&&TRN.cur&&TRN.cur.acomp&&!TRN.acomp&&!TRN.acompBusy&&!TRN.acompErro)trnAcompCarregar();
+});
+RH_PRE.push(()=>{if(TRN.tutOk||typeof V.tut!=='function')return;TRN.tutOk=true;const t0=V.tut;
+  V.tut=function(){const h=t0.apply(this,arguments);const card='<div class="card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0 0 4px">Treinamentos do sistema</h2><p style="margin:0">Cursos passo a passo com as telas do próprio sistema e perguntas rápidas, feitos aqui mesmo, sem conta externa. Veja os cursos liberados para o seu perfil.</p></div><button class="btn pri" data-act="nav" data-tab="treinos">Abrir treinamentos</button></div></div>';
+    const i=h.indexOf('<div class="bar">');return i>=0?h.slice(0,i)+card+h.slice(i):h+card;};});
+
+/* ---------- ações do player ---------- */
+const trnCtx=()=>{const c=trnCurso(ui.trn.curso),C=c?TRN.cont[c.id]:null;return C?{c,C,cap:C.capitulos[ui.trn.cap]}:null;};
+A.trnRecarregar=()=>{TRN.erro='';trnCarregar(true);};
+A.trnConteudoDeNovo=d=>{delete TRN.contErro[d.c];render();};
+A.trnAbrir=d=>{const c=trnCurso(d.c);if(!c)return;const r=trnResumo(c.caps,TRN.prog[c.id]||c.prog);
+  Object.assign(ui.trn,{curso:c.id,cap:r.concluido?0:r.prox,passo:0,modo:'passos',resp:{}});TRN.salvo='';ui.tab='treinos';try{history.replaceState(null,'','#treinos');}catch(e){}render();window.scrollTo(0,0);};
+A.trnVoltar=()=>{ui.trn.curso='';ui.tab='treinos';render();window.scrollTo(0,0);};
+A.trnCap=d=>{const x=trnCtx();if(!x)return;ui.trn.cap=Math.max(0,Math.min(x.C.capitulos.length-1,+d.i||0));ui.trn.passo=0;ui.trn.modo='passos';render();try{const m=$('.trn-mon');if(m&&m.scrollIntoView)m.scrollIntoView({block:'start',behavior:'smooth'});}catch(e){}};
+A.trnAnt=()=>{if(ui.trn.passo>0){ui.trn.passo--;render();}};
+A.trnProx=()=>{const x=trnCtx();if(!x)return;if(ui.trn.passo<x.cap.passos.length-1){ui.trn.passo++;render();return;}if(x.cap.quiz.length){ui.trn.modo='quiz';render();}else A.trnConcluir();};
+A.trnRever=()=>{ui.trn.modo='passos';ui.trn.passo=0;render();};
+A.trnResp=d=>{const x=trnCtx();if(!x)return;const r=ui.trn.resp[x.cap.id]=ui.trn.resp[x.cap.id]||{};if(r[d.q]==null){r[d.q]=+d.o;render();}};
+A.trnConcluir=async()=>{const x=trnCtx();if(!x)return;const r=ui.trn.resp[x.cap.id]||{};if(Object.keys(r).length<x.cap.quiz.length)return;
+  const pr=TRN.prog[x.c.id]=Object.assign({caps:{},ini:Date.now(),tent:0},TRN.prog[x.c.id]||{});pr.caps=Object.assign({},pr.caps);
+  const ant=pr.caps[x.cap.id]||{};pr.caps[x.cap.id]={feito:true,acertos:trnAcertos(x.cap,r),total:x.cap.quiz.length,em:Date.now(),tent:(+ant.tent||0)+1};pr.tent=(+pr.tent||0)+1;
+  const rr=trnResumo(x.C.capitulos,pr);pr.ult={cap:x.C.capitulos[rr.prox].id,passo:0};if(rr.concluido&&!pr.concluido)pr.concluido=Date.now();
+  pr._pend=true;ui.trn.modo='fim';TRN.salvo='salvando';render();await trnSalvar(x.c.id);};
+A.trnRefazer=()=>{const x=trnCtx();if(!x)return;delete ui.trn.resp[x.cap.id];ui.trn.modo='passos';ui.trn.passo=0;render();};
+A.trnSeguinte=()=>{const x=trnCtx();if(!x)return;if(ui.trn.cap<x.C.capitulos.length-1)ui.trn.cap++;ui.trn.passo=0;ui.trn.modo='passos';render();window.scrollTo(0,0);};
+A.trnZoom=()=>{const x=trnCtx();if(!x||ui.trn.modo!=='passos')return;const p=x.cap.passos[ui.trn.passo],d=p.d;
+  modal({title:p.titulo||x.cap.titulo,wide:true,nofocus:true,body:'<p class="sub" style="margin:0 0 8px">Arraste para ver o resto da tela; no celular, use dois dedos para aproximar.</p><div class="trn-zoom"><div class="trn-zi" style="width:'+Math.max(p.w,320)+'px"><img src="'+esc(trnImg(x.c,p))+'" alt="Tela do sistema ampliada: '+esc(p.titulo)+'" width="'+p.w+'" height="'+p.h+'">'+(d?'<span class="trn-hl" style="left:'+d.x+'%;top:'+d.y+'%;width:'+d.w+'%;height:'+d.h+'%"></span>':'')+'</div></div>',
+    foot:'<button class="btn pri" data-act="closeModal">Fechar</button>'});};
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('keydown',e=>{
+  if(ui.tab!=='treinos'||!ui.trn.curso||ui.trn.modo!=='passos'||e.altKey||e.ctrlKey||e.metaKey)return;const ov=$('#ov');if(ov&&!ov.hidden)return;
+  const t=e.target;if(t&&t.closest&&t.closest('input,textarea,select,[contenteditable]'))return;
+  const x=trnCtx();if(!x)return;
+  if(e.key==='ArrowRight'){if(ui.trn.passo<x.cap.passos.length-1){e.preventDefault();A.trnProx();}}else if(e.key==='ArrowLeft'){e.preventDefault();A.trnAnt();}});
+
+/* ---------- certificado (renderizador de documentos do sistema) ---------- */
+function trnCertDoc(c,pr,nome){const r=trnResumo(c.caps,pr),dt=(pr&&pr.concluido)||Date.now(),ca=(pr&&pr.caps)||{};
+  return {tipo:'Certificado de conclusão de treinamento',situacao:'Concluído',
+    meta:[['Participante',nome||'—'],['Treinamento',c.titulo],['Concluído em',fmtDT(dt)],['Acertos',r.acertos+' de '+r.total+(r.total?' ('+Math.round(100*r.acertos/r.total)+'%)':'')],['Capítulos',String(r.n)],['Carga aproximada',Math.max(1,c.minutos||0)+' min']],
+    raw:'<p style="font-size:15px;line-height:1.6;margin:6px 0 12px">Certificamos que <b>'+esc(nome||'—')+'</b> concluiu o treinamento <b>'+esc(c.titulo)+'</b> na Central de Gestão, com '+r.n+' capítulos de rotinas do sistema e as perguntas de fixação de cada capítulo, em '+fmtDate(new Date(dt-3*3600e3).toISOString())+'.</p>',
+    tables:[{title:'Capítulos',head:['Capítulo','Acertos','Concluído em'],num:[1],rows:c.caps.map(k=>{const x=ca[k.id]||{};return [k.titulo,x.feito?(x.acertos+' de '+x.total):'—',x.em?fmtDT(x.em):'—'];})}],
+    sign:['Participante','Responsável pelo treinamento']};}
+A.trnCert=d=>{const c=trnCurso(d.c);if(!c)return;const pr=TRN.prog[c.id]||c.prog;if(!trnResumo(c.caps,pr).concluido){toast('O certificado sai quando todos os capítulos estiverem concluídos.','neg');return;}
+  showDoc(trnCertDoc(c,pr,(TRN.cur&&TRN.cur.eu&&TRN.cur.eu.nome)||me.nome||''),slug('certificado-'+c.titulo+'-'+((TRN.cur&&TRN.cur.eu&&TRN.cur.eu.nome)||'')));};
+
+/* ---------- Sistema › Treinamentos: perfis por curso e acompanhamento ---------- */
+function trnAcompCarregar(){if(!trnOk()||TRN.acompBusy)return;TRN.acompBusy=true;
+  trnApi('GET','/api/treino/acomp').then(j=>{TRN.acomp=j;TRN.acompErro='';TRN.acompT=Date.now();}).catch(e=>{TRN.acompErro=e.message||String(e);}).finally(()=>{TRN.acompBusy=false;schedule();});}
+const TRN_PF_FORA=['pendente','semnivel','semid','admin'];
+const trnPerfisLista=()=>Object.keys(PERFIS).filter(k=>!TRN_PF_FORA.includes(k)).map(k=>[k,(PERFIS[k]&&PERFIS[k].nome)||k]);
+/* linhas filtradas do acompanhamento (puro) */
+function trnAcompFiltra(ls,f){const q=gsNorm((f&&f.q)||'');return (ls||[]).filter(l=>(!f||!f.curso||l.curso===f.curso)&&(!f||!f.sit||l.situacao===f.sit)&&(!q||gsNorm(l.nome+' '+l.perfilNome).includes(q)))
+  .sort((a,b)=>(a.situacao==='concluido')-(b.situacao==='concluido')||(b.em||0)-(a.em||0)||String(a.nome).localeCompare(String(b.nome),'pt-BR'));}
+function trnAcompCard(zerar){
+  if(!TRN.acomp){if(!TRN.acompBusy&&!TRN.acompErro)setTimeout(trnAcompCarregar,0);return '<div class="card"><h2>Acompanhamento da equipe</h2>'+(TRN.acompErro?'<p style="margin:0">Não foi possível carregar: '+esc(TRN.acompErro)+'</p><div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="trnAcompDeNovo">Tentar de novo</button></div>':'<div class="empty">Carregando…</div>')+'</div>';}
+  const f=ui.trnaf,A0=TRN.acomp,ls=trnAcompFiltra(A0.linhas,f),todos=trnAcompFiltra(A0.linhas,{curso:f.curso});
+  const nC=todos.filter(l=>l.situacao==='concluido').length,nA=todos.filter(l=>l.situacao==='andamento').length,nN=todos.filter(l=>l.situacao==='nao').length;
+  return '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Acompanhamento da equipe</h2><div class="acts"><button class="btn sm" data-act="trnAcompDeNovo">Atualizar</button><button class="btn sm" data-act="trnAcompCsv">Exportar CSV</button></div></div>'+
+    '<p class="sub" style="margin:4px 0 10px">Pessoas com o perfil de cada curso e quem já começou. '+(zerar?'Zerar apaga o progresso da pessoa naquele curso (ela recomeça do início) e fica na auditoria.':'Só consulta: zerar o progresso é com o Administrador.')+'</p>'+
+    '<div class="kpis" style="margin:0 0 10px">'+kpi('Pessoas',String(todos.length),'')+kpi('Concluíram',String(nC),'',nC?'pos':'')+kpi('Em andamento',String(nA),'',nA?'warn':'')+kpi('Não começaram',String(nN),'',nN?'neg':'')+'</div>'+
+    '<div class="bar"><label class="f"><span>Curso</span><select data-filter="trnaf.curso">'+opt(A0.cursos.map(c=>[c.id,c.titulo]),f.curso,'Todos')+'</select></label><label class="f"><span>Situação</span><select data-filter="trnaf.sit">'+opt([['nao','Não começou'],['andamento','Em andamento'],['concluido','Concluído']],f.sit,'Todas')+'</select></label><label class="f grow"><span>Buscar pessoa</span><input id="q_trnaf" data-filter="trnaf.q" value="'+esc(f.q)+'" placeholder="Nome ou perfil"></label></div>'+
+    '<div class="tw" style="border:0;margin-top:8px"><table style="min-width:760px"><thead><tr><th>Pessoa</th><th>Curso</th><th class="num">Capítulos</th><th class="num">Acertos</th><th>Última atividade</th><th>Situação</th>'+(zerar?'<th></th>':'')+'</tr></thead><tbody>'+
+    (ls.length?ls.map(l=>'<tr><td>'+esc(l.nome)+(l.ativo?'':' '+pill('inativo',''))+'<div class="sub">'+esc(l.perfilNome||'')+'</div></td><td>'+esc(l.cursoTitulo)+'</td><td class="num">'+l.feitos+' de '+l.nCaps+'</td><td class="num">'+(l.total?l.acertos+' de '+l.total:'—')+'</td><td>'+(l.em?fmtDT(l.em):'—')+(l.concluido?'<div class="sub">concluído em '+fmtDT(l.concluido)+'</div>':'')+'</td><td>'+trnSitPill(l.situacao)+'</td>'+
+      (zerar?'<td class="act">'+(l.situacao!=='nao'?'<button class="btn sm dng" data-act="trnZerar" data-u="'+esc(l.uid)+'" data-c="'+esc(l.curso)+'">Zerar</button>':'')+'</td>':'')+'</tr>').join(''):emptyRow(zerar?7:6,'Ninguém nesta lista.'))+'</tbody></table></div></div>';}
+A.trnAcompDeNovo=()=>{TRN.acompErro='';TRN.acomp=null;trnAcompCarregar();render();};
+A.trnAcompCsv=()=>{if(!TRN.acomp)return;const ls=trnAcompFiltra(TRN.acomp.linhas,ui.trnaf),c=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const txt='﻿'+['Pessoa;Perfil;Curso;Capítulos concluídos;Capítulos;Acertos;Perguntas;Última atividade;Concluído em;Situação'].concat(ls.map(l=>[l.nome,l.perfilNome,l.cursoTitulo,l.feitos,l.nCaps,l.acertos,l.total,l.em?fmtDT(l.em):'',l.concluido?fmtDT(l.concluido):'',(TRN_SIT[l.situacao]||TRN_SIT.nao)[0]].map(c).join(';'))).join('\r\n');
+  saveFile('treinamentos-acompanhamento.csv',txt);};
+A.trnZerar=d=>{const l=((TRN.acomp&&TRN.acomp.linhas)||[]).find(x=>x.uid===d.u&&x.curso===d.c);if(!l)return;
+  confirmBox('Zerar o progresso de <b>'+esc(l.nome)+'</b> em <b>'+esc(l.cursoTitulo)+'</b> ('+l.feitos+' de '+l.nCaps+' capítulos, '+l.acertos+' de '+l.total+' acertos)? A pessoa recomeça do início. A ação fica registrada na auditoria.',async()=>{
+    try{await trnApi('POST','/api/treino/zerar',{uid:l.uid,curso:l.curso});toast('Progresso zerado.','pos');}catch(e){toast('Não foi possível zerar: '+e.message,'neg');}
+    TRN.acomp=null;trnAcompCarregar();if(l.uid===me.uid){delete TRN.prog[l.curso];trnCarregar(true);}render();},'Zerar',true);};
+/* perfis por curso: cfg/empresa › treino.cursos[id] = {perfis:[...], off} (o servidor só aceita do Administrador ou do dono) */
+function trnCfgCursoHtml(c){const pf=new Set(c.perfis||[]),pad=JSON.stringify((c.perfisPadrao||[]).slice().sort())===JSON.stringify((c.perfis||[]).slice().sort());
+  return '<div class="card" data-trncurso="'+esc(c.id)+'"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap"><div><h2 style="margin:0">'+esc(c.titulo)+'</h2><div class="sub">'+c.caps.length+' capítulos · '+(c.passos||0)+' passos · '+(c.perguntas||0)+' perguntas · cerca de '+Math.max(1,c.minutos||0)+' min · pasta treino/'+esc(c.pasta)+'</div></div>'+(c.off?pill('Desligado','neg'):pill('Liberado','pos'))+'</div>'+
+    '<p class="sub" style="margin:10px 0 0">Quem faz este curso (aparece como pendente no painel). O Administrador e o dono veem todos os cursos.'+(pad?' Hoje vale o padrão do curso.':'')+'</p>'+
+    '<div class="trn-pfs">'+trnPerfisLista().map(([k,n])=>'<label><input type="checkbox" data-trnpf="'+esc(c.id)+'" value="'+esc(k)+'"'+(pf.has(k)?' checked':'')+'> '+esc(n)+'</label>').join('')+'</div>'+
+    '<label class="f chk"><input type="checkbox" data-trnoff="'+esc(c.id)+'"'+(c.off?' checked':'')+'><span>Desligar este curso (some da lista de todos, menos do Administrador)</span></label>'+
+    '<div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn pri" data-act="trnCfgSalvar" data-c="'+esc(c.id)+'">Salvar perfis</button><button class="btn" data-act="trnCfgPadrao" data-c="'+esc(c.id)+'">Voltar ao padrão</button><button class="btn" data-act="trnAbrir" data-c="'+esc(c.id)+'">Abrir o curso</button></div></div>';}
+function trnCfgGravar(id,o){const c0=cfg(),t=Object.assign({},c0.treino||{}),cs=Object.assign({},t.cursos||{});if(o===null)delete cs[id];else cs[id]=o;t.cursos=cs;
+  put('cfg',Object.assign({},c0,{id:'empresa',treino:t}));toast(o===null?'Curso volta aos perfis padrão.':'Perfis do curso salvos.','pos');setTimeout(()=>{trnCarregar(true);TRN.acomp=null;trnAcompCarregar();},600);}
+A.trnCfgSalvar=d=>{const ps=$$('[data-trnpf="'+d.c+'"]').filter(x=>x.checked).map(x=>x.value),off=!!($('[data-trnoff="'+d.c+'"]')||{}).checked;trnCfgGravar(d.c,off?{perfis:ps,off:true}:{perfis:ps});};
+A.trnCfgPadrao=d=>trnCfgGravar(d.c,null);
+V.treinadm=()=>{
+  const h=pageHead('Treinamentos','Cursos dentro do sistema: quem faz cada um e como a equipe está indo. Curso novo entra pela pasta treino do servidor (catálogo e conteúdo).','<button class="btn" data-act="nav" data-tab="treinos">Ver como a equipe vê</button>');
+  if(!trnOk())return h+'<div class="note">Os treinamentos ficam no sistema instalado no servidor da empresa.</div>';
+  if(!TRN.cur){if(!TRN.erro)trnCarregar();return h+(TRN.erro?'<div class="card"><p style="margin:0">Não foi possível carregar: '+esc(TRN.erro)+'</p><div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="trnRecarregar">Tentar de novo</button></div></div>':'<div class="empty">Carregando…</div>');}
+  if(!TRN.cur.admin)return h+'<div class="card"><p style="margin:0">Só o Administrador e o dono configuram os treinamentos.</p></div>'+(TRN.cur.acomp?trnAcompCard(false):'');
+  const cs=TRN.cur.cursos||[];
+  return h+'<div class="stack">'+(cs.length?cs.map(trnCfgCursoHtml).join(''):'<div class="card"><p style="margin:0">Nenhum curso no catálogo (pasta treino do servidor).</p></div>')+trnAcompCard(true)+'</div>';
+};
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='150',APP_DATA='2026-11-04';
+const APP_VER='151',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['151','2026-11-04',['Treinamentos do sistema: cursos passo a passo dentro do próprio ERP, com as telas do sistema, perguntas no fim de cada capítulo e certificado ao concluir. O primeiro é a Escola do Almoxarifado, que aparece no painel de Suprimentos e em Minha área › Cursos do sistema.', 'O progresso fica salvo por pessoa. Em Sistema › Treinamentos o administrador escolhe quais perfis fazem cada curso e acompanha quem concluiu e quantas perguntas acertou.']],
   ['150','2026-11-04',['Pedido de compra em PDF mais enxuto: colunas vazias não aparecem, cabeçalho em três colunas, totais, observações e assinaturas nunca ficam sozinhos na página seguinte e pedidos longos repetem o cabeçalho em cada página. Vale também para solicitação, cotação, separação e boletim de medição.', 'O PDF traz emitido por, aprovado por e um código de verificação. O e-mail do pedido leva um link para o fornecedor dar o aceite (ou avisar que não pode atender); o pedido ganha a etiqueta Aceito pelo fornecedor e o comprador é avisado no chat.']],
   ['149','2026-11-04',['Mapa de cotação com histórico de negociação: o primeiro preço fica guardado como proposta inicial e cada mudança vira uma rodada (Negociar ou Nova rodada), com canal, observação, anexo, quem e quando. Nenhum preço antigo é apagado.', 'Observação obrigatória quando o preço ou o frete sobe. O mapa mostra a etiqueta de desconto, o histórico ao clicar e a economia por fornecedor e no total; o pedido de compra guarda proposta inicial e negociado, e Controles de compras ganhou o cartão de economia por comprador e fornecedor.']],
   ['148','2026-11-04',['Correções da revisão de perfis: o Almoxarife volta a ver a lista de colaboradores (só nome, matrícula, função e obra) para registrar EPI, enviar ferramentas e despachar romaneio; o preço não reaparece mais no recebimento às cegas.', 'Solicitação enviada pelo encarregado fica Enviada até o almoxarife criar a separação, sem apontar para separação inexistente. O Fiscal volta a lançar a nota de entrada. Botões Aprovar e Recusar não aparecem mais em dobro nas solicitações.']],

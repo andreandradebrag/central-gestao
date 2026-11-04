@@ -1457,6 +1457,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
+    if (c0 === 'treino') return TREINO.podeLer(conta, p); /* v151: o próprio; todos só Administrador, dono e RH */
     if (c0 === 'lixo') { if (!data || !data.col) return true; if (data.col === 'func' && !veFuncCompleto(conta)) return false; const pp = data.col + '/' + (data.rid || 'x'); return perfilPermite(conta, pp, 'r') && podeLer(conta, pp, data.rec || null, memo); }
     if (VEIC_COLS.has(c0) && !veicOk(conta, c0, data, memo)) return false;
     if ((c0 === 'nfse' || (c0 === 'notas' && data && data.tipo === 'saida')) && !veFaturamento(conta)) return false; /* v115.2 */
@@ -2108,8 +2109,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   const NEGF = require('./negoc.js')({ doc, erro, igual, auditar: (...a) => auditar(...a) }); /* v149: histórico de negociação do mapa de cotação (negoc.js) */
   const ACEITE = require('./aceite.js')({ db, q, doc, salvar, erro, ehDono, gravaCol, pode, perfilPermite, gravacaoPermitida, cfgEmp, ipDe, json, html: X.html, pag, lerJson, lerCorpo: X.lerCorpo, APP_URL, SEG, avisarDoc, auditar: (...a) => auditar(...a) }); /* v150: código de verificação e aceite do fornecedor (aceite.js) */
+  const TREINO = require('./treino.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaGrupo, PERM, NIV }); /* v151: treinamentos dentro do sistema (treino.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
+    if (c0 === 'treino') { const e = TREINO.antes(conta, p, velho, novo); return e.erro ? e : { data: e.data, ctx }; } /* v151: cada pessoa grava só o próprio progresso */
+    if (p === 'cfg/empresa') TREINO.cfgAntes(conta, velho, novo); /* v151: cursos × perfis só pelo Administrador */
     if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
     if (c0 === 'usr' && s.length === 2) { const e = regraUsrPerfil(velho, novo); if (e) return e; }
     { const e = regraFina(conta, p, velho, novo, 'PUT'); if (e) return e; }
@@ -2187,6 +2191,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   function antesExcluir(conta, p, velho, req) {
     const s = p.split('/'), c0 = s[0];
+    if (c0 === 'treino') return TREINO.antesExcluir(); /* v151: zerar só por /api/treino/zerar */
     if (c0 === 'proj' && s.length === 2 && velho) { const e = regraExcluirObra(conta, req, p, s[1], velho); if (e) return e; } /* v128 */
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
     if (!velho) return null;
@@ -2223,6 +2228,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (m === 'POST' && (p === '/api/aprovar')) { await R(b => rotaAprovar(conta, req, b)); return true; }
     if (await P2Q.rota(p, m, req, res, conta)) return true; /* v141 */
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
+    if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (m === 'POST' && p === '/api/med/reabrir') { const b = await lerJson(req), r = MEDR(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro } : r); return true; } /* v144 */
     if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }

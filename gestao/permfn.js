@@ -18,7 +18,7 @@ const nmax = (a, b) => ni(a) >= ni(b) ? a : b;
 const nmin = (a, b) => ni(a) <= ni(b) ? a : b;
 const ACOES = ['aprovar', 'lancarNota', 'cancelar', 'exportar']; /* v146: 'valores' (Ver valores gerenciais) é tratada à parte em sanAcoes/aplicar */
 /* coleções que nunca são função (leitura livre ou só pelo Administrador) */
-const FORA = new Set(['cfg', 'usr', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'perfc']);
+const FORA = new Set(['cfg', 'usr', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'perfc', 'treino']); /* v151: treino (próprio progresso) nunca é função */
 const ID_OK = /^[a-z][a-zA-Z0-9]{0,30}$/;
 const tem = (l, g) => l === '*' || (Array.isArray(l) && l.includes(g));
 
