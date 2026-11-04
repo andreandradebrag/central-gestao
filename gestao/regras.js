@@ -2105,6 +2105,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (itens.length && !(novo.sepPend && Array.isArray(novo.sepPend.itens) && novo.sepPend.itens.length)) novo.sepPend = { itens, em: Date.now(), por: conta.id, srv: 1 };
     if (novo.status === 'atendida') novo.status = 'enviada';
   }
+  const NEGF = require('./negoc.js')({ doc, erro, igual, auditar: (...a) => auditar(...a) }); /* v149: histórico de negociação do mapa de cotação (negoc.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
@@ -2149,6 +2150,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */
       if (c0 === 'nfse') { e = regraNfseCanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'sc') { e = P2N.regraScAprov(conta, velho, novo); if (e) return e; regraScSep(conta, velho, novo); } /* v140; v148 */
+      if (c0 === 'cot' || c0 === 'ped') { e = NEGF(c0, conta, req, p, velho, novo); if (e) return e; } /* v149: negoc.js */
       if (c0 === 'notas') { e = regraNotaConf(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'notas') { e = P2Q.regraNota(conta, velho, novo); if (e) return e; } /* v141 */
       e = travaPonto(c0, velho, novo); if (e) return e;
@@ -2185,6 +2187,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'proj' && s.length === 2 && velho) { const e = regraExcluirObra(conta, req, p, s[1], velho); if (e) return e; } /* v128 */
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
     if (!velho) return null;
+    if (c0 === 'cot' && s.length === 2) { const e = NEGF.excluir(conta, velho); if (e) return e; } /* v149 */
     if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, /^a_/.test(s[1] || '') ? 'PERFIL_PADRAO_RESTAURADO' : 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome, base: velho.base }); } /* v114; v127: excluir o ajuste = voltar ao padrão */
     { const e = regraFina(conta, p, velho, null, 'DELETE'); if (e) return e; }
     if (c0 === 'rhdoc' && soNr(conta) && !docNr(velho)) return erro('Seu perfil exclui só certificados de NR.'); /* v114 */

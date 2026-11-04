@@ -28722,9 +28722,304 @@ function v148DedupDom(root){try{if(!root||!root.querySelectorAll)return;root.que
   td.querySelectorAll('button[data-act]').forEach(b=>{const k=b.dataset.act+'|'+(b.dataset.id||'')+'|'+(b.dataset.dec||'')+'|'+b.textContent.trim();if(vis.has(k))b.remove();else vis.add(k);});});}catch(e){}}
 RH_POST.push(()=>v148DedupDom($('#view')));
 
+/* ===== v149: histórico de negociação de preços no mapa de cotação (relatorios/feito_v149_negoc.md) =====
+   Dados (no próprio documento da cotação, lista c.negHist, só cresce; o servidor garante em deploy/gestao/negoc.js):
+     - inicial  {id:'ini_<parcId>_<k>', parcId, k, preco, origem, legado?, em, por}: primeiro preço do item/fornecedor
+       (digitado, link do fornecedor, arquivo, mensagem colada, PDF/IA; "legado" = registro anterior à v149).
+     - inicialF {id:'inif_<parcId>_<campo>', parcId, campo (frete|prazo|pgto), valor, origem, em, por}: primeira condição.
+     - rodada / correcao {id, parcId, n, canal, obs, anexo?, em, por, itens:[{k,de,para}], cond:{frete|prazo|pgto:{de,para}},
+       totDe, totPara}: negociação (por item ou do fornecedor inteiro). Observação obrigatória se algo SUBIR e na correção.
+     - reabertura {id, obs, em, por, pedIds}: mapa reaberto depois de gerar pedidos (só com os pedidos cancelados).
+   O preço atual continua em c.precos[j][i] (as contas de sempre); a célula com histórico não se edita direto: muda por
+   "Negociar" (item) ou "Nova rodada" (fornecedor). Pedido gerado guarda por item vIni (proposta inicial), negRod, negRef
+   e negPor (o servidor recalcula a partir da cotação). Valores em R$ seguem a máscara da v146 (o Comprador vê). */
+const NEG={orig:'',av:false,ctx:null};
+const NEG_CANAIS=[['telefone','Telefone'],['email','E-mail'],['whatsapp','WhatsApp'],['reuniao','Reunião'],['outro','Outro']];
+const NEG_ORIG={digitado:'digitado no mapa',link:'link do fornecedor',arquivo:'arquivo de resposta do fornecedor',texto:'mensagem colada (e-mail/WhatsApp)',pdf_ia:'orçamento em PDF (leitura por IA)',
+  legado:'registro anterior à v149',servidor:'registrado pelo servidor',telefone:'telefone',email:'e-mail',whatsapp:'WhatsApp',reuniao:'reunião',outro:'outro'};
+const NEG_CAMPOS=[['frete','Frete (R$)'],['prazo','Prazo de entrega (dias)'],['pgto','Condição de pagamento']];
+const negOrigNome=k=>NEG_ORIG[k]||String(k||'—');
+const negH=c=>Array.isArray(c&&c.negHist)?c.negHist:[];
+const negEhRod=e=>!!e&&(e.tipo==='rodada'||e.tipo==='correcao');
+const negNum=v=>v===''||v==null||!isFinite(+v)?null:+v;
+const negVazio=v=>v===''||v==null;
+function negCelEnt(c,parcId,k){return negH(c).filter(e=>e&&e.parcId===parcId&&((e.tipo==='inicial'&&e.k===k)||(negEhRod(e)&&(e.itens||[]).some(x=>x&&x.k===k))));}
+function negIni(c,parcId,k){const e=negH(c).find(e=>e&&e.tipo==='inicial'&&e.parcId===parcId&&e.k===k);return e?+e.preco:null;}
+function negUlt(c,parcId,k){let v=null;negH(c).forEach(e=>{if(!e||e.parcId!==parcId)return;if(e.tipo==='inicial'&&e.k===k)v=+e.preco;else if(negEhRod(e)){const x=(e.itens||[]).find(x=>x&&x.k===k);if(x&&negNum(x.para)!=null)v=+x.para;}});return v;}
+function negRods(c,parcId){return negH(c).filter(e=>negEhRod(e)&&e.parcId===parcId);}
+function negIniF(c,parcId,campo){return negH(c).find(e=>e&&e.tipo==='inicialF'&&e.parcId===parcId&&e.campo===campo)||null;}
+function negUltF(c,parcId,campo){const f=negIniF(c,parcId,campo);if(!f)return undefined;let v=f.valor;negRods(c,parcId).forEach(e=>{const x=e.cond&&e.cond[campo];if(x)v=x.para;});return v;}
+const negTravada=(c,parcId,k)=>!!parcId&&!!k&&negCelEnt(c,parcId,k).length>0;
+const negTravadaF=(c,parcId,campo)=>!!parcId&&!!negIniF(c,parcId,campo);
+const negQuem=()=>{try{return actorId();}catch(e){return '';}};
+/* mapa antigo (sem c.negHist): o preço atual vira a proposta inicial, marcada como registro anterior à v149 */
+function negInit(c){if(!c||Array.isArray(c.negHist))return c;c.negHist=[];try{cotChaves(c);}catch(e){}
+  const em=+c.cr||Date.parse(String(c.data||'')+'T12:00:00')||Date.now();
+  (c.forn||[]).forEach((f,j)=>{if(!f||!f.parcId)return;(c.itens||[]).forEach((it,i)=>{const p=+((c.precos[j]||[])[i]);if(!(p>0)||!it.k)return;
+      c.negHist.push({id:'ini_'+f.parcId+'_'+it.k,tipo:'inicial',parcId:f.parcId,k:it.k,preco:p,origem:'legado',legado:true,em:+f.respEm||em,por:''});});
+    NEG_CAMPOS.forEach(([campo])=>{if(!negVazio(f[campo]))c.negHist.push({id:'inif_'+f.parcId+'_'+campo,tipo:'inicialF',parcId:f.parcId,campo,valor:f[campo],origem:'legado',legado:true,em:+f.respEm||em,por:''});});});
+  return c;}
+/* registra a proposta inicial do que ainda não tem histórico e não deixa o preço com histórico mudar sem rodada */
+function negPrep(c,origem){if(!c||!Array.isArray(c.itens)||!Array.isArray(c.forn))return c;try{cotChaves(c);}catch(e){}negInit(c);if(!Array.isArray(c.precos))c.precos=[];
+  const o=origem||NEG.orig||'digitado',agora=Date.now(),por=negQuem();let rev=0;
+  c.forn.forEach((f,j)=>{if(!f||!f.parcId)return;const pr=c.precos[j]||(c.precos[j]=[]);
+    c.itens.forEach((it,i)=>{if(!it.k)return;const p=negNum(pr[i]);if(p==null||!(p>0))return;
+      if(!negTravada(c,f.parcId,it.k)){c.negHist.push({id:'ini_'+f.parcId+'_'+it.k,tipo:'inicial',parcId:f.parcId,k:it.k,preco:p,origem:o,em:agora,por});return;}
+      const u=negUlt(c,f.parcId,it.k);if(u!=null&&Math.abs(u-p)>1e-6){pr[i]=u;rev++;}});
+    NEG_CAMPOS.forEach(([campo])=>{const v=f[campo];
+      if(!negTravadaF(c,f.parcId,campo)){if(!negVazio(v))c.negHist.push({id:'inif_'+f.parcId+'_'+campo,tipo:'inicialF',parcId:f.parcId,campo,valor:campo==='pgto'?String(v):+v,origem:o,em:agora,por});return;}
+      const u=negUltF(c,f.parcId,campo);if(campo==='frete'&&!negVazio(v)&&negNum(u)!=null&&Math.abs(+u-+v)>1e-6){f.frete=+u;rev++;}});});
+  if(rev&&!NEG.av){NEG.av=true;try{toast('Preço já registrado na cotação só muda pelo botão Negociar (fica no histórico). O valor anterior foi mantido.','neg');}catch(e){}setTimeout(()=>{NEG.av=false;},3000);}
+  return c;}
+/* ---- totais: proposta inicial × negociado ---- */
+function negTotForn(c,j){const f=c.forn[j]||{},pr=c.precos[j]||[];let ini=0,neg=0,n=0,rods=f.parcId?negRods(c,f.parcId).length:0;
+  c.itens.forEach((it,i)=>{const p=+pr[i];if(!(p>0))return;n++;const q=+it.qtd||0,pi=f.parcId&&it.k?negIni(c,f.parcId,it.k):null;neg+=p*q;ini+=(pi!=null&&pi>0?pi:p)*q;});
+  if(n){neg+=+f.frete||0;const fi=f.parcId?negIniF(c,f.parcId,'frete'):null;ini+=fi&&negNum(fi.valor)!=null?+fi.valor:(+f.frete||0);}
+  return {ini:r2(ini),neg:r2(neg),eco:r2(ini-neg),pct:ini>0?(ini-neg)/ini:0,n,rods};}
+function negTotSel(c){let ini=0,neg=0;const us=new Set();
+  c.itens.forEach((it,i)=>{const j=c.escolha[i];if(j==null||j<0)return;const f=c.forn[j]||{},p=+((c.precos[j]||[])[i]);if(!(p>0))return;us.add(j);const q=+it.qtd||0,pi=f.parcId&&it.k?negIni(c,f.parcId,it.k):null;neg+=p*q;ini+=(pi!=null&&pi>0?pi:p)*q;});
+  us.forEach(j=>{const f=c.forn[j]||{};neg+=+f.frete||0;const fi=f.parcId?negIniF(c,f.parcId,'frete'):null;ini+=fi&&negNum(fi.valor)!=null?+fi.valor:(+f.frete||0);});
+  return {ini:r2(ini),neg:r2(neg),eco:r2(ini-neg),pct:ini>0?(ini-neg)/ini:0};}
+const negPctTxt=x=>(Math.round(Math.abs(x)*1000)/10).toString().replace('.',',')+'%';
+function negEcoHtml(t){if(!(t.ini>0))return '—';if(Math.abs(t.eco)<0.005)return '<span class="sub">sem variação</span>';
+  return t.eco>0?'<b class="pos">'+money(t.eco)+'</b><div class="sub">'+negPctTxt(t.pct)+' abaixo da proposta</div>':'<b class="neg">'+money(-t.eco)+' a mais</b><div class="sub">'+negPctTxt(t.pct)+' acima da proposta</div>';}
+function negEtiqueta(c,parcId,k,p){const ini=negIni(c,parcId,k);const rs=negCelEnt(c,parcId,k).filter(negEhRod).length;if(!rs||!(ini>0)||!(p>0))return '';
+  const d=(p-ini)/ini;if(Math.abs(d)<0.00005)return pill('= mantido ('+rs+' rodada'+(rs>1?'s':'')+')','');
+  return d<0?pill('↓ '+negPctTxt(d)+' negociado','pos'):pill('↑ '+negPctTxt(d)+' acima da proposta','neg');}
+/* ---- registrar uma rodada (núcleo, sem tela; usado pela tela e pelos testes) ----
+   dados: {tipo:'rodada'|'correcao', canal, obs, anexo, precos:{k:novo}, cond:{frete,prazo,pgto}} */
+function negRegistrar(c,j,d){negInit(c);const f=c.forn[j];if(!f||!f.parcId)return {err:'Escolha o fornecedor desta coluna antes de negociar.'};
+  if(c.status!=='aberta')return {err:'O mapa está fechado (pedidos gerados). Para negociar de novo, reabra o mapa.'};
+  negPrep(c);d=d||{};const tipo=d.tipo==='correcao'?'correcao':'rodada',obs=String(d.obs||'').trim().slice(0,1000),canal=String(d.canal||'');
+  if(!canal)return {err:'Informe o canal da negociação (telefone, e-mail, WhatsApp, reunião ou outro).'};
+  const itens=[],ini=[];let sobe=false;const pr=c.precos[j]||(c.precos[j]=[]);
+  for(const it of c.itens){if(!d.precos||!Object.prototype.hasOwnProperty.call(d.precos,it.k))continue;const raw=d.precos[it.k];if(negVazio(raw))continue;const nv=negNum(raw);
+    if(nv==null||!(nv>0))return {err:'Preço inválido para “'+it.desc+'”. Use um valor maior que zero.'};
+    const i=c.itens.indexOf(it),trav=negTravada(c,f.parcId,it.k),de=trav?negUlt(c,f.parcId,it.k):null;
+    if(!trav){ini.push({i,k:it.k,p:r4(nv)});continue;}
+    if(de!=null&&Math.abs(de-nv)<1e-6)continue;
+    if(de!=null&&nv>de+1e-6)sobe=true;itens.push({i,k:it.k,de,para:r4(nv)});}
+  const cond={},iniF=[];
+  for(const [campo,lbl] of NEG_CAMPOS){if(!d.cond||!Object.prototype.hasOwnProperty.call(d.cond,campo))continue;let nv=d.cond[campo];if(negVazio(nv))continue;
+    if(campo==='pgto')nv=String(nv).trim().slice(0,120);else{nv=negNum(nv);if(nv==null||nv<0)return {err:lbl+' inválido.'};}
+    if(!negTravadaF(c,f.parcId,campo)){iniF.push([campo,nv]);continue;}
+    const de=negUltF(c,f.parcId,campo);
+    if(campo==='pgto'?String(de||'')===nv:(negNum(de)!=null&&Math.abs(+de-nv)<1e-6))continue;
+    if(campo==='frete'&&nv>(+de||0)+1e-6)sobe=true;cond[campo]={de:negVazio(de)?'':de,para:nv};}
+  const nada=!itens.length&&!Object.keys(cond).length;
+  if(nada&&!ini.length&&!iniF.length&&!obs)return {err:'Nada mudou. Para registrar que o fornecedor manteve a proposta, escreva a observação.'};
+  if(tipo==='correcao'&&!obs)return {err:'Correção de digitação: escreva na observação o que estava errado.'};
+  if(sobe&&!obs)return {err:'O preço subiu em relação ao valor anterior: a observação é obrigatória (explique o motivo).'};
+  const totDe=negTotForn(c,j).neg;
+  ini.forEach(x=>{pr[x.i]=x.p;c.negHist.push({id:'ini_'+f.parcId+'_'+x.k,tipo:'inicial',parcId:f.parcId,k:x.k,preco:x.p,origem:canal,em:Date.now(),por:negQuem()});});
+  iniF.forEach(([campo,v])=>{f[campo]=v;c.negHist.push({id:'inif_'+f.parcId+'_'+campo,tipo:'inicialF',parcId:f.parcId,campo,valor:v,origem:canal,em:Date.now(),por:negQuem()});});
+  let e=null;
+  if(!nada||obs){itens.forEach(x=>{pr[x.i]=x.para;});Object.keys(cond).forEach(k=>{f[k]=cond[k].para;});
+    const totPara=negTotForn(c,j).neg,n=negRods(c,f.parcId).length+1;
+    e={id:'rd_'+uid(),tipo,parcId:f.parcId,n,canal,obs,em:Date.now(),por:negQuem(),itens:itens.map(x=>({k:x.k,de:x.de,para:x.para})),cond,totDe,totPara};
+    if(d.anexo&&d.anexo.id)e.anexo={id:String(d.anexo.id),nome:String(d.anexo.nome||'anexo').slice(0,120),ct:String(d.anexo.ct||''),tam:+d.anexo.tam||0};
+    c.negHist.push(e);}
+  negPrep(c);return {ok:true,entry:e,ini:ini.length+iniF.length};}
+/* resposta do fornecedor (link, arquivo, mensagem, PDF/IA) depois de já haver preço: vira rodada, nunca sobrescreve */
+{const a0=cotAplicar;cotAplicar=function(c,j,r){negInit(c);const f0=c.forn[j];if(!f0)return a0.apply(this,arguments);
+  const o=NEG.orig||'link',antP=(c.itens||[]).map((it,i)=>negNum((c.precos[j]||[])[i])),antF={};NEG_CAMPOS.forEach(([k])=>{antF[k]=f0[k];});
+  const res=a0.apply(this,arguments);const f=c.forn[j];if(!f||!f.parcId)return res;const pr=c.precos[j]||(c.precos[j]=[]);
+  const itens=[],agora=+(r&&r.em)||Date.now(),por=negQuem(),cond={};let sobe=false;
+  c.itens.forEach((it,i)=>{const nv=negNum(pr[i]),trav=it.k&&negTravada(c,f.parcId,it.k);
+    if(nv==null||!(nv>0)){if(antP[i]!=null&&antP[i]>0)pr[i]=antP[i];return;}
+    if(!trav){if(it.k)c.negHist.push({id:'ini_'+f.parcId+'_'+it.k,tipo:'inicial',parcId:f.parcId,k:it.k,preco:nv,origem:o,em:agora,por});return;}
+    const de=negUlt(c,f.parcId,it.k);if(de!=null&&Math.abs(de-nv)>1e-6){if(nv>de)sobe=true;itens.push({k:it.k,de,para:nv});}});
+  NEG_CAMPOS.forEach(([k])=>{const nv=f[k];if(negVazio(nv))return;if(!negTravadaF(c,f.parcId,k)){c.negHist.push({id:'inif_'+f.parcId+'_'+k,tipo:'inicialF',parcId:f.parcId,campo:k,valor:nv,origem:o,em:agora,por});return;}
+    const de=negUltF(c,f.parcId,k);if(k==='pgto'?String(de||'')!==String(nv):(negNum(de)==null||Math.abs(+de-+nv)>1e-6)){if(k==='frete'&&+nv>(+de||0))sobe=true;cond[k]={de:negVazio(de)?'':de,para:nv};}});
+  if(itens.length||Object.keys(cond).length){const id='rl_'+f.parcId+'_'+(o==='link'&&r&&r.em?r.em:uid());
+    if(!negH(c).some(e=>e&&e.id===id)){const ftmp=Object.assign({},f);NEG_CAMPOS.forEach(([k])=>{f[k]=cond[k]?cond[k].de:f[k];});const prTmp=pr.slice();itens.forEach(x=>{const i=c.itens.findIndex(y=>y.k===x.k);pr[i]=x.de;});
+      const totDe=negTotForn(c,j).neg;Object.assign(f,ftmp);prTmp.forEach((v,i)=>{pr[i]=v;});
+      c.negHist.push({id,tipo:'rodada',parcId:f.parcId,n:negRods(c,f.parcId).length+1,canal:o,auto:true,
+        obs:'Nova resposta do fornecedor ('+negOrigNome(o)+') em '+fmtDT(agora)+(sobe?', com aumento em relação ao valor anterior':'')+(r&&r.obsGeral?'. Observação do fornecedor: '+String(r.obsGeral).slice(0,300):'')+'.',
+        em:agora,por,itens,cond,totDe,totPara:negTotForn(c,j).neg});}}
+  return res;};}
+{const s0=cotSync;cotSync=function(){const o=NEG.orig;NEG.orig='link';try{return s0.apply(this,arguments);}finally{NEG.orig=o;}};}
+{const i0=cotImpTexto;cotImpTexto=function(t){const o=NEG.orig;NEG.orig=/^\s*\{/.test(String(t||''))?'arquivo':'texto';try{return i0.apply(this,arguments);}finally{NEG.orig=o;}};}
+{const l0=A.cotIaLancar;A.cotIaLancar=function(){const o=NEG.orig;NEG.orig='pdf_ia';try{return l0.apply(this,arguments);}finally{NEG.orig=o;}};}
+/* ---- gravação: cotação nova nasce com histórico; toda gravação registra a proposta inicial ---- */
+{const p0=put;put=function(col,rec){
+  if(col==='cot'&&rec&&typeof rec==='object'){try{if(!Array.isArray(rec.negHist)&&!(rec.id&&get('cot',rec.id)))rec.negHist=[];negPrep(rec);}catch(e){console.error('negPrep',e);}}
+  else if(col==='ped'&&rec&&rec.cotId&&!get('ped',rec.id)&&Array.isArray(rec.itens)&&!rec.itens.some(i=>i&&i.cotK)){try{const c=get('cot',rec.cotId);if(c)negPedFill(rec,c);}catch(e){console.error('negPedFill',e);}}
+  return p0.apply(this,[col,rec]);};}
+/* ---- pedido de compra: proposta inicial e negociado por item (o servidor recalcula a partir da cotação) ---- */
+function negPedItem(pi,c,parcId){const ini=negIni(c,parcId,pi.cotK),rs=negRods(c,parcId).filter(e=>(e.itens||[]).some(x=>x&&x.k===pi.cotK)),u=rs[rs.length-1];
+  if(ini!=null)pi.vIni=ini;else delete pi.vIni;pi.negRod=rs.length;pi.negRef=u?u.id:'';pi.negPor=u?u.por||'':'';}
+function negPedFill(p,c){const j=(c.forn||[]).findIndex(f=>f.parcId===p.parcId);if(j<0)return p;const its=(c.itens||[]).map((it,i)=>({it,i})).filter(x=>c.escolha[x.i]===j);
+  (p.itens||[]).forEach((pi,n)=>{let x=its[n];if(!x||x.it.desc!==pi.desc)x=its.find(y=>y.it.desc===pi.desc&&(y.it.prodId||'')===(pi.prodId||''));if(!x||!x.it.k)return;pi.cotK=x.it.k;negPedItem(pi,c,p.parcId);});
+  p.negCot={cotId:c.id,numero:c.numero||''};const fi=negIniF(c,p.parcId,'frete');if(fi&&negNum(fi.valor)!=null)p.freteIni=+fi.valor;return p;}
+function negPedEco(p){let ini=0,neg=0,n=0,rods=0;(p&&p.itens||[]).forEach(i=>{const vi=negNum(i.vIni);if(vi==null||!(vi>0))return;const q=+i.qtd||0;n++;rods+=+i.negRod||0;ini+=vi*q;neg+=(+i.vUnit||0)*q;});
+  if(n&&negNum(p.freteIni)!=null){ini+=+p.freteIni;neg+=+p.frete||0;}
+  return {tem:n>0,n,rods,ini:r2(ini),neg:r2(neg),eco:r2(ini-neg),pct:ini>0?(ini-neg)/ini:0};}
+/* ---- tela: histórico ---- */
+function negLinhasCel(c,parcId,k){const out=[];let ant=null,nr=0;const rodN=new Map(negRods(c,parcId).map((e,i)=>[e.id,i+1]));
+  negCelEnt(c,parcId,k).forEach(e=>{const v=e.tipo==='inicial'?+e.preco:+((e.itens||[]).find(x=>x.k===k)||{}).para;
+    const et=e.tipo==='inicial'?'Proposta inicial'+(e.legado?' '+pill('registro anterior à v149','warn'):''):(e.tipo==='correcao'?'Correção (rodada '+rodN.get(e.id)+')':'Rodada '+rodN.get(e.id));
+    const vr=ant!=null&&ant>0?(v-ant)/ant:null;nr++;
+    out.push('<tr><td>'+et+'</td><td class="num mono">'+money(v)+'</td><td class="num">'+(vr==null?'—':Math.abs(vr)<0.00005?'=':(vr<0?'<span class="pos">↓ '+negPctTxt(vr)+'</span>':'<span class="neg">↑ '+negPctTxt(vr)+'</span>'))+'</td><td class="mono">'+fmtDT(e.em)+'</td><td>'+esc(e.tipo==='inicial'?negOrigNome(e.origem):negOrigNome(e.canal))+'</td><td>'+(e.por?nm(e.por):'<span class="sub">—</span>')+'</td><td>'+esc(e.obs||'')+'</td><td>'+negAnexoHtml(e.anexo)+'</td></tr>');ant=v;});
+  return out;}
+const negAnexoHtml=a=>a&&a.id?'<a href="'+esc(anxUrl(a))+'" target="_blank" rel="noopener">'+esc(a.nome||'anexo')+' ↗</a>':'';
+const NEG_TAB='<div class="tw"><table class="ng-tab" style="min-width:0!important;width:100%"><thead><tr><th>Etapa</th><th class="num">Valor unit.</th><th class="num">Variação</th><th>Data</th><th>Origem / canal</th><th>Quem</th><th>Observação</th><th>Anexo</th></tr></thead><tbody>';
+function negHistModal(c,j,i){const f=c.forn[j]||{},it=c.itens[i]||{};const ls=negLinhasCel(c,f.parcId,it.k);const p=+((c.precos[j]||[])[i]);
+  modal({title:'Histórico de preço · '+(it.desc||'item'),wide:true,nofocus:true,
+    body:'<p class="sub" style="margin:0 0 8px">'+esc(parcNome(f.parcId))+' · '+esc(fmtQ(it.qtd))+' '+esc(it.un||'')+' · preço atual <b>'+(p>0?money(p):'—')+'</b>'+(c.numero?' · cotação nº '+esc(c.numero):'')+'</p>'+
+      (ls.length?NEG_TAB+ls.join('')+'</tbody></table></div>':'<p>Sem preço registrado para este item.</p>')+negCondHist(c,f.parcId),
+    foot:'<button class="btn" data-act="negVoltar">Voltar ao mapa</button>'+(cqRO||!mayW('comp')||!ls.length?'':'<button class="btn pri" data-act="negItem" data-i="'+i+'" data-j="'+j+'">Negociar</button>')});}
+function negCondHist(c,parcId){const rs=negRods(c,parcId).filter(e=>e.cond&&Object.keys(e.cond).length);const ini=NEG_CAMPOS.map(([k,l])=>{const e=negIniF(c,parcId,k);return e?esc(l)+': '+esc(k==='frete'?money(e.valor):String(e.valor)):'';}).filter(Boolean);
+  if(!rs.length&&!ini.length)return '';
+  return '<div class="sect">Condições do fornecedor</div><p class="sub" style="margin:0 0 6px">Proposta inicial: '+(ini.join(' · ')||'—')+'</p>'+(rs.length?'<ul style="margin:0 0 0 18px">'+rs.map(e=>'<li>'+fmtDT(e.em)+' · '+Object.keys(e.cond).map(k=>{const x=e.cond[k],l=(NEG_CAMPOS.find(y=>y[0]===k)||['',k])[1];return esc(l)+': '+esc(k==='frete'?money(x.de):String(x.de===''?'—':x.de))+' → '+esc(k==='frete'?money(x.para):String(x.para));}).join(' · ')+'</li>').join('')+'</ul>':'');}
+function negHistFModal(c,j){const f=c.forn[j]||{},rs=negRods(c,f.parcId),t=negTotForn(c,j),reab=negH(c).filter(e=>e&&e.tipo==='reabertura');
+  const kd=new Map(c.itens.map(it=>[it.k,it.desc]));
+  modal({title:'Negociação · '+parcNome(f.parcId),wide:true,nofocus:true,
+    body:'<p class="sub" style="margin:0 0 8px">Cotação nº '+esc(c.numero||'')+' · proposta inicial '+money(t.ini)+' · negociado '+money(t.neg)+' · '+(t.eco>0.004?'economia '+money(t.eco)+' ('+negPctTxt(t.pct)+')':t.eco<-0.004?'acima da proposta '+money(-t.eco):'sem variação')+'</p>'+
+      (rs.length?'<div class="tw"><table class="ng-tab" style="min-width:0!important;width:100%"><thead><tr><th>Rodada</th><th>Data</th><th>Canal</th><th>Quem</th><th>O que mudou</th><th class="num">Total antes → depois</th><th>Observação</th><th>Anexo</th></tr></thead><tbody>'+
+        rs.map((e,i)=>'<tr><td>'+(e.tipo==='correcao'?'Correção ('+(i+1)+')':'Rodada '+(i+1))+'</td><td class="mono">'+fmtDT(e.em)+'</td><td>'+esc(negOrigNome(e.canal))+'</td><td>'+(e.por?nm(e.por):'—')+'</td><td class="sub">'+
+          (e.itens||[]).map(x=>esc(kd.get(x.k)||'item')+': '+money(x.de)+' → '+money(x.para)).concat(Object.keys(e.cond||{}).map(k=>{const x=e.cond[k];return esc((NEG_CAMPOS.find(y=>y[0]===k)||['',k])[1])+': '+esc(k==='frete'?money(x.de):String(x.de===''?'—':x.de))+' → '+esc(k==='frete'?money(x.para):String(x.para));})).join('<br>')+'</td><td class="num mono">'+money(e.totDe)+' → '+money(e.totPara)+'</td><td>'+esc(e.obs||'')+'</td><td>'+negAnexoHtml(e.anexo)+'</td></tr>').join('')+'</tbody></table></div>':'<p>Nenhuma rodada de negociação com este fornecedor.</p>')+
+      negCondHist(c,f.parcId)+(reab.length?'<div class="sect">Reaberturas do mapa</div><ul style="margin:0 0 0 18px">'+reab.map(e=>'<li>'+fmtDT(e.em)+' · '+(e.por?nm(e.por):'—')+' · '+esc(e.obs||'')+'</li>').join('')+'</ul>':''),
+    foot:'<button class="btn" data-act="negVoltar">Voltar ao mapa</button>'+(cqRO||!mayW('comp')||!f.parcId?'':'<button class="btn pri" data-act="negForn" data-j="'+j+'">Nova rodada</button>')});}
+/* ---- tela: registrar rodada ---- */
+function negModal(j,is){const c=cqd;if(!c)return;negInit(c);const f=c.forn[j];if(!f||!f.parcId){toast('Escolha o fornecedor desta coluna antes de negociar.','neg');return;}
+  if(cqRO||c.status!=='aberta'){toast('O mapa está fechado. Para negociar de novo, reabra o mapa.','neg');return;}
+  negPrep(c);NEG.ctx={j,is:is||null};const n=negRods(c,f.parcId).length+1;
+  const lista=(is?is:c.itens.map((it,i)=>i)).map(i=>{const it=c.itens[i],p=negNum((c.precos[j]||[])[i]),ini=negIni(c,f.parcId,it.k);
+    return '<tr><td>'+esc(it.desc)+'<div class="sub">'+esc(fmtQ(it.qtd))+' '+esc(it.un||'')+'</div></td><td class="num mono">'+(ini!=null?money(ini):'—')+'</td><td class="num mono">'+(p!=null&&p>0?money(p):'—')+'</td><td><input type="number" step="any" min="0" data-ng="p" data-k="'+esc(it.k)+'" value="'+esc(p!=null&&p>0?p:'')+'" placeholder="R$ unitário" style="max-width:140px"></td></tr>';}).join('');
+  const cnd=NEG_CAMPOS.map(([k,l])=>{const v=f[k];return '<label class="f"><span>'+esc(l)+' · atual: '+esc(negVazio(v)?'—':k==='frete'?money(v):String(v))+'</span><input'+(k==='pgto'?'':' type="number" step="any" min="0"')+' data-ng="c" data-c="'+k+'" value="'+esc(negVazio(v)?'':v)+'"></label>';}).join('');
+  modal({title:(is&&is.length===1?'Negociar · '+c.itens[is[0]].desc:'Nova rodada · '+parcNome(f.parcId)),wide:true,nofocus:true,
+    body:'<p class="sub" style="margin:0 0 8px">'+esc(parcNome(f.parcId))+' · rodada '+n+' · cotação nº '+esc(c.numero||'')+'. Os valores anteriores ficam guardados no histórico; quem e quando são gravados automaticamente.</p>'+
+      '<div class="fg"><label class="f"><span>Motivo</span><select id="ngTipo"><option value="rodada">Negociação com o fornecedor</option><option value="correcao">Correção de digitação</option></select></label><label class="f"><span>Canal</span><select id="ngCanal">'+opt(NEG_CANAIS,'','Selecione…')+'</select></label></div>'+
+      '<div class="sect">Preço unitário</div><div class="tw"><table class="ng-tab" style="min-width:0!important;width:100%"><thead><tr><th>Item</th><th class="num">Proposta inicial</th><th class="num">Atual</th><th>Novo preço</th></tr></thead><tbody>'+lista+'</tbody></table></div>'+
+      '<div class="sect">Condições (altere só o que mudou)</div><div class="fg">'+cnd+'</div>'+
+      '<div id="ngRes" class="sub" style="margin:8px 0"></div>'+
+      '<label class="f full"><span id="ngObsL">Observação</span><textarea id="ngObs" rows="3" maxlength="1000" placeholder="Ex.: desconto de 5% para pagamento em 28 dias, conforme ligação com o vendedor."></textarea></label>'+
+      '<label class="f full" style="margin-top:8px"><span>Anexo (opcional: print, e-mail em PDF)</span><input type="file" id="ngArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>',
+    foot:'<button class="btn" data-act="negVoltar">Voltar ao mapa</button><button class="btn pri" data-act="negSalvar">Registrar rodada</button>'});
+  negResumo();}
+function negLerTela(){const d={tipo:($('#ngTipo')||{}).value||'rodada',canal:($('#ngCanal')||{}).value||'',obs:($('#ngObs')||{}).value||'',precos:{},cond:{}};
+  $$('#mb [data-ng="p"]').forEach(el=>{d.precos[el.dataset.k]=el.value;});$$('#mb [data-ng="c"]').forEach(el=>{d.cond[el.dataset.c]=el.value;});return d;}
+function negResumo(){const el=$('#ngRes');if(!el||!cqd||!NEG.ctx)return;const c=cqd,j=NEG.ctx.j,f=c.forn[j];if(!f)return;const d=negLerTela();
+  const t=cl(c),r=negRegistrar(t,j,Object.assign({},d,{canal:d.canal||'outro',obs:d.obs||'x'}));const de=negTotForn(c,j).neg,para=negTotForn(t,j).neg;
+  const sobe=c.itens.some(it=>{const v=negNum(d.precos[it.k]),u=negTravada(c,f.parcId,it.k)?negUlt(c,f.parcId,it.k):null;return v!=null&&u!=null&&v>u+1e-6;})||(negNum(d.cond.frete)!=null&&negNum(d.cond.frete)>(+f.frete||0)+1e-6);
+  const obr=sobe||d.tipo==='correcao';const l=$('#ngObsL');if(l)l.textContent='Observação'+(obr?' (obrigatória'+(sobe?': o preço subiu':': correção')+')':' (opcional)');
+  el.innerHTML=r.err&&!/Nada mudou/.test(r.err)?'<span class="neg">'+esc(r.err)+'</span>':'Total do fornecedor: <b>'+money(de)+'</b> → <b>'+money(para)+'</b>'+(Math.abs(para-de)>0.004?(para<de?' '+pill('↓ '+money(de-para),'pos'):' '+pill('↑ '+money(para-de)+' (observação obrigatória)','neg')):'');}
+document.addEventListener('input',e=>{if(e.target&&e.target.closest&&e.target.closest('#mb [data-ng], #ngTipo'))try{negResumo();}catch(er){}});
+document.addEventListener('change',e=>{if(e.target&&(e.target.id==='ngTipo'||e.target.id==='ngCanal'))try{negResumo();}catch(er){}});
+A.negItem=d=>negModal(+d.j,[+d.i]);
+A.negForn=d=>negModal(+d.j,null);
+A.negHist=d=>{if(!cqd)return;negHistModal(cqd,+d.j,+d.i);};
+A.negHistF=d=>{if(!cqd)return;negHistFModal(cqd,+d.j);};
+A.negVoltar=()=>{NEG.ctx=null;if(cqd)openCot(cqd);};
+A.negSalvar=async()=>{const c=cqd,x=NEG.ctx;if(!c||!x)return;const d=negLerTela(),fi=$('#ngArq'),arq=fi&&fi.files&&fi.files[0];
+  const t=cl(c),pre=negRegistrar(t,x.j,d);if(pre.err){toast(pre.err,'neg');return;}
+  if(arq){const as=await getAssets();if(!as){toast('Anexar arquivos só funciona na página publicada e para quem tem permissão de edição. Registre sem o anexo ou tente de novo.','neg');return;}
+    try{const ct=arq.type||(/\.pdf$/i.test(arq.name)?'application/pdf':'');const up=await as.upload(arq,ct?{type:ct}:undefined);d.anexo={id:up.id,nome:arq.name,ct:up.contentType||ct,tam:up.sizeBytes||arq.size};}catch(e){toast(anxErr(e),'neg');return;}}
+  const r=negRegistrar(c,x.j,d);if(r.err){toast(r.err,'neg');return;}
+  put('cot',cl(c));NEG.ctx=null;openCot(c);toast(r.entry?(r.entry.tipo==='correcao'?'Correção registrada no histórico.':'Rodada '+(negRods(c,r.entry.parcId).length)+' registrada.'):'Proposta inicial registrada.','pos');};
+/* ---- reabrir o mapa fechado (pedidos cancelados antes) ---- */
+function negPedsAtivos(c){return (c.pedIds||[]).map(id=>get('ped',id)).filter(p=>p&&p.status!=='cancelado');}
+function negReabrirCore(c,obs){obs=String(obs||'').trim();if(c.status!=='fechada')return {err:'Este mapa não está fechado.'};
+  const at=negPedsAtivos(c);if(at.length)return {err:'Cancele antes os pedidos gerados por este mapa: nº '+at.map(p=>p.numero).join(', ')+'. A reabertura fica no histórico.'};
+  if(obs.length<3)return {err:'Escreva o motivo da reabertura.'};negInit(c);
+  c.negHist.push({id:'rb_'+uid(),tipo:'reabertura',obs:obs.slice(0,1000),em:Date.now(),por:negQuem(),pedIds:(c.pedIds||[]).slice()});
+  c.pedIdsAnt=(c.pedIdsAnt||[]).concat(c.pedIds||[]);c.pedIds=[];c.status='aberta';return {ok:true};}
+A.negReabrir=()=>{const c0=cqd&&get('cot',cqd.id);if(!c0)return;const at=negPedsAtivos(c0);
+  if(at.length){msgModal('Reabrir o mapa de cotação',['Este mapa gerou pedido(s) que continuam ativos: nº '+at.map(p=>p.numero+' ('+((PED_ST[p.status]||[p.status])[0])+')').join(', ')+'.','Para negociar de novo, cancele antes esses pedidos em Suprimentos › Pedidos de compra. A reabertura e a nova negociação ficam no histórico do mapa.']);return;}
+  modal({title:'Reabrir o mapa nº '+c0.numero,body:'<p style="margin:0 0 8px">O mapa volta para Aberta e permite nova rodada de negociação. Tudo o que foi negociado continua no histórico.</p><label class="f"><span>Motivo da reabertura (obrigatório)</span><textarea id="ngReab" rows="3" maxlength="1000"></textarea></label>',saveLabel:'Reabrir mapa',
+    save:()=>{const c=cl(get('cot',c0.id));const r=negReabrirCore(c,($('#ngReab')||{}).value);if(r.err){toast(r.err,'neg');return false;}put('cot',c);
+      const sc=c.scId?get('sc',c.scId):null;if(sc&&sc.status==='comprada')put('sc',Object.assign(cl(sc),{status:'cotacao'}));
+      toast('Mapa reaberto. A reabertura ficou no histórico.','pos');setTimeout(()=>openCot(cl(get('cot',c.id)||c)),0);}});};
+/* ---- excluir: cotação com negociação vira cancelada (o histórico não se apaga) ---- */
+{const d0=A.cotDel;A.cotDel=d=>{const c=get('cot',d.id);if(c&&negH(c).some(e=>negEhRod(e)||(e&&e.tipo==='reabertura'))){confirmBox('Esta cotação tem negociação registrada e não pode ser excluída (o histórico fica guardado). Cancelar a cotação?',()=>{const x=get('cot',d.id);if(!x)return;put('cot',Object.assign(cl(x),{status:'cancelada'}));
+    const sc=x.scId?get('sc',x.scId):null;if(sc&&sc.status==='cotacao'&&!S.cot.some(y=>y.scId===sc.id&&y.status!=='cancelada'))put('sc',Object.assign(cl(sc),{status:'enviada'}));toast('Cotação cancelada; o histórico de negociação foi mantido.');},'Cancelar cotação',true);return;}return d0(d);};}
+/* ---- mapa: célula com preço atual, etiqueta e Negociar; rodapé com proposta inicial × negociado ---- */
+{const o0=openCot;openCot=function(c,ro){try{if(c)negInit(c);}catch(e){}const r=o0.apply(this,arguments);
+  try{const f=$('#mf');if(f&&c&&c.status==='fechada'&&mayW('comp')&&!f.querySelector('[data-act=negReabrir]'))f.insertAdjacentHTML('afterbegin','<button class="btn" data-act="negReabrir">Reabrir mapa para negociar</button>');}catch(e){}return r;};}
+{const t0=cqTable;cqTable=function(){let h=t0.apply(this,arguments);const c=cqd;if(!c||!Array.isArray(c.itens)||!Array.isArray(c.forn))return h;negInit(c);
+  h=h.replace(/<td id="cqc_(\d+)_(\d+)">([\s\S]*?)<\/td>/g,(m,a,b)=>{const i=+a,j=+b,it=c.itens[i],f=c.forn[j];if(!it||!f||!f.parcId||!negTravada(c,f.parcId,it.k))return m;
+    const p=negNum((c.precos[j]||[])[i]);
+    return '<td id="cqc_'+i+'_'+j+'"><div class="ng-c"><button type="button" class="ng-v" data-act="negHist" data-i="'+i+'" data-j="'+j+'" title="Ver o histórico de preço deste item"><b class="mono">'+(p!=null&&p>0?money(p):'—')+'</b>'+negEtiqueta(c,f.parcId,it.k,p)+'</button>'+(cqRO?'':'<button type="button" class="btn sm" data-act="negItem" data-i="'+i+'" data-j="'+j+'">Negociar</button>')+'</div></td>';});
+  h=h.replace(/<input( type="number" step="any")? data-cq="(frete|prazo|pgto)" data-j="(\d+)"[^>]*>/g,(m,t,k,b)=>{const f=c.forn[+b];if(!f||!f.parcId||!negTravadaF(c,f.parcId,k))return m;const v=f[k];
+    return '<span class="mono ng-cv" title="Muda pela Nova rodada (fica no histórico)">'+esc(negVazio(v)?'—':k==='frete'?money(v):String(v))+'</span>';});
+  const rod='<tr class="ng-rod"><td colspan="2"><b>Negociação</b><div class="sub">rodadas com o fornecedor</div></td>'+c.forn.map((f,j)=>{const n=f.parcId?negRods(c,f.parcId).length:0;
+      return '<td>'+(f.parcId?'<button type="button" class="btn sm" data-act="negHistF" data-j="'+j+'">'+(n?n+' rodada'+(n>1?'s':''):'Histórico')+'</button>'+(cqRO?'':'<button type="button" class="btn sm" data-act="negForn" data-j="'+j+'">Nova rodada</button>'):'')+'</td>';}).join('')+'<td></td></tr>'+
+    '<tr class="ng-tot"><td colspan="2">Valor inicial<div class="sub">proposta inicial (itens com preço + frete)</div></td>'+c.forn.map((f,j)=>'<td class="num" id="ngi_'+j+'"></td>').join('')+'<td class="num" id="ngsi"></td></tr>'+
+    '<tr class="ng-tot"><td colspan="2">Valor negociado</td>'+c.forn.map((f,j)=>'<td class="num" id="ngn_'+j+'"></td>').join('')+'<td class="num" id="ngsn"></td></tr>'+
+    '<tr class="ng-tot"><td colspan="2"><b>Economia da negociação</b></td>'+c.forn.map((f,j)=>'<td class="num" id="nge_'+j+'"></td>').join('')+'<td class="num" id="ngse"></td></tr>';
+  const k=h.lastIndexOf('</tbody>');if(k>=0)h=h.slice(0,k)+rod+h.slice(k);return h;};}
+{const t0=cqTotals;cqTotals=function(){const r=t0.apply(this,arguments);try{const c=cqd;if(!c)return r;
+  c.forn.forEach((f,j)=>{const t=negTotForn(c,j),a=$('#ngi_'+j),b=$('#ngn_'+j),e=$('#nge_'+j);if(a)a.innerHTML=t.n?money(t.ini):'—';if(b)b.innerHTML=t.n?money(t.neg):'—';if(e)e.innerHTML=t.n?negEcoHtml(t):'—';});
+  const s=negTotSel(c),a=$('#ngsi'),b=$('#ngsn'),e=$('#ngse');if(a)a.innerHTML=s.ini>0?money(s.ini)+'<div class="sub">escolhidos</div>':'—';if(b)b.innerHTML=s.ini>0?money(s.neg):'—';if(e)e.innerHTML=negEcoHtml(s);}catch(er){}return r;};}
+/* CSS do mapa */
+{const css='.ng-c{display:flex;flex-direction:column;align-items:flex-start;gap:4px}.ng-v{display:flex;flex-direction:column;align-items:flex-start;gap:2px;background:none;border:0;padding:0;margin:0;color:inherit;font:inherit;text-align:left;cursor:pointer}.ng-v:hover b,.ng-v:focus-visible b{text-decoration:underline}.ng-v .pill{white-space:nowrap;font-size:11px}.ng-tab td,.ng-tab th{vertical-align:top}tr.ng-rod td{border-top:2px solid var(--line)}';
+  try{if(typeof document!=='undefined'&&document.createElement&&document.head){const st=document.createElement('style');st.textContent=css;document.head.appendChild(st);}}catch(e){}}
+/* ---- PDF e CSV do mapa: coluna "Proposta inicial" ao lado do valor final ---- */
+cotDoc=function(c){c=negInit(cl(c));const sc=c.scId?get('sc',c.scId):null,nf=j=>c.forn[j].parcId?parcNome(c.forn[j].parcId):'Fornecedor '+(j+1);
+  const rows=c.itens.map((it,i)=>{let min=Infinity;c.forn.forEach((f,j)=>{const p=+(c.precos[j]||[])[i];if(p>0&&p<min)min=p;});const w=c.escolha[i];
+    return [String(i+1),it.desc+(it.un?' ('+it.un+')':''),fmtQ(it.qtd)].concat([].concat(...c.forn.map((f,j)=>{const p=+(c.precos[j]||[])[i],pi=f.parcId&&it.k?negIni(c,f.parcId,it.k):null;
+      return [p>0&&pi!=null&&pi>0?money(pi):'—',p>0?{h:esc(money(p)),best:p===min&&c.forn.length>1}:'—'];}))).concat([w>=0&&c.forn[w]?nf(w):'—']);});
+  const tt=c.forn.map((f,j)=>cqTotalForn(c,j)),tn=c.forn.map((f,j)=>negTotForn(c,j)),ts=negTotSel(c),dois=fn=>[].concat(...c.forn.map(fn));
+  const iniF=(f,k)=>{const e=f.parcId?negIniF(c,f.parcId,k):null;return e?e.valor:f[k];};
+  rows.push(['','Frete',''].concat(dois(f=>{const v=iniF(f,'frete');return [negVazio(v)?'—':money(v),f.frete!==''&&f.frete!=null?money(f.frete):'—'];})).concat(['']));
+  rows.push(['','Prazo de entrega (dias)',''].concat(dois(f=>{const v=iniF(f,'prazo');return [negVazio(v)?'—':String(v),f.prazo!==''&&f.prazo!=null?String(f.prazo):'—'];})).concat(['']));
+  rows.push(['','Condição de pagamento',''].concat(dois(f=>{const v=iniF(f,'pgto');return [negVazio(v)?'—':String(v),f.pgto||'—'];})).concat(['']));
+  rows.push(['','Total cotado',''].concat(dois((f,j)=>[tn[j].n?money(tn[j].ini):'—',tt[j].n?money(tt[j].total)+(tt[j].completo?'':' (incompleto)'):'—'])).concat([money(cqSelTotal(c))+' escolhidos']));
+  rows.push(['','Economia da negociação',''].concat(dois((f,j)=>['',tn[j].n&&Math.abs(tn[j].eco)>0.004?(tn[j].eco>0?money(tn[j].eco)+' ('+negPctTxt(tn[j].pct)+')':'+'+money(-tn[j].eco)+' (acima)'):'—'])).concat([ts.ini>0&&Math.abs(ts.eco)>0.004?(ts.eco>0?money(ts.eco)+' ('+negPctTxt(ts.pct)+')':'+'+money(-ts.eco)):'—']));
+  const head=['Item','Descrição','Qtd'].concat(dois((f,j)=>[nf(j)+' · proposta inicial',nf(j)+' · final'])).concat(['Vencedor']);
+  const nums=[0,2].concat(dois((f,j)=>[3+2*j,4+2*j]));
+  const nr=c.forn.reduce((s,f)=>s+(f.parcId?negRods(c,f.parcId).length:0),0);
+  return {tipo:'Mapa de cotação',numero:c.numero,situacao:c.status==='aberta'?'Aberta':c.status==='fechada'?'Fechada':'Cancelada',landscape:true,
+    meta:[['Data',fmtDate(c.data)],['Solicitação de compra',sc?'nº '+sc.numero:''],['Projeto',c.projId?projNome(c.projId):'Sem projeto'],['Necessidade',sc?fmtDate(sc.necessidade):''],['Local de entrega',sc?sc.localEntrega||'':''],['Rodadas de negociação',String(nr)]],
+    tables:[{head,num:nums,rows}],obs:'Para cada fornecedor: proposta inicial (primeiro preço registrado) e valor final negociado. Células em verde: menor preço final do item entre os fornecedores. O histórico das rodadas fica no mapa.',sign:['Comprador','Aprovação']};};
+A.cqCsv=()=>{const c=negInit(cl(cqd)),nf=j=>c.forn[j].parcId?parcNome(c.forn[j].parcId):'Fornecedor '+(j+1),dois=fn=>[].concat(...c.forn.map(fn)),num=v=>v===''||v==null?'':+v;
+  const iniF=(f,k)=>{const e=f.parcId?negIniF(c,f.parcId,k):null;return e?e.valor:f[k];};
+  const rows=[['Item','Un.','Qtd'].concat(dois((f,j)=>[nf(j)+' · proposta inicial',nf(j)+' · final'])).concat(['Vencedor'])];
+  c.itens.forEach((it,i)=>rows.push([it.desc,it.un,it.qtd].concat(dois((f,j)=>{const p=(c.precos[j]||[])[i],pi=f.parcId&&it.k?negIni(c,f.parcId,it.k):null;return [p===''||p==null||pi==null?'':+pi,p===''||p==null?'':+p];})).concat([c.escolha[i]>=0&&c.forn[c.escolha[i]]?parcNome(c.forn[c.escolha[i]].parcId):''])));
+  rows.push(['Frete','',''].concat(dois(f=>[num(iniF(f,'frete')),f.frete===''?'':+f.frete||''])).concat(['']));
+  rows.push(['Prazo (dias)','',''].concat(dois(f=>[iniF(f,'prazo')||'',f.prazo||''])).concat(['']));
+  rows.push(['Pagamento','',''].concat(dois(f=>[iniF(f,'pgto')||'',f.pgto||''])).concat(['']));
+  rows.push(['Total','',''].concat(dois((f,j)=>[negTotForn(c,j).ini,cqTotalForn(c,j).total])).concat([cqSelTotal(c)]));
+  rows.push(['Economia da negociação','',''].concat(dois((f,j)=>['',negTotForn(c,j).eco])).concat([negTotSel(c).eco]));
+  saveFile('mapa-cotacao-'+c.numero+'.csv',csv(rows));};
+/* ---- pedido: visão interna (formulário) e aprovação mostram a negociação; o PDF ao fornecedor continua só com o preço final ---- */
+function negPedHtml(p){const e=negPedEco(p);if(!e.tem)return '';const c=p.cotId?get('cot',p.cotId):null;
+  const lin=(p.itens||[]).filter(i=>negNum(i.vIni)!=null).map(i=>{const vi=+i.vIni,v=+i.vUnit||0,d=vi>0?(v-vi)/vi:0;
+    return '<tr><td>'+esc(i.desc)+'</td><td class="num mono">'+money(vi)+'</td><td class="num mono">'+money(v)+'</td><td class="num">'+(Math.abs(d)<0.00005?'=':d<0?'<span class="pos">↓ '+negPctTxt(d)+'</span>':'<span class="neg">↑ '+negPctTxt(d)+'</span>')+'</td><td class="num">'+(+i.negRod||0)+'</td></tr>';}).join('');
+  let hist='';if(c&&p.parcId){const rs=negRods(c,p.parcId),kd=new Map((c.itens||[]).map(it=>[it.k,it.desc]));if(rs.length)hist='<details style="margin-top:6px"><summary>Histórico da negociação ('+rs.length+' rodada'+(rs.length>1?'s':'')+')</summary><ul style="margin:6px 0 0 18px">'+rs.map((r,i)=>'<li>'+(r.tipo==='correcao'?'Correção':'Rodada '+(i+1))+' · '+fmtDT(r.em)+' · '+esc(negOrigNome(r.canal))+' · '+(r.por?nm(r.por):'—')+' · '+money(r.totDe)+' → '+money(r.totPara)+((r.itens||[]).length?' · '+(r.itens||[]).map(x=>esc(kd.get(x.k)||'item')+' '+money(x.de)+' → '+money(x.para)).join('; '):'')+(r.obs?' · “'+esc(r.obs)+'”':'')+(r.anexo&&r.anexo.id?' · '+negAnexoHtml(r.anexo):'')+'</li>').join('')+'</ul></details>';}
+  return '<div class="ng-ped"><div class="sect">Negociação na cotação'+(p.negCot&&p.negCot.numero?' nº '+esc(p.negCot.numero):'')+'</div><p class="sub" style="margin:0 0 6px">Proposta inicial <b>'+money(e.ini)+'</b> · negociado <b>'+money(e.neg)+'</b> · '+(e.eco>0.004?'<b class="pos">economia '+money(e.eco)+' ('+negPctTxt(e.pct)+')</b>':e.eco<-0.004?'<b class="neg">'+money(-e.eco)+' acima da proposta</b>':'sem variação')+'. Só para uso interno: o pedido enviado ao fornecedor mostra apenas o preço final.</p>'+
+    '<div class="tw"><table class="ng-tab" style="min-width:0!important;width:100%"><thead><tr><th>Item</th><th class="num">Proposta inicial</th><th class="num">Negociado</th><th class="num">Variação</th><th class="num">Rodadas</th></tr></thead><tbody>'+lin+'</tbody></table></div>'+hist+'</div>';}
+{const b0=pedBody;pedBody=function(){const h=b0.apply(this,arguments);try{if(typeof pdd!=='undefined'&&pdd)return h+negPedHtml(pdd);}catch(e){}return h;};}
+{const a0=A.aprovar;A.aprovar=function(d){let antes='';try{antes=($('#ov')||{}).hidden===false?($('#mt')||{}).textContent||'':'#fechado';}catch(e){}const r=a0.apply(this,arguments);try{const ov=$('#ov'),t=($('#mt')||{}).textContent||'';if(d&&d.col==='ped'&&ov&&ov.hidden===false&&/^(Aprovar|Recusar)/.test(t)&&t!==antes){const p=get('ped',d.id),mb=$('#mb');const x=p?negPedHtml(p):'';if(x&&mb&&!mb.querySelector('.ng-ped')){const p0=mb.querySelector('p');if(p0)p0.insertAdjacentHTML('afterend',x);else mb.insertAdjacentHTML('afterbegin',x);}}}catch(e){}return r;};}
+/* ---- indicadores: Suprimentos › Controles de compras ---- */
+function negIndicadores(mes){const o={ini:0,neg:0,eco:0,peds:0,itens:0,comp:new Map(),forn:new Map()};
+  S.ped.filter(p=>p.status!=='cancelado'&&ym(p.data)===mes).forEach(p=>{const e=negPedEco(p);if(!e.tem)return;o.peds++;o.itens+=e.n;o.ini+=e.ini;o.neg+=e.neg;
+    const add=(m,k,ini,neg)=>{const x=m.get(k)||{ini:0,neg:0,peds:new Set()};x.ini+=ini;x.neg+=neg;x.peds.add(p.id);m.set(k,x);};
+    add(o.forn,p.parcId||'',e.ini,e.neg);
+    (p.itens||[]).forEach(i=>{const vi=negNum(i.vIni);if(vi==null||!(vi>0))return;const q=+i.qtd||0;add(o.comp,i.negPor||p.crBy||'',vi*q,(+i.vUnit||0)*q);});
+    if(negNum(p.freteIni)!=null)add(o.comp,((p.itens||[]).find(i=>i.negPor)||{}).negPor||p.crBy||'',+p.freteIni,+p.frete||0);});
+  o.ini=r2(o.ini);o.neg=r2(o.neg);o.eco=r2(o.ini-o.neg);o.pct=o.ini>0?o.eco/o.ini:null;
+  const lista=m=>[...m.entries()].map(([k,x])=>({k,ini:r2(x.ini),neg:r2(x.neg),eco:r2(x.ini-x.neg),pct:x.ini>0?(x.ini-x.neg)/x.ini:0,peds:x.peds.size})).sort((a,b)=>b.eco-a.eco);
+  o.porComp=lista(o.comp);o.porForn=lista(o.forn);delete o.comp;delete o.forn;return o;}
+function negIndHtml(mes){const o=negIndicadores(mes);const pc=x=>x>0.00005?'<span class="pos">'+negPctTxt(x)+'</span>':x<-0.00005?'<span class="neg">−'+negPctTxt(x)+'</span>':'0%';
+  const tb=(h,rows)=>'<div class="tw" style="border:0"><table class="ng-tab" style="min-width:0!important;width:100%"><thead><tr>'+h.map((x,i)=>'<th'+(i?' class="num"':'')+'>'+x+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.join(''):emptyRow(h.length,'Nenhum pedido com negociação registrada neste mês.'))+'</tbody></table></div>';
+  const ln=(nome,x)=>'<tr><td>'+nome+'</td><td class="num">'+x.peds+'</td><td class="num mono">'+money(x.ini)+'</td><td class="num mono">'+money(x.neg)+'</td><td class="num mono">'+money(x.eco)+'</td><td class="num">'+pc(x.pct)+'</td></tr>';
+  const H=['','Pedidos','Proposta inicial','Negociado','Economia','Desconto'];
+  return '<div class="card ng-ind"><h2>Economia na negociação</h2><p class="sub" style="margin:0 0 8px">Pedidos do mês gerados de cotação com histórico de negociação (v149): proposta inicial × preço negociado, com frete. Desconto médio ponderado pelo valor. Comprador = quem registrou a última rodada do item (ou quem lançou o pedido).</p>'+
+    '<div class="kpis">'+kpi('Economia no mês',money(o.eco),o.peds+' pedido(s) · '+o.itens+' item(ns)',o.eco>0.004?'pos':o.eco<-0.004?'neg':'')+kpi('Desconto médio',o.pct==null?'—':(o.pct<0?'−':'')+negPctTxt(o.pct),'sobre '+money(o.ini)+' de propostas iniciais')+'</div>'+
+    '<div class="sect">Por comprador</div>'+tb(H.map((x,i)=>i?x:'Comprador'),o.porComp.map(x=>ln(x.k?esc(nameOf(x.k)):'—',x)))+
+    '<div class="sect">Por fornecedor</div>'+tb(H.map((x,i)=>i?x:'Fornecedor'),o.porForn.map(x=>ln(esc(parcNome(x.k)),x)))+'</div>';}
+{const v0=V.supctl;V.supctl=function(){let h=v0.apply(this,arguments);try{const m=(ui.supctl&&ui.supctl.mes)||ym(todayStr()),k='<div class="card"><h2>Pedidos sem a cotação mínima</h2>',i=h.indexOf(k);const x=negIndHtml(m);h=i>=0?h.slice(0,i)+x+h.slice(i):h+x;}catch(e){console.error('negInd',e);}return h;};}
+Object.assign(ACT_GROUP,{negItem:'comp',negForn:'comp',negSalvar:'comp',negReabrir:'comp',negHist:null,negHistF:null,negVoltar:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{negItem:'Registra uma nova rodada de negociação deste item (o valor anterior fica no histórico).',negForn:'Registra uma rodada de negociação com o fornecedor inteiro: preços, frete, prazo e pagamento.',negReabrir:'Reabre o mapa fechado para nova negociação (os pedidos gerados precisam estar cancelados).'});
+/* gravação do pedido espera a da cotação (o servidor tira a proposta inicial da cotação gravada) */
+if(typeof v148Antes==='function'){const a0=v148Antes;v148Antes=function(col,rec,prev){prev=a0.apply(this,arguments);try{if(col==='ped'&&rec&&rec.cotId){const ch=chains.get('cot/'+rec.cotId);if(ch)return Promise.all([prev,ch]);}}catch(e){}return prev;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='148',APP_DATA='2026-11-04';
+const APP_VER='149',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['149','2026-11-04',['Mapa de cotação com histórico de negociação: o primeiro preço fica guardado como proposta inicial e cada mudança vira uma rodada (Negociar ou Nova rodada), com canal, observação, anexo, quem e quando. Nenhum preço antigo é apagado.', 'Observação obrigatória quando o preço ou o frete sobe. O mapa mostra a etiqueta de desconto, o histórico ao clicar e a economia por fornecedor e no total; o pedido de compra guarda proposta inicial e negociado, e Controles de compras ganhou o cartão de economia por comprador e fornecedor.']],
   ['148','2026-11-04',['Correções da revisão de perfis: o Almoxarife volta a ver a lista de colaboradores (só nome, matrícula, função e obra) para registrar EPI, enviar ferramentas e despachar romaneio; o preço não reaparece mais no recebimento às cegas.', 'Solicitação enviada pelo encarregado fica Enviada até o almoxarife criar a separação, sem apontar para separação inexistente. O Fiscal volta a lançar a nota de entrada. Botões Aprovar e Recusar não aparecem mais em dobro nas solicitações.']],
   ['147.1','2026-11-04',['Mapa de cotação: corrigida a desconfiguração do cabeçalho dos fornecedores depois da v147. A caixa do fornecedor volta a ocupar só a própria coluna; o CNPJ, a cidade e o aviso de outras unidades aparecem ao passar o mouse sobre a caixa.']],
   ['147','2026-11-04',['Clientes, fornecedores e transportadoras com filiais: a busca mostra apelido ou nome fantasia, CNPJ com a filial destacada e cidade, e encontra por qualquer um desses dados (inclusive só o final do CNPJ).', 'Matriz e filiais aparecem juntas, o cadastro mostra Outras unidades deste grupo e, ao escolher, aparece o aviso quando há outras unidades. Novo campo Apelido no cadastro. Documentos continuam com razão social e CNPJ completos.']],
