@@ -638,7 +638,7 @@ function render(){
   const c=cfg();
   me.perfil=resolvePerfil();
   const nav=NAV.filter(n=>mayR(GROUP_OF_TAB[n[0]])&&(typeof pfnTabOk!=='function'||pfnTabOk(n[0])));
-  let semTela=false;if(nav.length&&!nav.some(n=>n[0]===ui.tab)){if(typeof pfnTelaNegada==='function'&&pfnTelaNegada(ui.tab))semTela=true;else ui.tab=nav[0][0];}
+  let semTela=false;if(nav.length&&!nav.some(n=>n[0]===ui.tab)){if(typeof pfnTelaNegada==='function'&&pfnTelaNegada(ui.tab))semTela=true;else{ui.tab=nav[0][0];if(!store.ready)ui.__fbTab=true;}}
   $('#brandName').textContent=c.fantasia||'Central de Gestão';
   setMark(c);
   {const nv=$('#nav'),sb=$('#subnav'),sx=nv?nv.scrollLeft:0,sy=nv?nv.scrollTop:0,bx=sb?sb.scrollLeft:0;renderMenu();
@@ -21193,7 +21193,8 @@ function p0PainelInicial(){const ls=p0Paineis();if(!ls.length)return '';
   const gw=ls.find(p=>w.includes(g(p)));return (gw||ls[0]).id;}
 /* ao entrar (e em qualquer navegação para o Painel do Início sem permissão): vai para o painel do setor */
 RH_PRE.push(()=>{if(!store.ready)return;try{me.perfil=resolvePerfil();}catch(e){return;}
-  if(p0VeInicio()||!p0TabsInicio().includes(ui.tab))return;
+  const fb=!!ui.__fbTab;ui.__fbTab=false;
+  if(p0VeInicio()||!(p0TabsInicio().includes(ui.tab)||fb))return;
   const d=p0PainelInicial();if(d){ui.tab=d;ui.mod='';}});
 /* navegação direta (atalho, busca, endereço salvo): a tela não abre nem mostra os números */
 function p0SemInicio(){const ls=p0Paineis();
@@ -29584,8 +29585,9 @@ V.treinadm=()=>{
 };
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='151',APP_DATA='2026-11-04';
+const APP_VER='151.1',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['151.1','2026-11-04',['Ao entrar no sistema, cada pessoa abre direto no painel do próprio setor (o Almoxarife e o Comprador no Painel de Suprimentos). Antes, o Almoxarife caía em Pedidos de venda.']],
   ['151','2026-11-04',['Treinamentos do sistema: cursos passo a passo dentro do próprio ERP, com as telas do sistema, perguntas no fim de cada capítulo e certificado ao concluir. O primeiro é a Escola do Almoxarifado, que aparece no painel de Suprimentos e em Minha área › Cursos do sistema.', 'O progresso fica salvo por pessoa. Em Sistema › Treinamentos o administrador escolhe quais perfis fazem cada curso e acompanha quem concluiu e quantas perguntas acertou.']],
   ['150','2026-11-04',['Pedido de compra em PDF mais enxuto: colunas vazias não aparecem, cabeçalho em três colunas, totais, observações e assinaturas nunca ficam sozinhos na página seguinte e pedidos longos repetem o cabeçalho em cada página. Vale também para solicitação, cotação, separação e boletim de medição.', 'O PDF traz emitido por, aprovado por e um código de verificação. O e-mail do pedido leva um link para o fornecedor dar o aceite (ou avisar que não pode atender); o pedido ganha a etiqueta Aceito pelo fornecedor e o comprador é avisado no chat.']],
   ['149','2026-11-04',['Mapa de cotação com histórico de negociação: o primeiro preço fica guardado como proposta inicial e cada mudança vira uma rodada (Negociar ou Nova rodada), com canal, observação, anexo, quem e quando. Nenhum preço antigo é apagado.', 'Observação obrigatória quando o preço ou o frete sobe. O mapa mostra a etiqueta de desconto, o histórico ao clicar e a economia por fornecedor e no total; o pedido de compra guarda proposta inicial e negociado, e Controles de compras ganhou o cartão de economia por comprador e fornecedor.']],
