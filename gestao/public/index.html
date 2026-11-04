@@ -28510,6 +28510,11 @@ function filPrepara(s,col){
     s.__filSig=filSig(s);
   }
   if(s.hasAttribute&&s.hasAttribute('data-filter'))return;
+  if(s.closest&&s.closest('th,thead,.fil-compacto')){const n0=s.nextElementSibling;if(n0&&n0.classList&&n0.classList.contains('fil-info'))n0.remove();
+    let tt='';try{const r=s.value?get(col,s.value):null;if(r){const d=typeof filDocTxt==='function'?filDocTxt(r):'';tt=String(r.nome||'')+(d?' · '+d:'');const ii=document.createElement('div');ii.innerHTML=filInfoH(col,s.value,'');const av=ii.querySelector('.fil-av');if(av)tt+='\n'+av.textContent;}}catch(e){}
+    s.title=tt;
+    try{for(const o of s.options){const r=o.value?get(col,o.value):null;if(!r)continue;const sf=filCnpj(r)?filSufixo(r):'',cd=String(filCidade(r)||'').split('/')[0];const t=filCurto(r)+(sf?' '+sf:'')+(cd?' · '+cd:'');if(o.textContent!==t)o.textContent=t;}}catch(e){}
+    return;}
   let inf=s.nextElementSibling;
   if(!inf||!inf.classList||!inf.classList.contains('fil-info')){inf=document.createElement('div');inf.className='fil-info';
     inf.innerHTML='<button type="button" class="btn sm fil-bus" aria-label="Buscar '+(col==='transp'?'transportadora':'cadastro')+' por nome, apelido, CNPJ ou cidade">Buscar</button><span class="fil-txt" aria-live="polite"></span>';
@@ -28522,7 +28527,7 @@ function filScan(root){if(typeof document==='undefined'||!document.querySelector
   const sels=(root&&root.querySelectorAll?root:document).querySelectorAll('select');
   for(const s of sels){const col=filLbSel(s);if(!col)continue;try{filPrepara(s,col);}catch(e){console.error('[v147] filiais:',e);}}
   if(FIL.obs)FIL.obs.takeRecords();}
-document.addEventListener('change',e=>{const s=e.target;if(!s||s.tagName!=='SELECT')return;const col=filLbSel(s);if(col)filInfo(s,col);});
+document.addEventListener('change',e=>{const s=e.target;if(!s||s.tagName!=='SELECT')return;const col=filLbSel(s);if(!col)return;if(s.closest&&s.closest('th,thead,.fil-compacto')){s.__filSig='';try{filPrepara(s,col);}catch(er){}return;}filInfo(s,col);});
 document.addEventListener('click',e=>{const b=e.target&&e.target.closest&&e.target.closest('.fil-bus');if(!b)return;e.preventDefault();
   const s=b.parentElement&&b.parentElement.previousElementSibling;if(s&&s.tagName==='SELECT'&&!s.disabled){try{s.focus();}catch(x){}lbAbrir(s,'');}});
 try{if(typeof MutationObserver!=='undefined'&&document.body&&document.body.nodeType){
@@ -28581,7 +28586,7 @@ if(typeof FLABEL!=='undefined')FLABEL.apelido=FLABEL.apelido||'Apelido';
 /* transportadora: bloco de outras unidades no formulário (o formulário é o genérico do defMod) */
 {const e0=A.transpEdit;if(e0)A.transpEdit=function(x){const r=e0.apply(this,arguments);try{const t=get('transp',x&&x.id),fg=$('#mb .fg');const h=filGrupoBloco('transp',t);
   if(h&&fg&&typeof fg.insertAdjacentHTML==='function')fg.insertAdjacentHTML('beforebegin',h);}catch(e){}return r;};}
-{const css='.fil-info{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:12px;line-height:1.35;color:var(--muted,#667);margin-top:3px;min-width:0}.fil-info:not(.tem){margin-top:0}.fil-info .fil-txt{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}'+
+{const css='th select,thead select{max-width:100%;min-width:0}.fil-info{text-transform:none;letter-spacing:normal;font-family:inherit;display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:12px;line-height:1.35;color:var(--muted,#667);margin-top:3px;min-width:0}.fil-info:not(.tem){margin-top:0}.fil-info .fil-txt{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}'+
   '.fil-bus{display:none}@media (hover:none),(pointer:coarse){.fil-bus{display:inline-block}.fil-info{margin-top:4px}}'+
   '.fil-av{color:var(--warn,#a16207);font-weight:600}.fil-suf{font-weight:700;color:var(--fg,inherit);background:var(--warn-soft,rgba(255,200,0,.25));border-radius:3px;padding:0 2px}'+
   '.lb-it.fil-it{display:block}.fil-l1{font-size:14px}.fil-l2{font-size:12px;opacity:.85;margin-top:1px;overflow-wrap:anywhere}.lb-it.on .fil-suf{background:rgba(255,255,255,.3);color:#fff}'+
@@ -28625,8 +28630,9 @@ PFN_LIM_K.push('leFora','valCols','valTelas');
   if(p&&Array.isArray(p.valCols)&&p.valCols.length)t.push('Recebe sem os valores (mesmo vendo valores gerenciais): '+p.valCols.map(c=>pfnNomeCol(c)).join(', ')+'.');return t;};}
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='147',APP_DATA='2026-11-04';
+const APP_VER='147.1',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['147.1','2026-11-04',['Mapa de cotação: corrigida a desconfiguração do cabeçalho dos fornecedores depois da v147. A caixa do fornecedor volta a ocupar só a própria coluna; o CNPJ, a cidade e o aviso de outras unidades aparecem ao passar o mouse sobre a caixa.']],
   ['147','2026-11-04',['Clientes, fornecedores e transportadoras com filiais: a busca mostra apelido ou nome fantasia, CNPJ com a filial destacada e cidade, e encontra por qualquer um desses dados (inclusive só o final do CNPJ).', 'Matriz e filiais aparecem juntas, o cadastro mostra Outras unidades deste grupo e, ao escolher, aparece o aviso quando há outras unidades. Novo campo Apelido no cadastro. Documentos continuam com razão social e CNPJ completos.']],
   ['146','2026-11-04',['Revisão dos perfis: Encarregado, RH, Só ponto, Comprador, Financeiro, Fiscal, Comercial e Almoxarife passam a ver só as telas da função. Valores de obra (painel, rateio, resultado, relatório mensal, custo de mão de obra) ficam com Diretoria, Gestor de projetos, Financeiro e, em parte, Comercial.', 'Nova permissão Ver valores gerenciais em Perfis de acesso: quem não tem vê as telas do dia a dia com os valores em R$ ocultos (também na impressão, PDF e CSV). O Comprador continua vendo preços de compra e o Almoxarife recebe às cegas, só por quantidade.', 'O RH passa a só consultar o SST, gravando Convocação de ASO, Acidentes e EPI. Perfis antigos mostram quantas pessoas ainda os usam, com botão para trocar.']],
   ['145','2026-11-03',['Perfis de SST: o Gestor de segurança do trabalho deixa de ver Obras e rateio, contratos e medições de empreiteiros, resultado e relatório mensal da obra, e as telas de Pessoal de colaboradores, férias, apropriação, banco de horas, recrutamento, admissões, desligamentos, solicitações, empréstimos, jornadas e custo-hora.', 'O Técnico de segurança do trabalho deixa de ver também Curva S, horas extras, materiais e mão de obra por obra, quadro de pessoal, movimentações e afastamentos. As telas de ASO, EPI, treinamentos, aptidão e CIPA continuam funcionando; o servidor deixou de entregar os dados das telas tiradas.']],
