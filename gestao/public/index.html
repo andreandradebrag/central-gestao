@@ -3340,21 +3340,66 @@ const DOC_CSS=`.docroot{--bg:#fff;--surface:#fff;--surface2:#f3f5f9;--hover:#f6f
 .docroot .sub{color:#586379;font-size:11px}
 .docroot .empty{color:#586379;padding:8px 0}
 .docprev{overflow:auto;border:1px solid var(--line);border-radius:6px;background:#fff}
-.docprev .docroot{min-width:680px}`;
+.docprev .docroot{min-width:680px}
+.doc-cp .doc-h{padding-bottom:7px;margin-bottom:8px;gap:14px}
+.doc-cp .doc-co img{max-height:42px;max-width:150px}
+.doc-cp .doc-co b{font-size:14px}
+.doc-cp .doc-co span{font-size:10.5px}
+.doc-cp .doc-t h1{font-size:18px}
+.doc-cp .doc-t .n{font-size:13px}
+.doc-cp .doc-t span{font-size:10.5px}
+.doc-cp h2{margin:10px 0 5px}
+.doc-cp table{font-size:11.5px}
+.doc-cp th{padding:4px 6px}
+.doc-cp td{padding:3px 6px}
+.doc-topo{font-size:11.5px;margin:0 0 6px;color:#586379;display:flex;flex-wrap:wrap;gap:2px 16px}
+.doc-topo b{color:#111a27;font-weight:600}
+.doc-m3{display:grid;grid-template-columns:.8fr 1.25fr 1.45fr;gap:0 10px;margin:0 0 8px;font-size:11px;line-height:1.32}
+.doc-m3>div{border:1px solid #cfd5e0;border-radius:4px;padding:4px 8px 5px;min-width:0}
+.doc-m3 h3{font:600 9.5px var(--font-disp);text-transform:uppercase;letter-spacing:.06em;color:#586379;margin:0 0 2px}
+.doc-m3 p{margin:0;display:flex;gap:6px;min-width:0}
+.doc-m3 p span{color:#586379;flex:none}
+.doc-m3 p b{font-weight:500;min-width:0;overflow-wrap:anywhere}
+.doc-m3 p.nm b{font-weight:600}
+.doc-fim{margin-top:8px}
+.doc-fim .doc-obs{margin-top:0;margin-bottom:8px;padding:5px 9px;font-size:11px}
+.doc-fimg{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:start}
+.doc-fim .doc-tot{margin:0;width:auto;font-size:12px}
+.doc-fim .doc-tot div{padding:2px 0}
+.doc-esig{font-size:10px;line-height:1.45;color:#2b3546;border:1px solid #cfd5e0;border-radius:4px;padding:5px 8px}
+.doc-esig b{font-weight:600}
+.doc-esig .cod{font:600 11px var(--font-mono);letter-spacing:.04em}
+.doc-sgm{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;margin-top:22px}
+.doc-sgm div{border-top:1px solid #111a27;padding-top:2px;text-align:center;font-size:10px;color:#2b3546}
+.doc-fim .doc-f{margin-top:8px}
+.docroot.ppdf{background:transparent}
+.ppdf .doc{padding:0;background:#fff}
+.ppdf .doc>:first-child{margin-top:0}
+.ppg{position:relative;overflow:hidden;background:#fff;box-sizing:border-box}
+.ppg-in{display:flow-root}
+.ppg-rh{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-bottom:1.5px solid #111a27;padding:0 0 4px;margin:0 0 8px;font-size:11.5px;color:#111a27}
+.ppg-rh span{color:#586379;font-size:10.5px}
+.ppg-f{position:absolute;left:0;right:0;bottom:0;height:16px;display:flex;justify-content:space-between;gap:12px;border-top:1px solid #dfe4ec;padding-top:2px;font-size:9.5px;color:#586379;background:#fff}
+.ppdf table.ppdf-fx{table-layout:fixed}
+.ppdf .doc td,.ppdf .doc th{overflow-wrap:break-word}
+.ppdf .doc table{border-bottom:1px solid #cfd5e0}
+.ppdf-tela .ppg{margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.18);outline:1px solid #dfe4ec}`;
 const slug=s=>String(s||'documento').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'documento';
 const dcell=x=>x&&typeof x==='object'&&x.h!=null?x.h:esc(x==null?'':x);
 function docHtml(o){
   const c=cfg(),who=nameOf(actorId());
   const id=[c.cnpj?'CNPJ '+fmtDoc(c.cnpj):'',c.ie?'IE '+c.ie:'',[c.cidade,c.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ');
-  let h='<div class="docroot"><div class="doc">';
+  let h='<div class="docroot"><div class="doc'+(o.compacto?' doc-cp':'')+'">';
   h+='<div class="doc-h"><div class="doc-co">'+(c.logo?'<img src="'+esc(c.logo)+'" alt="">':'')+'<div><b>'+esc(c.razao||c.fantasia||'Sua empresa')+'</b>'+(c.razao&&c.fantasia&&c.razao!==c.fantasia?'<span>'+esc(c.fantasia)+'</span>':'')+(id?'<span>'+esc(id)+'</span>':'')+'</div></div><div class="doc-t"><h1>'+esc(o.tipo)+'</h1>'+(o.numero?'<div class="n">nº '+esc(o.numero)+'</div>':'')+(o.situacao?'<span>'+esc(o.situacao)+'</span>':'')+'</div></div>';
   const meta=(o.meta||[]).filter(m=>m[1]!==''&&m[1]!=null&&m[1]!=='—');
-  if(meta.length)h+='<div class="doc-meta">'+meta.map(m=>'<div><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join('')+'</div>';
+  if(o.topo&&typeof ppdfTopo==='function')h+=ppdfTopo(o);
+  if(o.meta3&&typeof ppdfMeta3==='function')h+=ppdfMeta3(o);else if(meta.length)h+='<div class="doc-meta">'+meta.map(m=>'<div><span>'+esc(m[0])+'</span><b>'+esc(m[1])+'</b></div>').join('')+'</div>';
   (o.tables||[]).forEach(t=>{
-    const nc=t.num||[];
+    if(typeof ppdfHide==='function')t=ppdfHide(t);const nc=t.num||[];
     h+=(t.title?'<h2>'+esc(t.title)+'</h2>':'')+'<table><thead><tr>'+t.head.map((x,i)=>'<th'+(nc.includes(i)?' class="num"':'')+'>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+t.rows.map(r=>'<tr>'+r.map((x,i)=>{const cl2=(nc.includes(i)?'num':'')+(x&&x.best?' best':'');return '<td'+(cl2?' class="'+cl2.trim()+'"':'')+'>'+dcell(x)+'</td>';}).join('')+'</tr>').join('')+'</tbody></table>';
   });
   if(o.raw)h+='<div class="doc-body">'+o.raw+'</div>';
+  if(o.fim&&typeof ppdfFim==='function')return h+ppdfFim(o,who,c)+'</div></div>';
   if(o.totals&&o.totals.length)h+='<div class="doc-tot nobreak">'+o.totals.map(t=>'<div'+(t[2]?' class="g"':'')+'><span>'+esc(t[0])+'</span><span>'+esc(t[1])+'</span></div>').join('')+'</div>';
   if(o.obs)h+='<div class="doc-obs nobreak"><b>Observações:</b> '+esc(o.obs)+'</div>';
   if(o.sign&&o.sign.length)h+='<div class="doc-sign nobreak">'+o.sign.map(s=>'<div>'+esc(s)+'</div>').join('')+'</div>';
@@ -7412,6 +7457,7 @@ A.pedEmail=d=>{
   (p.itens||[]).forEach((i,k)=>{pedItFill(i);L.push('Item '+(k+1)+(i.cod?' ['+i.cod+']':'')+' - '+i.desc+(i.ncm?' (NCM '+i.ncm+')':'')+': '+fmtQ(i.qtd)+' '+(i.un||'')+' x '+money(i.vUnit)+(+i.pDesc?' - desc. '+fmtQ(i.pDesc)+'%':'')+(+i.pIpi?' + IPI '+fmtQ(i.pIpi)+'%':'')+(+i.vSt?' + ICMS-ST '+money(i.vSt):'')+' = '+money(pedItTot(i)));});
   L.push('','Produtos: '+money(s.bruto));if(s.desc)L.push('Descontos: - '+money(s.desc));if(s.ipi)L.push('IPI: '+money(s.ipi));if(s.st)L.push('ICMS-ST: '+money(s.st));if(+p.frete)L.push('Frete: '+money(p.frete));if(+p.descGeral)L.push('Desconto no total: - '+money(p.descGeral));
   L.push('TOTAL: '+money(pedTotal(p)));if(p.obs){L.push('');L.push('Obs.: '+p.obs);}
+  {const lk=typeof ppdfLinkTxt==='function'?ppdfLinkTxt(p):null;if(lk){L.push('');lk.forEach(x=>L.push(x));}}
   L.push('');L.push('Favor informar no XML/DANFE o número deste pedido.');L.push('');L.push('Atenciosamente,');L.push(cfg().fantasia||'');
   emailModal((f&&f.email)||'','Pedido de compra nº '+p.numero+' · '+(cfg().fantasia||'')+' · entrega '+fmtDate(p.previsao),L.join('\n'),'E-mail ao fornecedor');
 };
@@ -29016,9 +29062,287 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{negItem:'Registra uma nov
 /* gravação do pedido espera a da cotação (o servidor tira a proposta inicial da cotação gravada) */
 if(typeof v148Antes==='function'){const a0=v148Antes;v148Antes=function(col,rec,prev){prev=a0.apply(this,arguments);try{if(col==='ped'&&rec&&rec.cotId){const ch=chains.get('cot/'+rec.cotId);if(ch)return Promise.all([prev,ch]);}}catch(e){}return prev;};}
 
+/* ===== v150: PDF do pedido de compra (paginação, colunas vazias, cabeçalho compacto) e aceite eletrônico do fornecedor =====
+   (relatorios/feito_v150_pedpdf.md)
+   Renderizador de documentos (docHtml, mudado no próprio patch128 para todos os documentos):
+   - tabela com hideEmpty (true ou lista de colunas): coluna sem nenhum valor some (ppdfHide);
+   - o.meta3 (três quadros) e o.topo (linha de cima), o.compacto (cabeçalho menor), o.fim (bloco final do pedido: observações,
+     assinatura eletrônica, assinaturas em papel menores ao lado dos totais e "emitido por" num bloco só).
+   Paginação (documentos sem conteúdo bruto "raw"): o documento é medido no navegador e montado em páginas A4 de verdade
+   (ppdfPaginar), usadas pelo PDF (html2canvas por página + jsPDF), pela impressão (quadro separado, @page A4) e pelo HTML baixado:
+   - a tabela quebra entre linhas e repete os títulos das colunas; da página 2 em diante, cabeçalho curto
+     ("Pedido de compra nº 1591 · Fornecedor"); rodapé "Página x de y · Pedido nº 1591";
+   - o bloco final (tudo depois da última tabela: totais, observações, assinaturas, emitido por) nunca se divide; se não couber,
+     a última linha da tabela vai junto para a página seguinte (nunca página só com assinatura);
+   - excesso de até 12% numa página: a escala cai um pouco e tudo cabe em uma página;
+   - bloco maior que a página (raro): volta ao corte antigo (docToPdf de antes).
+   Pedido de compra (pedDoc): cabeçalho em três quadros (Datas · Fornecedor · Entrega e pagamento) com o projeto em cima,
+   colunas vazias somem, "Emitido por … · Aprovado por …" (aprovação da v140), aceite do fornecedor e código de verificação
+   (ppdfCodigo = SHA-256 dos dados do pedido, igual ao servidor, deploy/gestao/aceite.js) com o endereço para conferir.
+   Aceite: link gerado pelo servidor (POST /api/ped/aceite/link) entra no e-mail do pedido (pelo servidor e no e-mail pronto);
+   etiqueta na lista, quadro no formulário do pedido, histórico e aviso no chat (conversa "Central de Gestão"). */
+const PPDF={base:'',links:new Map(),ult:null,av:new Set(),F:20};
+/* ---------- SHA-256 (síncrono; o mesmo resultado do crypto do servidor) ---------- */
+function ppdfSha256(str){
+  const s=unescape(encodeURIComponent(String(str))),n=s.length,K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const L=((n+9+63)>>6)<<6,b=new Uint8Array(L);for(let i=0;i<n;i++)b[i]=s.charCodeAt(i);b[n]=0x80;const bits=n*8;b[L-4]=(bits>>>24)&255;b[L-3]=(bits>>>16)&255;b[L-2]=(bits>>>8)&255;b[L-1]=bits&255;b[L-5]=Math.floor(bits/4294967296)&255;
+  let H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];const W=new Array(64),R=(x,k)=>(x>>>k)|(x<<(32-k));
+  for(let o=0;o<L;o+=64){for(let i=0;i<16;i++)W[i]=(b[o+4*i]<<24)|(b[o+4*i+1]<<16)|(b[o+4*i+2]<<8)|b[o+4*i+3];
+    for(let i=16;i<64;i++){const s0=R(W[i-15],7)^R(W[i-15],18)^(W[i-15]>>>3),s1=R(W[i-2],17)^R(W[i-2],19)^(W[i-2]>>>10);W[i]=(W[i-16]+s0+W[i-7]+s1)|0;}
+    let [a,c,d,e,f,g,h,k]=[H[0],H[1],H[2],H[3],H[4],H[5],H[6],H[7]];
+    for(let i=0;i<64;i++){const S1=R(f,6)^R(f,11)^R(f,25),ch=(f&g)^(~f&h),t1=(k+S1+ch+K[i]+W[i])|0,S0=R(a,2)^R(a,13)^R(a,22),mj=(a&c)^(a&d)^(c&d),t2=(S0+mj)|0;k=h;h=g;g=f;f=(e+t1)|0;e=d;d=c;c=a;a=(t1+t2)|0;}
+    H=[(H[0]+a)|0,(H[1]+c)|0,(H[2]+d)|0,(H[3]+e)|0,(H[4]+f)|0,(H[5]+g)|0,(H[6]+h)|0,(H[7]+k)|0];}
+  const out=[];H.forEach(x=>{out.push((x>>>24)&255,(x>>>16)&255,(x>>>8)&255,x&255);});return out;}
+/* ---------- código de verificação (igual a deploy/gestao/aceite.js › canon/codigo) ---------- */
+const PPDF_B32='0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function ppdfCanon(p){const n4=v=>String(Math.round((+v||0)*10000)/10000),s1=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+  return ['ped1',s1(p.id),s1(p.numero),s1(p.data),s1(p.parcId),s1(p.previsao),s1(p.necessidade),n4(p.frete),n4(p.descGeral),s1(p.formaPgto),s1(p.condPgto),s1(p.modFrete),s1(p.localEntrega)]
+    .concat((Array.isArray(p.itens)?p.itens:[]).map(i=>[s1(i&&i.desc),s1(i&&i.un),n4(i&&i.qtd),n4(i&&i.vUnit),n4(i&&i.pDesc),n4(i&&i.pIpi),n4(i&&i.vSt)].join('~'))).join('|');}
+function ppdfCodigo(p){const h=ppdfSha256(ppdfCanon(p||{}));let bits=0,val=0,out='';for(let i=0;i<8&&out.length<12;i++){val=(val<<8)|h[i];bits+=8;while(bits>=5&&out.length<12){out+=PPDF_B32[(val>>(bits-5))&31];bits-=5;val&=(1<<bits)-1;}}return out;}
+const ppdfFmtCod=c=>c.slice(0,4)+'-'+c.slice(4,8)+'-'+c.slice(8,12);
+const ppdfAceiteValido=(p,cod)=>{const a=p&&p.aceite;return !!(a&&a.ok&&a.codigo===(cod||ppdfCodigo(p)));};
+const ppdfBase=()=>PPDF.base||(typeof SEGA_SRV==='function'&&SEGA_SRV()&&typeof location!=='undefined'&&location.origin&&/^https?:/.test(location.origin)?location.origin:'');
+const ppdfUrlVerif=cod=>{const b=ppdfBase();return b?b.replace(/\/$/,'')+'/verificar/'+cod:'';};
+
+/* ---------- renderizador: colunas vazias, três quadros, bloco final ---------- */
+function ppdfHide(t){
+  if(!t||!t.hideEmpty||!Array.isArray(t.rows)||!t.rows.length||!Array.isArray(t.head))return t;
+  const cand=t.hideEmpty===true?t.head.map((x,i)=>i):t.hideEmpty;
+  const vaz=x=>x==null||(typeof x==='object'?String(x.h==null?'':x.h).replace(/<[^>]*>/g,'').trim()==='':String(x).trim()==='');
+  const fora=new Set(cand.filter(i=>i>=0&&i<t.head.length&&t.rows.every(r=>vaz(r[i]))));
+  if(!fora.size)return t;
+  const keep=t.head.map((x,i)=>i).filter(i=>!fora.has(i)),map=new Map(keep.map((i,j)=>[i,j]));
+  return Object.assign({},t,{head:keep.map(i=>t.head[i]),num:(t.num||[]).filter(i=>map.has(i)).map(i=>map.get(i)),rows:t.rows.map(r=>keep.map(i=>r[i])),hideEmpty:null,ocultas:[...fora].map(i=>t.head[i])});
+}
+const ppdfOk=v=>v!==''&&v!=null&&v!=='—';
+function ppdfTopo(o){const t=(o.topo||[]).filter(x=>ppdfOk(x[1]));return t.length?'<div class="doc-topo">'+t.map(x=>'<span>'+esc(x[0])+': <b>'+esc(x[1])+'</b></span>').join('')+'</div>':'';}
+function ppdfMeta3(o){
+  return '<div class="doc-m3">'+(o.meta3||[]).map(q=>'<div><h3>'+esc(q.t)+'</h3>'+(q.rows||[]).filter(r=>ppdfOk(r[1])).map(r=>'<p'+(r[2]?' class="nm"':'')+'>'+(r[0]?'<span>'+esc(r[0])+'</span>':'')+'<b>'+esc(r[1])+'</b></p>').join('')+'</div>').join('')+'</div>';
+}
+function ppdfFim(o,who,c){
+  let h='<div class="doc-fim nobreak">';
+  if(o.obs)h+='<div class="doc-obs"><b>Observações:</b> '+esc(o.obs)+'</div>';
+  const tot=o.totals&&o.totals.length?'<div class="doc-tot">'+o.totals.map(t=>'<div'+(t[2]?' class="g"':'')+'><span>'+esc(t[0])+'</span><span>'+esc(t[1])+'</span></div>').join('')+'</div>':'<div></div>';
+  const es=(o.esig||[]).filter(Boolean);
+  h+='<div class="doc-fimg"><div>'+(es.length?'<div class="doc-esig">'+es.map(x=>'<div>'+x+'</div>').join('')+'</div>':'')+(o.sign&&o.sign.length?'<div class="doc-sgm">'+o.sign.map(s=>'<div>'+esc(s)+'</div>').join('')+'</div>':'')+'</div>'+tot+'</div>';
+  if(!es.length)h+='<div class="doc-f"><span>Emitido em '+fmtDT(Date.now())+' por '+esc(who)+'</span><span>'+esc(c.fantasia||'Central de Gestão')+'</span></div>';
+  return h+'</div>';
+}
+
+/* ---------- pedido de compra ---------- */
+function ppdfAprovTxt(p){
+  const a=p.aprov;
+  if(a&&a.ok){const ass=Array.isArray(a.assin)&&a.assin.length?a.assin:[{por:a.por,em:a.em}];
+    return 'Aprovado por '+ass.map(x=>'<b>'+esc(nameOf(x.por))+'</b> em '+esc(fmtDT(x.em))).join(' e ');}
+  let pr=false;try{pr=typeof precisaAprov==='function'&&precisaAprov('ped',p);}catch(e){}
+  if(pr)return p.aprovParc?'Aprovação: primeira assinatura de <b>'+esc(nameOf(p.aprovParc.por))+'</b>; falta a segunda':'Aprovação: <b>pendente</b>';
+  return 'Aprovação: dentro da alçada do comprador (não exigida)';
+}
+pedDoc=function(p){
+  const s=pedSoma(p),tr=p.transpId?get('transp',p.transpId):null,mf=PED_MODFRETE.find(x=>x[0]===p.modFrete),f=p.parcId?get('parc',p.parcId):null;
+  const sc=p.scId?get('sc',p.scId):null,cot=p.negCot&&p.negCot.numero?p.negCot.numero:'',cod=ppdfCodigo(p),ac=p.aceite,acOk=ppdfAceiteValido(p,cod),url=ppdfUrlVerif(cod);
+  const fNome=f?f.nome:parcNome(p.parcId),c=cfg();
+  const esig=['Emitido por <b>'+esc(nameOf(actorId()))+'</b> em '+esc(fmtDT(Date.now()))+' · '+ppdfAprovTxt(p)];
+  if(ac&&ac.codigo===cod)esig.push(ac.ok?'Aceite eletrônico do fornecedor: <b>'+esc(ac.nome)+'</b>'+(ac.cargo?' ('+esc(ac.cargo)+')':'')+' em '+esc(fmtDT(ac.em)):'Fornecedor respondeu que não pode atender ('+esc(ac.nome)+', '+esc(fmtDT(ac.em))+')');
+  esig.push('Código de verificação: <span class="cod">'+esc(ppdfFmtCod(cod))+'</span>'+(url?' · confira em '+esc(url):''));
+  return {tipo:'Pedido de compra',numero:p.numero,situacao:(PED_ST[p.status]||PED_ST.aberto)[0]+(acOk?' · Aceito pelo fornecedor':''),landscape:true,compacto:true,fim:true,
+    runSub:fNome||'',pageRef:'Pedido nº '+(p.numero||''),codigo:cod,
+    topo:[['Projeto',p.projId?projNome(p.projId):''],['Solicitação de compra',sc?'nº '+sc.numero:''],['Cotação',cot?'nº '+cot:'']],
+    meta3:[{t:'Datas',rows:[['Pedido',fmtDate(p.data)],['Necessidade',fmtDate(p.necessidade)],['Previsão de entrega',fmtDate(p.previsao)]]},
+      {t:'Fornecedor',rows:[['',fNome||'—',1],['CNPJ/CPF',f&&f.doc?fmtDoc(f.doc):''],['Contato',f?[f.contato,f.tel,f.email].filter(Boolean).join(' · '):''],['Endereço',f?[f.end,[f.cidade,f.uf].filter(Boolean).join('/'),f.cep].filter(Boolean).join(' · '):'']]},
+      {t:'Entrega e pagamento',rows:[['Local',p.localEntrega||''],['Endereço',pedEndTxt(p)],['Recebimento',[p.entResp,p.entTel,p.entHorario].filter(Boolean).join(' · ')],['Frete',mf?mf[1]:''],['Pagamento',pgtoTxt(p)],['Transportadora',tr?(tr.nome+(tr.doc?' · CNPJ '+tr.doc:'')+([tr.tel||tr.whats,tr.email].filter(Boolean).length?' · '+[tr.tel||tr.whats,tr.email].filter(Boolean).join(' · '):'')):'']]}],
+    tables:[{head:['Item','Código','Descrição','NCM','Un.','Qtd','Valor unit.','Desc. %','IPI %','ICMS-ST','Total'],num:[0,5,6,7,8,9,10],hideEmpty:[1,3,7,8,9],rows:(p.itens||[]).map((i,k)=>{pedItFill(i);const nw=x=>x?{h:'<span style="white-space:nowrap">'+esc(x)+'</span>'}:'';return [String(i.n||k+1),nw(i.cod),i.desc,nw(i.ncm),i.un||'',fmtQ(i.qtd),money(i.vUnit),+i.pDesc?fmtQ(i.pDesc):'',+i.pIpi?fmtQ(i.pIpi):'',+i.vSt?money(i.vSt):'',money(pedItTot(i))];})}],
+    totals:[['Produtos',money(s.bruto)]].concat(s.desc?[['Descontos nos itens','− '+money(s.desc)]]:[],s.ipi?[['IPI',money(s.ipi)]]:[],s.st?[['ICMS-ST',money(s.st)]]:[],[['Frete',money(p.frete)]],+p.descGeral?[['Desconto no total','− '+money(p.descGeral)]]:[],[['Total do pedido',money(pedTotal(p)),1]]),
+    obs:p.obs,esig,sign:['Comprador','Fornecedor (aceite)']};
+};
+
+/* ---------- paginação ---------- */
+function ppdfDims(land){const pw=land?841.89:595.28,ph=land?595.28:841.89,mg=22;return {W:Math.floor((pw-2*mg)*4/3),H:Math.floor((ph-2*mg)*4/3)-2,mg,pw,ph};}
+const ppdfPaginavel=o=>!!o&&!o.raw&&o.paginar!==false;
+/* plano puro (testável): U = blocos {k:'b',h,keep} e tabelas {k:'t',head,extra,rows:[h]}; fim = {h} ou null */
+function ppdfPlan(U,fim,cap1,capN){
+  const segH=(u,de,ate)=>u.head+(de===0?u.extra:0)+u.rows.slice(de,ate).reduce((a,b)=>a+b,0);
+  const tot=U.reduce((s,u)=>s+(u.k==='t'?segH(u,0,u.rows.length):u.h),0)+(fim?fim.h:0);
+  const tudo=()=>[{its:U.map((u,i)=>u.k==='t'?{i,de:0,ate:u.rows.length}:{i}),fim:!!fim}];
+  if(tot<=cap1)return {pags:tudo(),esc:1,tot,over:false};
+  if(tot<=cap1*1.12)return {pags:tudo(),esc:Math.floor(cap1/tot*1000)/1000,tot,over:false};
+  const pags=[];let pg=null,over=false;
+  const nova=()=>{pg={its:[],usado:0,cap:pags.length?capN:cap1,fim:false};pags.push(pg);};nova();
+  for(let i=0;i<U.length;i++){const u=U[i];
+    if(u.k!=='t'||!u.rows.length){const h=u.k==='t'?segH(u,0,0):u.h;let need=h;const nx=U[i+1];
+      if(u.keep&&nx)need+=nx.k==='t'?nx.head+nx.extra+(nx.rows[0]||0):nx.h;
+      if(pg.usado+need>pg.cap&&pg.its.length)nova();
+      if(h>pg.cap)over=true;
+      pg.its.push(u.k==='t'?{i,de:0,ate:0}:{i});pg.usado+=h;continue;}
+    let r=0;
+    while(r<u.rows.length){
+      const base=u.head+(r===0?u.extra:0);
+      if(pg.usado+base+u.rows[r]>pg.cap&&pg.its.length)nova();
+      if(base+u.rows[r]>pg.cap)over=true;
+      const sg={i,de:r,ate:r};pg.its.push(sg);pg.usado+=base;
+      while(r<u.rows.length&&(sg.ate===sg.de||pg.usado+u.rows[r]<=pg.cap)){pg.usado+=u.rows[r];r++;sg.ate=r;}
+    }
+  }
+  if(fim){
+    if(pg.usado+fim.h<=pg.cap)pg.fim=true;
+    else{
+      const mov=[],ult=pg.its[pg.its.length-1];
+      if(ult){const u=U[ult.i];
+        if(u.k==='t'&&ult.ate-ult.de>1){ult.ate--;mov.push({i:ult.i,de:ult.ate,ate:ult.ate+1});}
+        else if(pg.its.length>1){pg.its.pop();mov.push(ult);}}
+      nova();pg.its=mov;pg.usado=mov.reduce((s,x)=>s+(U[x.i].k==='t'?segH(U[x.i],x.de,x.ate):U[x.i].h),0);pg.fim=true;
+      if(pg.usado+fim.h>pg.cap)over=true;
+    }
+  }
+  pags.forEach(p=>{delete p.usado;delete p.cap;});
+  return {pags,esc:1,tot,over};
+}
+/* mede o documento renderizado (docHtml, com todos os envoltórios) e devolve as páginas em HTML */
+function ppdfPaginar(o){
+  if(!ppdfPaginavel(o)||typeof document==='undefined'||!document.body)return null;
+  const land=!!o.landscape,D=ppdfDims(land),F=PPDF.F,c=cfg();
+  const ref=o.pageRef||(o.tipo+(o.numero?' nº '+o.numero:'')),rhTxt=o.tipo+(o.numero?' nº '+o.numero:'')+(o.runSub?' · '+o.runSub:'');
+  const rh='<div class="ppg-rh"><b>'+esc(rhTxt)+'</b><span>'+esc(c.fantasia||c.razao||'')+'</span></div>';
+  const host=document.createElement('div');
+  host.style.cssText='position:fixed;left:-30000px;top:0;width:'+D.W+'px;background:#fff;visibility:hidden;pointer-events:none;z-index:-1';
+  host.innerHTML=docHtml(o).replace('<div class="docroot">','<div class="docroot ppdf">')+'<div class="docroot ppdf"><div class="doc">'+rh+'</div></div>';
+  document.body.appendChild(host);
+  try{
+    const roots=host.querySelectorAll('.docroot'),doc=roots[0]&&roots[0].querySelector('.doc');if(!doc)return null;
+    const rhH=Math.ceil(roots[1].querySelector('.ppg-rh').getBoundingClientRect().height+8);
+    const fl=[],ov=[];
+    Array.from(doc.children).forEach(k=>{const ps=getComputedStyle(k).position;if(ps==='absolute'||ps==='fixed')ov.push(k.outerHTML);else fl.push(k);});
+    if(!fl.length)return null;
+    const tops=fl.map(k=>k.getBoundingClientRect().top);
+    const hOf=i=>i<fl.length-1?tops[i+1]-tops[i]:fl[i].getBoundingClientRect().bottom-tops[i]+(parseFloat(getComputedStyle(fl[i]).marginBottom)||0);
+    const U=fl.map((k,i)=>{const h=Math.max(0,hOf(i));
+      if(k.tagName==='TABLE'&&k.tHead&&k.tBodies.length===1&&!k.tFoot){
+        const rows=Array.from(k.tBodies[0].rows),head=k.tHead.getBoundingClientRect().height,rh2=rows.map(r=>r.getBoundingClientRect().height),soma=rh2.reduce((a,b)=>a+b,0);
+        const tw=k.getBoundingClientRect().width||1,ths=k.tHead.rows[0]?Array.from(k.tHead.rows[0].cells):[];
+        const cols=ths.length&&ths.every(x=>(+x.colSpan||1)===1)?ths.map(x=>Math.round(x.getBoundingClientRect().width/tw*10000)/100):null;
+        const sh=k.cloneNode(false);/* larguras medidas como referência (layout automático: código e NCM não quebram no meio) */const op=sh.outerHTML.replace(/<\/table>\s*$/i,'');
+        return {k:'t',head:Math.ceil(head),extra:Math.max(0,Math.ceil(h-head-soma)),rows:rh2.map(x=>Math.ceil(x)),op,cg:cols?'<colgroup>'+cols.map(w=>'<col style="width:'+w+'%">').join('')+'</colgroup>':'',th:k.tHead.outerHTML,trs:rows.map(r=>r.outerHTML)};}
+      return {k:'b',h:Math.ceil(h),keep:k.tagName==='H2',html:k.outerHTML,nb:k.classList.contains('nobreak')};});
+    const cap1=D.H-F-4,capN=D.H-F-4-rhH;
+    /* bloco final: tudo depois da última tabela (ou o fim "nobreak"), se couber com folga numa página */
+    let li=-1;U.forEach((u,i)=>{if(u.k==='t')li=i;});
+    let fi=-1;const sh=from=>U.slice(from).reduce((s,u)=>s+(u.k==='b'?u.h:1e9),0);
+    if(li>=0&&li<U.length-1&&sh(li+1)<=capN*0.6)fi=li+1;
+    if(fi<0){let j=U.length;while(j>0&&U[j-1].k==='b'&&U[j-1].nb)j--;if(j<U.length&&j>0&&sh(j)<=capN*0.6)fi=j;}
+    const corpo=fi>=0?U.slice(0,fi):U,fimU=fi>=0?U.slice(fi):[];
+    const fim=fimU.length?{h:fimU.reduce((s,u)=>s+u.h,0)}:null;
+    const P=ppdfPlan(corpo,fim,cap1,capN);
+    if(P.over)return {over:true,plan:P};
+    const M={corpo,fimU,ov,dcl:doc.getAttribute('class')||'doc',dst:doc.getAttribute('style'),D,rh,ref,emp:c.fantasia||c.razao||'Central de Gestão'};
+    const out=ppdfMontar(M,P);
+    PPDF.ult={paginas:P.pags.length,esc:P.esc,tot:P.tot,cap1,capN,plan:P,fim:!!fim};
+    return {html:out,paginas:P.pags.length,esc:P.esc,D,land,plan:P};
+  }catch(e){console.warn('[v150] paginação:',e);return null;}
+  finally{host.remove();}
+}
+/* monta as páginas a partir do plano (sem medir nada: testável) */
+function ppdfMontar(M,P){
+  const D=M.D,n=P.pags.length,s=P.esc;let out='<div class="docroot ppdf">';
+  P.pags.forEach((pg,k)=>{
+    let it='';
+    pg.its.forEach(x=>{const u=M.corpo[x.i];if(u.k==='b'){it+=u.html;return;}
+      if(x.ate<=x.de&&u.rows.length)return;it+=u.op+u.cg+u.th+'<tbody>'+u.trs.slice(x.de,x.ate).join('')+'</tbody></table>';});
+    if(pg.fim)it+=M.fimU.map(u=>u.html).join('');
+    out+='<div class="ppg" data-pg="'+(k+1)+'" style="width:'+D.W+'px;height:'+D.H+'px"><div class="ppg-in" style="width:'+(s<1?Math.floor(D.W/s):D.W)+'px'+(s<1?';transform:scale('+s+');transform-origin:0 0':'')+'">'+(k>0?M.rh:'')+'<div class="'+esc(M.dcl)+'"'+(M.dst?' style="'+esc(M.dst)+'"':'')+'>'+M.ov.join('')+it+'</div></div><div class="ppg-f"><span>'+esc(M.emp)+'</span><span>Página '+(k+1)+' de '+n+' · '+esc(M.ref)+'</span></div></div>';
+  });
+  return out+'</div>';
+}
+function ppdfPrintHtml(o,R){
+  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>'+esc(o.tipo+(o.numero?' nº '+o.numero:''))+'</title><style>'+DOC_CSS+
+    '\nhtml,body{background:#fff!important;color:#111a27;margin:0}:root{color-scheme:light}@page{size:A4 '+(R.land?'landscape':'portrait')+';margin:22pt}.ppg{break-after:page;page-break-after:always}.ppg:last-child{break-after:auto;page-break-after:auto}@media screen{body{background:#eef1f6!important;padding:16px 0}.ppg{margin:0 auto 16px;box-shadow:0 1px 4px rgba(0,0,0,.2)}}</style></head><body>'+R.html+'</body></html>';
+}
+/* PDF: uma imagem por página, na área útil da folha (margem de 22 pt) */
+async function ppdfPdf(o){
+  await loadScript(H2C_URL,()=>!!window.html2canvas);
+  await loadScript(JSPDF_URL,()=>!!(window.jspdf&&window.jspdf.jsPDF));
+  try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;}catch(e){}
+  const R=ppdfPaginar(o);if(!R||R.over)return null;
+  const host=document.createElement('div');host.style.cssText='position:fixed;left:-30000px;top:0;background:#fff;z-index:-1';host.innerHTML=R.html;document.body.appendChild(host);
+  const r=document.documentElement,b=document.body,cs=r.classList.contains('cores-setor'),sr=r.style.background,sb=b.style.background;
+  r.classList.remove('cores-setor');r.style.background='#ffffff';b.style.background='#ffffff';
+  try{
+    const {jsPDF}=window.jspdf,D=R.D;const pdf=new jsPDF({unit:'pt',format:'a4',orientation:R.land?'landscape':'portrait'});
+    const pgs=Array.from(host.querySelectorAll('.ppg'));
+    for(let k=0;k<pgs.length;k++){
+      const cv=await window.html2canvas(pgs[k],{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false,width:D.W,height:D.H,windowWidth:D.W+40});
+      if(k>0)pdf.addPage();
+      pdf.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',D.mg,D.mg,D.pw-2*D.mg,D.ph-2*D.mg);
+    }
+    return pdf.output('blob');
+  }finally{if(cs)r.classList.add('cores-setor');r.style.background=sr;b.style.background=sb;host.remove();}
+}
+{const d0=docToPdf;docToPdf=async function(o){if(ppdfPaginavel(o)){try{const bl=await ppdfPdf(o);if(bl)return bl;}catch(e){console.warn('[v150] PDF paginado:',e);}}return d0.apply(this,arguments);};}
+{const p0=A.docPrint;A.docPrint=()=>{if(!curDoc||!ppdfPaginavel(curDoc.o))return p0();let R=null;try{R=ppdfPaginar(curDoc.o);}catch(e){}if(!R||R.over)return p0();
+  try{const old=document.getElementById('v1331Print');if(old)old.remove();
+    const fr=document.createElement('iframe');fr.id='v1331Print';fr.setAttribute('aria-hidden','true');fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(fr);const w=fr.contentWindow,dc=w.document;dc.open();dc.write(ppdfPrintHtml(curDoc.o,R));dc.close();PPDF.printHtml=dc.documentElement.outerHTML.length;
+    const ir=()=>{try{w.focus();w.print();}catch(e){p0();}setTimeout(()=>{try{fr.remove();}catch(e){}},60000);};
+    const imgs=Array.from(dc.images||[]);if(!imgs.length||imgs.every(i=>i.complete))setTimeout(ir,50);else{let n=imgs.length;const um=()=>{if(--n<=0)ir();};imgs.forEach(i=>{if(i.complete)um();else{i.onload=um;i.onerror=um;}});setTimeout(()=>{if(n>0){n=0;ir();}},3000);}
+  }catch(e){p0();}};}
+{const h0=A.docHtml;A.docHtml=()=>{if(!curDoc||!ppdfPaginavel(curDoc.o))return h0();let R=null;try{R=ppdfPaginar(curDoc.o);}catch(e){}if(!R||R.over)return h0();saveFile(curDoc.fname+'.html',ppdfPrintHtml(curDoc.o,R));};}
+
+/* nomes de quem aprovou (e de quem emite) antes de montar o documento: o perfil das outras pessoas vem do servidor */
+async function ppdfNomes(ids){try{const f=Array.from(new Set(ids.filter(i=>i&&i!=='local'&&i!=='fornecedor'&&i!=='sistema'&&!(profCache.get(i)&&profCache.get(i).name))));if(!f.length||!me.u||!me.u.profiles)return;
+  const ps=await me.u.profiles(f);f.forEach(i=>{if(ps&&ps[i])profCache.set(i,ps[i]);});}catch(e){}}
+const ppdfUids=p=>{const a=(p&&p.aprov)||{},l=[actorId(),a.por].concat((Array.isArray(a.assin)?a.assin:[]).map(x=>x&&x.por));if(p&&p.aprovParc)l.push(p.aprovParc.por);return l.filter(Boolean);};
+{const p0=A.pedPrint;A.pedPrint=async d=>{const p=get('ped',d&&d.id);if(p)await ppdfNomes(ppdfUids(p));return p0(d);};}
+{const s0=A.p2qPmEnviar;if(s0)A.p2qPmEnviar=async()=>{try{const x=typeof P2Q!=='undefined'&&P2Q.pm,p=x&&get('ped',x.id);if(p)await ppdfNomes(ppdfUids(p));}catch(e){}return s0();};}
+/* ---------- aceite do fornecedor ---------- */
+const PPDF_AC=p=>{const a=p&&p.aceite;if(!a)return null;const cod=ppdfCodigo(p),atual=a.codigo===cod;
+  return a.ok?(atual?['Aceito pelo fornecedor','pos','Aceite eletrônico de '+a.nome+(a.cargo?' ('+a.cargo+')':'')+' em '+fmtDT(a.em)]:['Aceite de versão anterior','warn','O fornecedor aceitou em '+fmtDT(a.em)+' uma versão anterior; o pedido mudou depois. Envie de novo para um novo aceite.'])
+    :['Fornecedor não pode atender','neg',a.nome+' em '+fmtDT(a.em)+': '+(a.motivo||'')];};
+function ppdfLinkTxt(p){const l=p&&PPDF.links.get(p.id);if(!l||!l.url)return null;
+  return ['ACEITE ELETRÔNICO','Para confirmar que recebeu e aceita este pedido (ou avisar que não pode atender), abra o link abaixo. Não precisa de senha; vale até '+new Date(l.expira).toLocaleDateString('pt-BR')+'.',l.url];}
+function ppdfPodeLink(p){if(!p||p.status==='cancelado'||p.status==='recebido')return false;if(ppdfAceiteValido(p))return false;
+  try{if(typeof precisaAprov==='function'&&precisaAprov('ped',p)&&!(p.aprov&&p.aprov.ok))return false;}catch(e){}return true;}
+async function ppdfObterLink(id){const j=await segaPost('/api/ped/aceite/link',{id});if(j&&j.base)PPDF.base=j.base;if(j&&j.url)PPDF.links.set(id,{url:j.url,expira:j.expira});return j;}
+{const e0=A.pedEmail;A.pedEmail=async d=>{const p=get('ped',d&&d.id);
+  if(p&&typeof SEGA_SRV==='function'&&SEGA_SRV()&&ppdfPodeLink(p)&&!PPDF.links.has(p.id)){try{await ppdfObterLink(p.id);}catch(e){toast('O link de aceite não foi gerado ('+((e&&e.message)||'erro')+'). O e-mail segue sem ele.','neg');}}
+  return e0(d);};}
+A.ppdfLink=async d=>{const p=get('ped',d&&d.id);if(!p)return;
+  if(!(typeof SEGA_SRV==='function'&&SEGA_SRV())){toast('O link de aceite é gerado pelo servidor da empresa: abra o sistema pelo endereço da empresa.','neg');return;}
+  if(ppdfAceiteValido(p)){toast('O fornecedor já aceitou esta versão do pedido.','pos');return;}
+  if(!ppdfPodeLink(p)){toast(p.status==='cancelado'?'Pedido cancelado não recebe aceite.':'O pedido precisa estar aprovado (e não recebido) para pedir o aceite.','neg');return;}
+  let j;try{j=await ppdfObterLink(p.id);}catch(e){toast((e&&e.message)||'Não foi possível gerar o link.','neg');return;}
+  if(j&&j.ja){toast('O fornecedor já aceitou esta versão do pedido.','pos');return;}
+  modal({title:'Link de aceite · pedido nº '+p.numero,nofocus:true,body:'<p class="sub" style="margin:0 0 8px">Mande este link ao fornecedor (o e-mail do pedido já leva o link). Ele vê o pedido como no PDF, sem preços internos ou negociação, e responde "Aceito o pedido" ou "Não posso atender". Vale até '+esc(new Date(j.expira).toLocaleDateString('pt-BR'))+' e só pode ser usado uma vez.</p><label class="f full"><span>Link</span><input id="ppdfUrl" readonly value="'+esc(j.url)+'"></label>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn pri" data-act="ppdfCopiar">Copiar link</button>'});};
+A.ppdfCopiar=()=>{const i=$('#ppdfUrl');if(!i)return;try{navigator.clipboard.writeText(i.value).then(()=>toast('Link copiado.','pos'),()=>{i.select();toast('Selecione e copie o link.');});}catch(e){i.select();toast('Selecione e copie o link.');}};
+Object.assign(ACT_GROUP,{ppdfLink:'comp',ppdfCopiar:null});
+try{Object.assign(FLABEL,{aceite:'Aceite do fornecedor'});}catch(e){}
+{const n0=nameOf;nameOf=function(id){if(id==='fornecedor')return 'Fornecedor (link de aceite)';if(id==='sistema')return 'Central de Gestão';return n0.apply(this,arguments);};}
+/* lista: etiqueta do aceite ao lado da situação */
+{const v0=V.ped;V.ped=function(){let h=v0.apply(this,arguments);try{const parts=h.split('<tr data-rid="');
+  for(let i=1;i<parts.length;i++){const id=parts[i].slice(0,parts[i].indexOf('"')),p=get('ped',id),a=p&&PPDF_AC(p);if(!a)continue;const k=parts[i].indexOf('</td><td class="act">');if(k<0)continue;
+    parts[i]=parts[i].slice(0,k)+'<div style="margin-top:3px" title="'+esc(a[2])+'">'+pill(a[0],a[1])+'</div>'+parts[i].slice(k);}
+  h=parts.join('<tr data-rid="');}catch(e){}return h;};}
+/* formulário do pedido: quadro do aceite */
+{const b0=pedBody;pedBody=function(){const h=b0.apply(this,arguments);try{if(typeof pdd==='undefined'||!pdd||!pdd.id||!get('ped',pdd.id))return h;const p=get('ped',pdd.id),a=PPDF_AC(p),cod=ppdfCodigo(p);
+  return h+'<div class="sect">Aceite do fornecedor e código de verificação</div><div class="sub" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+(a?pill(a[0],a[1])+' <span>'+esc(a[2])+'</span>':'<span>Ainda sem resposta do fornecedor.</span>')+
+    ' <span>Código: <b class="mono">'+esc(ppdfFmtCod(cod))+'</b></span>'+(typeof SEGA_SRV==='function'&&SEGA_SRV()&&ppdfPodeLink(p)?' <button type="button" class="btn sm" data-act="ppdfLink" data-id="'+esc(p.id)+'">Link de aceite</button>':'')+'</div>'+
+    (Array.isArray(p.aceiteAnt)&&p.aceiteAnt.length?'<div class="sub" style="margin-top:4px">Respostas anteriores: '+p.aceiteAnt.map(x=>esc((x.ok?'aceito':'não atende')+' por '+x.nome+' em '+fmtDT(x.em))).join(' · ')+'</div>':'');}catch(e){return h;}};}
+/* chat: conversa "Central de Gestão" (avisos do servidor, autor "sistema") */
+RH_PRE.push(()=>{try{if(store.mode!=='db'||typeof chOk!=='function'||!chOk()||CH.subs.has('sistema')||!store.db)return;CH.subs.add('sistema');const u='sistema',db=store.db;
+  const onM=(kind,map)=>snap=>{const first=!CH.primed.has(kind+u),keep=new Set();
+    snap.docs.forEach(d=>{const o=Object.assign({},d.data(),{id:d.id}),k=u+'/'+d.id;keep.add(k);const old=map.get(k);map.set(k,Object.assign(o,{_a:u,_k:k}));if(kind==='m'&&!first&&!old&&!CH.seen.has(k))chNovo(map.get(k));CH.seen.add(k);});
+    Array.from(map.keys()).forEach(k=>{if(k.startsWith(u+'/')&&!keep.has(k))map.delete(k);});CH.primed.add(kind+u);schedule();};
+  dbWatch('cm/sistema/m',db.collection('cm/sistema/m').orderBy('ts','desc').limit(300),onM('m',CH.msgs),{live:true,every:20000});
+  dbWatch('cm/sistema/c',db.collection('cm/sistema/c'),onM('c',CH.convs),{live:true,every:30000});}catch(e){}});
+/* endereço público (APP_URL) para o código de verificação; aviso na tela quando chega um aceite */
+RH_POST.push(()=>{try{if(!(typeof SEGA_SRV==='function'&&SEGA_SRV()))return;
+  if(!PPDF.baseQ){PPDF.baseQ=1;segaPost('/api/ped/aceite/base',null,'GET').then(j=>{if(j&&j.base)PPDF.base=j.base;},()=>{});}
+  const eu=actorId(),ag=Date.now();(S.ped||[]).forEach(p=>{const a=p.aceite;if(!a||!(ag-a.em<15*60e3)||p.crBy!==eu)return;const k='ppdf.av.'+p.id+'.'+a.em;if(PPDF.av.has(k))return;PPDF.av.add(k);
+    let ja=false;try{ja=!!localStorage.getItem(k);localStorage.setItem(k,'1');}catch(e){}if(!ja)toast(a.ok?parcNome(p.parcId)+' aceitou o pedido nº '+p.numero+'.':parcNome(p.parcId)+' não pode atender o pedido nº '+p.numero+': '+(a.motivo||''),a.ok?'pos':'neg');});}catch(e){}});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='149',APP_DATA='2026-11-04';
+const APP_VER='150',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['150','2026-11-04',['Pedido de compra em PDF mais enxuto: colunas vazias não aparecem, cabeçalho em três colunas, totais, observações e assinaturas nunca ficam sozinhos na página seguinte e pedidos longos repetem o cabeçalho em cada página. Vale também para solicitação, cotação, separação e boletim de medição.', 'O PDF traz emitido por, aprovado por e um código de verificação. O e-mail do pedido leva um link para o fornecedor dar o aceite (ou avisar que não pode atender); o pedido ganha a etiqueta Aceito pelo fornecedor e o comprador é avisado no chat.']],
   ['149','2026-11-04',['Mapa de cotação com histórico de negociação: o primeiro preço fica guardado como proposta inicial e cada mudança vira uma rodada (Negociar ou Nova rodada), com canal, observação, anexo, quem e quando. Nenhum preço antigo é apagado.', 'Observação obrigatória quando o preço ou o frete sobe. O mapa mostra a etiqueta de desconto, o histórico ao clicar e a economia por fornecedor e no total; o pedido de compra guarda proposta inicial e negociado, e Controles de compras ganhou o cartão de economia por comprador e fornecedor.']],
   ['148','2026-11-04',['Correções da revisão de perfis: o Almoxarife volta a ver a lista de colaboradores (só nome, matrícula, função e obra) para registrar EPI, enviar ferramentas e despachar romaneio; o preço não reaparece mais no recebimento às cegas.', 'Solicitação enviada pelo encarregado fica Enviada até o almoxarife criar a separação, sem apontar para separação inexistente. O Fiscal volta a lançar a nota de entrada. Botões Aprovar e Recusar não aparecem mais em dobro nas solicitações.']],
   ['147.1','2026-11-04',['Mapa de cotação: corrigida a desconfiguração do cabeçalho dos fornecedores depois da v147. A caixa do fornecedor volta a ocupar só a própria coluna; o CNPJ, a cidade e o aviso de outras unidades aparecem ao passar o mouse sobre a caixa.']],

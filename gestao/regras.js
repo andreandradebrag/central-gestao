@@ -1671,6 +1671,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     "},function(){fim('Não foi possível abrir a pesquisa agora. Tente mais tarde.');});})();";
   const PAG_PESQ_CSS = '.ns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.n{width:44px;height:44px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--tx);font-size:16px;cursor:pointer}.n.on{background:var(--acc);color:#fff;border-color:var(--acc)}.esc{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-bottom:12px}.err{color:var(--neg)}';
   async function rotaPublica(p, m, req, res) {
+    if (await ACEITE.publica(p, m, req, res)) return true; /* v150: aceite do pedido e verificação do código */
     const mp = p.match(/^\/pesquisa\/([A-Za-z0-9_-]{32,64})$/), ma = p.match(/^\/api\/pub\/pesquisa\/([A-Za-z0-9_-]{32,64})$/);
     if (!mp && !ma) return false;
     if (mp) { X.html(res, 200, pag('Pesquisa de satisfação', '<style>' + PAG_PESQ_CSS + '</style><div class="card" style="max-width:560px;margin:30px auto"><h1>Pesquisa de satisfação</h1><div id="c"><p class="sub">Carregando…</p></div></div><script>' + PAG_PESQ_JS + '</script>'), { 'x-robots-tag': 'noindex' }); return true; }
@@ -2106,6 +2107,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (novo.status === 'atendida') novo.status = 'enviada';
   }
   const NEGF = require('./negoc.js')({ doc, erro, igual, auditar: (...a) => auditar(...a) }); /* v149: histórico de negociação do mapa de cotação (negoc.js) */
+  const ACEITE = require('./aceite.js')({ db, q, doc, salvar, erro, ehDono, gravaCol, pode, perfilPermite, gravacaoPermitida, cfgEmp, ipDe, json, html: X.html, pag, lerJson, lerCorpo: X.lerCorpo, APP_URL, SEG, avisarDoc, auditar: (...a) => auditar(...a) }); /* v150: código de verificação e aceite do fornecedor (aceite.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
@@ -2126,6 +2128,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual((velho || {}).p0, novo.p0)) return erro('Quem vê o Painel do Início só um administrador altera.'); /* v115 */
     if (c0 === 'cfg' && !(ehDono(conta) || perfilEm(conta, ['admin'])) && !igual((velho || {}).j4, novo.j4)) return erro('As regras de aptidão para obra e de retenção dos empreiteiros só um administrador altera.');
     if (c0 === 'aptlib' && s.length === 2) { const e = regraAptLib(conta, req, velho, novo); if (e) return e; }
+    if (c0 === 'ped' && s.length === 2) { const e = ACEITE.antes(conta, req, velho, novo); if (e) return e; } /* v150: aceite só pelo link do fornecedor */
     if (c0 === 'pesqlink') return erro('O link da pesquisa só é criado pelo botão "Enviar link ao cliente".');
     if (c0 === 'tdoc' && !tdocGrava(conta)) return erro('Os documentos mensais dos empreiteiros (folha e guias) ficam com o Financeiro, o RH e a Segurança do trabalho.');
     if (c0 === 'pesq' && s.length === 2) ['viaLink', 'respLinkEm', 'linkEm', 'linkExpira'].forEach(k => { if (velho && velho[k] !== undefined) novo[k] = velho[k]; else delete novo[k]; });
@@ -2219,6 +2222,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     const R = async fn => { const b = await lerJson(req); const r = fn(b); if (r.reauth) { auditar(conta, req, 'PEDE_SENHA', p, null, null); if (END.exigirReauth(req, res)) return; return json(res, 409, { erro: 'Repita a ação.' }); } if (r.erro) return json(res, r.st || 403, { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro }); return json(res, 200, r); };
     if (m === 'POST' && (p === '/api/aprovar')) { await R(b => rotaAprovar(conta, req, b)); return true; }
     if (await P2Q.rota(p, m, req, res, conta)) return true; /* v141 */
+    if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (m === 'POST' && p === '/api/med/reabrir') { const b = await lerJson(req), r = MEDR(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro } : r); return true; } /* v144 */
     if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }
