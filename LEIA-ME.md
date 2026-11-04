@@ -642,6 +642,29 @@ sem valores gerenciais. Recebe os avisos de almoxarife.
 Arquivo novo do servidor: `gestao/almox153.js` (já no Dockerfile). `perfis.json` regerado (Almoxarife: `telasFora` com
 `supctl` e `scTipos`; perfil novo `almoxfab`).
 
+## Chat: não lida que voltava e almoxarifados no mesmo endereço (v153.1)
+
+**Causa.** O estado do chat de cada pessoa (`cm/<uid>`: o que já leu, sinal de online, áudios ouvidos, status vistos) era
+gravado inteiro a cada mudança, inclusive no sinal de online a cada 60 s. Uma aba, computador ou celular aberto há tempo,
+que perdeu o tempo real (rede, notebook que dormiu, celular em segundo plano), gravava o "lido" antigo por cima do novo e
+a mensagem voltava a contar como não lida nos outros aparelhos. Além disso, cada abertura do sistema reiniciava o início da
+contagem (`desde`) e escondia o que chegou com o sistema fechado.
+
+**Correção.** `server.js` (função `chEstadoMescla`): ao gravar `cm/<uid>` (PUT ou PATCH), por conversa vale a leitura mais
+recente; `ouv`/`sv` pelo mais recente (poda de 30 e 3 dias), `on` pelo maior e `desde` pelo mais antigo; os demais campos
+(silenciar, ocultar) seguem o que chegou. Nenhuma gravação faz o "lido" voltar, nem a de uma aba com a versão anterior do
+sistema. O navegador passa a gravar só o campo alterado e relê o estado depois. Clicar no balão do chat abre direto a
+conversa com mensagem nova; "Marcar todas como lidas" no topo da lista; no celular, a conversa só conta como lida quando é
+aberta. Depois de atualizar, mensagens que chegaram com o sistema fechado desde a última abertura podem aparecer como não
+lidas uma vez (antes ficavam escondidas): "Marcar todas como lidas" resolve.
+
+**Almoxarifados no mesmo endereço ou CEP** (cadastro e edição): o aviso "Já existe o almoxarifado X neste endereço.
+Cadastrar outro no mesmo endereço?" aparece junto do rodapé, o botão vira **Salvar mesmo assim** (um clique grava) e
+**Voltar** desfaz. Antes o aviso ia para o topo do formulário, fora da vista.
+
+Alterados `gestao/server.js` e `gestao/public/index.html`: reconstruir a imagem do serviço `gestao`. Quem estiver com o
+sistema aberto deve recarregar a página (F5) em cada computador e no celular.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

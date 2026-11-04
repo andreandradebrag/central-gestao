@@ -5518,8 +5518,15 @@ function chWriteOther(a,obj){ /* só o dono da página consegue (moderação) */
 function chStSave(patch){
   Object.assign(CH.st,patch);
   if(store.mode!=='db'){chLocalSave();return;}
-  CH.stPend=Object.assign({},CH.st);
-  CH.stQ=CH.stQ.then(async()=>{const s=CH.stPend;if(!s)return;CH.stPend=null;try{await store.db.collection('cm').doc(chMe()).set(s);}catch(e){}});
+  /* v153.1: no servidor próprio grava só os campos alterados (PATCH) e relê o estado mesclado pelo servidor; uma aba aberta
+     há tempo (sem o tempo real) não devolve mais o "lido" antigo nem fica mostrando como não lida o que já foi lido */
+  const parcial=typeof window!=='undefined'&&!!window.__SELFHOST;
+  if(parcial){const p=Object.assign({},patch||{});if(!Object.keys(p).length)p.lido=Object.assign({},CH.st.lido||{});CH.stPend=Object.assign(CH.stPend||{},p);}
+  else CH.stPend=Object.assign({},CH.st);
+  CH.stQ=CH.stQ.then(async()=>{const s=CH.stPend;if(!s)return;CH.stPend=null;
+    try{const ref=store.db.collection('cm').doc(chMe());if(!parcial){await ref.set(s);return;}
+      try{await ref.update(s);}catch(e){if(e&&e.code==='invalid_argument')await ref.set(Object.assign({},CH.st,s));else throw e;}
+      const r=await ref.get();if(r&&r.exists){CH.st=r.data();schedule();}}catch(e){}});
 }
 function chSync(){
   if(!chOk())return;
@@ -5592,6 +5599,7 @@ RH_POST.push(()=>{
 /* ---------- marcar como lida ---------- */
 RH_POST.push(()=>{
   if(ui.tab!=='chat'||!chOk()||(typeof document!=='undefined'&&document.visibilityState==='hidden'))return;
+  if(!chUi.open&&typeof matchMedia==='function'&&matchMedia('(max-width:760px)').matches)return; /* v153.1: celular mostrando a lista */
   const u=chUltima(chUi.conv);if(!u)return;
   const lido=CH.st.lido||{};if((+lido[chUi.conv]||0)>=u.ts)return;
   chStSave({lido:Object.assign({},lido,{[chUi.conv]:u.ts})});
@@ -5602,7 +5610,7 @@ function toolsHtml(){
   if(!store.ready||!NAV.some(n=>mayR(GROUP_OF_TAB[n[0]])))return '';
   const n=chTotal();
   return '<div class="tools"><button class="tbtn" data-act="gsOpen" title="Buscar (Ctrl+K)" aria-label="Buscar em todo o sistema"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="tl">Buscar</span></button>'+
-    (mayR('chat')?'<button class="tbtn" data-act="nav" data-tab="chat" aria-label="Chat'+(n?', '+n+' não lidas':'')+'"'+(ui.tab==='chat'?' aria-current="page"':'')+'><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg><span class="tl">Chat</span>'+(n?'<span class="bd">'+(n>99?'99+':n)+'</span>':'')+'</button>':'')+'</div>';
+    (mayR('chat')?'<button class="tbtn" data-act="nav" data-tab="chat"'+(n?' data-nl="1"':'')+' aria-label="Chat'+(n?', '+n+' não lidas':'')+'"'+(ui.tab==='chat'?' aria-current="page"':'')+'><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg><span class="tl">Chat</span>'+(n?'<span class="bd">'+(n>99?'99+':n)+'</span>':'')+'</button>':'')+'</div>';
 }
 /* ---------- renderização ---------- */
 const chHash=s=>{let h=0;s=String(s);for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return 'm'+(h>>>0).toString(36);};
@@ -12831,7 +12839,7 @@ function chStMescla(inc){const cur=CHST.v||{},out=Object.assign({},inc||{}),now=
   Object.keys(CHST.loc).forEach(k=>{if(now-CHST.loc[k]<20000&&k in cur)out[k]=cur[k];});
   const L=Object.assign({},(inc&&inc.lido)||{});Object.keys(cur.lido||{}).forEach(k=>{if((+cur.lido[k]||0)>(+L[k]||0)){L[k]=cur.lido[k];atrasado=true;}});out.lido=L;
   ['ouv','sv'].forEach(f=>{if(cur[f]||out[f])out[f]=Object.assign({},cur[f]||{},out[f]||{});});
-  if(cur.desde&&(!out.desde||+cur.desde<+out.desde))out.desde=cur.desde;
+  {const ds=[+((inc&&inc.desde)||0),+(cur.desde||0)].filter(x=>x>0);if(ds.length)out.desde=Math.min(...ds);} /* v153.1 */
   if(atrasado&&store.mode==='db'&&inc){clearTimeout(CHST.fix);CHST.fix=setTimeout(()=>chStSave({}),2500);}
   return out;}
 Object.defineProperty(CH,'st',{configurable:true,enumerable:true,get(){return CHST.v;},set(v){CHST.v=chStMescla(v);}});
@@ -29919,7 +29927,7 @@ function v153AlmSalvarBase(root,isNew){
   if(!String(r.end||'').trim()||!String(r.num||'').trim()||!String(r.cidade||'').trim()){toast('Informe logradouro, número e cidade: cada almoxarifado fica em um endereço.','neg');return false;}
   if(S.almox.some(a=>a.id!==r.id&&rsNorm(a.nome)===rsNorm(r.nome))){toast('Já existe um almoxarifado com este nome.','neg');return false;}
   /* v153: vários almoxarifados no mesmo endereço (materiais, ferramentas/EPI, fábrica): aviso com confirmação na própria tela */
-  const k=almChave(r),dups=k?S.almox.filter(a=>a.id!==r.id&&almChave(a)===k):[];if(dups.length&&V153.dupOk!==r.id+'|'+k){v153DupAviso(dups,r.id+'|'+k);return false;}
+  const k=almChave(r),dups=k?S.almox.filter(a=>a.id!==r.id&&almChave(a)===k):[];if(dups.length&&V153.dupOk!==r.id+'|'+k){if(V153.dupArm===r.id+'|'+k&&$('#v153dup')){V153.dupOk=V153.dupArm;}else{v153DupAviso(dups,r.id+'|'+k);return false;}}
   const prats=ALM.prats.map(p=>({cod:String(p.cod||'').trim().toUpperCase(),desc:p.desc||'',setor:p.setor||''})).filter(p=>p.cod);
   const cods=prats.map(p=>p.cod);const rep=cods.find((c,i)=>cods.indexOf(c)!==i);if(rep){toast('Código de prateleira repetido: '+rep,'neg');return false;}
   if(prats.some(p=>/[,;]/.test(p.cod))){toast('O código da prateleira não pode ter vírgula.','neg');return false;}
@@ -29929,11 +29937,16 @@ function v153AlmSalvarBase(root,isNew){
   if(sai.length){S.prod.filter(p=>p.almoxId===r.id&&sai.includes(p.prateleira)).forEach(p=>put('prod',Object.assign(cl(p),{prateleira:''})));S.ferr.filter(f=>f.almoxId===r.id&&sai.includes(f.prateleira)).forEach(f=>put('ferr',Object.assign(cl(f),{prateleira:''})));}
   toast('Almoxarifado salvo.','pos');
 }
-function v153DupAviso(dups,chave){const mb=$('#mb');if(!mb||!mb.insertAdjacentHTML){toast('Já existe o almoxarifado "'+dups[0].nome+'" neste endereço.','neg');return;}const x=$('#v153dup');if(x&&x.remove)x.remove();
-  mb.insertAdjacentHTML('afterbegin','<div class="note" id="v153dup" style="margin:0 0 10px;border-color:var(--warn)"><b>'+(dups.length>1?'Já existem os almoxarifados '+esc(dups.map(a=>'"'+a.nome+'"').join(', ')):'Já existe o almoxarifado "'+esc(dups[0].nome)+'"')+' neste endereço.</b> Cadastrar outro no mesmo endereço? (ex.: materiais, ferramentas/EPI e fábrica no mesmo terreno)<div class="acts" style="margin-top:8px"><button type="button" class="btn sm pri" data-act="v153DupSim" data-k="'+esc(chave)+'">Sim, cadastrar no mesmo endereço</button><button type="button" class="btn sm" data-act="v153DupNao">Não, revisar</button></div></div>');
-  try{mb.scrollTop=0;}catch(e){}toast('Confirme: já existe almoxarifado neste endereço.','neg');}
+function v153DupAviso(dups,chave){ /* v153.1: aviso no rodapé, ao lado do Salvar (o topo do formulário ficava fora da vista) */
+  const mf=$('#mf');if(!mf||!mf.insertAdjacentHTML){toast('Já existe o almoxarifado "'+dups[0].nome+'" neste endereço.','neg');return;}
+  const x=$('#v153dup');if(x&&x.remove)x.remove();const y=$('#v153dupVoltar');if(y&&y.remove)y.remove();V153.dupArm=chave;
+  const nomes=dups.map(a=>'"'+a.nome+'"').join(', ');
+  mf.insertAdjacentHTML('afterbegin','<div class="note" id="v153dup" role="alert" style="flex:1 1 100%;width:100%;margin:0 0 8px;border-color:var(--warn);text-align:left"><b>'+esc((dups.length>1?'Já existem os almoxarifados ':'Já existe o almoxarifado ')+nomes)+' neste endereço. Cadastrar outro no mesmo endereço?</b><div class="sub">Ex.: materiais, ferramentas/EPI e fábrica no mesmo terreno. Clique em <b>Salvar mesmo assim</b> para gravar ou em <b>Voltar</b> para revisar o endereço.</div></div>');
+  try{mf.style.flexWrap='wrap';}catch(e){}
+  const b=$('#mf [data-act="modalSave"]');if(b){if(!b.dataset.v153lbl)b.dataset.v153lbl=b.textContent;b.textContent='Salvar mesmo assim';if(b.insertAdjacentHTML)b.insertAdjacentHTML('beforebegin','<button type="button" class="btn" id="v153dupVoltar" data-act="v153DupNao">Voltar</button>');}
+  try{const n=b||$('#v153dup');if(n&&n.scrollIntoView)n.scrollIntoView({block:'end'});if(b&&b.focus)b.focus({preventScroll:true});}catch(e){}}
 A.v153DupSim=d=>{V153.dupOk=d.k;const b=$('#mf [data-act="modalSave"]')||$('[data-act="modalSave"]');if(b&&b.click)b.click();};
-A.v153DupNao=()=>{const x=$('#v153dup');if(x&&x.remove)x.remove();V153.dupOk=null;};
+A.v153DupNao=()=>{const x=$('#v153dup');if(x&&x.remove)x.remove();const y=$('#v153dupVoltar');if(y&&y.remove)y.remove();V153.dupOk=null;V153.dupArm=null;const b=$('#mf [data-act="modalSave"]');if(b&&b.dataset.v153lbl){b.textContent=b.dataset.v153lbl;delete b.dataset.v153lbl;}};
 Object.assign(ACT_GROUP,{v153DupSim:null,v153DupNao:null});
 {const s0=v153AlmSalvarBase;almSalvar=function(root,isNew){const v=readForm(root);
   if(v.respUid&&v.substUid&&v.respUid===v.substUid){toast('O substituto precisa ser outra pessoa.','neg');return false;}
@@ -30186,8 +30199,9 @@ try{if(!document.getElementById('css_v153')){const st=document.createElement('st
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v153Abrir:'Abre o documento na tela dele.',v153Mais:'Mostra todos os cartões desta coluna.',v153Transferir:'Abre um romaneio de transferência entre almoxarifados com o que falta.'});
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='153',APP_DATA='2026-11-04';
+const APP_VER='153.1',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['153.1','2026-11-04',['Chat: a mensagem lida num computador, aba ou celular não volta mais a aparecer como não lida por causa de outra aba aberta há tempo (o servidor guarda sempre a leitura mais recente). A mensagem recebida com o sistema fechado passa a contar ao abrir.', 'Chat: clicar no balão de não lidas abre direto a conversa com a mensagem nova; novo botão Marcar todas como lidas no topo da lista de conversas. No celular, a conversa só conta como lida quando é aberta (na lista, continua marcada).', 'Almoxarifados no mesmo endereço ou CEP: o aviso aparece junto do botão Salvar, que passa a dizer Salvar mesmo assim; um clique confirma e grava (cadastro e edição).']],
   ['153','2026-11-04',['Painel de Suprimentos com quadro do processo de compra: solicitação, cotação, pedido, recebimento e nota em colunas, com quem precisa agir, atraso em cor e filtros por obra, comprador, tipo e almoxarifado.', 'Almoxarifados com cidade, responsável, substituto e principal da cidade; a obra indica o almoxarifado que a atende. Separação, recebimento, romaneio e devolução avisam só o responsável daquele almoxarifado, e as telas abrem em Meu almoxarifado. Vários almoxarifados podem ficar no mesmo endereço.', 'Pedido de separação mostra almoxarifado, prateleira e saldo de cada item, em ordem de prateleira; se faltar material, sugere a transferência entre almoxarifados.', 'Novo perfil Almoxarife e fábrica: tudo do Almoxarife, mais solicitação de compra de qualquer tipo e movimentação das etapas das OS de fabricação. O Almoxarife deixa de ver Controles de compras e cria solicitação só de reposição e administrativa.']],
   ['152','2026-11-04',['Solicitação recusada ganhou Corrigir e reenviar: cria uma nova já preenchida, com o motivo da recusa no topo, ligada à recusada.', 'Solicitações e pedidos aguardando aprovação mostram quem precisa aprovar (com o nível da alçada no pedido) e há quanto tempo; o botão Pedir aprovação avisa o aprovador no chat e por e-mail e copia a mensagem para o WhatsApp (um lembrete a cada 2 horas).', 'Almoxarife pode criar solicitação de compra de Reposição de estoque e Administrativa (sem obra); no Estoque, Gerar solicitação de reposição com os itens abaixo do mínimo.', 'Pedidos de compra, Solicitações, Cotações, Separação e Notas de entrada se ajustam à largura da tela: botões sempre visíveis e, no celular, cada linha vira um cartão.']],
   ['151.2','2026-11-04',['Treinamentos: a tela de cada passo agora cabe na janela, com a explicação e os botões à vista sem rolar. Novo botão Aproximar do destaque, que amplia a área a clicar; Tela cheia abre a imagem inteira.']],
@@ -30506,6 +30520,7 @@ document.addEventListener('click',e=>{
   if(e.target===$('#ov')){closeModal();return;}
   const el=e.target.closest('[data-act]');if(!el)return;
   const act=el.dataset.act;
+  if(act==='nav'&&el.dataset.nl&&el.dataset.tab==='chat'&&typeof chIrNaoLida==='function'&&chIrNaoLida())return;
   if(act==='nav'){ui.tab=el.dataset.tab;if(el.dataset.mod)ui.mod=el.dataset.mod;if(el.dataset.pj!==undefined)ui.rproj.proj=el.dataset.pj;if(el.dataset.nftipo!==undefined)ui.nf.tipo=el.dataset.nftipo;try{history.replaceState(null,'','#'+ui.tab);}catch(_){}render();window.scrollTo(0,0);return;}
   if(act==='closeModal'){closeModal();return;}
   if(act==='modalSave'){const fn=mSave;if(!fn)return;const r=fn($('#mb'));if(r!==false&&mSave===fn)closeModal();return;}
@@ -30599,6 +30614,22 @@ async function boot(){
     store.mode='local';loadLocal();store.ready=true;render();
   }
 }
+
+/* ===== v153.1 (relatorios/feito_v1531_chat.md): chat sem não lida que volta, balão que abre a conversa, marcar todas =====
+   Causa: o estado do chat de cada pessoa (cm/<uid>: lido, online, ouvidos, status vistos…) era gravado inteiro a cada
+   mudança (sinal "online" a cada 60 s). Uma aba ou aparelho aberto há tempo, que perdeu o tempo real (rede, notebook que
+   dormiu, celular em segundo plano), gravava o "lido" antigo por cima do novo, e a mensagem voltava a contar como não lida.
+   Agora: o navegador grava só o que mudou e relê o estado; o servidor mescla o "lido" pela leitura mais recente (server.js,
+   chEstadoMescla). O "desde" guardado vale o mais antigo (antes cada abertura o reiniciava e escondia o que chegou com o
+   sistema fechado). */
+function chIrNaoLida(){try{if(!chOk())return false;const mu=CH.st.mudo||{},oc=chOcultas();
+  const l=chConvs().filter(c=>!mu[c._k]&&!oc[c._k]).map(c=>({k:c._k,n:chNaoLidas(c._k),u:chUltima(c._k)})).filter(x=>x.n>0).sort((a,b)=>(b.u?b.u.ts:0)-(a.u?a.u.ts:0));
+  if(!l.length)return false;chUi.aba='';chUi.fil='';chUi.q='';A.chAbrir({k:l[0].k});try{window.scrollTo(0,0);}catch(e){}return true;}catch(e){return false;}}
+A.chLerTodas=()=>{const L=Object.assign({},CH.st.lido||{});let n=0;chConvs().forEach(c=>{const u=chUltima(c._k);if(u&&u.ts>(+L[c._k]||0)){L[c._k]=u.ts;n++;}});
+  if(n)chStSave({lido:L});toast(n?'Todas as conversas foram marcadas como lidas.':'Não há mensagens não lidas.','pos');render();};
+{const v0=V.chat;V.chat=function(){let h=v0.apply(this,arguments);try{if(!chOk()||chUi.aba||String(chUi.q||'').trim())return h;const oc=chOcultas();
+  if(chConvs().some(c=>!oc[c._k]&&chNaoLidas(c._k)>0))h=h.replace('<div class="wa-fil">','<div class="wa-lt" style="padding:6px 12px 0"><button class="wa-chip" data-act="chLerTodas" title="Marca como lidas as mensagens de todas as conversas">✓ Marcar todas como lidas</button></div><div class="wa-fil">');}catch(e){}return h;};}
+try{if(typeof TIP_ACT!=='undefined')TIP_ACT.chLerTodas='Marca como lidas as mensagens de todas as conversas.';}catch(e){}
 boot();
 })();
 </script>

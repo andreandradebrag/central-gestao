@@ -325,6 +325,23 @@ function iceServers(conta) {
 }
 const validPath = (p, doc) => { const s = String(p || '').split('/').filter(Boolean); return s.length > 0 && s.length <= 12 && s.every(x => /^[\w\-.|~@+=]{1,200}$/.test(x)) && (doc ? s.length % 2 === 0 : s.length % 2 === 1); };
 
+/* v153.1: estado do chat de cada pessoa (cm/<uid>: lido, on, ouv, sv, desde…). Uma aba ou aparelho aberto há tempo, sem o
+   tempo real, gravava o documento inteiro com o "lido" antigo e a mensagem voltava a contar como não lida. Aqui a gravação
+   (PUT ou PATCH) é mesclada com o que está guardado: por conversa vale a leitura mais recente (lido), o mesmo para ouv/sv
+   (com a mesma poda do navegador: 30 e 3 dias) e on; desde vale o mais antigo. Os demais campos (mudo, ocultas…) seguem o
+   que chegou. Nenhuma gravação faz o "lido" voltar. */
+function chEstadoMescla(dp, velho, data) {
+  const s = dp.split('/'); if (s.length !== 2 || s[0] !== 'cm' || !velho || typeof velho !== 'object' || !data) return data;
+  const agora = Date.now(), out = Object.assign({}, data), mapa = m => m && typeof m === 'object' && !Array.isArray(m) ? m : null;
+  const maior = (a, b, dias) => { const o = {}; [mapa(a), mapa(b)].forEach(m => { if (m) Object.keys(m).forEach(k => { if ((+m[k] || 0) > (+o[k] || 0)) o[k] = m[k]; }); });
+    if (dias) Object.keys(o).forEach(k => { if (+o[k] < agora - dias * 864e5) delete o[k]; }); return o; };
+  if (mapa(velho.lido) || mapa(out.lido)) out.lido = maior(velho.lido, out.lido);
+  if (mapa(velho.ouv) || mapa(out.ouv)) out.ouv = maior(velho.ouv, out.ouv, 30);
+  if (mapa(velho.sv) || mapa(out.sv)) out.sv = maior(velho.sv, out.sv, 3);
+  if ((+velho.on || 0) > (+out.on || 0)) out.on = velho.on;
+  if (+velho.desde > 0 && !(+out.desde > 0 && +out.desde <= +velho.desde)) out.desde = velho.desde;
+  return out;
+}
 /* ---------------- tempo real (SSE) ---------------- */
 const CONEX = new Map(); /* id -> {res, conta, presence, updatedAt} */
 function sse(res, ev, obj) { try { res.write('event: ' + ev + '\ndata: ' + JSON.stringify(obj) + '\n\n'); } catch (e) { } }
@@ -891,6 +908,7 @@ async function rotear(req, res) {
       data = preservarFunc(conta, dp, data);
       data = VAL.preservar(conta, dp, velho, data); /* v146: sem a ação "Ver valores gerenciais", os campos de valor ficam como estavam */
       { const rt = rtcPreparar(conta, dp, velho, data); if (rt.erro) return json(res, rt.st, { code: 'invalid_argument', erro: rt.erro }); data = rt.data; } /* v116 */
+      data = chEstadoMescla(dp, velho, data); /* v153.1 */
     }
     if (!gravacaoPermitida(conta, dp) && !REG.excecaoGravacao(conta, dp, velho, data, m)) {
       try { permLogPut.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), dp.split('/')[0], Date.now()); } catch (e) { }
