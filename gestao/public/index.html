@@ -29368,8 +29368,10 @@ MEU_ABAS.push(['cursos','Cursos do sistema']);
  '.trn-cap.feito .trn-cod{background:var(--pos-soft);color:var(--pos);border:1px solid var(--pos)}.trn-cap b{display:block;font-weight:600;line-height:1.25}.trn-cap .sub{display:block;font-size:12px}'+
  '.trn-mon{padding:0;overflow:hidden}.trn-mh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}'+
  '.trn-mh h2{margin:0;font:600 18px/1.2 var(--font-disp)}.trn-pn{font:500 12.5px/1 var(--font-mono);color:var(--muted)}'+
- '.trn-tela{position:relative;background:#0b1114;line-height:0;overflow:hidden;cursor:zoom-in;display:block;width:100%;border:0;padding:0}'+
+ '.trn-tela{position:relative;background:#0b1114;line-height:0;overflow:hidden;display:flex;justify-content:center;width:100%;border:0;padding:0}'+
+ '.trn-fit{position:relative;display:block;max-width:100%;overflow:hidden;cursor:zoom-in}.trn-zw{position:relative;display:block;transition:transform .35s ease}@media (prefers-reduced-motion:reduce){.trn-zw{transition:none}}'+
  '.trn-tela img{width:100%;height:auto;display:block}'+
+ '.trn-tbar{position:absolute;right:8px;bottom:8px;display:flex;gap:6px;line-height:1}.trn-tb{appearance:none;cursor:pointer;font:600 12.5px var(--font-body);background:rgba(10,16,20,.78);color:#fff;padding:7px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.25)}.trn-tb:focus-visible{outline:2px solid #e7a21b;outline-offset:2px}.trn-tb[aria-pressed="true"]{background:#e7a21b;color:#1a1200}'+
  '.trn-hl{position:absolute;border:3px solid #e7a21b;border-radius:6px;box-shadow:0 0 0 9999px rgba(10,16,20,.42);pointer-events:none;animation:trnPulso 1.6s ease-in-out infinite}'+
  '@keyframes trnPulso{0%,100%{outline:0 solid rgba(231,162,27,0)}50%{outline:8px solid rgba(231,162,27,.38)}}@media (prefers-reduced-motion:reduce){.trn-hl{animation:none}}'+
  '.trn-amp{position:absolute;right:8px;bottom:8px;line-height:1;font:600 12px var(--font-body);background:rgba(10,16,20,.72);color:#fff;padding:6px 8px;border-radius:4px}'+
@@ -29409,6 +29411,15 @@ const trnImg=(c,p)=>'/treino/'+encodeURIComponent(c.pasta)+'/'+String(p.img).spl
 function trnResumo(caps,pr){const cs=caps||[],d=(pr&&pr.caps)||{};let feitos=0,acertos=0,total=0,prox=-1;
   cs.forEach((c,i)=>{const x=d[c.id];if(x&&x.feito){feitos++;acertos+=+x.acertos||0;total+=+x.total||0;}else if(prox<0)prox=i;});
   const n=cs.length,concl=n>0&&feitos===n;return {feitos,n,acertos,total,pct:n?Math.round(100*feitos/n):0,prox:prox<0?0:prox,concluido:concl,concluidoEm:concl?((pr&&pr.concluido)||null):null,sit:concl?'concluido':feitos||(pr&&pr.ini)?'andamento':'nao'};}
+/* v151.2: a imagem cabe na altura da janela (cabeçalho do sistema + legenda + botões ficam à vista) */
+function trnFitW(p){const r=(+p.w||1440)/(+p.h||900);return 'max(min(100%,320px*'+r.toFixed(4)+'),min(100%,calc((100vh - 360px)*'+r.toFixed(4)+')))';}
+function trnFoco(){try{return localStorage.getItem('trnFoco')==='1';}catch(e){return !!TRN.foco;}}
+function trnFocoK(d){return Math.max(1,Math.min(2.8,0.85/Math.max(d.w/100,d.h/100,0.05)));}
+function trnFocoTf(d){const cx=d.x+d.w/2,cy=d.y+d.h/2,k=trnFocoK(d);
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v)),tx=cl(50-k*cx,100-100*k,0),ty=cl(50-k*cy,100-100*k,0);
+  return 'transform-origin:0 0;transform:translate('+tx.toFixed(2)+'%,'+ty.toFixed(2)+'%) scale('+k.toFixed(3)+')';}
+A.trnFoco=()=>{const v=!trnFoco();TRN.foco=v;try{localStorage.setItem('trnFoco',v?'1':'0');}catch(e){}render();};
+ACT_GROUP.trnFoco=null;
 const TRN_SIT={nao:['Não começou',''],andamento:['Em andamento','warn'],concluido:['Concluído','pos']};
 const trnSitPill=s=>pill((TRN_SIT[s]||TRN_SIT.nao)[0],(TRN_SIT[s]||TRN_SIT.nao)[1]);
 /* resultado de um capítulo (puro): acertos das respostas dadas */
@@ -29449,7 +29460,8 @@ function trnPlayerHtml(c,C){
   let mon;
   if(s.modo==='passos'){const p=cap.passos[s.passo],d=p.d,ult=s.passo===cap.passos.length-1;
     mon='<div class="trn-mh"><h2>'+esc(cap.titulo)+'</h2><span class="trn-pn">Passo '+(s.passo+1)+' de '+cap.passos.length+'</span></div>'+
-      '<button class="trn-tela" data-act="trnZoom" aria-label="Ampliar a tela"><img src="'+esc(trnImg(c,p))+'" alt="Tela do sistema: '+esc(p.titulo)+'" width="'+p.w+'" height="'+p.h+'">'+(d?'<span class="trn-hl" style="left:'+d.x+'%;top:'+d.y+'%;width:'+d.w+'%;height:'+d.h+'%"></span>':'')+'<span class="trn-amp">Ampliar</span></button>'+
+      '<div class="trn-tela"><span class="trn-fit" data-act="trnZoom" title="Clique para abrir em tela cheia" style="width:'+trnFitW(p)+'"><span class="trn-zw" style="'+(d&&trnFoco()&&trnFocoK(d)>=1.2?trnFocoTf(d):'')+'"><img src="'+esc(trnImg(c,p))+'" alt="Tela do sistema: '+esc(p.titulo)+'" width="'+p.w+'" height="'+p.h+'">'+(d?'<span class="trn-hl" style="left:'+d.x+'%;top:'+d.y+'%;width:'+d.w+'%;height:'+d.h+'%"></span>':'')+'</span></span>'+
+        '<span class="trn-tbar">'+(d&&trnFocoK(d)>=1.2?'<button type="button" class="trn-tb" data-act="trnFoco" aria-pressed="'+trnFoco()+'">'+(trnFoco()?'Ver a tela inteira':'Aproximar do destaque')+'</button>':'')+'<button type="button" class="trn-tb" data-act="trnZoom">Tela cheia</button></span></div>'+
       '<div class="trn-leg">'+(s.passo===0&&cap.objetivo?'<p class="sub">Objetivo: '+esc(cap.objetivo)+'</p>':'')+'<h3>'+esc(p.titulo)+'</h3><p>'+esc(p.texto)+'</p>'+(p.dica?'<div class="trn-dica"><b>Atenção:</b> '+esc(p.dica)+'</div>':'')+'</div>'+
       '<div class="trn-ctl"><button class="btn" data-act="trnAnt"'+(s.passo===0?' disabled':'')+'>← Anterior</button><div class="trn-dots" aria-hidden="true">'+cap.passos.map((_,i)=>'<i class="'+(i<=s.passo?'on':'')+'"></i>').join('')+'</div><button class="btn pri" data-act="trnProx">'+(ult?(cap.quiz.length?'Responder perguntas →':'Concluir capítulo'):'Próximo →')+'</button></div>';
     const nx=cap.passos[s.passo+1]||(C.capitulos[s.cap+1]||{passos:[]}).passos[0];if(nx&&typeof Image!=='undefined'){try{const im=new Image();im.src=trnImg(c,nx);}catch(e){}}
@@ -29585,8 +29597,9 @@ V.treinadm=()=>{
 };
 
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='151.1',APP_DATA='2026-11-04';
+const APP_VER='151.2',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['151.2','2026-11-04',['Treinamentos: a tela de cada passo agora cabe na janela, com a explicação e os botões à vista sem rolar. Novo botão Aproximar do destaque, que amplia a área a clicar; Tela cheia abre a imagem inteira.']],
   ['151.1','2026-11-04',['Ao entrar no sistema, cada pessoa abre direto no painel do próprio setor (o Almoxarife e o Comprador no Painel de Suprimentos). Antes, o Almoxarife caía em Pedidos de venda.']],
   ['151','2026-11-04',['Treinamentos do sistema: cursos passo a passo dentro do próprio ERP, com as telas do sistema, perguntas no fim de cada capítulo e certificado ao concluir. O primeiro é a Escola do Almoxarifado, que aparece no painel de Suprimentos e em Minha área › Cursos do sistema.', 'O progresso fica salvo por pessoa. Em Sistema › Treinamentos o administrador escolhe quais perfis fazem cada curso e acompanha quem concluiu e quantas perguntas acertou.']],
   ['150','2026-11-04',['Pedido de compra em PDF mais enxuto: colunas vazias não aparecem, cabeçalho em três colunas, totais, observações e assinaturas nunca ficam sozinhos na página seguinte e pedidos longos repetem o cabeçalho em cada página. Vale também para solicitação, cotação, separação e boletim de medição.', 'O PDF traz emitido por, aprovado por e um código de verificação. O e-mail do pedido leva um link para o fornecedor dar o aceite (ou avisar que não pode atender); o pedido ganha a etiqueta Aceito pelo fornecedor e o comprador é avisado no chat.']],
