@@ -722,6 +722,40 @@ Só aparece para quem grava Documentos e ASO (o Técnico de SST, só certificado
 **Subir**: `gestao/epi154.js` (novo), `gestao/regras.js`, `gestao/Dockerfile`, `gestao/perfis.json` e
 `gestao/public/index.html`; reconstruir a imagem do serviço `gestao`.
 
+## Quem faz o quê no Estoque: estorno, motivo, campos fiscais e exclusão de produto (v155)
+
+Regras aprovadas pelo dono. O servidor confere tudo (`gestao/est155.js`, ligado em `regras.js`); a tela mostra só os botões
+de quem pode e o quadro **Quem faz o quê no Estoque** (Estoque e Cadastros › Produtos), com o que o perfil da pessoa pode fazer.
+
+| Ação | Quem | Como |
+|---|---|---|
+| Entrada | Fiscal e Almoxarife pelos fluxos (nota, recebimento, romaneio, devolução de obra, higienização de EPI) | **Entrada manual** só com **motivo**: doação, devolução de obra sem romaneio, sobra de inventário ou outro (descrito) |
+| Saída | Almoxarife e Fiscal | Separação, romaneio, EPI, fábrica/OS ou **baixa manual com motivo**: perda, consumo interno, descarte ou outro (descrito) |
+| Transferência entre almoxarifados | Almoxarife (e Fiscal/Administrador) | Só por romaneio (o servidor recusa transferência solta) |
+| Ajuste de inventário | Almoxarife propõe | Botão **Ajuste** = proposta: até o limite por item (Controles de compras › Regras, padrão R$ 300) entra na hora; acima, outra pessoa aprova em Estoque › Ajustes de inventário. Ajuste solto é recusado |
+| Editar produto | Almoxarife: almoxarifado/prateleira, mínimo, família, lote, EPI (CA, validade, tamanho, vida útil), observações internas, imagem, anexos. Fiscal (e Administrador): tudo | O servidor recusa do Almoxarife (e do antigo Comprador/almoxarife) mudança de preço, custo padrão, NCM (completar NCM vazio pode), recomendações fiscais, unidade tributável e preço das variações; o valor guardado continua |
+| Excluir movimentação | **Ninguém** (nem Administrador nem dono) | **Estornar** (Histórico do produto): movimento contrário ligado ao original, motivo obrigatório, quem e quando; original marcado "estornado"; estorno não se estorna; a data do estorno respeita a competência fechada |
+| Excluir produto | Só Administrador | E só sem histórico (nenhum movimento, nota, pedido, SC, separação, romaneio, EPI, cotação, inventário, kit...). Com histórico: **Inativar** (quem grava o Estoque) |
+
+Detalhes:
+- **Estorno**: mesmo tipo, produto e almoxarifado, quantidade com o sinal trocado. Entrada estornada sai pelo mesmo custo (o custo
+  médio volta); saída estornada volta pelo custo em que saiu (e sai do custo da obra). Não deixa saldo negativo (estorne antes a
+  saída do material). Movimento de **nota fiscal** só se estorna com a nota cancelada (o **cancelamento da nota** estorna o
+  estoque sozinho); movimento de **EPI**, pela devolução. O estorno vai na data de hoje; a marca no original não mexe na
+  competência fechada dele.
+- Fluxos que antes **apagavam** movimentos agora estornam: cancelar nota, excluir a nota em rascunho do recebimento (desfaz a
+  entrada provisória) e aprovação de ajuste recusada pelo servidor. A troca da entrada provisória pela definitiva dentro do
+  lançamento da nota (`/api/nota/lancar`) continua como era (o servidor confere que é a provisória daquele pedido).
+- **Dados de exemplo** (`ex:true`) continuam removíveis pela limpeza de exemplos. Movimentos antigos sem motivo continuam
+  válidos. O **dono** (conta principal) pode gravar saldo de implantação pela API sem motivo; na tela o motivo é sempre pedido.
+- **Produto novo** só nasce em Cadastros › Produtos ou na entrada da nota fiscal: Controle de EPI › "Cadastrar em Cadastros ›
+  Produtos" abre o Novo produto já na família EPI; no pedido de compra o botão leva a Cadastros › Produtos (item sem produto,
+  só com a descrição, continua como antes). A unificação do estoque de EPI (v154, uma vez) continua.
+- Auditoria: `ESTOQUE_ESTORNO`, `ESTOQUE_ENTRADA_MANUAL`, `ESTOQUE_BAIXA_MANUAL`, `MOV_EXCLUSAO_RECUSADA`, `PRODUTO_EXCLUIDO`,
+  `PRODUTO_EXCLUSAO_RECUSADA`, `PRODUTO_FISCAL_RECUSADO`, além do registro de cada gravação.
+- Implantar: subir `gestao/est155.js` (novo), `gestao/regras.js`, `gestao/Dockerfile`, `gestao/perfis.json` e
+  `gestao/public/index.html` e reconstruir a imagem do serviço `gestao`.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

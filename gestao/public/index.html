@@ -347,7 +347,7 @@ function persist(col,rec,isDel){
       if(cur&&cur.del)await ref.delete();else await ref.set(cl(cur?cur.rec:rec));
     }catch(e){
       if(typeof v148Falhou==='function')v148Falhou(key);
-      toast('Não foi possível salvar na nuvem'+(e&&e.code?' ('+e.code+')':'')+'. Confira se você tem permissão de edição.','neg');
+      if(!(typeof v155Recusa==='function'&&v155Recusa(col,rec,isDel,e)))toast('Não foi possível salvar na nuvem'+(e&&e.code?' ('+e.code+')':'')+'. Confira se você tem permissão de edição.','neg');
     }finally{release();}
   });
   chains.set(key,p);
@@ -389,8 +389,8 @@ function stockAll(){
     let q=0,c=0;
     for(const m of list){
       const mq=+m.qtd||0;
-      if(m.tipo==='entrada'){const cu=+m.custoUnit||0;const nq=q+mq;c=q>0?(q*c+mq*cu)/nq:cu;q=nq;costs.set(m.id,cu);}
-      else if(m.tipo==='saida'){if(m.devFor&&+m.custoUnit>0){const cu=+m.custoUnit,nq=q-mq;costs.set(m.id,cu);c=nq>1e-9?Math.max(0,(q*c-mq*cu)/nq):c;q=nq;}else{costs.set(m.id,c);q-=mq;}}
+      if(m.tipo==='entrada'){const cu=+m.custoUnit||0;const nq=q+mq;c=q>0?(nq>1e-9?(q*c+mq*cu)/nq:c):cu;q=nq;costs.set(m.id,cu);}
+      else if(m.tipo==='saida'){if((m.devFor||m.estornoDe)&&+m.custoUnit>0){const cu=+m.custoUnit,nq=q-mq;costs.set(m.id,cu);c=nq>1e-9?Math.max(0,(q*c-mq*cu)/nq):c;q=nq;}else{costs.set(m.id,c);q-=mq;}}
       else if(m.tipo==='transf'){costs.set(m.id,c);}else{costs.set(m.id,c);q+=mq;}
     }
     res.set(pid,{saldo:q,custo:c,valor:q*c});
@@ -4125,7 +4125,7 @@ function stockAsOf(dt){
   const res=new Map();
   for(const [pid,list] of by){
     list.sort(cmpMov);let q=0,c=0;
-    for(const m of list){const mq=+m.qtd||0;if(m.tipo==='entrada'){const cu=+m.custoUnit||0,nq=q+mq;c=q>0?(q*c+mq*cu)/nq:cu;q=nq;}else if(m.tipo==='saida')q-=mq;else q+=mq;}
+    for(const m of list){const mq=+m.qtd||0;if(m.tipo==='entrada'){const cu=+m.custoUnit||0,nq=q+mq;c=q>0?(nq>1e-9?(q*c+mq*cu)/nq:c):cu;q=nq;}else if(m.tipo==='saida')q-=mq;else q+=mq;}
     res.set(pid,{saldo:q,custo:c,valor:q*c});
   }
   return res;
@@ -13200,7 +13200,7 @@ function pfEstoque(p){const sm=almSaldosMap(),st=stockAll().of(p.id),rs=almReser
     '<tr style="font-weight:600"><td>Total</td><td class="num">'+fmtQ(st.saldo)+' '+esc(p.un||'')+'</td><td class="num">'+money(st.custo)+'</td><td class="num">'+money(st.valor)+'</td><td></td><td class="num">'+fmtQ(prevE)+'</td><td class="num">'+fmtQ(alms.reduce((s,a)=>s+(rs.get(a+'|'+p.id)||0),0))+'</td></tr></tbody></table></div><p class="sub" style="margin:6px 0 0">CMC = custo médio contábil (custo médio móvel das entradas). Previsão de entrada: pedidos de compra em aberto. Previsão de saída: separações em aberto.</p>';}
 function pfCustoMeses(p){const ms=S.mov.filter(m=>m.prodId===p.id).sort(cmpMov),out=[],hoje=todayStr();let d=new Date(hoje.slice(0,7)+'-01T12:00:00');d.setMonth(d.getMonth()-11);
   for(let k=0;k<12;k++){const ini=new Date(d.getFullYear(),d.getMonth()+k,1),fim=new Date(d.getFullYear(),d.getMonth()+k+1,0),lim=fim.toISOString().slice(0,10);let q=0,c=0;
-    for(const m of ms){if(String(m.data)>lim)break;const mq=+m.qtd||0;if(m.tipo==='entrada'){const cu=+m.custoUnit||0,nq=q+mq;c=q>0?(q*c+mq*cu)/nq:cu;q=nq;}else if(m.tipo==='saida')q-=mq;else if(m.tipo!=='transf')q+=mq;}
+    for(const m of ms){if(String(m.data)>lim)break;const mq=+m.qtd||0;if(m.tipo==='entrada'){const cu=+m.custoUnit||0,nq=q+mq;c=q>0?(nq>1e-9?(q*c+mq*cu)/nq:c):cu;q=nq;}else if(m.tipo==='saida')q-=mq;else if(m.tipo!=='transf')q+=mq;}
     out.push({r:['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][ini.getMonth()]+'/'+String(ini.getFullYear()).slice(2),c,q});}return out;}
 function pfCusto(p){const M=pfCustoMeses(p),W=960,H=240,L=60,R=20,T=24,B=36,mx=Math.max(1,...M.map(m=>m.c))*1.15,x=i=>L+i*(W-L-R)/11,y=v=>T+(H-T-B)*(1-v/mx);
   const pts=M.map((m,i)=>x(i)+','+y(m.c)).join(' '),grid=[0,.25,.5,.75,1].map(f=>'<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(mx*f)+'" y2="'+y(mx*f)+'" stroke="currentColor" opacity=".12"/><text x="'+(L-8)+'" y="'+(y(mx*f)+4)+'" text-anchor="end" font-size="11" fill="currentColor" opacity=".6">'+(mx*f).toFixed(2).replace('.',',')+'</text>').join('');
@@ -30549,9 +30549,250 @@ function v154TrmPend(){const fs=S.func.filter(f=>f.status!=='desligado').sort(by
 {const n0=A.epiNovo;if(n0)A.epiNovo=d=>v154Garante(()=>n0(d));const n1=A.epiNovoPara;A.epiNovoPara=d=>v154Garante(()=>n1(d));const n2=A.epiDev;A.epiDev=d=>v154Garante(()=>n2(d));
   const t0=MODS2.epi.top;MODS2.epi.top=function(){if(!v154LeProd()&&!V154.est&&!V154.estP)v154Carrega().then(x=>{if(x)render();});return t0.apply(this,arguments);};}
 
+/* ===== v155: quem faz o quê no Estoque (relatorios/feito_v155.md) =====
+   Regras aprovadas pelo dono (servidor: deploy/gestao/est155.js):
+   - Entrada: pelos fluxos (nota, recebimento, romaneio, devolução de obra, higienização) ou ENTRADA MANUAL com motivo de uma
+     lista (doação, devolução de obra sem romaneio, sobra de inventário, outro com texto).
+   - Saída: pelos fluxos (separação, romaneio, EPI, OS/fábrica) ou BAIXA MANUAL com motivo (perda, consumo interno, descarte,
+     outro com texto).
+   - Ajuste: o botão Ajuste vira PROPOSTA (coleção invaj): até o limite por item (Controles de compras › Regras, padrão R$ 300)
+     entra na hora; acima, outra pessoa aprova em Estoque › Ajustes de inventário (mecanismo da v-anterior, mantido).
+   - Transferência: só por romaneio (v153).
+   - Movimento NÃO se exclui: ESTORNO (movimento contrário ligado ao original, motivo, quem e quando); o original fica
+     "estornado"; estorno não se estorna; competência fechada vale para a data do estorno. Os fluxos que antes apagavam
+     movimentos (cancelar nota, desfazer recebimento, aprovação de ajuste recusada pelo servidor) passam a estornar.
+   - Produto: Almoxarife edita prateleira/almoxarifado, mínimo, família, lote, dados de EPI, observações internas, imagem e
+     anexos; o Fiscal (e o Administrador) edita tudo. Excluir produto: só Administrador e só sem histórico; senão, Inativar.
+   Prefixos: v155*, V155*. */
+const V155={adiar:null,ctx:'',dep:new Map(),semEst:false};
+const V155_MOT={entrada:[['doacao','Doação'],['devobra','Devolução de obra sem romaneio'],['sobra','Sobra de inventário'],['outro','Outro (descreva)']],
+  saida:[['perda','Perda'],['consumo','Consumo interno'],['descarte','Descarte'],['outro','Outro (descreva)']]};
+const V155_LINK=['notaId','sepId','romId','epiId','higId','higienizado','invajId','balanco','devObraId','devObra','osId','osfId','recProv','pedId','devFor','devolObra','devolucao','impLote','estornoDe'];
+const V155_EST_F=['estornoId','estornadoEm','estornadoPor','estornoMotivo'];
+const V155_PF_OK=new Set(['almoxId','prateleira','minimo','lote','diasValLote','familia','ca','caVal','tam','vidaEpi','obsInt']);
+const v155Lim=()=>{const l=typeof supCfg==='function'?+supCfg().supInvLim:300;return 'R$ '+(isFinite(l)?l:300).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}; /* limite de regra (não é valor gerencial: não se mascara) */
+const V155_TIPO={entrada:'Entrada',saida:'Saída',ajuste:'Ajuste',transf:'Transferência'};
+/* a marca de "estornado" no original não mexe na competência dele (igual ao servidor) */
+try{V155_EST_F.forEach(k=>FZ_META.add(k));}catch(e){}
+
+/* ---------- perfil ---------- */
+function v155Papel(){if(me.owner)return 'admin';const p=PERFIS[me.perfil];if(!p)return me.perfil||'';return p.custom?'custom':(p.papel||me.perfil);}
+const v155Adm=()=>!!me.owner||v155Papel()==='admin';
+const v155Restrito=()=>!me.owner&&['almoxarife','compras'].includes(v155Papel());
+const v155PerfilNome=()=>me.owner?'Dono':((PERFIS[me.perfil]||{}).nome||me.perfil||'');
+function v155Pode(){const w=mayW('est'),o=[];
+  if(!w)return ['consultar o estoque e o histórico'];
+  o.push('entrada manual com motivo','baixa manual com motivo','propor ajuste de inventário','estornar movimento','transferir por romaneio');
+  o.push(v155Restrito()?'editar prateleira, mínimo, família, lote, EPI, observações e imagem do produto':'editar o produto inteiro (inclusive preço, NCM e dados fiscais)');
+  o.push(v155Adm()?'excluir produto sem histórico':'inativar produto (excluir é do Administrador)');
+  return o;}
+const V155_REGRAS=[
+  ['Entrada','Fiscal e Almoxarife pelos fluxos (nota fiscal, recebimento, romaneio, devolução de obra, higienização de EPI)','Entrada manual só com motivo: doação, devolução de obra sem romaneio, sobra de inventário ou outro (descrito)'],
+  ['Saída','Almoxarife e Fiscal','Separação, romaneio, EPI, fábrica/OS ou baixa manual com motivo: perda, consumo interno, descarte ou outro (descrito)'],
+  ['Transferência entre almoxarifados','Almoxarife (e Fiscal/Administrador)','Por romaneio de transferência'],
+  ['Ajuste de inventário','Almoxarife propõe','Até o limite por item entra na hora; acima, outra pessoa aprova em Ajustes de inventário'],
+  ['Editar produto','Almoxarife: prateleira, mínimo, família, lote, EPI (CA, validade, tamanho, vida útil), observações, imagem. Fiscal: tudo','Preço, NCM, dados fiscais e unidade tributável só o Fiscal (o servidor recusa do Almoxarife)'],
+  ['Excluir movimentação','Ninguém','Estornar: lança o movimento contrário ligado ao original, com motivo, quem e quando; estorno não se estorna'],
+  ['Excluir produto','Só Administrador','E só se o produto nunca teve movimento, nota, pedido, SC, separação, romaneio ou EPI; com histórico, Inativar']];
+function v155RegrasCard(onde){
+  return '<details class="card v155-reg" id="v155Reg_'+onde+'" style="padding:10px 14px"><summary style="cursor:pointer"><b>Quem faz o quê no Estoque</b> <span class="sub">· você ('+esc(v155PerfilNome())+'): '+esc(v155Pode().join(' · '))+'</span></summary>'+
+    '<div class="tw" style="margin-top:8px"><table><thead><tr><th>Ação</th><th>Quem</th><th>Como</th></tr></thead><tbody>'+
+    V155_REGRAS.map(r=>'<tr><td><b>'+esc(r[0])+'</b></td><td>'+esc(r[1])+'</td><td>'+esc(r[2].replace('o limite por item','o limite por item (Controles de compras › Regras)'))+'</td></tr>').join('')+'</tbody></table></div>'+
+    '<p class="sub" style="margin:6px 0 0">Movimentos antigos sem motivo continuam valendo. Os fluxos automáticos não pedem motivo. O servidor confere tudo isso: o que o seu perfil não pode fazer é recusado com a explicação.</p></details>';}
+
+/* ---------- movimentos: origem, estorno ---------- */
+const v155Tem=v=>!(v===undefined||v===null||v===''||v===false);
+const v155Auto=m=>!!m&&(m.ex===true||V155_LINK.some(k=>v155Tem(m[k])));
+function v155EstMap(){if(memo.v155e)return memo.v155e;const mp=new Map();S.mov.forEach(x=>{if(x&&x.estornoDe)mp.set(x.estornoDe,x);});return memo.v155e=mp;}
+const v155EstornoDe=m=>!m?null:((m.estornoId&&get('mov',m.estornoId))||v155EstMap().get(m.id)||null);
+function v155MotNome(t,k){const l=V155_MOT[t]||[];const x=l.find(a=>a[0]===k);return x?x[1].replace(' (descreva)',''):'';}
+function v155Origem(m){
+  if(m.estornoDe){const o=get('mov',m.estornoDe);return 'Estorno'+(o?' do lançamento de '+fmtDate(o.data)+(o.obs?' ('+String(o.obs).slice(0,60)+')':''):'')+' · motivo: '+(m.estMotivo||'—');}
+  if(m.motivo&&V155_MOT[m.tipo])return (m.tipo==='entrada'?'Entrada manual':'Baixa manual')+' · '+v155MotNome(m.tipo,m.motivo)+(m.motivoTxt?': '+m.motivoTxt:'')+(m.obs?' · '+m.obs:'');
+  if(m.notaId){const n=get('notas',m.notaId);return 'Nota fiscal '+(n&&n.numero?'nº '+n.numero:'')+(n&&n.status==='cancelada'?' (cancelada)':'');}
+  if(m.epiId||m.higId)return m.obs||'EPI';
+  if(m.invajId||m.balanco)return m.obs||'Inventário';
+  if(m.obs)return m.obs;
+  if(m.sepId)return 'Separação';if(m.romId)return 'Romaneio';if(m.devObra)return 'Devolução de obra';if(m.recProv)return 'Recebimento (provisório)';if(m.osId)return 'Ordem de serviço';
+  return 'Manual (sem motivo: lançamento anterior à v155)';}
+function v155PodeEstornar(m){
+  if(!m)return 'Movimento não encontrado.';
+  if(m.estornoDe)return 'Este lançamento é um estorno: não se estorna de novo.';
+  if(v155EstornoDe(m))return 'Já estornado.';
+  if(m.epiId||m.higId)return 'Movimento de EPI: use a devolução em Controle de EPI.';
+  if(m.notaId){const n=get('notas',m.notaId);if(!(n&&n.status==='cancelada'))return 'Movimento de nota fiscal: para desfazer, cancele a nota (o cancelamento estorna o estoque).';}
+  if(!mayW('est'))return 'Seu perfil não estorna movimentos de estoque.';
+  if(typeof pfnAcaoOk==='function'&&!pfnAcaoOk('cancelar'))return 'Seu perfil não cancela nem estorna (ação desligada em Sistema › Perfis de acesso).';
+  return '';}
+/* efeito do estorno no saldo de cada almoxarifado (para não deixar negativo) */
+function v155EfeitoEst(m){const q=+m.qtd||0,pd=get('prod',m.prodId)||{},loc=m.almoxId||pd.almoxId||'',o=[];
+  if(m.tipo==='transf'){o.push([m.almoxId||'',q]);o.push([m.almoxDest||'',-q]);}
+  else o.push([loc,m.tipo==='saida'?q:-q]);return o;}
+function v155SaldoAlm(pid,alm){const sm=almSaldosMap(),mp=sm.get(alm||'');return mp?(mp.get(pid)||0):0;}
+function v155FazEstorno(m,motivo,o){o=o||{};const st=stockAll();
+  const cu=m.tipo==='entrada'?(+m.custoUnit||0):m.tipo==='saida'?r4(st.costOf(m.id)||+m.custoUnit||0):(+m.custoUnit||0),hj=todayStr();
+  const e={id:uid(),data:String(m.data||'')>hj?String(m.data):hj,prodId:m.prodId,tipo:m.tipo,qtd:-(+m.qtd||0),custoUnit:cu,projId:m.projId||'',almoxId:m.almoxId||'',prateleira:m.prateleira||'',
+    estornoDe:m.id,estMotivo:String(motivo||'').slice(0,500),estPor:actorId(),estEm:Date.now(),obs:'Estorno · '+String(motivo||'').slice(0,200)};
+  if(m.tipo==='transf')e.almoxDest=m.almoxDest||'';if(m.devObra)e.devObra=true;if(m.devFor)e.devFor=true;if(o.auto)e.estAuto=o.auto;
+  if(o.dep&&o.dep.length)V155.dep.set('mov/'+e.id,o.dep.slice());
+  put('mov',e);if(!get('mov',e.id)){V155.dep.delete('mov/'+e.id);return null;} /* competência fechada na data do estorno: a gravação já avisou */
+  V155.dep.set('mov/'+m.id,['mov/'+e.id]);
+  put('mov',Object.assign(cl(get('mov',m.id)||m),{estornoId:e.id,estornadoEm:e.estEm,estornadoPor:e.estPor,estornoMotivo:e.estMotivo}));
+  return e;}
+/* fluxos que apagavam movimento (cancelar nota, desfazer recebimento, aprovação recusada): agora estornam */
+{const d0=del;del=function(col,id,o){
+  if(col!=='mov'||V155.semEst||(typeof P2N_CAP!=='undefined'&&P2N_CAP))return d0.apply(this,arguments);
+  const m=get('mov',id);if(!m||m.ex===true||m.epiId||m.higId)return d0.apply(this,arguments);
+  if(m.estornoDe||v155EstornoDe(m))return; /* já desfeito */
+  if(V155.adiar){V155.adiar.push(m.id);return;}
+  v155FazEstorno(m,V155.ctx||'Desfeito pelo sistema (gravação recusada ou fluxo desfeito)',{auto:'sistema'});};}
+if(typeof cancelarNota==='function'){const c0=cancelarNota;cancelarNota=function(id){const n0=get('notas',id),mot='Cancelamento da NF '+((n0&&n0.numero)||'s/n');
+  const ad0=V155.adiar,cx0=V155.ctx;V155.adiar=[];V155.ctx=mot;let r,ids=[];
+  try{r=c0.apply(this,arguments);}finally{ids=V155.adiar||[];V155.adiar=ad0;V155.ctx=cx0;}
+  const n=get('notas',id);
+  if(n&&n.status==='cancelada'&&ids.length){ids.forEach(mid=>{const m=get('mov',mid);if(m&&!m.estornoDe&&!v155EstornoDe(m))v155FazEstorno(m,mot,{auto:'nota',dep:['notas/'+id]});});
+    const neg=S.prod.filter(p=>stockAll().of(p.id).saldo<-1e-9&&ids.some(mid=>(get('mov',mid)||{}).prodId===p.id));
+    if(neg.length)toast('Atenção: o estoque de '+neg.map(p=>p.nome).join(', ')+' ficou negativo com o estorno da nota.','neg');}
+  return r;};}
+if(typeof supRecRemover==='function'){const r0=supRecRemover;supRecRemover=function(){const c=V155.ctx;V155.ctx='Recebimento desfeito (nota em rascunho excluída)';try{return r0.apply(this,arguments);}finally{V155.ctx=c;}};}
+/* ordem das gravações: estorno antes da marca no original; estorno da nota depois da nota cancelada; produto inativado:
+   a exclusão do ativo espera o inativo chegar ao servidor */
+if(typeof v148Antes==='function'){const a0=v148Antes;v148Antes=function(col,rec,prev){prev=a0.apply(this,arguments);try{
+  const k=col+'/'+(rec&&rec.id),ds=(V155.dep.get(k)||[]).slice();V155.dep.delete(k);
+  if(col==='prod'&&rec&&(pending.get(k)||{}).del)ds.push('prodinat/'+rec.id);
+  const chs=ds.map(x=>chains.get(x)).filter(Boolean);if(chs.length)return Promise.all([prev].concat(chs));}catch(e){}return prev;};}
+/* recusa do servidor em movimento/produto: mostra o motivo e volta ao que está gravado */
+function v155Recusa(col,rec,isDel,e){if(!['mov','prod','prodinat'].includes(col)||!e||!e.message||e.code==='unavailable'||e.message===e.code)return false;
+  toast('O servidor recusou: '+e.message,'neg');
+  try{fetch('/api/db/doc?path='+encodeURIComponent(col+'/'+rec.id)).then(r=>r.json()).then(j=>{if(j&&j.exists&&j.data)segaLocal(col,Object.assign({},j.data,{id:rec.id}));else if(j&&j.exists===false)segaTira(col,rec.id);render();}).catch(()=>{});}catch(x){}
+  return true;}
+
+/* ---------- Entrada manual, baixa manual e ajuste (proposta) ---------- */
+function v155AlmPad(p){const meus=typeof v153Meus==='function'?v153Meus():[];return (p&&p.almoxId)||meus[0]||'';}
+A.mov=d=>{const p=get('prod',d.id);if(!p)return;const t=d.tipo;
+  if(!mayW('est')){toast('Seu perfil não movimenta o estoque.','neg');return;}
+  if(t==='ajuste')return v155Ajuste(p);if(t!=='entrada'&&t!=='saida')return;
+  const s=stockAll().of(p.id),ent=t==='entrada',alm0=v155AlmPad(p),L=V155_MOT[t];
+  modal({title:(ent?'Entrada manual':'Baixa manual')+' · '+p.nome,body:
+    '<p style="margin:0 0 8px" class="sub">Saldo atual: <b class="mono">'+fmtQ(s.saldo)+' '+esc(p.un||'')+'</b> · custo médio '+money(s.custo)+'</p>'+
+    '<div class="note" style="margin:0 0 10px">'+(ent?'Use só fora dos fluxos: nota fiscal, recebimento, romaneio, devolução de sobras da obra e higienização de EPI já dão entrada sozinhos. A entrada manual exige o motivo e fica no histórico do produto e na auditoria.':'Use só fora dos fluxos: separação, romaneio, entrega de EPI e fábrica/OS já dão baixa sozinhos. A baixa manual exige o motivo e fica no histórico do produto e na auditoria.')+'</div><div class="fg">'+
+    field('Data','data','date',todayStr())+field('Quantidade','qtd','number',null)+
+    (ent?field('Custo unitário (R$)','custoUnit','number',p.custoPadrao||s.custo||0)+locFields(Object.assign({},p,{almoxId:alm0})):
+      field('Almoxarifado de onde sai'+(S.almox.length?' *':''),'almoxId','select',alm0,{opts:almOpts(),blank:'—'})+field('Obra que consumiu','projId','select','',{opts:S.proj.map(x=>[x.id,projOptNome(x.id)]),blank:'Sem obra'}))+
+    field('Motivo *','motivo','select','',{opts:L,blank:'Selecione o motivo…'})+field('Descreva o motivo (obrigatório em "Outro")','motivoTxt','text','',{full:true})+
+    field('Observação','obs','text','',{full:true})+'</div>',
+    save:root=>{const v=readForm(root);
+      if(!v.data||v.qtd==null||!(v.qtd>0)){toast('Informe a data e a quantidade (positiva).','neg');return false;}
+      if(!L.some(x=>x[0]===v.motivo)){toast('Escolha o motivo da '+(ent?'entrada manual':'baixa manual')+'.','neg');return false;}
+      if(v.motivo==='outro'&&String(v.motivoTxt||'').trim().length<3){toast('Motivo "Outro": descreva o motivo.','neg');return false;}
+      if(S.almox.length&&!v.almoxId){toast(ent?'Indique o almoxarifado da entrada.':'Indique o almoxarifado de onde sai.','neg');return false;}
+      if(!ent){const sd=S.almox.length?v155SaldoAlm(p.id,v.almoxId):s.saldo;if(sd-v.qtd<-1e-9){toast('Saldo insuficiente'+(S.almox.length?' em '+aiNomeAlm(v.almoxId):'')+': '+fmtQ(sd)+' '+(p.un||'')+'. O estoque ficaria negativo.','neg');return false;}}
+      put('mov',{id:uid(),data:v.data,prodId:p.id,tipo:t,qtd:v.qtd,custoUnit:ent?(v.custoUnit||0):0,projId:ent?'':(v.projId||''),obs:v.obs||'',almoxId:v.almoxId||'',prateleira:ent?(v.prateleira||''):'',motivo:v.motivo,motivoTxt:String(v.motivoTxt||'').trim()});
+      if(ent&&typeof prodLoc==='function')prodLoc(p.id,v.almoxId,v.prateleira);
+      toast((ent?'Entrada manual':'Baixa manual')+' registrada ('+v155MotNome(t,v.motivo)+').','pos');}});};
+function v155Ajuste(p){const st=stockAll().of(p.id),lim=supCfg().supInvLim,alm0=v155AlmPad(p);
+  modal({title:'Ajuste de inventário (proposta) · '+p.nome,body:
+    '<p style="margin:0 0 8px" class="sub">Saldo atual: <b class="mono">'+fmtQ(st.saldo)+' '+esc(p.un||'')+'</b> · custo médio '+money(st.custo)+'</p>'+
+    '<div class="note" style="margin:0 0 10px">Diferenças de até '+v155Lim()+' por item entram na hora. Acima disso, o ajuste fica aguardando outra pessoa aprovar em Estoque › Ajustes de inventário (quem propõe não aprova).</div><div class="fg">'+
+    field('Almoxarifado'+(S.almox.length?' *':''),'almoxId','select',alm0,{opts:almOpts(),blank:'—'})+field('Diferença (negativa para baixar)','qtd','number',null)+
+    field('Justificativa *','obs','text','',{full:true,ph:'Ex.: contagem física de 04/11, avaria encontrada…'})+'</div>',
+    save:root=>{const v=readForm(root),d=r4(+v.qtd||0);
+      if(!d){toast('Informe a diferença (positiva para somar, negativa para baixar).','neg');return false;}
+      if(String(v.obs||'').trim().length<3){toast('Informe a justificativa do ajuste.','neg');return false;}
+      if(S.almox.length&&!v.almoxId){toast('Indique o almoxarifado.','neg');return false;}
+      const sd=S.almox.length?v155SaldoAlm(p.id,v.almoxId):st.saldo;if(sd+d<-1e-9){toast('O estoque ficaria negativo: saldo '+fmtQ(sd)+'.','neg');return false;}
+      const cu=+st.custo||0,val=Math.abs(d)*cu;
+      const b={id:uid(),data:todayStr(),almoxId:v.almoxId||'',prodId:p.id,prat:p.almoxId===v.almoxId?(p.prateleira||''):'',saldo:r4(sd),contado:r4(sd+d),dif:d,custo:cu,valor:r2(d*cu),contPor:actorId(),contEm:Date.now(),manual:true,just:String(v.obs).trim()};
+      if(val>lim+1e-9){put('invaj',Object.assign(b,{status:'pendente'}));toast('Ajuste de '+(d>0?'+':'')+fmtQ(d)+' ('+money(val)+') enviado para aprovação: passa de '+v155Lim()+' por item. Outra pessoa aprova em Estoque › Ajustes de inventário.');}
+      else{const mid=supAjMov(b,'Ajuste de inventário · '+aiNomeAlm(b.almoxId)+' · '+b.just);put('invaj',Object.assign(b,{status:'auto',movId:mid}));toast('Ajuste lançado ('+(d>0?'+':'')+fmtQ(d)+').','pos');}}});}
+
+/* ---------- Histórico do produto com estorno ---------- */
+function v155HistHtml(p){const st=stockAll(),ms=S.mov.filter(m=>m.prodId===p.id).sort(cmpMov).reverse(),w=mayW('est');
+  const quem=(u,t)=>u?esc(nameOf(u))+(t?'<div class="sub">'+fmtDT(t)+'</div>':''):'<span class="sub">—</span>';
+  return '<p class="sub" style="margin:0 0 8px">Movimentos não se excluem: um lançamento errado se desfaz com <b>Estornar</b> (movimento contrário ligado ao original, com motivo). Movimento de nota fiscal se desfaz cancelando a nota; de EPI, pela devolução.</p>'+
+  '<div class="tw"><table class="v155h" style="min-width:0;width:100%"><thead><tr><th>Data</th><th>Tipo</th><th class="num">Qtd</th><th class="num">Custo unit.</th><th>Almoxarifado / obra</th><th>Origem / motivo</th><th>Quem</th><th>Situação</th></tr></thead><tbody>'+
+  (ms.length?ms.map(m=>{const es=v155EstornoDe(m),pe=v155PodeEstornar(m),tp=V155_TIPO[m.tipo]||'Ajuste';
+    const tipo=m.estornoDe?pill('Estorno de '+tp.toLowerCase(),'warn'):pill(tp,m.tipo==='entrada'?'pos':m.tipo==='saida'?'neg':'');
+    const loc=m.tipo==='transf'?esc(aiNomeAlm(m.almoxId))+' → '+esc(aiNomeAlm(m.almoxDest)):esc(aiNomeAlm(m.almoxId||p.almoxId||''));
+    const sit=es?pill('Estornado','neg')+'<div class="sub">'+fmtDT(m.estornadoEm||es.estEm)+' · '+esc(nameOf(m.estornadoPor||es.estPor))+'<br>'+esc(m.estornoMotivo||es.estMotivo||'')+'</div>':m.estornoDe?'<span class="sub">desfaz o lançamento original</span>':(v155Auto(m)?'<span class="sub">automático</span>':'<span class="sub">manual</span>');
+    const act=!pe?'<button class="btn sm" data-act="v155Estornar" data-id="'+esc(m.id)+'" title="Lança o movimento contrário ligado a este, com motivo">Estornar</button>':(w&&!es&&!m.estornoDe&&pe!=='Já estornado.'?'<span class="sub" title="'+esc(pe)+'">'+(m.notaId?'cancele a nota':m.epiId||m.higId?'pela devolução de EPI':'—')+'</span>':'');
+    return '<tr'+(es||m.estornoDe?' style="opacity:.85"':'')+'><td class="mono">'+fmtDate(m.data)+'</td><td>'+tipo+'</td><td class="num">'+fmtQ(m.qtd)+'</td><td class="num">'+money(m.tipo==='entrada'?m.custoUnit:st.costOf(m.id))+'</td><td>'+loc+(m.projId?'<div class="sub">Obra '+esc(projNome(m.projId))+'</div>':'')+'</td><td>'+esc(v155Origem(m))+'</td><td>'+quem(m.estPor||m.crBy,m.estEm||m.cr)+'</td><td>'+sit+(act?'<div style="margin-top:4px">'+act+'</div>':'')+'</td></tr>';}).join(''):emptyRow(8,'Sem movimentos.'))+'</tbody></table></div>';}
+A.histProd=d=>{const p=get('prod',d.id)||(S.prodinat||[]).find(x=>x.id===d.id);if(!p)return;
+  modal({title:'Histórico · '+p.nome,wide:true,foot:'<button class="btn pri" data-act="closeModal">Fechar</button>',nofocus:true,body:v155HistHtml(p)});};
+A.v155Estornar=d=>{const m=get('mov',d.id);const pe=v155PodeEstornar(m);if(pe){toast(pe,'neg');return;}
+  const p=get('prod',m.prodId)||{nome:prodNome(m.prodId)},tp=(V155_TIPO[m.tipo]||'Ajuste').toLowerCase();
+  modal({title:'Estornar '+tp+' · '+p.nome,body:'<p style="margin:0 0 8px">Lançamento de <b>'+fmtDate(m.data)+'</b>: '+esc(tp)+' de <b class="mono">'+fmtQ(m.qtd)+' '+esc(p.un||'')+'</b>'+(m.almoxId?' em '+esc(aiNomeAlm(m.almoxId)):'')+(m.tipo==='transf'?' → '+esc(aiNomeAlm(m.almoxDest)):'')+' · '+esc(v155Origem(m))+'.</p>'+
+    '<p class="sub" style="margin:0 0 10px">O estorno lança hoje o movimento contrário (quantidade '+fmtQ(-(+m.qtd||0))+'), ligado a este. O original fica marcado como estornado. Nada é apagado, e um estorno não se estorna de novo.</p>'+
+    '<div class="fg">'+field('Motivo do estorno *','motivo','textarea','',{full:true,rows:2,ph:'Ex.: lançado em duplicidade, quantidade errada, produto errado…'})+'</div>',saveLabel:'Estornar',
+    save:root=>{const v=readForm(root),mot=String(v.motivo||'').trim();if(mot.length<3){toast('Informe o motivo do estorno.','neg');return false;}
+      const m2=get('mov',m.id),pe2=v155PodeEstornar(m2);if(pe2){toast(pe2,'neg');return false;}
+      for(const [a,dq] of v155EfeitoEst(m2)){if(dq<0){const sd=S.almox.length?v155SaldoAlm(m2.prodId,a):stockAll().of(m2.prodId).saldo;if(sd+dq<-1e-9){toast('Não dá para estornar: o saldo'+(a?' em '+aiNomeAlm(a):'')+' é '+fmtQ(sd)+' e ficaria negativo. Esse material já saiu; estorne antes a saída dele.','neg');return false;}}}
+      const e=v155FazEstorno(m2,mot,{});if(!e)return false;
+      toast('Estorno lançado. O lançamento original ficou marcado como estornado.','pos');setTimeout(()=>A.histProd({id:m2.prodId}),0);}});};
+Object.assign(ACT_GROUP,{v155Estornar:'est'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v155Estornar:'Desfaz o lançamento com o movimento contrário, ligado ao original e com motivo. Movimento não se exclui.'});
+
+/* ---------- Estoque e Cadastros › Produtos: quem faz o quê; botões só para quem pode ---------- */
+function v155InsCard(h,onde){const i=h.indexOf('<div class="stack">');return i<0?h:h.slice(0,i+19)+v155RegrasCard(onde)+h.slice(i+19);}
+{const v0=V.est;V.est=function(){let h=v0.apply(this,arguments);if(typeof v152Resp==='function')try{h=v152Resp(h,'est');}catch(e){} /* botões quebram dentro da célula, como na v152 (o Histórico não passa da tabela) */
+  h=v155InsCard(h,'est');
+  h=h.replace(/data-tipo="entrada">Entrada</g,'data-tipo="entrada" title="Entrada manual (fora de nota, romaneio, devolução e higienização): pede o motivo">Entrada<')
+    .replace(/data-tipo="saida">Saída</g,'data-tipo="saida" title="Baixa manual: perda, consumo interno, descarte ou outro, com o motivo">Saída<')
+    .replace(/data-tipo="ajuste">Ajuste</g,'data-tipo="ajuste" title="Proposta de ajuste de inventário: acima do limite por item, outra pessoa aprova">Ajuste<')
+    .replace(/data-act="histProd" data-id="([^"]+)">Histórico</g,'data-act="histProd" data-id="$1" title="Movimentos do produto; Estornar desfaz um lançamento errado">Histórico<');
+  if(!v155Adm())h=h.replace(/<button class="btn sm dng" data-act="delProd" data-id="[^"]+">Excluir<\/button>/g,'');
+  return h;};}
+if(V.cadprod){const v0=V.cadprod;V.cadprod=function(){return v155InsCard(v0.apply(this,arguments),'cad');};}
+if(V.prodinat){const v0=V.prodinat;V.prodinat=function(){let h=v0.apply(this,arguments);if(!v155Adm())h=h.replace(/<button class="btn sm dng" data-act="delProdinat" data-id="[^"]+">Excluir<\/button>/g,'');return h;};}
+
+/* ---------- Cadastro do produto: campos por perfil e exclusão ---------- */
+function v155FichaAjusta(o){if(!o||typeof o.body!=='string')return o;o=Object.assign({},o);const rest=v155Restrito()&&mayW('est');
+  if(typeof o.foot==='string'&&!v155Adm())o.foot=o.foot.replace('<button class="btn dng" data-act="pfExcluir">Excluir</button>','');
+  let b=o.body;
+  if(rest){b=b.replace(/data-f="([A-Za-z0-9_]+)"/g,(x,k)=>V155_PF_OK.has(k)?x:x+' disabled title="Só o Fiscal altera este campo"').replace(/data-f-def/g,'data-f-def disabled').replace(/ data-c="/g,' disabled data-c="')
+    .replace(/<button type="button" class="btn sm( dng)?" data-act="pfGrid(Add|Del)"[^>]*>[^<]*<\/button>/g,'');}
+  const nota=(rest?'<div class="note v155-pfnote" style="margin:0 0 10px"><b>Seu perfil ('+esc(v155PerfilNome())+') altera só:</b> almoxarifado e prateleira, estoque mínimo, família, controle de lote, dados de EPI (CA, validade, tamanho, vida útil), observações internas, imagem e anexos. Preço, NCM, dados fiscais e unidade tributável ficam com o Fiscal (o servidor recusa a mudança).</div>':'')+
+    '<details class="v155-pfreg" style="margin:0 0 10px"><summary class="sub" style="cursor:pointer">Quem altera o quê neste cadastro</summary><ul class="sub" style="margin:6px 0 0 18px">'+
+    '<li><b>Almoxarife</b>: almoxarifado e prateleira, estoque mínimo, família, lote, dados de EPI, observações internas, imagem e anexos.</li>'+
+    '<li><b>Fiscal</b> e <b>Administrador</b>: tudo, inclusive preço, NCM, recomendações fiscais e unidade tributável.</li>'+
+    '<li><b>Excluir</b>: só o Administrador, e só produto que nunca teve movimento, nota, pedido, SC, separação, romaneio ou EPI. Com histórico: <b>Inativar</b> (quem grava o Estoque).</li></ul></details>';
+  o.body=nota+b;return o;}
+if(typeof prodFicha==='function'){const f0=prodFicha;prodFicha=function(){const m0=modal;modal=function(o){modal=m0;return m0.call(this,v155FichaAjusta(o));};
+  try{return f0.apply(this,arguments);}finally{if(modal!==m0)modal=m0;}};}
+/* produto com histórico: qualquer registro que cite o produto (igual ao servidor) */
+const V155_FORA=new Set(['prod','prodinat','lixo','cfg','usr','usrreq','perfc','implog','lgpdc','cm','chat']);
+const V155_COLN={mov:'movimentos de estoque',notas:'notas fiscais',ped:'pedidos de compra',sc:'solicitações de compra',sep:'separações',rom:'romaneios',epi:'entregas de EPI',cot:'cotações',invaj:'ajustes de inventário',devobra:'devoluções de obra',psv:'pedidos de venda',acordo:'acordos de preço',prod:'kits/produtos',epihig:'higienização de EPI'};
+function v155Vinc(id){const k='"'+id+'"',m={};
+  COLS.forEach(c=>{if(V155_FORA.has(c)||!Array.isArray(S[c]))return;let n=0;for(const r of S[c]){if(r&&r.id!==id&&JSON.stringify(r).includes(k))n++;}if(n)m[c]=n;});
+  const kits=S.prod.concat(S.prodinat||[]).filter(x=>x.id!==id&&JSON.stringify(x).includes(k)).length;if(kits)m.prod=kits;
+  return Object.keys(m).map(c=>(V155_COLN[c]||COL_NOME[c]||c)+': '+m[c]);}
+function v155Excluir(col,p,depois){if(!v155Adm()){toast('Só o Administrador exclui produto. Use Inativar: o produto sai das listas e o histórico fica.','neg');return;}
+  const v=v155Vinc(p.id);if(v.length){toast('Este produto tem histórico ('+v.join(', ')+') e não se exclui. Use Inativar.','neg');return;}
+  confirmBox('Excluir de vez o produto <b>'+esc(p.nome)+'</b>'+(p.sku?' (código '+esc(p.sku)+')':'')+'? Ele nunca teve movimento, nota, pedido, separação, romaneio nem EPI.',()=>{del(col,p.id);if(depois)depois();toast('Produto excluído.','pos');},'Excluir',true);}
+A.pfExcluir=()=>{const p=PF.p;if(!p||!p.id)return;v155Excluir(PF.inat?'prodinat':'prod',p,()=>closeModal());};
+A.delProd=d=>{const p=get('prod',d.id);if(p)v155Excluir('prod',p);};
+A.delProdinat=d=>{const p=(S.prodinat||[]).find(x=>x.id===d.id);if(p)v155Excluir('prodinat',p);};
+
+/* ---------- produto novo só nasce na nota de entrada ou em Cadastros › Produtos (pedido do coordenador) ---------- */
+function v155IrCadProd(pre){closeModal();ui.tab='cadprod';try{const m=MENU.find(x=>(x[2]||[]).some(i=>i[0]==='cadprod'));if(m)ui.mod=m[0];}catch(e){}
+  try{history.replaceState(null,'','#cadprod');}catch(e){}render();
+  if(pre&&mayW('est'))setTimeout(()=>prodFicha(Object.assign({},pre),false),0);}
+/* Controle de EPI › "Cadastrar EPI": vira o atalho para Cadastros › Produtos com a família EPI já preenchida */
+A.epiEstNovo=()=>v155IrCadProd({familia:typeof v154Fam==='function'?v154Fam():'EPI'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{epiEstNovo:'Abre Cadastros › Produtos com o novo produto já na família EPI. Produto novo só nasce lá ou na entrada da nota fiscal.'});
+function v155EpiBtn(h){return typeof h!=='string'?h:h.replace(/<button class="btn sm" data-act="epiEstNovo">[^<]*<\/button>/g,'<button class="btn sm" data-act="epiEstNovo" title="Produto novo só nasce em Cadastros › Produtos ou na entrada da nota fiscal">Cadastrar em Cadastros › Produtos</button>');}
+['epi','epiest'].forEach(t=>{if(typeof V[t]==='function'){const v0=V[t];V[t]=function(){return v155EpiBtn(v0.apply(this,arguments));};}});
+if(typeof v154EpiTop==='function'){const t0=v154EpiTop;v154EpiTop=function(){return v155EpiBtn(t0.apply(this,arguments));};}
+try{if(MODS2.epi&&typeof MODS2.epi.top==='function'){const t1=MODS2.epi.top;MODS2.epi.top=function(){return v155EpiBtn(t1.apply(this,arguments));};}}catch(e){}
+/* Pedido de compra: sem "Cadastrar novo produto" dentro do pedido (busca do cadastro; item com descrição livre continua) */
+A.pedNovoProd=()=>{confirmBox('Produto novo é cadastrado em <b>Cadastros › Produtos</b> (ou nasce na entrada da nota fiscal). Salve o pedido antes: ao continuar, o formulário do pedido fecha.<br><span class="sub">Sem produto cadastrado, o item do pedido pode seguir só com a descrição, como antes.</span>',()=>v155IrCadProd(mayW('est')?{}:null),'Ir para Cadastros › Produtos');};
+function v155PedBtn(o){if(o&&typeof o.body==='string')o=Object.assign({},o,{body:o.body.replace('<button class="btn sm" data-act="pedNovoProd">+ Cadastrar novo produto</button>','<button class="btn sm ghost" data-act="pedNovoProd" title="Produto novo só nasce em Cadastros › Produtos ou na entrada da nota fiscal">Produto não cadastrado? Cadastros › Produtos</button>')});return o;}
+if(typeof openPed==='function'){const o0=openPed;openPed=function(){const m0=modal;modal=function(o){modal=m0;return m0.call(this,v155PedBtn(o));};try{return o0.apply(this,arguments);}finally{if(modal!==m0)modal=m0;}};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='154.1',APP_DATA='2026-11-04';
+const APP_VER='155',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['155','2026-11-04',['Estoque: movimento não se exclui mais (nem pelo administrador). Lançamento errado se desfaz com Estornar no Histórico do produto: entra o movimento contrário ligado ao original, com motivo, quem e quando; o original fica marcado como estornado e um estorno não se estorna de novo.', 'Entrada manual e baixa manual pedem o motivo (doação, devolução de obra sem romaneio, sobra de inventário; perda, consumo interno, descarte; ou outro, descrito). Nota, romaneio, separação, EPI, higienização, fábrica e inventário continuam sem pedir motivo.', 'O botão Ajuste do Estoque virou proposta de ajuste de inventário: até o limite por item (R$ 300) entra na hora; acima, outra pessoa aprova em Ajustes de inventário.', 'Cancelar nota fiscal e desfazer recebimento estornam o estoque (antes apagavam os movimentos).', 'Cadastro de produto: o Almoxarife altera prateleira, mínimo, família, lote, dados de EPI, observações e imagem; preço, NCM, dados fiscais e unidade tributável ficam com o Fiscal (o servidor recusa).', 'Excluir produto: só o Administrador e só produto sem nenhum histórico; com histórico, use Inativar.', 'Estoque e Cadastros › Produtos mostram o quadro Quem faz o quê no Estoque e o que o seu perfil pode fazer.', 'Produto novo nasce só em Cadastros › Produtos ou na entrada da nota fiscal: Controle de EPI e o pedido de compra levam para Cadastros › Produtos.', 'Estoque: os botões da linha quebram dentro da célula (o Histórico não passa mais da tabela).']],
   ['154.1','2026-11-04',['Cadastro de produto: os campos de EPI (Nº do CA, Validade do CA, Tamanho/variação e Vida útil) ficam numa faixa própria abaixo de Código NCM e Família, em colunas que se ajustam à tela. Aparecem só quando a família é EPI e somem ao trocar a família.', 'Estoque: saiu o botão Novo produto. Produto novo nasce na entrada da nota fiscal (quando o item não tem produto) ou em Cadastros › Produtos.']],
   ['154','2026-11-04',['Estoque: a busca espera você parar de digitar (Enter busca na hora), procura por código, descrição, família, NCM, prateleira e código do fornecedor, e mostra os 100 primeiros com o total encontrado e Mostrar mais. Notas, Pedidos e Produtos também esperam a digitação.', 'Estoque com a coluna Família e o filtro por família (a Família de produto do cadastro).', 'Entrega de EPI pelo cadastro de produtos: escolha o EPI da família EPI com saldo no seu almoxarifado (saldo, tamanho e CA na lista). Ao salvar, a saída do estoque é registrada junto, para a obra do colaborador; sem saldo, a entrega é recusada.', 'Devolução e troca de EPI: em condição de uso o EPI vai para a higienização (não volta direto ao estoque); descarte fica só na ficha; a troca registra a devolução e a nova entrega no mesmo ato. A ficha NR-6 mostra o destino.', 'Nova tela Higienização de EPI: aguardando envio, transferência por romaneio para o almoxarifado de Tuiuti, em higienização, higienizado (volta ao estoque) ou reprovado, com indicadores, ações em lote e exportação.', 'Configurações › EPI: nome da família dos EPI e almoxarifado de higienização; botão para unificar uma vez o estoque de EPI com o cadastro de produtos (com relatório).', 'Matriz de treinamentos: botão Lançar renovação em cada NR vencida, a vencer ou que falta (abre Documentos e ASO já com o colaborador, a NR e a validade sugerida, com anexo do certificado) e renovação em lote para várias pessoas com a mesma NR.']],
   ['153.1','2026-11-04',['Chat: a mensagem lida num computador, aba ou celular não volta mais a aparecer como não lida por causa de outra aba aberta há tempo (o servidor guarda sempre a leitura mais recente). A mensagem recebida com o sistema fechado passa a contar ao abrir.', 'Chat: clicar no balão de não lidas abre direto a conversa com a mensagem nova; novo botão Marcar todas como lidas no topo da lista de conversas. No celular, a conversa só conta como lida quando é aberta (na lista, continua marcada).', 'Almoxarifados no mesmo endereço ou CEP: o aviso aparece junto do botão Salvar, que passa a dizer Salvar mesmo assim; um clique confirma e grava (cadastro e edição).']],
