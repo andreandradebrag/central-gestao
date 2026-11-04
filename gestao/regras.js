@@ -1466,6 +1466,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'proj' && soFabProj(conta)) return true; /* v125: só código, nome, situação e cliente (redigir) */
     if (leSoFora(conta, c0)) return false; /* v125: leSo do perfil (Fábrica: em Compras, só solicitações e produtos) */
     if (LEIT_LIVRE.has(c0) || leModulo(conta, c0)) return true;
+    if (X.FN && X.FN.leMinCampos && X.FN.leMinCampos(defDe(conta), c0, PERM)) return true; /* v148: leitura mínima de apoio (server.js › redigir entrega só os campos do leMin) */
     if (leParcial(conta, c0, data)) return true; /* v115: RH só as contas da folha; Qualidade só as do custo da não qualidade */
     const k = 'plog:' + c0; if (!memo || !memo.has(k)) { if (memo) memo.set(k, 1); try { permLog.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), 'leitura:' + c0, Date.now()); } catch (e) { } }
     return MODO_LEIT !== 'bloquear';
@@ -2093,6 +2094,17 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'cfg' && m !== 'DELETE' && Array.isArray(d.cfgNao)) { const k = d.cfgNao.find(k => !igual((velho || {})[k], novo[k])); if (k) return erro('Seu perfil não altera esta configuração (' + k + '). Fica com o Gestor de segurança do trabalho ou um administrador.'); }
     return null;
   }
+  /* v148 (relatorios/feito_v148_regressoes.md): a solicitação de compra nunca fica apontando para uma separação que não existe.
+     Se a SC chega com um sepId novo e essa separação não está gravada (o perfil não grava separação, como o Encarregado, ou a
+     gravação dela falhou), o servidor guarda a separação como PENDENTE (sepPend, com os itens separados do estoque) e a SC fica
+     "Enviada" (não "Atendida"): o Almoxarife ou o Comprador cria a separação pelo botão Criar separação (fluxo da v140). */
+  function regraScSep(conta, velho, novo) {
+    const sid = String(novo.sepId || ''); if (!sid || sid === String((velho || {}).sepId || '') || doc('sep/' + sid)) return;
+    const itens = (Array.isArray(novo.itens) ? novo.itens : []).filter(i => i && +i.qSep > 0).map(i => ({ prodId: i.prodId || '', desc: i.desc || '', un: i.un || '', qtd: +i.qSep }));
+    novo.sepId = '';
+    if (itens.length && !(novo.sepPend && Array.isArray(novo.sepPend.itens) && novo.sepPend.itens.length)) novo.sepPend = { itens, em: Date.now(), por: conta.id, srv: 1 };
+    if (novo.status === 'atendida') novo.status = 'enviada';
+  }
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
@@ -2136,7 +2148,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */
       if (c0 === 'nfse') { e = regraNfseCanc(conta, req, velho, novo); if (e) return e; }
-      if (c0 === 'sc') { e = P2N.regraScAprov(conta, velho, novo); if (e) return e; } /* v140 */
+      if (c0 === 'sc') { e = P2N.regraScAprov(conta, velho, novo); if (e) return e; regraScSep(conta, velho, novo); } /* v140; v148 */
       if (c0 === 'notas') { e = regraNotaConf(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'notas') { e = P2Q.regraNota(conta, velho, novo); if (e) return e; } /* v141 */
       e = travaPonto(c0, velho, novo); if (e) return e;

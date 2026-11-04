@@ -65,6 +65,8 @@ function sanLim(l) {
   /* v146b: leFora (como leDep) e valCols/valTelas (listas) */
   if (l.leFora && typeof l.leFora === 'object' && !Array.isArray(l.leFora)) { const m = {}; for (const [g, v] of Object.entries(l.leFora)) { if (!ID_OK.test(g)) continue; const x = lista(v); if (x && x.length) m[g] = x; } if (Object.keys(m).length) out.leFora = m; }
   for (const k of ['valCols', 'valTelas']) { const x = lista(l[k]); if (x && x.length) out[k] = x; }
+  /* v148: leitura mínima (só as coleções e campos de LEMIN_OK) */
+  if (l.leMin && typeof l.leMin === 'object' && !Array.isArray(l.leMin)) { const m = {}; for (const [c, v] of Object.entries(l.leMin)) { if (!LEMIN_OK[c] || !Array.isArray(v)) continue; const x = [...new Set(v.filter(k => LEMIN_OK[c].includes(k)))]; if (x.length) m[c] = x; } if (Object.keys(m).length) out.leMin = m; }
   if (l.leDep && typeof l.leDep === 'object' && !Array.isArray(l.leDep)) { const m = {}; for (const [g, v] of Object.entries(l.leDep)) { if (!ID_OK.test(g)) continue; const x = lista(v); if (x && x.length) m[g] = x; } if (Object.keys(m).length) out.leDep = m; }
   return out;
 }
@@ -137,6 +139,18 @@ function aplicar(p, fn, acoes, o) {
   p.pf = true; p.fnNiv = fnNiv; p.colNiv = colNiv;
   return p;
 }
+/* v148 (relatorios/feito_v148_regressoes.md): leitura MÍNIMA de apoio (leMin) — o perfil que não lê o módulo da coleção
+   recebe só estes campos (Almoxarife: colaboradores para EPI, envio/retorno de ferramentas e romaneio; nada de salário,
+   CPF, banco/PIX, endereço, contato ou dado sensível). Só vale para as coleções e os campos de LEMIN_OK; quem já lê o
+   módulo (RH, Frota...) continua com a regra de sempre. */
+const LEMIN_OK = { func: ['id', 'nome', 'matricula', 'funcao', 'cargo', 'projId', 'status', 'ts', 'ex'] };
+function leMinCampos(pr, c0, PERM) {
+  if (!pr || pr.w === '*' || pr.r === '*' || !pr.leMin || typeof pr.leMin !== 'object') return null;
+  const l = pr.leMin[c0], ok = LEMIN_OK[c0]; if (!Array.isArray(l) || !ok) return null;
+  const gs = [...new Set([].concat((PERM && PERM.colecoes && PERM.colecoes[c0]) || [], (PERM && PERM.leitura && PERM.leitura[c0]) || []))];
+  if (gs.some(g => tem(pr.w, g) || tem(pr.r, g))) return null; /* lê o módulo: regra de sempre */
+  const x = l.filter(k => ok.includes(k)); return x.length ? x : null;
+}
 const acaoNegada = (p, k) => !!(p && p.w !== '*' && Array.isArray(p.acoesNao) && p.acoesNao.includes(k));
 /* mudança de situação que é cancelar ou estornar (ação sensível "cancelar") */
 const CANC = ['cancelado', 'cancelada', 'estornado', 'estornada'];
@@ -146,4 +160,4 @@ function ehCancelamento(c0, velho, novo) {
   if (c0 === 'lanc' && velho.pago && !novo.pago) return true; /* estorno da baixa */
   return false;
 }
-module.exports = { NIVS, ACOES, FORA, mescla, funcoes, leituraPorGrupo, sanFn, sanAcoes, sanLim, implicito, aplicar, acaoNegada, ehCancelamento };
+module.exports = { NIVS, ACOES, FORA, LEMIN_OK, leMinCampos, mescla, funcoes, leituraPorGrupo, sanFn, sanAcoes, sanLim, implicito, aplicar, acaoNegada, ehCancelamento };

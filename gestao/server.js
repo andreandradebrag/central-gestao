@@ -186,6 +186,7 @@ function redigir(conta, p, data) {
   data = REG.redigir(conta, p, data);
   data = VAL.redigir(conta, p, data); /* v146: sem a ação "Ver valores gerenciais", sai sem os campos de valor de obra, contrato, medição e frota */
   if (!data || !ehDocFunc(p) || veFuncCompleto(conta)) return data;
+  { const l = FN.leMinCampos(PERM.perfis[perfilDe(conta)], 'func', PERM); if (l) { const o = {}; l.forEach(k => { if (data[k] !== undefined) o[k] = data[k]; }); o._restrito = true; o._min = true; return o; } } /* v148: leitura mínima (Almoxarife) */
   const o = {}; for (const k of Object.keys(data)) if (!FUNC_SENS.test(k)) o[k] = data[k]; o._restrito = true; return o;
 }
 function preservarFunc(conta, p, novo) {

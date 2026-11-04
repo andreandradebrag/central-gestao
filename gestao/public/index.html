@@ -338,7 +338,7 @@ function persist(col,rec,isDel){
   if(store.mode!=='db'){saveLocal();return;}
   const key=col+'/'+rec.id;
   pending.set(key,{col,rec,del:!!isDel});
-  const prev=chains.get(key)||Promise.resolve();
+  let prev=chains.get(key)||Promise.resolve();if(typeof v148Antes==='function')prev=v148Antes(col,rec,prev);
   const p=prev.then(async()=>{
     await slot();
     try{
@@ -346,6 +346,7 @@ function persist(col,rec,isDel){
       const cur=pending.get(key);
       if(cur&&cur.del)await ref.delete();else await ref.set(cl(cur?cur.rec:rec));
     }catch(e){
+      if(typeof v148Falhou==='function')v148Falhou(key);
       toast('Não foi possível salvar na nuvem'+(e&&e.code?' ('+e.code+')':'')+'. Confira se você tem permissão de edição.','neg');
     }finally{release();}
   });
@@ -27214,7 +27215,7 @@ function p2nSepPendHtml(){const ls=p2nSepPend();if(!ls.length)return '';const po
   return '<div class="note" style="margin:0 0 10px"><b>'+ls.length+' solicitação(ões) aprovada(s) com separação a criar.</b> Quem aprovou ou enviou não grava separação; '+(pode?'crie aqui':'o almoxarife ou o comprador cria')+'.<ul style="margin:6px 0 0;padding-left:18px">'+ls.map(s=>'<li>SC nº '+esc(s.numero)+(s.projId?' · '+esc(projNome(s.projId)):'')+' · '+(s.sepPend.itens||[]).length+' item(ns)'+(pode?' <button class="btn sm pri" data-act="p2nCriarSep" data-id="'+s.id+'">Criar separação</button>':'')+'</li>').join('')+'</ul></div>';}
 ['sep','sc'].forEach(t=>{if(typeof V[t]!=='function')return;const v0=V[t];V[t]=function(){const h=v0.apply(this,arguments),a=p2nSepPendHtml();if(!a)return h;const k='<div class="stack">',i=h.indexOf(k);return i>=0?h.slice(0,i+k.length)+a+h.slice(i+k.length):a+h;};});
 /* aprovar direto da lista de solicitações */
-{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);S.sc.filter(s=>s.status==='aprovacao').forEach(s=>{if(typeof podeAprovarMat!=='function'||!podeAprovarMat(s))return;const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
+{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);S.sc.filter(s=>s.status==='aprovacao').forEach(s=>{if(typeof podeAprovarMat!=='function'||!podeAprovarMat(s))return;if(h.includes('data-act="matAprovar" data-id="'+s.id+'"'))return;const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
   h=h.replace(det,'<button class="btn sm pri" data-act="matAprovar" data-id="'+s.id+'">Aprovar</button><button class="btn sm dng" data-act="matAprovar" data-dec="nao" data-id="'+s.id+'">Recusar</button>'+det);});return h;};}
 /* configuração: aprovar automaticamente até R$ X (0 = sempre aprovar) */
 {const m0=matCard;matCard=function(){let h=m0.apply(this,arguments);if(!mayW('cfg'))return h;const k='<div class="acts" style="margin-top:8px"><button class="btn pri" data-act="matCfgSalvar">';
@@ -28629,9 +28630,102 @@ PFN_LIM_K.push('leFora','valCols','valTelas');
 {const l0=pfnLimTexto;pfnLimTexto=function(p){const t=l0.apply(this,arguments);if(p&&p.leFora&&typeof p.leFora==='object'){const cs=[...new Set(Object.values(p.leFora).flat())];if(cs.length)t.push('Não recebe (nem como apoio): '+cs.map(c=>pfnNomeCol(c)).join(', ')+'.');}
   if(p&&Array.isArray(p.valCols)&&p.valCols.length)t.push('Recebe sem os valores (mesmo vendo valores gerenciais): '+p.valCols.map(c=>pfnNomeCol(c)).join(', ')+'.');return t;};}
 
+/* ===== v148: regressões dos perfis v145/v146/v146b (relatorios/feito_v148_regressoes.md) =====
+   Inserido pelo patch126.py antes do marcador da v14 (prefixo v148). APP_VER/CHANGELOG não mexidos.
+   1. Almoxarife lê os colaboradores com o MÍNIMO (perfis.json › leMin; servidor: permfn.js › leMinCampos, server.js › redigir):
+      EPI, envio/retorno de ferramentas e romaneio voltam a ter a lista de colaboradores.
+   2. Recebimento às cegas: a máscara do valor vai no próprio desenho da linha do item da nota (itemRow) e, para qualquer outro
+      redesenho parcial nas telas mascaradas, um observador mascara campos e textos em R$ assim que entram na tela.
+   3. SC enviada por quem não grava separação (Encarregado): a separação vira PENDENTE de novo (fluxo da v140) e a SC fica
+      "Enviada" até o Almoxarife/Comprador criar a separação; a SC só é gravada depois da separação e, se a gravação da
+      separação falhar, a SC não fica "Atendida" apontando para ela (o servidor também confere: regras.js › regraScSep).
+   4. Fiscal lança a nota de entrada: o filtro por função da v142 (pfnPodeGravar) recusava na tela as contas a pagar do
+      pacote do lançamento (o Fiscal ganhou acesso por função na v146 e só consulta o Financeiro) — o pacote ia sem as contas
+      e o servidor dizia "As contas do lançamento (R$ 0,00) não fecham". Durante o lançamento (P2N_CAP) quem confere é a rota
+      POST /api/nota/lancar (permissão de lançar, coleções e vínculos do pacote), como na v140.
+   5. Botões repetidos numa linha de lista (Aprovar/Recusar da SC aguardando aprovação): um só de cada. */
+
+/* ---------- 1. leitura mínima de colaboradores (Almoxarife) ---------- */
+const V148_FUNC_MIN=['id','nome','matricula','funcao','cargo','projId','status','ts','ex'];
+if(PERFIS.almoxarife)PERFIS.almoxarife.leMin={func:V148_FUNC_MIN.slice()};
+
+/* ---------- 4. lançamento da nota pela rota do servidor ---------- */
+const V148_NOTA_COLS=['notas','mov','lanc','prod','ped'];
+/* ---------- 3. separação pendente para quem não grava separação ---------- */
+{const f0=pfnPodeGravar;pfnPodeGravar=function(col,velho,exclui){
+  if(typeof P2N_CAP!=='undefined'&&P2N_CAP&&V148_NOTA_COLS.includes(col)&&!(typeof p2nPodeLancar==='function'&&!p2nPodeLancar()))return ''; /* o servidor confere o pacote inteiro */
+  if(!exclui&&!velho&&col==='sep'&&typeof P2N_SEP!=='undefined'&&P2N_SEP.on&&typeof p2nPodeSep==='function'&&!p2nPodeSep())return ''; /* vira separação pendente (não é gravada) */
+  return f0.apply(this,arguments);};}
+/* o mesmo para o filtro dos limites do perfil padrão (v140: "so"); o Fiscal passou a ter "so" na v146 (Equipamentos) */
+{const f0=p2PodeGravar;p2PodeGravar=function(col,velho,novo,exclui){
+  if(typeof P2N_CAP!=='undefined'&&P2N_CAP&&V148_NOTA_COLS.includes(col)&&!(typeof p2nPodeLancar==='function'&&!p2nPodeLancar()))return '';
+  return f0.apply(this,arguments);};}
+/* SC cuja separação ficou pendente: "Enviada" (não "Atendida") até a separação existir */
+const V148={criaSep:null,falhou:new Set(),obs:null};
+{const p0=put;put=function(col,rec){
+  if(col==='sc'&&rec&&typeof P2N_SEP!=='undefined'&&P2N_SEP.on&&P2N_SEP.hit&&rec.sepId===P2N_SEP.hit.id&&rec.status==='atendida')rec=Object.assign({},rec,{status:'enviada'});
+  if(col==='sc'&&rec&&V148.criaSep&&rec.id===V148.criaSep&&rec.sepId&&rec.sepPend===null&&rec.status==='enviada'&&!(rec.itens||[]).some(i=>+i.qCom>0))rec=Object.assign({},rec,{status:'atendida'});
+  return p0.apply(this,[col,rec]);};}
+/* Criar separação: se já existe uma separação aberta desta SC (gravada depois), liga a ela em vez de criar outra */
+{const c0=A.p2nCriarSep;A.p2nCriarSep=d=>{const sc=get('sc',d&&d.id);if(!sc)return c0(d);
+  const ja=S.sep.find(x=>x.scId===sc.id&&typeof SEP_ABERTA==='function'&&SEP_ABERTA(x));
+  V148.criaSep=sc.id;try{
+    if(ja&&sc.sepPend&&!sc.sepId){if(!p2nPodeSep()){toast('Seu perfil não cria separação. Quem cria é o almoxarife ou o comprador.','neg');return;}put('sc',Object.assign(cl(sc),{sepId:ja.id,sepPend:null}));toast('Separação nº '+ja.numero+' ligada à solicitação.','pos');render();return;}
+    return c0(d);}finally{V148.criaSep=null;}};}
+/* gravação: a SC espera a gravação da separação dela; se a separação foi recusada, a SC vai com a separação pendente */
+function v148Antes(col,rec,prev){try{
+  if(col!=='sc'||!rec||!rec.sepId)return prev;const sid=rec.sepId,scId=rec.id,k='sep/'+sid,ch=chains.get(k);
+  if(!ch&&!V148.falhou.has(k))return prev;
+  return Promise.all([prev,ch||Promise.resolve()]).then(()=>{if(!V148.falhou.has(k))return;
+    const cur=pending.get('sc/'+scId),r=cur&&cur.rec?cur.rec:rec;if(r.sepId!==sid)return;
+    const sp=get('sep',sid),its=sp&&Array.isArray(sp.itens)?sp.itens:(r.itens||[]).filter(i=>+i.qSep>0).map(i=>({prodId:i.prodId,desc:i.desc,un:i.un,qtd:i.qSep}));
+    const nv=Object.assign({},r,{sepId:'',sepPend:{itens:its,em:Date.now(),por:actorId()},status:r.status==='atendida'?'enviada':r.status});
+    if(cur)cur.rec=nv;const loc=IDX.sc&&IDX.sc.get(scId);if(loc&&loc.sepId===sid)Object.assign(loc,{sepId:'',sepPend:nv.sepPend,status:nv.status});
+    const i=S.sep.findIndex(x=>x.id===sid);if(i>=0){S.sep.splice(i,1);IDX.sep.delete(sid);}
+    toast('A separação não foi gravada no servidor. A solicitação ficou com a separação pendente (o almoxarife cria em Separação).','neg');try{schedule();}catch(e){}});
+}catch(e){return prev;}}
+function v148Falhou(key){try{V148.falhou.add(key);}catch(e){}}
+/* aviso na lista de solicitações: separação a criar */
+{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);try{S.sc.filter(s=>s.sepPend&&!s.sepId&&s.status==='enviada').forEach(s=>{const k='data-act="scVer" data-id="'+s.id+'"';const i=h.indexOf(k);if(i<0)return;const j=h.lastIndexOf('<tr',i);const t=h.indexOf('</td>',j);if(j<0||t<0||t>i)return;
+  h=h.slice(0,t)+'<div class="sub">separação a criar pelo almoxarife</div>'+h.slice(t);});}catch(e){}return h;};}
+
+/* ---------- 2. máscara de valores no desenho da linha e em qualquer redesenho parcial ---------- */
+function v148MascHtml(h){try{if(!h||typeof h!=='string'||!vgMascara())return h;vgEstilo();
+  return h.replace(/<input\b[^>]*>/g,tag=>{if(/\btype="(checkbox|radio|hidden)"/.test(tag)||/\bvg-in\b/.test(tag))return tag;
+    const ds=[...tag.matchAll(/\bdata-([\w-]+)="([^"]*)"/g)];if(!ds.some(([,k,v])=>k==='money'||(VG_CAMPO.test(v)&&(k==='f'||v.length>1))))return tag;
+    let t=/\bclass="/.test(tag)?tag.replace(/\bclass="/,'class="vg-in '):tag.replace(/^<input/,'<input class="vg-in"');
+    if(!/\breadonly\b/.test(t))t=t.replace(/^<input/,'<input readonly');if(!/\btitle="/.test(t))t=t.replace(/^<input/,'<input title="Valor restrito ao seu perfil"');return t;});}catch(e){return h;}}
+/* linhas de item redesenhadas sozinhas (nota, pedido de compra, pedido de venda, solicitação, romaneio, rateio) */
+{const r0=itemRow;itemRow=function(){return v148MascHtml(r0.apply(this,arguments));};}
+{const r0=pedItemRow;pedItemRow=function(){return v148MascHtml(r0.apply(this,arguments));};}
+{const r0=psvItemRow;psvItemRow=function(){return v148MascHtml(r0.apply(this,arguments));};}
+{const r0=scItemRow;scItemRow=function(){return v148MascHtml(r0.apply(this,arguments));};}
+{const r0=romItemRow;romItemRow=function(){return v148MascHtml(r0.apply(this,arguments));};}
+{const r0=ratRows;ratRows=function(){return v148MascHtml(r0.apply(this,arguments));};}
+/* redesenho parcial (innerHTML de uma parte da tela ou da janela): mascara campos e textos em R$ que entram */
+function v148Observa(){if(V148.obs||typeof MutationObserver==='undefined'||typeof document==='undefined'||!document.body)return;
+  V148.obs=new MutationObserver(ms=>{try{if(!vgMascara())return;for(const m of ms)for(const n of m.addedNodes){if(!n||n.nodeType!==1)continue;
+      if(!(n.closest&&n.closest('#view,#mb')))continue;if(n.tagName==='INPUT'&&n.parentNode)vgCampos(n.parentNode);else vgCampos(n);vgMascararDom(n);}}catch(e){}});
+  V148.obs.observe(document.body,{childList:true,subtree:true});}
+RH_POST.push(v148Observa);
+
+/* ---------- 5. botões repetidos numa linha (mesma ação, mesmo registro, mesmo texto): fica um só ---------- */
+function v148Dedup(h){try{if(typeof h!=='string'||h.indexOf('data-act=')<0)return h;
+  return h.replace(/(<td class="act[^"]*">)([\s\S]*?)(<\/td>)/g,(m,a,meio,z)=>{const vis=new Set();
+    return a+meio.replace(/<button\b[^>]*>[\s\S]*?<\/button>/g,b=>{const ac=(b.match(/data-act="([^"]*)"/)||[])[1];if(!ac)return b;
+      const k=ac+'|'+((b.match(/data-id="([^"]*)"/)||[])[1]||'')+'|'+((b.match(/data-dec="([^"]*)"/)||[])[1]||'')+'|'+b.replace(/<[^>]+>/g,'').trim();
+      if(vis.has(k))return '';vis.add(k);return b;})+z;});}catch(e){return h;}}
+function v148EmbrulhaV(){Object.keys(V).forEach(t=>{const f=V[t];if(typeof f!=='function'||f.__v148)return;const g=function(){return v148Dedup(f.apply(this,arguments));};g.__v148=true;V[t]=g;});}
+v148EmbrulhaV();RH_PRE.push(v148EmbrulhaV);
+/* na tela: o mesmo para listas desenhadas fora do V (painéis, janelas) */
+function v148DedupDom(root){try{if(!root||!root.querySelectorAll)return;root.querySelectorAll('td.act').forEach(td=>{const vis=new Set();
+  td.querySelectorAll('button[data-act]').forEach(b=>{const k=b.dataset.act+'|'+(b.dataset.id||'')+'|'+(b.dataset.dec||'')+'|'+b.textContent.trim();if(vis.has(k))b.remove();else vis.add(k);});});}catch(e){}}
+RH_POST.push(()=>v148DedupDom($('#view')));
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='147.1',APP_DATA='2026-11-04';
+const APP_VER='148',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['148','2026-11-04',['Correções da revisão de perfis: o Almoxarife volta a ver a lista de colaboradores (só nome, matrícula, função e obra) para registrar EPI, enviar ferramentas e despachar romaneio; o preço não reaparece mais no recebimento às cegas.', 'Solicitação enviada pelo encarregado fica Enviada até o almoxarife criar a separação, sem apontar para separação inexistente. O Fiscal volta a lançar a nota de entrada. Botões Aprovar e Recusar não aparecem mais em dobro nas solicitações.']],
   ['147.1','2026-11-04',['Mapa de cotação: corrigida a desconfiguração do cabeçalho dos fornecedores depois da v147. A caixa do fornecedor volta a ocupar só a própria coluna; o CNPJ, a cidade e o aviso de outras unidades aparecem ao passar o mouse sobre a caixa.']],
   ['147','2026-11-04',['Clientes, fornecedores e transportadoras com filiais: a busca mostra apelido ou nome fantasia, CNPJ com a filial destacada e cidade, e encontra por qualquer um desses dados (inclusive só o final do CNPJ).', 'Matriz e filiais aparecem juntas, o cadastro mostra Outras unidades deste grupo e, ao escolher, aparece o aviso quando há outras unidades. Novo campo Apelido no cadastro. Documentos continuam com razão social e CNPJ completos.']],
   ['146','2026-11-04',['Revisão dos perfis: Encarregado, RH, Só ponto, Comprador, Financeiro, Fiscal, Comercial e Almoxarife passam a ver só as telas da função. Valores de obra (painel, rateio, resultado, relatório mensal, custo de mão de obra) ficam com Diretoria, Gestor de projetos, Financeiro e, em parte, Comercial.', 'Nova permissão Ver valores gerenciais em Perfis de acesso: quem não tem vê as telas do dia a dia com os valores em R$ ocultos (também na impressão, PDF e CSV). O Comprador continua vendo preços de compra e o Almoxarife recebe às cegas, só por quantidade.', 'O RH passa a só consultar o SST, gravando Convocação de ASO, Acidentes e EPI. Perfis antigos mostram quantas pessoas ainda os usam, com botão para trocar.']],

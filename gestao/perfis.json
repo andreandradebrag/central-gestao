@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-04T12:59:07.528Z",
+ "gerado": "2026-11-04T14:03:43.081Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -698,6 +698,19 @@
    "itensFora": [
     "fisc:nf"
    ],
+   "leMin": {
+    "func": [
+     "id",
+     "nome",
+     "matricula",
+     "funcao",
+     "cargo",
+     "projId",
+     "status",
+     "ts",
+     "ex"
+    ]
+   },
    "valNao": true,
    "nome": "Almoxarife"
   },
