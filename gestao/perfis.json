@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-03T23:16:06.241Z",
+ "gerado": "2026-11-04T12:48:48.989Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -34,6 +34,29 @@
     "ajuda"
    ],
    "frotaTodos": true,
+   "telasFora": [
+    "pnQua",
+    "fvs",
+    "nc",
+    "trec",
+    "gar",
+    "cnq",
+    "pesq",
+    "pa",
+    "procd",
+    "insp",
+    "osfp",
+    "osf",
+    "rdo",
+    "etapa",
+    "pnEqp",
+    "ferr",
+    "fmov",
+    "fman",
+    "obrcal",
+    "obrextr",
+    "obralug"
+   ],
    "nome": "Financeiro"
   },
   "fiscal": {
@@ -58,6 +81,74 @@
     "ctr",
     "meu",
     "ajuda"
+   ],
+   "padFn": {
+    "frota": {
+     "veic": "r",
+     "vsai": "r",
+     "vrota": "r",
+     "vabas": "r",
+     "vman": "r",
+     "vfrete": "r",
+     "func": "r",
+     "multa": "r"
+    },
+    "ferr": {
+     "fman": "r",
+     "obrextr": "r"
+    },
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n"
+    },
+    "fin": {
+     "ctremp": "n",
+     "medemp": "n"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "opp",
+    "hab",
+    "rdo",
+    "etapa",
+    "curva",
+    "mo",
+    "pobra",
+    "proj",
+    "rproj",
+    "rmes",
+    "ctremp",
+    "medemp",
+    "retemp"
+   ],
+   "leFora": {
+    "proj": [
+     "rmesf",
+     "ctremp",
+     "medemp"
+    ],
+    "fin": [
+     "ctremp",
+     "medemp"
+    ]
+   },
+   "valCols": [
+    "proj",
+    "obrprev",
+    "obrbase",
+    "rmesf",
+    "ctremp",
+    "medemp"
+   ],
+   "valTelas": [
+    "pnObr"
    ],
    "nome": "Fiscal e estoque"
   },
@@ -107,6 +198,7 @@
     "fab",
     "ajuda"
    ],
+   "valNao": true,
    "nome": "Somente leitura"
   },
   "rh": {
@@ -129,6 +221,72 @@
     "ajuda"
    ],
    "frotaTodos": true,
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n",
+     "obrchk": "n"
+    },
+    "sst": {
+     "tterc": "r",
+     "sstv": "r",
+     "cipa": "r",
+     "pgrdoc": "r",
+     "pgr": "r",
+     "isochk": "r",
+     "ambdoc": "r",
+     "ambind": "r",
+     "ambres": "r",
+     "ambforn": "r",
+     "psicamp": "r",
+     "pte": "r",
+     "sstdoc": "r",
+     "integ": "r",
+     "aptlib": "r",
+     "treinc": "r",
+     "trein": "r",
+     "rda": "r",
+     "rel": "r",
+     "hht": "r",
+     "insp": "r",
+     "pa": "r",
+     "cipam": "r",
+     "cipar": "r",
+     "cipaa": "r"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "pobra",
+    "proj",
+    "curva",
+    "pmat",
+    "ctremp",
+    "medemp",
+    "rproj",
+    "rmes",
+    "obrchk",
+    "gvsst",
+    "trm",
+    "pgrdoc",
+    "aptlib",
+    "pgr",
+    "pte",
+    "integ",
+    "treinm",
+    "rda",
+    "amb"
+   ],
+   "itensFora": [
+    "sstq:tterc"
+   ],
+   "valNao": true,
    "nome": "Recursos humanos"
   },
   "pendente": {
@@ -146,6 +304,19 @@
     "meu",
     "ajuda"
    ],
+   "telasFora": [
+    "pmimp",
+    "pdia",
+    "pespelho",
+    "hextra",
+    "pfonte",
+    "pfarq",
+    "pajuste"
+   ],
+   "itensFora": [
+    "pess:ponto"
+   ],
+   "valNao": true,
    "nome": "Só ponto e Minha área"
   },
   "semnivel": {
@@ -216,6 +387,45 @@
      "sc"
     ]
    },
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "pobra",
+    "proj",
+    "curva",
+    "ctremp",
+    "medemp",
+    "mo",
+    "rproj",
+    "rmes",
+    "cot",
+    "nfrec",
+    "supctl",
+    "invaj",
+    "avforn",
+    "acordo",
+    "almox",
+    "arqf",
+    "veic",
+    "vman",
+    "vfrete",
+    "vcond",
+    "frloc",
+    "multa",
+    "vanal"
+   ],
+   "valNao": true,
    "nome": "Encarregado / campo"
   },
   "comercial": {
@@ -231,6 +441,28 @@
     "qual",
     "meu",
     "ajuda"
+   ],
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "rdo",
+    "hepedir",
+    "pmat",
+    "mo",
+    "fvs",
+    "nc",
+    "pobra",
+    "proj",
+    "rmes"
    ],
    "nome": "Comercial"
   },
@@ -273,6 +505,38 @@
      "transp"
     ]
    },
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n",
+     "heaut": "n",
+     "obrchk": "n"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "pobra",
+    "proj",
+    "curva",
+    "hepedir",
+    "ctremp",
+    "medemp",
+    "mo",
+    "rproj",
+    "rmes",
+    "obrchk",
+    "nfse"
+   ],
+   "itensFora": [
+    "fisc:nf"
+   ],
+   "valNao": true,
    "nome": "Comprador"
   },
   "almoxarife": {
@@ -344,6 +608,97 @@
    "rascunho": [
     "notas"
    ],
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n",
+     "heaut": "n",
+     "obrchk": "n"
+    },
+    "sst": {
+     "tterc": "n",
+     "sstv": "n",
+     "cipa": "n",
+     "acid": "n",
+     "ppp": "n",
+     "pgrdoc": "n",
+     "pgr": "n",
+     "isochk": "n",
+     "ambdoc": "n",
+     "ambind": "n",
+     "ambres": "n",
+     "ambforn": "n",
+     "psicamp": "n",
+     "pte": "n",
+     "sstdoc": "n",
+     "integ": "n",
+     "rda": "n",
+     "rel": "n",
+     "hht": "n",
+     "cipam": "n",
+     "cipar": "n",
+     "cipaa": "n"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "pobra",
+    "pnObr",
+    "proj",
+    "etapa",
+    "curva",
+    "rdo",
+    "hepedir",
+    "ctremp",
+    "medemp",
+    "tterc",
+    "mo",
+    "rproj",
+    "rmes",
+    "obrchk",
+    "pnSst",
+    "gvsst",
+    "cipa",
+    "acid",
+    "trm",
+    "aso",
+    "pgrdoc",
+    "amb",
+    "pgr",
+    "psico",
+    "pte",
+    "sstdoc",
+    "integ",
+    "aptlib",
+    "treinm",
+    "rda",
+    "rel",
+    "hht",
+    "isst",
+    "pnFrota",
+    "veic",
+    "vsai",
+    "vrota",
+    "vabas",
+    "vman",
+    "vfrete",
+    "vcond",
+    "multa",
+    "vanal",
+    "frloc",
+    "nfse",
+    "arqf"
+   ],
+   "itensFora": [
+    "fisc:nf"
+   ],
+   "valNao": true,
    "nome": "Almoxarife"
   },
   "sstgestor": {
@@ -400,6 +755,7 @@
     "rsind"
    ],
    "sensRh": true,
+   "valNao": true,
    "nome": "Gestor de segurança do trabalho"
   },
   "ssttec": {
@@ -498,6 +854,7 @@
    ],
    "aptLibDia": true,
    "rhdocNr": true,
+   "valNao": true,
    "nome": "Técnico de segurança do trabalho"
   },
   "compras": {
@@ -517,6 +874,7 @@
     "ajuda"
    ],
    "antigo": true,
+   "valNao": true,
    "nome": "Comprador / almoxarife (antigo — troque por Comprador ou Almoxarife)"
   },
   "sst": {
@@ -573,6 +931,7 @@
    ],
    "sensRh": true,
    "antigo": true,
+   "valNao": true,
    "nome": "Segurança do trabalho (antigo — troque por Gestor ou Técnico de segurança do trabalho)"
   },
   "fabrica": {
@@ -597,6 +956,7 @@
      "prod"
     ]
    },
+   "valNao": true,
    "nome": "Fábrica (encarregado)"
   }
  },

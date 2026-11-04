@@ -16,7 +16,7 @@ const NIVS = ['n', 'r', 'a', 'w'];
 const ni = v => Math.max(0, NIVS.indexOf(v));
 const nmax = (a, b) => ni(a) >= ni(b) ? a : b;
 const nmin = (a, b) => ni(a) <= ni(b) ? a : b;
-const ACOES = ['aprovar', 'lancarNota', 'cancelar', 'exportar'];
+const ACOES = ['aprovar', 'lancarNota', 'cancelar', 'exportar']; /* v146: 'valores' (Ver valores gerenciais) é tratada à parte em sanAcoes/aplicar */
 /* coleções que nunca são função (leitura livre ou só pelo Administrador) */
 const FORA = new Set(['cfg', 'usr', 'lixo', 'lgpdc', 'implog', 'cm', 'pt', 'usrreq', 'perfc']);
 const ID_OK = /^[a-z][a-zA-Z0-9]{0,30}$/;
@@ -47,7 +47,9 @@ function sanFn(fn, F, grupoOk) {
   return out;
 }
 /* ações sensíveis: só "false" (retira) conta */
-function sanAcoes(a) { const out = {}; if (!a || typeof a !== 'object') return out; ACOES.forEach(k => { if (a[k] === false) out[k] = false; }); return out; }
+function sanAcoes(a) { const out = {}; if (!a || typeof a !== 'object') return out; ACOES.forEach(k => { if (a[k] === false) out[k] = false; });
+  /* v146: "Ver valores gerenciais" vale nos dois sentidos (o padrão de cada perfil está em perfis.json › valNao) */
+  if (typeof a.valores === 'boolean') out.valores = a.valores; return out; }
 /* limites internos levados do perfil padrão na duplicação (só restringem): campos, camposSt, rascunho, cfgNao, aptLibDia, rhdocNr */
 function sanLim(l) {
   const out = {}; if (!l || typeof l !== 'object' || Array.isArray(l)) return out;
@@ -57,6 +59,12 @@ function sanLim(l) {
   if (l.aptLibDia === true) out.aptLibDia = true; if (l.rhdocNr === true) out.rhdocNr = true;
   /* v145: telas sem função própria fora do menu (só na tela) e leitura de apoio (leDep: só dentro do que o módulo já lê) */
   const tn = lista(l.telasNao); if (tn && tn.length) out.telasNao = tn;
+  /* v146: telas fora do menu (telasFora) e itens de menu fora (itensFora: "menu:tela" ou "menu:tela:tipo"); só na tela */
+  const tf = lista(l.telasFora); if (tf && tf.length) out.telasFora = tf;
+  if (Array.isArray(l.itensFora)) { const x = [...new Set(l.itensFora.filter(v => typeof v === 'string' && /^[a-z][a-zA-Z0-9]{0,30}(:[a-z][a-zA-Z0-9]{0,30}){1,2}$/.test(v)))].slice(0, 60); if (x.length) out.itensFora = x; }
+  /* v146b: leFora (como leDep) e valCols/valTelas (listas) */
+  if (l.leFora && typeof l.leFora === 'object' && !Array.isArray(l.leFora)) { const m = {}; for (const [g, v] of Object.entries(l.leFora)) { if (!ID_OK.test(g)) continue; const x = lista(v); if (x && x.length) m[g] = x; } if (Object.keys(m).length) out.leFora = m; }
+  for (const k of ['valCols', 'valTelas']) { const x = lista(l[k]); if (x && x.length) out[k] = x; }
   if (l.leDep && typeof l.leDep === 'object' && !Array.isArray(l.leDep)) { const m = {}; for (const [g, v] of Object.entries(l.leDep)) { if (!ID_OK.test(g)) continue; const x = lista(v); if (x && x.length) m[g] = x; } if (Object.keys(m).length) out.leDep = m; }
   return out;
 }
@@ -77,8 +85,15 @@ function mescla(pad, fn) {
    lido só como apoio das telas que o perfil usa (entra na dependência de leitura; nunca passa do que o módulo já lê) */
 function aplicar(p, fn, acoes, o) {
   o = o || {}; const PERM = o.PERM || {};
+  /* v146b: o que o ajuste salvo libera (função fora de "Sem acesso") volta a ser entregue e com valores (leFora/valCols) */
+  const liberadas = new Set(); { const fa = sanFn(fn, funcoes(o.PERM || {})); for (const m of Object.values(fa)) for (const [c, v] of Object.entries(m)) if (v !== 'n') liberadas.add(c); }
+  if (liberadas.size && p.leFora) { const lf = {}; for (const [g, l] of Object.entries(p.leFora)) { const x = (Array.isArray(l) ? l : []).filter(c => !liberadas.has(c)); if (x.length) lf[g] = x; } if (Object.keys(lf).length) p.leFora = lf; else delete p.leFora; }
+  if (liberadas.size && Array.isArray(p.valCols)) { p.valCols = p.valCols.filter(c => !liberadas.has(c)); if (!p.valCols.length) delete p.valCols; }
   if (p && !p.custom && p.padFn && p.w !== '*') fn = mescla(p.padFn, fn);
-  const an = Object.keys(sanAcoes(acoes)); if (an.length && p.w !== '*') p.acoesNao = an;
+  const sa = sanAcoes(acoes), an = Object.keys(sa).filter(k => k !== 'valores'); if (an.length && p.w !== '*') p.acoesNao = an;
+  /* v146: valores gerenciais (valores.js): o ajuste ou o personalizado decide; sem a escolha, fica o padrão do perfil */
+  if (p.w === '*') delete p.valNao; else if (sa.valores === true) delete p.valNao; else if (sa.valores === false) p.valNao = true;
+  if (p.valNao === true && p.w !== '*') p.acoesNao = [...new Set((p.acoesNao || []).concat(['valores']))]; /* lista das ações desligadas, igual ao navegador */
   const F = funcoes(PERM), f = sanFn(fn, F);
   if (!Object.keys(f).length || p.w === '*') return p;
   const fnNiv = {}, colNiv = {};
@@ -116,6 +131,8 @@ function aplicar(p, fn, acoes, o) {
     const pode = [...(L[g] || [])].filter(c => !Object.prototype.hasOwnProperty.call(m, c) || m[c] !== 'n' || dep.has(c));
     leSo[g] = Array.isArray(leSo[g]) ? leSo[g].filter(c => pode.includes(c)) : pode;
   }
+  /* v146b: leFora = fora da leitura mesmo como apoio de outra função (Fiscal: relatório mensal, contratos e medições de empreiteiros) */
+  if (p.leFora && typeof p.leFora === 'object') for (const [g, l] of Object.entries(p.leFora)) { if (!Array.isArray(l) || !l.length || (!tem(p.w, g) && !tem(p.r, g))) continue; const base = Array.isArray(leSo[g]) ? leSo[g] : [...(L[g] || [])]; leSo[g] = base.filter(c => !l.includes(c)); }
   if (Object.keys(leSo).length) { p.leSo = leSo; if (p.r === '*') p.r = todos.slice(); } /* "*" ignoraria o leSo */
   p.pf = true; p.fnNiv = fnNiv; p.colNiv = colNiv;
   return p;

@@ -184,6 +184,7 @@ const ehDocFunc = p => /^func\/[^/]+$/.test(p);
 const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin || veRh(conta);
 function redigir(conta, p, data) {
   data = REG.redigir(conta, p, data);
+  data = VAL.redigir(conta, p, data); /* v146: sem a ação "Ver valores gerenciais", sai sem os campos de valor de obra, contrato, medição e frota */
   if (!data || !ehDocFunc(p) || veFuncCompleto(conta)) return data;
   const o = {}; for (const k of Object.keys(data)) if (!FUNC_SENS.test(k)) o[k] = data[k]; o._restrito = true; return o;
 }
@@ -199,6 +200,7 @@ function preservarFunc(conta, p, novo) {
    seria bloqueado, para conferir antes. */
 let PERM = { perfis: {}, colecoes: {} };
 const FN = require('./permfn.js'); /* v142: permissão por função dentro do módulo */
+const VAL = require('./valores.js')({ PERM: () => PERM, perfilDe: c => perfilDe(c), veRh: c => veRh(c) }); /* v146: valores gerenciais só para quem tem a ação "Ver valores gerenciais" */
 try { PERM = JSON.parse(fs.readFileSync(path.join(__dirname, 'perfis.json'), 'utf8')); } catch (e) { console.log('perfis.json não encontrado: gravação por módulo desligada'); }
 /* ---- v114: perfis personalizados (Sistema › Perfis de acesso), guardados na coleção perfc ----
    Cada perfil: nome, descrição, mod {grupo: 'r'|'w'} e opc {rh, banco, frota, dir}. O servidor monta o perfil com o
@@ -293,7 +295,7 @@ function chatVisivel(conta, p, data, memo) {
   if (kind === 'm' || kind === 'v') { const cv = String(d.conv || ''); if (cv === 'geral') return true; const i = cv.indexOf('/'); if (i <= 0) return false; return membro(cv.slice(0, i), cv.slice(i + 1)); }
   return false;
 }
-const podeVer = (conta, p, data, memo) => pode(conta, p, 'r') && perfilPermite(conta, p, 'r') && chatVisivel(conta, p, data, memo) && REG.podeLer(conta, p, data, memo) && END.leituraPropria(conta, p, data);
+const podeVer = (conta, p, data, memo) => pode(conta, p, 'r') && perfilPermite(conta, p, 'r') && chatVisivel(conta, p, data, memo) && REG.podeLer(conta, p, data, memo) && VAL.podeLer(conta, p) && END.leituraPropria(conta, p, data); /* v146: custo-hora só com valores gerenciais ou dados de RH */
 /* v116: sinalização das chamadas diretas (cm/<eu>/rtc/<id>): o documento leva "to" (a outra pessoa); a resposta, a recusa e o
    encerramento herdam o "to" do documento anterior ou de quem ligou, para que só as duas pessoas da chamada leiam */
 const rtcPar = db.prepare("SELECT path, data FROM docs WHERE id=? AND parent LIKE 'cm/%/rtc' LIMIT 5");
@@ -885,6 +887,7 @@ async function rotear(req, res) {
       if (m === 'PATCH') { if (!r0) return json(res, 404, { code: 'invalid_argument', erro: 'Documento não existe.' }); data = Object.assign(JSON.parse(r0.data), data); }
       if (Object.prototype.hasOwnProperty.call(data, 'id') && data.id !== id) data.id = id;
       data = preservarFunc(conta, dp, data);
+      data = VAL.preservar(conta, dp, velho, data); /* v146: sem a ação "Ver valores gerenciais", os campos de valor ficam como estavam */
       { const rt = rtcPreparar(conta, dp, velho, data); if (rt.erro) return json(res, rt.st, { code: 'invalid_argument', erro: rt.erro }); data = rt.data; } /* v116 */
     }
     if (!gravacaoPermitida(conta, dp) && !REG.excecaoGravacao(conta, dp, velho, data, m)) {
