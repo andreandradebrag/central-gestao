@@ -244,7 +244,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       else if (!a.auto && (v.solUid || novo.solUid) === conta.id && !ehDono(conta)) return erro('Quem pediu não aprova a própria solicitação.');
       novo.aprovMat = Object.assign({}, a, { por: conta.id, em: Date.now(), srv: 1 }); return null;
     }
-    return { alcPadraoDe, antesDaAlcada, crMinimo, regraLancNota, rotaNotaLancar, podeLancar, travas, regraScAprov };
+    return { alcPadraoDe, antesDaAlcada, crMinimo, regraLancNota, rotaNotaLancar, podeLancar, travas, regraScAprov, rotaNota: () => ROTA }; /* v155: rotaNota (est155.js) */
   })();
 
   /* =====================================================================
@@ -1002,7 +1002,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
      3. COMPETÊNCIA FECHADA (mesmas regras de new_fis.js)
      ===================================================================== */
   const FZ_COLS = new Set(['lanc', 'notas', 'nfse', 'mov', 'fpag', 'fofi']); /* v111: folha oficial (holerite) também */
-  const FZ_META = new Set(['ts', 'cr', 'crBy', 'ed', 'edBy', 'hist', 'pub', 'pubEm', 'lido', 'lida', 'vistoEm', 'ciencia', 'cienciaHist']);
+  const FZ_META = new Set(['ts', 'cr', 'crBy', 'ed', 'edBy', 'hist', 'pub', 'pubEm', 'lido', 'lida', 'vistoEm', 'ciencia', 'cienciaHist', 'estornoId', 'estornadoEm', 'estornadoPor', 'estornoMotivo']); /* v155: a marca de estornado não muda a competência do original */
   const fzN = v => { const x = +v; return isFinite(x) ? Math.round(x * 100) / 100 : 0; };
   const fechados = () => { const s = new Set(); for (const f of col('ctbfech')) if (f.st === 'fechado' && /^\d{4}-\d{2}$/.test(String(f.mes || ''))) s.add(f.mes); return s; };
   function catMapa() { const m = new Map(); for (const c of col('cat')) if (c.nome && c.planoId) m.set(c.nome, c.planoId); return m; }
@@ -2115,6 +2115,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual }); /* v152: compras (compras152.js) */
   const C153 = require('./almox153.js')({ q, db, col, doc, erro, PERM, papelDe, defDe, igual }); /* v153: almoxarifados por cidade com responsável (almox153.js) */
   const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson, json, antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
+  const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'treino') { const e = TREINO.antes(conta, p, velho, novo); return e.erro ? e : { data: e.data, ctx }; } /* v151: cada pessoa grava só o próprio progresso */
@@ -2152,6 +2153,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'sc' || c0 === 'ped') { e = C152.antes(conta, c0, s[1], velho, novo, ctx); if (e) return e; } /* v152: lembrete só pela rota; SC reenviada e tipo */
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
       if (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig') { e = C154.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v154: EPI com baixa e higienização só pelas rotas */
+      if (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat') { e = C155.antes(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v155: estorno, motivo da entrada/saída manual, campos fiscais do produto */
       if (c0 === 'lanc') { e = P2N.regraLancNota(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
@@ -2203,6 +2205,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'proj' && s.length === 2 && velho) { const e = regraExcluirObra(conta, req, p, s[1], velho); if (e) return e; } /* v128 */
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
     if (!velho) return null;
+    if (s.length === 2 && (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat')) { const e = C155.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v155: movimento não se exclui (estorno); produto só Administrador e sem histórico */
     if (s.length === 2 && (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig')) { const e = C154.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v154 */
     if (c0 === 'cot' && s.length === 2) { const e = NEGF.excluir(conta, velho); if (e) return e; } /* v149 */
     if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, /^a_/.test(s[1] || '') ? 'PERFIL_PADRAO_RESTAURADO' : 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome, base: velho.base }); } /* v114; v127: excluir o ajuste = voltar ao padrão */
