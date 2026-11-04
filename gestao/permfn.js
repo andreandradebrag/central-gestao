@@ -56,6 +56,8 @@ function sanLim(l) {
   const lista = (v, n) => Array.isArray(v) ? [...new Set(v.filter(x => typeof x === 'string' && ID_OK.test(x)))].slice(0, n || 60) : null;
   for (const k of ['campos', 'camposSt']) { const o = l[k]; if (!o || typeof o !== 'object' || Array.isArray(o)) continue; const m = {}; for (const [c, v] of Object.entries(o)) { if (!ID_OK.test(c)) continue; const x = lista(v); if (x && x.length) m[c] = x; } if (Object.keys(m).length) out[k] = m; }
   for (const k of ['rascunho', 'cfgNao']) { const x = lista(l[k]); if (x && x.length) out[k] = x; }
+  /* v152: camposProprio (o próprio registro, nas situações listadas, fica livre dos campos; só vale onde há campos) */
+  if (l.camposProprio && typeof l.camposProprio === 'object' && !Array.isArray(l.camposProprio) && out.campos) { const m = {}; for (const [c, v] of Object.entries(l.camposProprio)) { if (!out.campos[c]) continue; const x = lista(v); if (x && x.length) m[c] = x; } if (Object.keys(m).length) out.camposProprio = m; }
   if (l.aptLibDia === true) out.aptLibDia = true; if (l.rhdocNr === true) out.rhdocNr = true;
   /* v145: telas sem função própria fora do menu (só na tela) e leitura de apoio (leDep: só dentro do que o módulo já lê) */
   const tn = lista(l.telasNao); if (tn && tn.length) out.telasNao = tn;

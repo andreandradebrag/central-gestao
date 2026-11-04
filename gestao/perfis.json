@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-04T16:41:17.191Z",
+ "gerado": "2026-11-04T18:05:04.577Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -593,7 +593,8 @@
     "sc": [
      "status",
      "sepId",
-     "sepPend"
+     "sepPend",
+     "reenviadaId"
     ]
    },
    "camposSt": {
@@ -640,6 +641,9 @@
      "cipam": "n",
      "cipar": "n",
      "cipaa": "n"
+    },
+    "comp": {
+     "sc": "a"
     }
    },
    "leDep": {
@@ -709,6 +713,11 @@
      "status",
      "ts",
      "ex"
+    ]
+   },
+   "camposProprio": {
+    "sc": [
+     "rascunho"
     ]
    },
    "valNao": true,

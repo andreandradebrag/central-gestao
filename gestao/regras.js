@@ -2082,7 +2082,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (ehDono(conta)) return null;
     const d = defDe(conta), s = p.split('/'), c0 = s[0]; if (!d || (d.custom && !d.pf && !d.temLim) || s.length !== 2) return null; /* v142: personalizado com acesso por função ou limites levados na duplicação */
     const cp = d.campos && Array.isArray(d.campos[c0]) ? d.campos[c0] : null;
-    if (cp) {
+    if (cp && !C152.proprio(conta, d, c0, velho, novo, m)) { /* v152: camposProprio (o próprio registro nas situações listadas) */
       if (m === 'DELETE' || !velho) return erro('Seu perfil não cria nem exclui este registro aqui; só registra ' + (c0 === 'ped' ? 'o recebimento do pedido' : 'o andamento') + '.');
       const livre = new Set(cp.concat(['id', 'ts', 'cr', 'crBy', 'ed', 'edBy', 'hist']));
       for (const k of new Set(Object.keys(velho).concat(Object.keys(novo)))) if (!livre.has(k) && !igual(velho[k], novo[k])) return erro('Seu perfil só altera ' + (c0 === 'ped' ? 'o recebimento' : 'o andamento') + ' deste registro (campo "' + k + '").');
@@ -2110,6 +2110,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const NEGF = require('./negoc.js')({ doc, erro, igual, auditar: (...a) => auditar(...a) }); /* v149: histórico de negociação do mapa de cotação (negoc.js) */
   const ACEITE = require('./aceite.js')({ db, q, doc, salvar, erro, ehDono, gravaCol, pode, perfilPermite, gravacaoPermitida, cfgEmp, ipDe, json, html: X.html, pag, lerJson, lerCorpo: X.lerCorpo, APP_URL, SEG, avisarDoc, auditar: (...a) => auditar(...a) }); /* v150: código de verificação e aceite do fornecedor (aceite.js) */
   const TREINO = require('./treino.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaGrupo, PERM, NIV }); /* v151: treinamentos dentro do sistema (treino.js) */
+  const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual }); /* v152: compras (compras152.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'treino') { const e = TREINO.antes(conta, p, velho, novo); return e.erro ? e : { data: e.data, ctx }; } /* v151: cada pessoa grava só o próprio progresso */
@@ -2144,6 +2145,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'parc' && s.length === 2) regraParc(conta, req, velho, novo, ctx);
     let e = regraAprov(c0, conta, req, velho, novo, ctx); if (e) return e;
     if (s.length === 2) {
+      if (c0 === 'sc' || c0 === 'ped') { e = C152.antes(conta, c0, s[1], velho, novo, ctx); if (e) return e; } /* v152: lembrete só pela rota; SC reenviada e tipo */
       if (c0 === 'lanc') { e = P2N.regraLancNota(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
@@ -2216,6 +2218,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     PRIV.aposGravar(auditar, conta, req, p, antes, depois_); /* v112: anonimização do titular alcança a auditoria */
     atualizarCitacoes(conta, p, depois_);
     if (v && v.ctx) for (const a of v.ctx.alertas) alertar(a[0], a[1], req, a[2]);
+    if (v && v.ctx && v.ctx.v152) try { C152.depois(conta, req, v.ctx.v152); } catch (e) { console.error('[v152]', e.message); } /* v152: a recusada ganha a ligação com a SC nova */
   }
 
   /* =====================================================================
@@ -2229,6 +2232,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await P2Q.rota(p, m, req, res, conta)) return true; /* v141 */
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
+    if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
     if (m === 'POST' && p === '/api/med/reabrir') { const b = await lerJson(req), r = MEDR(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro } : r); return true; } /* v144 */
     if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }

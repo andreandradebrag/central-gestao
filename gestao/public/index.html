@@ -29596,9 +29596,264 @@ V.treinadm=()=>{
   return h+'<div class="stack">'+(cs.length?cs.map(trnCfgCursoHtml).join(''):'<div class="card"><p style="margin:0">Nenhum curso no catálogo (pasta treino do servidor).</p></div>')+trnAcompCard(true)+'</div>';
 };
 
+/* ===== v152 (relatorios/feito_v152.md): compras — SC recusada "Corrigir e reenviar", telas responsivas, quem aprova,
+   "Pedir aprovação" (lembrete), SC de reposição de estoque e administrativa (o Almoxarife cria e envia) =====
+   Servidor: deploy/gestao/compras152.js (mesmo cálculo de "quem aprova", rota do lembrete com o limite de 2 h, regras da SC
+   reenviada e do tipo, camposProprio do perfil). Prefixos v152*, V152*. */
+const V152={horas:2,ult:{}};
+
+/* ---------- 0. utilidades ---------- */
+const v152Uniq=a=>[...new Set((a||[]).filter(Boolean))];
+function v152Ha(t){if(!t)return '';const m=Math.max(0,Math.round((Date.now()-t)/60000));if(m<60)return 'há '+m+' min';const h=Math.round(m/60);if(h<48)return 'há '+h+' h';return 'há '+Math.round(h/24)+' dias';}
+const v152Hora=t=>{const d=new Date(t);return pad2(d.getHours())+':'+pad2(d.getMinutes());};
+const v152Admin=()=>store.mode!=='db'||me.owner||!!(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+/* grava a coleção (como gravaCol do servidor): o módulo dela, respeitando o "so" do perfil */
+function v152GravaCol(c){if(store.mode!=='db'||me.owner)return true;const d=PERFIS[me.perfil];if(!d)return false;if(d.w==='*')return true;
+  const gs=(typeof p2ColMods==='function'?p2ColMods()[c]:null)||[];return gs.some(g=>Array.isArray(d.w)&&d.w.includes(g)&&!(d.so&&Array.isArray(d.so[g])&&!d.so[g].includes(c)));}
+const V152_NIV=['','N1 · gestor da área','N2 · diretor','N3 · duas pessoas'];
+
+/* ---------- 1. quem aprova (igual a compras152.js › quem) ---------- */
+const v152AprovMat=()=>v152Uniq(((matCfg().aprov)||[]).concat(aprovadoresDe('compras')));
+const v152TodosAprov=()=>v152Uniq(finQuemAprova(1).concat(aprovComSubst(alc().aprov.slice(),'n1')));
+function v152Pend(c,r){if(!r)return false;if(c==='sc')return r.status==='aprovacao';
+  if(c==='ped'){let pr=false;try{pr=precisaAprov('ped',r);}catch(e){}return pr&&!(r.aprov&&r.aprov.ok)&&!['cancelado','recebido'].includes(r.status);}return false;}
+function v152Quem(c,r){if(!v152Pend(c,r))return {pend:false};
+  if(c==='sc'){const fora=[r.solUid].filter(Boolean),tira=l=>v152Uniq(l).filter(u=>!fora.includes(u));let pri,alt=[];
+    if(r.aprovUid){pri=tira([r.aprovUid]);alt=tira(v152AprovMat()).filter(u=>!pri.includes(u));}else pri=tira(v152AprovMat());
+    if(!pri.length){pri=alt;alt=[];}if(!pri.length)pri=tira(v152TodosAprov());
+    return {pend:true,col:c,principais:pri,alternativos:alt,fallback:!pri.length,desde:+r.aprovPedidoEm||+r.cr||0};}
+  const v=pedTotal(r),nv=finNivel(v).i,par=r.aprovParc&&r.aprovParc.por?r.aprovParc:null,fora=[r.crBy,par&&par.por].filter(Boolean),tira=l=>v152Uniq(l).filter(u=>!fora.includes(u));
+  let pri=tira(aprovadoresDe('n'+nv)),alt=tira(finQuemAprova(nv)).filter(u=>!pri.includes(u));if(!pri.length){pri=alt;alt=[];}
+  return {pend:true,col:c,nivel:nv,nivelNome:V152_NIV[nv],dois:nv===3,ja:par?[{por:par.por,em:+par.em||0}]:[],principais:pri,alternativos:alt,fallback:!pri.length,desde:Math.max(+r.cr||0,+(r.aprovReaberta&&r.aprovReaberta.em)||0)};}
+/* nomes de quem não está no cache (perfis sem acesso a Usuários): busca uma vez e redesenha */
+V152.pedNome=new Set();
+function v152Nomes(ids){try{ids=v152Uniq(ids).filter(i=>i!=='local'&&!profCache.has(i)&&!V152.pedNome.has(i)&&!(S.usr||[]).some(u=>u.uid===i&&u.apelido));if(!ids.length||!me.u||typeof me.u.profiles!=='function')return;
+  ids.forEach(i=>V152.pedNome.add(i));me.u.profiles(ids).then(ps=>{ids.forEach(i=>profCache.set(i,ps[i]||{name:'',avatarUrl:''}));schedule();}).catch(()=>{});}catch(e){}}
+function v152QuemTxt(q){if(!q||!q.pend)return '';v152Nomes(q.principais.concat(q.alternativos,(q.ja||[]).map(x=>x.por)));const nm=l=>l.map(u=>esc(nameOf(u)));
+  const quem=q.fallback?'<b>dono ou Administrador</b> (nenhum aprovador cadastrado'+(q.col==='ped'?' no nível':'')+')':'<b>'+nm(q.principais).join('</b> ou <b>')+'</b>'+(q.alternativos.length?' (ou '+nm(q.alternativos.slice(0,4)).join(', ')+(q.alternativos.length>4?' e mais '+(q.alternativos.length-4):'')+')':'');
+  return (q.col==='ped'?esc(q.nivelNome)+(q.dois&&q.ja.length?' · já aprovou: '+esc(nameOf(q.ja[0].por))+' · falta a segunda pessoa':'')+'<br>':'')+'Aguardando aprovação de: '+quem+(q.desde?' · '+esc(v152Ha(q.desde)):'');}
+function v152LembTxt(r){const l=r&&r.lembAprov;if(!l||!l.em)return '';v152Nomes([l.por]);return 'Lembrete enviado às '+v152Hora(l.em)+(new Date(l.em).toDateString()!==new Date().toDateString()?' de '+fmtDate(new Date(l.em).toISOString().slice(0,10)):'')+' por '+esc(nameOf(l.por));}
+function v152PodePedir(c,r){if(!r)return false;if(v152Admin()||v152GravaCol(c))return true;const eu=actorId();return r.crBy===eu||(c==='sc'&&r.solUid===eu);}
+const v152Prox=r=>{const l=r&&r.lembAprov;return l&&l.em?(+l.em+V152.horas*3600e3):0;};
+function v152BoxHtml(c,r,comBtn){const q=v152Quem(c,r);if(!q.pend)return '';const lt=v152LembTxt(r),pode=comBtn&&v152PodePedir(c,r);
+  return '<div class="note v152q" style="margin:0 0 10px">'+v152QuemTxt(q)+(lt?'<div class="sub" style="margin-top:4px">'+lt+'</div>':'')+(pode?'<div style="margin-top:6px"><button class="btn sm" data-act="v152Lembrar" data-col="'+c+'" data-id="'+esc(r.id)+'">Pedir aprovação</button></div>':'')+'</div>';}
+FLABEL.lembAprov='Lembrete de aprovação';FLABEL.reenviadaId='Reenviada';FLABEL.origemId='Reenvio da SC recusada';FLABEL.tipo=FLABEL.tipo||'Tipo';
+
+/* ---------- 2. Pedir aprovação (lembrete) ---------- */
+const v152Link=c=>{let b='';try{b=(typeof PPDF!=='undefined'&&PPDF.base)||location.origin;}catch(e){}return String(b||'').replace(/\/$/,'')+'/#'+(c==='sc'?'sc':'aprov');};
+function v152Resumo(c,r,comValor){if(c==='sc'){const t=v152Tipo(r);return ['Solicitação de compra nº '+(r.numero||''),r.projId?'obra '+projNome(r.projId):t==='repos'?'reposição de estoque'+(r.almoxId?' ('+almNome(r.almoxId)+')':''):t==='adm'?'administrativa'+(r.categoria?' ('+r.categoria+')':''):'',(r.itens||[]).length+' item(ns)',r.necessidade?'necessidade '+fmtDate(r.necessidade):''].filter(Boolean).join(' · ');}
+  return ['Pedido de compra nº '+(r.numero||''),parcNome(r.parcId),r.projId?'obra '+projNome(r.projId):'',comValor?money(pedTotal(r)):'',r.necessidade?'necessidade '+fmtDate(r.necessidade):''].filter(Boolean).join(' · ');}
+function v152MsgWhats(c,r){const q=v152Quem(c,r),nomes=q.fallback?'dono ou Administrador':q.principais.map(nameOf).join(' ou ');
+  return 'Olá! '+(me.nome||nameOf(actorId()))+' pede a sua aprovação na Central de Gestão: '+v152Resumo(c,r,c==='ped')+'.'+(c==='ped'?' '+q.nivelNome+'.':'')+' Aguardando aprovação de: '+nomes+(q.desde?' ('+v152Ha(q.desde)+')':'')+'.\nAbra: '+v152Link(c);}
+A.v152Lembrar=d=>{const c=d.col,r=get(c,d.id);if(!r)return;const q=v152Quem(c,r);
+  if(!q.pend){toast('Este documento não está aguardando aprovação.','neg');return;}
+  if(!v152PodePedir(c,r)){toast('Pedir aprovação é de quem criou ou enviou o documento, de quem grava esta tela ou do Administrador.','neg');return;}
+  const px=v152Prox(r),cedo=px>Date.now(),msg=v152MsgWhats(c,r);
+  modal({title:'Pedir aprovação · '+(c==='sc'?'SC':'pedido')+' nº '+(r.numero||''),nofocus:true,
+    body:'<p style="margin:0 0 8px">'+v152QuemTxt(q)+'</p>'+
+      '<p class="sub" style="margin:0 0 8px">Vai uma mensagem no chat do sistema (conversa Central de Gestão) para '+(q.fallback?'o dono e os administradores':esc(q.principais.map(nameOf).join(', ')))+' e, se o e-mail do servidor estiver configurado, um e-mail com o resumo e o link direto para a tela. Um lembrete por documento a cada '+V152.horas+' horas.</p>'+
+      (r.lembAprov?'<p class="sub" style="margin:0 0 8px">'+v152LembTxt(r)+(cedo?'. O próximo pode ser enviado a partir das '+v152Hora(px)+'.':'.')+'</p>':'')+
+      '<label class="f full"><span>Mensagem para WhatsApp (texto pronto com o link)</span><textarea id="v152Wa" rows="5" readonly>'+esc(msg)+'</textarea></label>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="v152CopiarWa">Copiar mensagem para WhatsApp</button><button class="btn pri" data-act="v152Enviar" data-col="'+c+'" data-id="'+esc(r.id)+'"'+(cedo?' disabled title="Já foi pedido há menos de '+V152.horas+' horas"':'')+'>Enviar lembrete</button>'});};
+A.v152CopiarWa=()=>{const t=$('#v152Wa');if(!t)return;const ok=()=>toast('Mensagem copiada. Cole no WhatsApp.','pos');try{navigator.clipboard.writeText(t.value).then(ok,()=>{t.select();toast('Selecione e copie a mensagem.');});}catch(e){try{t.select();document.execCommand('copy');ok();}catch(z){toast('Selecione e copie a mensagem.');}}};
+A.v152Enviar=async d=>{const c=d.col,r=get(c,d.id);if(!r)return;
+  if(typeof SEGA_SRV==='function'&&SEGA_SRV()){let j;try{j=await segaPost('/api/aprov/lembrete',{col:c,id:r.id});}catch(e){toast((e&&e.message)||'O lembrete não foi enviado.','neg');return;}
+    if(j&&j.data)segaLocal(c,Object.assign({},j.data,{id:r.id}));closeModal();
+    toast('Lembrete enviado a '+(j.para||[]).map(x=>x.nome).join(', ')+((j.para||[]).some(x=>x.email)?' (chat e e-mail).':' (chat'+(j.smtp?'':'; e-mail do servidor não configurado')+').'),'pos');render();return;}
+  /* fora do servidor próprio: chat pelo navegador e o registro no documento (o limite é conferido aqui) */
+  const px=v152Prox(r);if(px>Date.now()){toast('Já foi pedido às '+v152Hora(r.lembAprov.em)+' por '+nameOf(r.lembAprov.por)+'. O próximo a partir das '+v152Hora(px)+'.','neg');return;}
+  const q=v152Quem(c,r),para=(q.fallback?[]:q.principais).filter(u=>u!==actorId());
+  para.forEach(u=>avisoChat(u,(me.nome||nameOf(actorId()))+' pede a sua aprovação: '+v152Resumo(c,r,false)+'. Abra: '+v152Link(c)));
+  const l={em:Date.now(),por:actorId(),para,emails:0};put(c,Object.assign(cl(r),{lembAprov:l,lembHist:(r.lembHist||[]).concat([l]).slice(-20)}));closeModal();toast('Lembrete registrado'+(para.length?' e enviado no chat.':'.'),'pos');};
+Object.assign(ACT_GROUP,{v152Lembrar:null,v152CopiarWa:null,v152Enviar:null});
+
+/* ---------- 3. tipo da SC: obra, reposição de estoque, administrativa ---------- */
+const v152AlmTxt=id=>{const n=almNome(id)||'';return /^almox/i.test(n)?n:'Almoxarifado '+n;};
+const V152_TIPOS=[['obra','Obra (projeto)'],['repos','Reposição de estoque'],['adm','Administrativa']];
+const v152Tipo=s=>s&&s.tipo?s.tipo:(s&&s.projId?'obra':'');
+const v152TipoPill=s=>{const t=v152Tipo(s);return t==='repos'?pill('Reposição','acc'):t==='adm'?pill('Administrativa','warn'):'';};
+function v152AlmoxPapel(){try{const p=PERFIS[me.perfil];return !me.owner&&!!p&&((p.papel||me.perfil)==='almoxarife');}catch(e){return false;}}
+/* reposição: não separa do próprio estoque (tudo vai para compra) */
+{const a0=scAloca;scAloca=function(sc){if(sc&&sc.tipo==='repos')return (sc.itens||[]).map(i=>({sep:0,com:r3(+i.qtd||0),disp:i.prodId?dispo(i.prodId,sc.id):0}));return a0.apply(this,arguments);};}
+{const n0=A.scNovo;A.scNovo=d=>{const r=n0(d);if(scd&&!get('sc',scd.id)&&!scd.tipo){if(v152AlmoxPapel()&&almoxAtivos().length){const a=almoxAtivos()[0];Object.assign(scd,{tipo:'repos',almoxId:a.id,projId:'',etapaId:'',localEntrega:v152AlmTxt(a.id)});}else scd.tipo='obra';v152ScRedesenha();}return r;};}
+function v152ScRedesenha(){const mb=$('#mb');if(!mb||!scd||!scActive)return;try{mb.innerHTML=scBody();scTotals();}catch(e){}}
+function v152TiraCampo(h,k){const i=h.indexOf('data-cf="'+k+'"');if(i<0)return h;const a=h.lastIndexOf('<label',i),b=h.indexOf('</label>',i);if(a<0||b<0)return h;return h.slice(0,a)+h.slice(b+8);}
+{const b0=scBody;scBody=function(){let h=b0.apply(this,arguments);const x=scd||{},t=v152Tipo(x),F2=(l,k,ty,o)=>field(l,k,ty,x[k],o).replace('data-f="','data-cf="');let top='';
+  /* reenvio de SC recusada: o motivo no topo */
+  if(x.origemId){const o=get('sc',x.origemId),a=o&&o.aprovMat;top+='<div class="note v152mot" style="margin:0 0 10px;border-color:var(--neg,#c33)"><b>Correção da SC nº '+esc(o?o.numero:x.origemNum||'')+', recusada'+(a&&a.por?' por '+(v152Nomes([a.por]),nm(a.por)):'')+(a&&a.em?' em '+esc(fmtDT(a.em)):'')+'.</b><br>Motivo: '+esc((a&&a.obs)||'não informado')+'<br><span class="sub">Corrija o que foi pedido e salve; depois use Enviar na lista. Ela passa pela aprovação de material de novo.</span></div>';}
+  top+='<div class="fg">'+F2('Tipo da solicitação','tipo','select',{opts:V152_TIPOS,blank:t?null:'Não informado (antiga)'})+
+    (t==='repos'?F2('Almoxarifado de destino *','almoxId','select',{opts:almOpts(),blank:'Escolha…'}):'')+
+    (t==='adm'?F2('Categoria (plano de contas) *','categoria','select',{opts:catOpts('despesa',x.categoria),blank:'Escolha…'}):'')+'</div>'+
+    (t==='repos'?'<p class="sub" style="margin:4px 0 10px">Reposição de estoque: sem obra; nada é separado do próprio estoque (tudo vai para compra) e, no recebimento, o material entra neste almoxarifado.</p>':
+     t==='adm'?'<p class="sub" style="margin:4px 0 10px">Administrativa: sem obra; o custo vai para a categoria escolhida como custo comum (rateio). O que já existe no estoque continua sendo separado.</p>':'');
+  if(t==='repos'||t==='adm'){h=v152TiraCampo(v152TiraCampo(h,'projId'),'etapaId');}
+  return top+h;};}
+/* troca do tipo/almoxarifado no formulário */
+document.addEventListener('change',e=>{const t=e.target;if(!scActive||!scd||!t||!t.dataset)return;const k=t.dataset.cf;if(k!=='tipo'&&k!=='almoxId')return;
+  if(k==='tipo'){if(scd.tipo!=='obra'){scd.projId='';scd.etapaId='';}if(scd.tipo!=='repos')delete scd.almoxId;if(scd.tipo!=='adm')delete scd.categoria;
+    if(scd.tipo==='repos'&&!scd.almoxId&&almoxAtivos().length===1)scd.almoxId=almoxAtivos()[0].id;}
+  if(scd.tipo==='repos'&&scd.almoxId){const n=v152AlmTxt(scd.almoxId);if(!scd.localEntrega||/^Almox/i.test(scd.localEntrega)||scd.localEntrega===cfg().localEntrega)scd.localEntrega=n;}
+  setTimeout(v152ScRedesenha,0);});
+{const s0=scSave;scSave=function(){const x=scd||{},t=v152Tipo(x),novo=!get('sc',x.id);
+  if(x.tipo==='obra'&&!x.projId){toast('Escolha a obra (ou mude o tipo para Reposição de estoque ou Administrativa).','neg');return false;}
+  if(t==='repos'&&!x.almoxId){toast('Escolha o almoxarifado de destino da reposição.','neg');return false;}
+  if(t==='adm'&&!String(x.categoria||'').trim()){toast('Escolha a categoria (plano de contas) da solicitação administrativa.','neg');return false;}
+  if(t==='repos'||t==='adm'){x.projId='';x.etapaId='';}
+  if(novo&&x.origemId){const o=get('sc',x.origemId);if(!o||o.status!=='recusada'||o.reenviadaId||S.sc.some(s=>s.origemId===o.id&&s.id!==x.id)){toast('Esta solicitação recusada já foi reenviada.','neg');return false;}}
+  const r=s0.apply(this,arguments);if(r===false)return r;
+  if(novo&&x.origemId&&get('sc',x.id)){const o=get('sc',x.origemId);if(o&&!o.reenviadaId){const n=Object.assign(cl(o),{reenviadaId:x.id,reenviadaNum:x.numero,reenviadaEm:Date.now(),reenviadaPor:actorId()});
+      if(store.mode==='db')segaLocal('sc',n);else put('sc',n);} /* no servidor próprio quem grava a ligação é o servidor (compras152.js) */
+    toast('SC nº '+x.numero+' criada a partir da recusada nº '+(o?o.numero:'')+'. Confira e use Enviar na lista.','pos');}
+  return r;};}
+
+/* ---------- 4. SC recusada: Corrigir e reenviar ---------- */
+function v152PodeReenviar(s){if(!s||s.status!=='recusada'||s.reenviadaId||S.sc.some(x=>x.origemId===s.id))return false;if(v152Admin()||v152GravaCol('sc'))return true;const eu=actorId();return s.solUid===eu||s.crBy===eu;}
+function v152ReenvNova(o){const h=todayStr();
+  return {id:uid(),numero:nextNum('sc'),data:h,necessidade:o.necessidade&&o.necessidade>=h?o.necessidade:addDays(h,7),solicitante:o.solicitante||me.nome||'',solUid:o.solUid||actorId(),projId:o.projId||'',etapaId:o.etapaId||'',localEntrega:o.localEntrega||'',obs:o.obs||'',
+    tipo:v152Tipo(o)||undefined,almoxId:o.almoxId||undefined,categoria:o.categoria||undefined,aprovUid:o.aprovUid||'',status:'rascunho',origemId:o.id,origemNum:o.numero,
+    itens:(o.itens||[]).map(i=>{const n={prodId:i.prodId||'',desc:i.desc||'',un:i.un||'UN',qtd:+i.qtd||0,k:uid()};if(i.vEst!=null)n.vEst=i.vEst;return n;})};}
+A.v152Reenviar=d=>{const o=get('sc',d.id);if(!o)return;if(!v152PodeReenviar(o)){toast(o.reenviadaId||S.sc.some(x=>x.origemId===o.id)?'Esta solicitação recusada já foi reenviada.':'Só quem pediu, quem grava Solicitações ou o Administrador reenvia a solicitação recusada.','neg');return;}
+  const n=v152ReenvNova(o);Object.keys(n).forEach(k=>{if(n[k]===undefined)delete n[k];});openSc(n);};
+ACT_GROUP.v152Reenviar=null;
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v152Reenviar:'Cria uma SC nova em rascunho com os mesmos dados e itens, mostrando o motivo da recusa para corrigir.',v152Lembrar:'Envia um lembrete ao aprovador (chat e e-mail) e mostra o texto para WhatsApp.'});
+
+/* ---------- 5. listas: quem aprova, botões, tipo, reenvio ---------- */
+/* divide a linha em células (sem tabela dentro de célula) */
+function v152Cells(tr){const a=tr.indexOf('>')+1,cs=[];const rx=/<td\b[^>]*>[\s\S]*?<\/td>/g;let m;while((m=rx.exec(tr)))cs.push(m[0]);return {ab:tr.slice(0,a),cs};}
+function v152RowId(tr,c){if(c==='ped'){const m=tr.match(/<tr data-rid="([^"]+)"/);if(m)return m[1];}const rx=/data-id="([^"]+)"/g;let m;while((m=rx.exec(tr)))if(IDX[c]&&IDX[c].has(m[1]))return m[1];return '';}
+function v152Linhas(h,c,fn){const i=h.indexOf('<tbody>');if(i<0)return h;const j=h.indexOf('</tbody>',i);if(j<0)return h;
+  const corpo=h.slice(i,j).replace(/<tr\b[\s\S]*?<\/tr>/g,tr=>{const id=v152RowId(tr,c),r=id&&get(c,id);if(!r)return tr;try{return fn(tr,r)||tr;}catch(e){return tr;}});return h.slice(0,i)+corpo+h.slice(j);}
+/* acrescenta html ao fim da penúltima célula (situação) e botões ao fim da última (ações) */
+function v152NaLinha(tr,info,btns){const {ab,cs}=v152Cells(tr),n=cs.length;if(n<2)return tr;
+  const add=(c,x)=>{const k=c.lastIndexOf('</td>');return c.slice(0,k)+x+c.slice(k);};
+  if(info)cs[n-2]=add(cs[n-2],info);if(btns)cs[n-1]=add(cs[n-1],btns);return ab+cs.join('')+'</tr>';}
+function v152InfoLista(c,r){const q=v152Quem(c,r);if(!q.pend)return '';const lt=v152LembTxt(r);return '<div class="sub v152q" style="margin-top:4px;white-space:normal">'+v152QuemTxt(q)+(lt?'<br>'+lt:'')+'</div>';}
+const v152BtnLemb=(c,r)=>v152Pend(c,r)&&v152PodePedir(c,r)?'<button class="btn sm" data-act="v152Lembrar" data-col="'+c+'" data-id="'+esc(r.id)+'">Pedir aprovação</button>':'';
+function v152ScLista(h){
+  return v152Linhas(h,'sc',(tr,s)=>{let info=v152InfoLista('sc',s),b=v152BtnLemb('sc',s);
+    if(s.status==='recusada'){const a=s.aprovMat;info+=(a&&a.obs?'<div class="sub" style="margin-top:4px;white-space:normal">Motivo: '+esc(a.obs)+'</div>':'')+(s.reenviadaId?'<div style="margin-top:4px">'+pill('Reenviada como SC nº '+(s.reenviadaNum||((get('sc',s.reenviadaId)||{}).numero)||''),'acc')+'</div>':'');
+      if(v152PodeReenviar(s))b='<button class="btn sm pri" data-act="v152Reenviar" data-id="'+esc(s.id)+'">Corrigir e reenviar</button>'+b;}
+    if(s.origemId)info+='<div class="sub" style="margin-top:4px">Reenvio da SC nº '+esc(s.origemNum||((get('sc',s.origemId)||{}).numero)||'')+'</div>';
+    tr=v152NaLinha(tr,info,b);
+    /* tipo: etiqueta e destino no lugar de "Sem projeto" */
+    const t=v152Tipo(s);if(t==='repos'||t==='adm'){const dest=t==='repos'?v152AlmTxt(s.almoxId):esc(s.categoria||'Administrativa');
+      tr=tr.replace('<span class="mut">Sem projeto</span>',v152TipoPill(s)+' <span>'+(t==='repos'?esc(dest):dest)+'</span>');}
+    return tr;});}
+function v152PedLista(h){return v152Linhas(h,'ped',(tr,p)=>v152NaLinha(tr,v152InfoLista('ped',p),v152BtnLemb('ped',p)));}
+ui.sc.tipo=ui.sc.tipo||'';
+{const v0=V.sc;V.sc=function(){const f=ui.sc.tipo||'',all=S.sc;let h;
+  if(f){S.sc=all.filter(s=>(v152Tipo(s)||'obra')===f);try{h=v0.apply(this,arguments);}finally{S.sc=all;}}else h=v0.apply(this,arguments);
+  const k='<label class="f"><span>Projeto</span>';
+  h=h.replace(k,'<label class="f"><span>Tipo</span><select id="s_sctipo" data-filter="sc.tipo">'+opt(V152_TIPOS,f,'Todos')+'</select></label>'+k);
+  return v152Resp(v152ScLista(h),'sc');};}
+{const v0=V.ped;V.ped=function(){return v152Resp(v152PedLista(v0.apply(this,arguments)),'ped');};}
+['cot','sep','nf'].forEach(t=>{if(typeof V[t]!=='function')return;const v0=V[t];V[t]=function(){return v152Resp(v0.apply(this,arguments),t);};});
+/* detalhes da SC e formulário do pedido */
+{const v0=A.scVer;A.scVer=d=>{const r=v0(d);const s=get('sc',d.id),mb=$('#mb');if(s&&mb){let h=v152BoxHtml('sc',s,true);
+    if(s.status==='recusada'){const a=s.aprovMat;h+='<div class="note" style="margin:10px 0 0;border-color:var(--neg,#c33)"><b>Recusada'+(a&&a.por?' por '+(v152Nomes([a.por]),nm(a.por)):'')+(a&&a.em?' em '+esc(fmtDT(a.em)):'')+'.</b> Motivo: '+esc((a&&a.obs)||'não informado')+
+      (s.reenviadaId?'<div style="margin-top:6px">'+pill('Reenviada como SC nº '+(s.reenviadaNum||((get('sc',s.reenviadaId)||{}).numero)||''),'acc')+'</div>':v152PodeReenviar(s)?'<div style="margin-top:6px"><button class="btn sm pri" data-act="v152Reenviar" data-id="'+esc(s.id)+'">Corrigir e reenviar</button></div>':'')+'</div>';}
+    if(s.origemId)h+='<p class="sub" style="margin:8px 0 0">Reenvio da SC recusada nº '+esc(s.origemNum||((get('sc',s.origemId)||{}).numero)||'')+'.</p>';
+    const t=v152Tipo(s);if(t==='repos'||t==='adm')h+='<p class="sub" style="margin:8px 0 0">'+v152TipoPill(s)+' '+(t==='repos'?'Destino: almoxarifado '+esc(almNome(s.almoxId)):'Categoria: '+esc(s.categoria||''))+'</p>';
+    if(h)mb.insertAdjacentHTML('afterbegin','<div>'+h+'</div>');}return r;};}
+{const b0=pedBody;pedBody=function(){const h=b0.apply(this,arguments);try{if(typeof pdd!=='undefined'&&pdd&&pdd.id){const p=get('ped',pdd.id);if(p){const x=v152BoxHtml('ped',p,true);if(x)return x+h;}}}catch(e){}return h;};}
+{const d0=scDoc;scDoc=function(sc){const o=d0.apply(this,arguments);try{const t=v152Tipo(sc);if(o&&o.meta){if(t==='repos')o.meta.push(['Tipo','Reposição de estoque · '+almNome(sc.almoxId)]);if(t==='adm')o.meta.push(['Tipo','Administrativa · '+(sc.categoria||'')]);if(sc.origemId)o.meta.push(['Reenvio da SC recusada','nº '+(sc.origemNum||'')]);if(sc.reenviadaId)o.meta.push(['Reenviada como','SC nº '+(sc.reenviadaNum||'')]);}}catch(e){}return o;};}
+
+/* ---------- 6. recebimento: reposição entra no almoxarifado da SC; administrativa leva a categoria (custo comum) ---------- */
+const V152_REC={on:null};
+{const r0=supReceber;supReceber=function(pid,o){const p=get('ped',pid),sc=p&&p.scId?get('sc',p.scId):null,t=v152Tipo(sc);
+  V152_REC.on=sc&&(t==='repos'||t==='adm')?{pedId:pid,t,almoxId:sc.almoxId||'',categoria:sc.categoria||''}:null;
+  try{return r0.apply(this,arguments);}finally{V152_REC.on=null;}};}
+{const p0=put;put=function(col,rec){const x=V152_REC.on;
+  if(x&&rec&&rec.pedId===x.pedId){
+    if(col==='notas'&&x.t==='repos'&&x.almoxId&&Array.isArray(rec.itens))rec=Object.assign({},rec,{itens:rec.itens.map(i=>i.prodId?Object.assign({},i,{almoxId:x.almoxId}):i)});
+    if(col==='notas'&&x.t==='adm'&&!rec.projId)rec=Object.assign({},rec,{categoria:x.categoria||rec.categoria,comum:true});
+    if(col==='mov'&&rec.recProv&&x.t==='repos'&&x.almoxId)rec=Object.assign({},rec,{almoxId:x.almoxId,prateleira:''});}
+  return p0.apply(this,[col,rec]);};}
+
+/* ---------- 7. Estoque: Gerar solicitação de reposição (itens abaixo do mínimo, por almoxarifado) ---------- */
+function v152MinDe(p,a){const m=p.minAlm||{};if(m[a]!=null&&m[a]!=='')return +m[a]||0;if(!Object.keys(m).length&&a===(p.almoxId||''))return +p.minimo||0;return 0;}
+function v152MaxDe(p,a){const m=p.maxAlm||{};if(m[a]!=null&&m[a]!=='')return +m[a]||0;if(!Object.keys(m).length&&a===(p.almoxId||''))return +p.maximo||0;return 0;}
+function v152ReposItens(a){const sm=almSaldosMap(),mp=sm.get(a)||new Map(),out=[];
+  S.prod.forEach(p=>{if(p.inativo||p.ativo===false)return;const mn=v152MinDe(p,a);if(!(mn>0))return;const sd=+(mp.get(p.id)||0),mx=v152MaxDe(p,a);if(!(sd<mn))return;
+    const q=r3((mx>mn?mx:mn)-sd);if(q>0)out.push({prodId:p.id,desc:p.nome,un:p.un||'UN',qtd:q,saldo:sd,min:mn,max:mx||null});});
+  return out.sort((x,y)=>String(x.desc).localeCompare(String(y.desc)));}
+function v152PodeCriarSc(){if(!mayW('comp'))return false;try{if(typeof p2PodeGravar==='function'&&p2PodeGravar('sc',null,{id:'novo',status:'rascunho'},false))return false;if(typeof pfnPodeGravar==='function'&&pfnPodeGravar('sc',null,false))return false;}catch(e){}return true;}
+A.v152Repor=d=>{if(!v152PodeCriarSc()){toast('Seu perfil não cria solicitação de compra.','neg');return;}
+  const als=almoxAtivos();if(!als.length){toast('Cadastre um almoxarifado antes (Estoque › Almoxarifados).','neg');return;}
+  const cont=als.map(a=>({a,n:v152ReposItens(a.id).length})),pri=(cont.find(x=>x.n)||cont[0]).a.id;
+  modal({title:'Gerar solicitação de reposição',nofocus:true,saveLabel:'Gerar solicitação',
+    body:'<p class="sub" style="margin:0 0 8px">Itens abaixo do estoque mínimo do almoxarifado escolhido. A quantidade sugerida é o mínimo menos o saldo (ou até o máximo, quando o produto tiver).</p>'+
+      field('Almoxarifado','v152Alm','select',pri,{opts:cont.map(x=>[x.a.id,x.a.nome+' ('+x.n+' item(ns) abaixo do mínimo)'])})+'<div id="v152RepPrev" style="margin-top:10px">'+v152RepPrev(pri)+'</div>',
+    save:()=>{const a=($('#f_v152Alm')||{}).value||pri,its=v152ReposItens(a);if(!its.length){toast('Nenhum item abaixo do mínimo neste almoxarifado.','neg');return false;}
+      setTimeout(()=>{A.scNovo();Object.assign(scd,{tipo:'repos',almoxId:a,projId:'',etapaId:'',localEntrega:v152AlmTxt(a),obs:'Reposição de estoque mínimo ('+almNome(a)+')',itens:its.map(i=>({prodId:i.prodId,desc:i.desc,un:i.un,qtd:i.qtd,k:uid()}))});v152ScRedesenha();},60);}});};
+function v152RepPrev(a){const its=v152ReposItens(a),ab=S.sc.filter(s=>s.tipo==='repos'&&s.almoxId===a&&['rascunho','aprovacao','enviada','cotacao'].includes(s.status));
+  return (ab.length?'<div class="note" style="margin:0 0 8px">Já existe solicitação de reposição aberta para este almoxarifado: '+ab.map(s=>'nº '+esc(s.numero)+' ('+esc((SC_ST[s.status]||[s.status])[0])+')').join(', ')+'. Confira para não pedir duas vezes.</div>':'')+
+    (its.length?'<div class="tw"><table style="min-width:0;width:100%"><thead><tr><th>Produto</th><th class="num">Saldo</th><th class="num">Mínimo</th><th class="num">Sugerido</th></tr></thead><tbody>'+its.map(i=>'<tr><td>'+esc(i.desc)+'</td><td class="num">'+fmtQ(i.saldo)+'</td><td class="num">'+fmtQ(i.min)+(i.max?' / máx. '+fmtQ(i.max):'')+'</td><td class="num"><b>'+fmtQ(i.qtd)+' '+esc(i.un)+'</b></td></tr>').join('')+'</tbody></table></div>':'<div class="empty">Nenhum item abaixo do mínimo neste almoxarifado.</div>');}
+document.addEventListener('change',e=>{const t=e.target;if(t&&t.id==='f_v152Alm'){const b=$('#v152RepPrev');if(b)b.innerHTML=v152RepPrev(t.value);}});
+ACT_GROUP.v152Repor=null;
+{const v0=V.est;V.est=function(){let h=v0.apply(this,arguments);if(!v152PodeCriarSc())return h;const b='<button class="btn" data-act="v152Repor">Gerar solicitação de reposição</button>',k='<button class="btn" data-act="exportEst">';
+  return h.includes(k)?h.replace(k,b+k):h.replace('<div class="acts">','<div class="acts">'+b);};}
+
+/* ---------- 8. Almoxarife: cria, altera o próprio rascunho e envia SC (não aprova, não exclui) ---------- */
+if(PERFIS.almoxarife&&!PERFIS.almoxarife.custom){const p=PERFIS.almoxarife;
+  p.campos=Object.assign({},p.campos||{});p.campos.sc=v152Uniq((p.campos.sc||[]).concat(['status','sepId','sepPend','reenviadaId']));
+  p.camposProprio=Object.assign({},p.camposProprio||{},{sc:['rascunho']});
+  p.padFn=Object.assign({},p.padFn||{});p.padFn.comp=Object.assign({},p.padFn.comp||{},{sc:'a'});
+  if(p.desc&&!/solicitação de compra de reposição/.test(p.desc))p.desc+=' Cria e envia solicitação de compra de reposição de estoque e administrativa (não aprova).';
+  try{U3_BASE_=null;}catch(e){}}
+/* a regra do navegador igual à do servidor (regraFina › compras152.proprio) */
+{const g0=p2PodeGravar;p2PodeGravar=function(col,velho,novo,exclui){const m=g0.apply(this,arguments);if(!m||exclui||me.owner)return m;
+  const d=p2Def(me.perfil),l=d&&d.camposProprio&&d.camposProprio[col];if(!Array.isArray(l)||!d.campos||!d.campos[col])return m;
+  const ok=!velho?l.includes(String((novo&&novo.status)||'rascunho')):(velho.crBy===actorId()&&l.includes(String(velho.status||'')));if(!ok)return m;
+  const c=d.campos;d.campos=Object.assign({},c);delete d.campos[col];try{return g0.apply(this,arguments);}finally{d.campos=c;}};}
+try{if(typeof PFN_LIM_K!=='undefined'&&!PFN_LIM_K.includes('camposProprio'))PFN_LIM_K.push('camposProprio');
+  {const s0=pfnSanLim;pfnSanLim=function(l){const out=s0.apply(this,arguments);try{if(l&&l.camposProprio&&typeof l.camposProprio==='object'&&out.campos){const m={};Object.keys(l.camposProprio).forEach(c=>{const v=l.camposProprio[c];if(out.campos[c]&&Array.isArray(v)){const x=v.filter(s=>typeof s==='string'&&/^[a-z]{2,20}$/.test(s));if(x.length)m[c]=x;}});if(Object.keys(m).length)out.camposProprio=m;}}catch(e){}return out;};}
+  {const l0=pfnLimTexto;pfnLimTexto=function(p){const t=l0.apply(this,arguments);try{if(p&&p.camposProprio)Object.keys(p.camposProprio).forEach(c=>t.push((COL_NOME[c]||c)+': cria e altera as próprias em '+p.camposProprio[c].join(', ')+'.'));}catch(e){}return t;};}}catch(e){}
+
+/* ---------- 9. telas responsivas (Pedidos de compra, Solicitações, Cotações, Separação, Notas de entrada) ---------- */
+try{if(!document.getElementById('css_v152')){const st=document.createElement('style');st.id='css_v152';st.textContent=
+  'table.v152t{min-width:0!important;width:100%}'+
+  '.v152t td.act,.v152t td.rowacts2{white-space:normal!important;min-width:0!important;max-width:none!important;width:15rem;text-align:right}'+
+  '.v152t td.act>.btn,.v152t td.rowacts2>.btn{margin:2px 0 2px 4px}.v152t td.act .btn+.btn{margin-left:4px}'+
+  '.v152t th,.v152t td{word-break:normal;overflow-wrap:anywhere}.v152t td.mono,.v152t td.num{overflow-wrap:normal}'+
+  '.v152t .v152dt{white-space:nowrap}.v152t .v152dt .sub{white-space:nowrap}'+
+  '@media (max-width:1500px){.v152t th,.v152t td{padding-left:8px;padding-right:8px}}'+
+  '@media (max-width:900px){.v152tw{overflow:visible!important;border:0!important;background:transparent!important}'+
+    'table.v152t,table.v152t>tbody{display:block;width:100%}table.v152t>thead{display:none}'+
+    'table.v152t>tbody>tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--surface)}'+
+    'table.v152t>tbody>tr>td{display:block;padding:0!important;border:0!important;text-align:left!important;min-width:0!important;width:auto!important;white-space:normal!important}'+
+    'table.v152t>tbody>tr>td[colspan]{grid-column:1/-1}'+
+    'table.v152t>tbody>tr>td[data-l]:not(:empty)::before{content:attr(data-l);display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}'+
+    'table.v152t>tbody>tr>td.v152c1{grid-column:1/-1;font-weight:600}table.v152t>tbody>tr>td .pill{white-space:normal;max-width:100%}'+
+    'table.v152t>tbody>tr>td.act,table.v152t>tbody>tr>td.rowacts2{grid-column:1/-1;border-top:1px solid var(--line)!important;padding-top:8px!important;display:flex;flex-wrap:wrap;gap:6px;max-width:none!important}'+
+    'table.v152t>tbody>tr>td.act>.btn,table.v152t>tbody>tr>td.rowacts2>.btn{margin:0!important}}'+
+  '@media (max-width:640px){#who{flex-wrap:wrap;max-width:100%;min-width:0;row-gap:6px}#who .tools{flex-wrap:wrap;max-width:100%}.top-in{flex-wrap:wrap}}';
+  document.head.appendChild(st);}}catch(e){}
+/* Pedidos de compra: Data, Previsão e Necessidade numa coluna "Datas" */
+const V152_JUNTA={ped:{de:['Data','Previsão','Necessidade'],nome:'Datas',rot:['Pedido','Previsão','Necessidade']}};
+function v152Resp(h,tab){if(typeof h!=='string')return h;const i=h.indexOf('<div class="tw"><table');if(i<0)return h;
+  const ti=h.indexOf('<table',i),te=h.indexOf('>',ti),fim=h.indexOf('</table>',te);if(fim<0)return h;
+  let tb=h.slice(ti,fim);const th0=tb.indexOf('<thead>'),th1=tb.indexOf('</thead>');if(th0<0||th1<0)return h;
+  let head=tb.slice(th0,th1);const ths=head.match(/<th\b[^>]*>[\s\S]*?<\/th>/g)||[],lab=ths.map(x=>x.replace(/<[^>]+>/g,'').trim());
+  const J=V152_JUNTA[tab],ix=J?J.de.map(n=>lab.indexOf(n)):null,junta=!!J&&ix.every(k=>k>=0)&&ix.every((k,n)=>!n||k>ix[n-1]);
+  let novoLab=lab.slice();
+  if(junta){const ths2=ths.slice();ths2[ix[0]]='<th>'+J.nome+'</th>';for(let n=ix.length-1;n>0;n--)ths2.splice(ix[n],1);head=head.replace(ths.join(''),ths2.join(''));novoLab=ths2.map(x=>x.replace(/<[^>]+>/g,'').trim());}
+  let body=tb.slice(th1);
+  body=body.replace(/<tr\b[\s\S]*?<\/tr>/g,tr=>{const {ab,cs}=v152Cells(tr);if(cs.length!==lab.length)return tr;let c2=cs.slice();
+    if(junta){const tx=ix.map(k=>cs[k].replace(/^<td\b[^>]*>/,'').replace(/<\/td>$/,''));
+      c2[ix[0]]='<td class="v152dt">'+tx.map((t,n)=>t&&t.replace(/<[^>]+>/g,'').trim()&&t.replace(/<[^>]+>/g,'').trim()!=='—'?(n?'<div class="sub">'+J.rot[n]+' ':'<div>')+t+'</div>':'').join('')+'</td>';
+      for(let n=ix.length-1;n>0;n--)c2.splice(ix[n],1);}
+    c2=c2.map((c,k)=>{const l=novoLab[k];if(!l||/class="(act|rowacts2)/.test(c.slice(0,c.indexOf('>'))))return c;return c.replace(/^<td\b/,'<td data-l="'+esc(l)+'"'+(k===0?' data-c1="1"':''));});
+    return ab+c2.join('')+'</tr>';});
+  tb=tb.slice(0,th0).replace(/^<table\b([^>]*)>/,(m,at)=>/class="/.test(at)?'<table'+at.replace('class="','class="v152t v152t-'+tab+' ')+'>':'<table class="v152t v152t-'+tab+'"'+at+'>')+head+body;
+  return h.slice(0,i)+'<div class="tw v152tw">'+tb+h.slice(fim);}
+/* primeira célula do cartão (o número) ocupa a linha inteira */
+try{const st=document.getElementById('css_v152');if(st)st.textContent+='@media (max-width:900px){table.v152t>tbody>tr>td[data-c1]{grid-column:1/-1;font-weight:600}}';}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='151.2',APP_DATA='2026-11-04';
+const APP_VER='152',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['152','2026-11-04',['Solicitação recusada ganhou Corrigir e reenviar: cria uma nova já preenchida, com o motivo da recusa no topo, ligada à recusada.', 'Solicitações e pedidos aguardando aprovação mostram quem precisa aprovar (com o nível da alçada no pedido) e há quanto tempo; o botão Pedir aprovação avisa o aprovador no chat e por e-mail e copia a mensagem para o WhatsApp (um lembrete a cada 2 horas).', 'Almoxarife pode criar solicitação de compra de Reposição de estoque e Administrativa (sem obra); no Estoque, Gerar solicitação de reposição com os itens abaixo do mínimo.', 'Pedidos de compra, Solicitações, Cotações, Separação e Notas de entrada se ajustam à largura da tela: botões sempre visíveis e, no celular, cada linha vira um cartão.']],
   ['151.2','2026-11-04',['Treinamentos: a tela de cada passo agora cabe na janela, com a explicação e os botões à vista sem rolar. Novo botão Aproximar do destaque, que amplia a área a clicar; Tela cheia abre a imagem inteira.']],
   ['151.1','2026-11-04',['Ao entrar no sistema, cada pessoa abre direto no painel do próprio setor (o Almoxarife e o Comprador no Painel de Suprimentos). Antes, o Almoxarife caía em Pedidos de venda.']],
   ['151','2026-11-04',['Treinamentos do sistema: cursos passo a passo dentro do próprio ERP, com as telas do sistema, perguntas no fim de cada capítulo e certificado ao concluir. O primeiro é a Escola do Almoxarifado, que aparece no painel de Suprimentos e em Minha área › Cursos do sistema.', 'O progresso fica salvo por pessoa. Em Sistema › Treinamentos o administrador escolhe quais perfis fazem cada curso e acompanha quem concluiu e quantas perguntas acertou.']],
