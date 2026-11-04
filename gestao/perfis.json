@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-04T20:27:59.065Z",
+ "gerado": "2026-11-04T21:56:57.728Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1627,6 +1627,9 @@
   "acvc": [
    "ctr"
   ],
+  "epihig": [
+   "sst"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -2097,6 +2100,9 @@
   ],
   "acvc": [
    "ctr"
+  ],
+  "epihig": [
+   "sst"
   ],
   "ctremp": [
    "proj",
@@ -2834,6 +2840,9 @@
     "epi",
     "func",
     "prod"
+   ],
+   "epihig": [
+    "epihig"
    ],
    "ppp": [
     "ppp"

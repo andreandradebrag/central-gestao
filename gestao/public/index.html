@@ -309,7 +309,7 @@ const digits=s=>String(s||'').replace(/\D/g,'');
 
 const CATS_REC=['Venda de produtos','Prestação de serviços','Contratos recorrentes','Outras receitas'];
 const CATS_DESP=['Compra de mercadorias e insumos','Folha e encargos','Aluguel e condomínio','Impostos e taxas','Energia, água e internet','Serviços de terceiros','Frete e logística','Marketing e vendas','Despesas bancárias','Outras despesas'];
-const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano','cat','recor','extrato','ped','psv','sc','sep','cot','etapa','func','rhdoc','epi','veic','vsai','vabas','vman','ferr','fmov','fman','almox','nfse','ctbfech','jornada','feriado','ponto','pajuste','cipa','cipam','cipar','cipaa','acid','proc','procp','riscoia','usrreq','lgpdreq','lgpdinc','lgpdc','lixo','reun','rdo','rmesf','ctr','med','opp','hab','eqc','pmoc','os','multa','fvs','nc','trec','gar','pgr','pte','obrig','fechm','arq','transp','implog','ferias','fpag','afast','adm','dpmov','desl','esoc','psicamp','psr','rel','dpsol','rsreq','vaga','cand','cap','rom','intra','eap','idxbal','sstv','bhlanc','hht','trein','treinc','epica','fapac','vrota','vfrete','rda','integ','pgrdoc','sstdoc','ppp','insp','ambdoc','ambres','ambforn','ambind','isochk','procd','procl','pa'];
+const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano','cat','recor','extrato','ped','psv','sc','sep','cot','etapa','func','rhdoc','epi','veic','vsai','vabas','vman','ferr','fmov','fman','almox','nfse','ctbfech','jornada','feriado','ponto','pajuste','cipa','cipam','cipar','cipaa','acid','proc','procp','riscoia','usrreq','lgpdreq','lgpdinc','lgpdc','lixo','reun','rdo','rmesf','ctr','med','opp','hab','eqc','pmoc','os','multa','fvs','nc','trec','gar','pgr','pte','obrig','fechm','arq','transp','implog','ferias','fpag','afast','adm','dpmov','desl','esoc','psicamp','psr','rel','dpsol','rsreq','vaga','cand','cap','rom','intra','eap','idxbal','sstv','bhlanc','hht','trein','treinc','epica','fapac','vrota','vfrete','rda','integ','pgrdoc','sstdoc','ppp','insp','ambdoc','ambres','ambforn','ambind','isochk','procd','procl','pa','epihig'];
 
 /* ===== estado e persistência ===== */
 const S={},IDX={};COLS.forEach(c=>{S[c]=[];IDX[c]=new Map();});
@@ -850,17 +850,7 @@ A.exportFluxo=()=>{
 };
 
 /* --- estoque --- */
-V.est=()=>{
-  const q=ui.est.q.toLowerCase(),st=stockAll(),smL=almSaldosMap();
-  const rows=S.prod.filter(p=>!q||((p.nome||'')+' '+(p.sku||'')+' '+prodLocTxt(p,smL)).toLowerCase().includes(q)).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
-  const total=sum(S.prod,p=>st.of(p.id).valor);
-  return pageHead('Estoque','Saldo e custo médio móvel por produto. Notas fiscais efetivadas movimentam o estoque sozinhas.','<button class="btn" data-act="exportEst">Exportar CSV</button><button class="btn pri" data-act="novoProd">Novo produto</button>')+
-  '<div class="stack"><div class="kpis">'+kpi('Produtos',String(S.prod.length),'cadastrados')+kpi('Valor em estoque',money(total),'ao custo médio')+kpi('No mínimo ou abaixo',String(S.prod.filter(stockLow).length),'',S.prod.filter(stockLow).length?'neg':'')+'</div>'+
-  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_est" data-filter="est.q" value="'+esc(ui.est.q)+'" placeholder="Nome, SKU, almoxarifado ou prateleira"></label></div>'+
-  '<div class="tw"><table><thead><tr><th>SKU</th><th>Produto</th><th>Localização</th><th>NCM</th><th class="num">Saldo</th><th class="num">Custo médio</th><th class="num">Valor</th><th class="num">Mínimo</th><th>Situação</th><th></th></tr></thead><tbody>'+
-  (rows.length?limRows('est',rows).map(p=>{const s=st.of(p.id);return '<tr><td class="mono">'+esc(p.sku||'—')+'</td><td>'+esc(p.nome)+'</td><td>'+prodLocHtml(p,smL)+'</td><td class="mono">'+esc(p.ncm||'—')+'</td><td class="num">'+fmtQ(s.saldo)+' '+esc(p.un||'')+'</td><td class="num">'+money(s.custo)+'</td><td class="num">'+money(s.valor)+'</td><td class="num">'+fmtQ(p.minimo)+'</td><td>'+(s.saldo<=0?pill('Zerado','neg'):stockLow(p)?pill('Baixo','warn'):pill('Ok','pos'))+'</td><td class="act"><button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="entrada">Entrada</button><button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="saida">Saída</button><button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="ajuste">Ajuste</button><button class="btn sm" data-act="histProd" data-id="'+p.id+'">Histórico</button><button class="btn sm" data-act="editProd" data-id="'+p.id+'">Editar</button></td></tr>';}).join(''):emptyRow(10,'Nenhum produto cadastrado.'))+
-  limMais('est',rows,10)+'</tbody></table></div></div>';
-};
+V.est=()=>v154EstView(); /* v154: índice, família e Mostrar mais (new_v154.js) */
 A.novoProd=()=>prodForm({});
 A.editProd=d=>{const p=get('prod',d.id);if(p)prodForm(p);};
 A.mov=d=>{
@@ -30198,9 +30188,360 @@ try{if(!document.getElementById('css_v153')){const st=document.createElement('st
     return j>0?h.slice(0,j)+kb+h.slice(j):h.slice(0,i+k.length)+kb+h.slice(i+k.length);}catch(e){return h;}};}
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v153Abrir:'Abre o documento na tela dele.',v153Mais:'Mostra todos os cartões desta coluna.',v153Transferir:'Abre um romaneio de transferência entre almoxarifados com o que falta.'});
 
+/* =====================================================================================================================
+   v154 (relatorios/feito_v154.md): busca rápida no Estoque, coluna e filtro de Família, entrega de EPI pelo cadastro de
+   produtos com baixa automática, devolução/troca de EPI e higienização no almoxarifado de Tuiuti.
+   1. Busca: o campo espera ~300 ms depois da última tecla (Enter busca na hora) sem perder o foco nem o cursor (Estoque,
+      Produtos, Produtos inativos, Notas, Pedidos de compra e NFs recebidas). O Estoque usa um índice já normalizado
+      (sem acento, minúsculas: código, descrição, família, NCM, prateleira, almoxarifados, EAN, marca e código do produto no
+      fornecedor, das notas de entrada), refeito só quando os dados mudam (memo), e mostra 100 linhas com "Mostrar mais".
+   2. Família: a do cadastro de produtos (campo "Família de produto", p.familia). Coluna e filtro no Estoque.
+   3. EPI: produto da família EPI (nome configurável em Configurações › EPI; também vale a marca antiga "é EPI" p.epi),
+      com Nº do CA, validade do CA e tamanho no cadastro. Nova entrega escolhe o produto com saldo no almoxarifado
+      ("Meu almoxarifado" por padrão) e grava entrega + saída do estoque juntas (servidor: POST /api/epi/entrega,
+      deploy/gestao/epi154.js). Devolução: em condição de uso → higienização (não volta direto ao estoque); descarte → só
+      na ficha; troca = devolução + nova entrega no mesmo ato.
+   4. Higienização (tela nova, CIPA e SST e Suprimentos): aguardando envio → romaneio de transferência para o almoxarifado
+      de higienização → em higienização → higienizado (entrada no estoque, marcada "higienizado") ou reprovado (descarte).
+   5. Migração única: produtos marcados como EPI sem família passam à família EPI; nomes de EPI digitados nas entregas sem
+      produto viram produto da família EPI (saldo zero). Relatório guardado em cfg.empresa.epi154Mig.
+   ===================================================================================================================== */
+const V154={deb:null,pend:{},cap:null,sel:new Set(),hig:{st:'abertos',alm:undefined,q:''}};
+const v154N=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const v154Srv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV();
+
+/* ---------- 1. busca com espera (debounce) ---------- */
+const V154_DEB=new Set(['est.q','cadprod.q','prodinat.q','nf.q','ped.q','nfrec.q']);
+const V154_ESPERA=300;
+function v154Aplica(path,val){clearTimeout(V154.deb);V154.deb=null;if(path==='est.q'&&ui.est)ui.est.lim=100;setFilter(path,val);}
+function v154Digita(t){const path=t.dataset.filter;const p=path.split('.');if(ui[p[0]])ui[p[0]][p[1]]=t.value;
+  clearTimeout(V154.deb);V154.deb=setTimeout(()=>v154Aplica(path,t.value),V154_ESPERA);}
+document.addEventListener('input',e=>{const t=e.target;if(!t||!t.dataset||!V154_DEB.has(t.dataset.filter)||t.tagName==='SELECT')return;
+  e.stopImmediatePropagation();v154Digita(t);},true);
+document.addEventListener('keydown',e=>{const t=e.target;if(e.key!=='Enter'||!t||!t.dataset||!V154_DEB.has(t.dataset.filter))return;e.preventDefault();v154Aplica(t.dataset.filter,t.value);},true);
+{const sf0=setFilter;setFilter=function(path){if(path==='est.fam'&&ui.est)ui.est.lim=100;return sf0.apply(this,arguments);};}
+
+/* ---------- 2. Estoque: índice, família e "Mostrar mais" ---------- */
+ui.est.fam=ui.est.fam||'';ui.est.lim=ui.est.lim||100;
+const V154_SEM_FAM='__sem';
+function v154Sm(){return memo.v154sm||(memo.v154sm=almSaldosMap());}
+function v154EstIdx(){if(memo.v154est)return memo.v154est;const sm=v154Sm(),forn=new Map(),pratAlm=new Map();
+  S.notas.forEach(n=>{if(n.tipo!=='entrada'||n.status==='cancelada')return;(n.itens||[]).forEach(i=>{if(i.prodId&&i.sku){if(!forn.has(i.prodId))forn.set(i.prodId,new Set());forn.get(i.prodId).add(i.sku);}});});
+  S.mov.forEach(m=>{if(m.prateleira&&m.prodId){if(!pratAlm.has(m.prodId))pratAlm.set(m.prodId,new Set());pratAlm.get(m.prodId).add(m.prateleira);}});
+  const rows=S.prod.map(p=>{const locs=[];sm.forEach((mp,a)=>{if(a&&Math.abs(mp.get(p.id)||0)>1e-9)locs.push(aiNomeAlm(a));});
+    const k=v154N([p.sku,p.nome,p.familia,p.ncm,p.prateleira,p.almoxId?aiNomeAlm(p.almoxId):'',locs.join(' '),[...(pratAlm.get(p.id)||[])].join(' '),[...(forn.get(p.id)||[])].join(' '),p.ean,p.marca,p.ca?'ca '+p.ca:''].filter(Boolean).join(' | '));
+    return {p,k,fam:String(p.familia||'').trim()};}).sort((a,b)=>String(a.p.nome||'').localeCompare(String(b.p.nome||'')));
+  const fams=[...new Set(rows.map(r=>r.fam).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  return memo.v154est={rows,fams};}
+function v154EstFiltra(q,fam){const ix=v154EstIdx(),ts=v154N(q).split(' ').filter(Boolean),fk=fam===V154_SEM_FAM?'':fam;
+  return ix.rows.filter(r=>(!fam||(fam===V154_SEM_FAM?!r.fam:r.fam===fk))&&ts.every(t=>r.k.includes(t))).map(r=>r.p);}
+function v154EstView(){
+  const st=stockAll(),smL=v154Sm(),f=ui.est,ix=v154EstIdx(),rows=v154EstFiltra(f.q,f.fam),lim=f.lim||100;
+  const kp=memo.v154kp||(memo.v154kp={total:sum(S.prod,p=>st.of(p.id).valor),low:S.prod.filter(stockLow).length});
+  return pageHead('Estoque','Saldo e custo médio móvel por produto. Notas fiscais efetivadas movimentam o estoque sozinhas.','<button class="btn" data-act="exportEst">Exportar CSV</button><button class="btn pri" data-act="novoProd">Novo produto</button>')+
+  '<div class="stack"><div class="kpis">'+kpi('Produtos',String(S.prod.length),'cadastrados')+kpi('Valor em estoque',money(kp.total),'ao custo médio')+kpi('No mínimo ou abaixo',String(kp.low),'',kp.low?'neg':'')+'</div>'+
+  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_est" data-filter="est.q" value="'+esc(f.q)+'" placeholder="Código, descrição, família, NCM, prateleira, almoxarifado ou código do fornecedor" autocomplete="off" enterkeyhint="search"></label>'+
+  '<label class="f"><span>Família</span><select id="f_est_fam" data-filter="est.fam">'+opt([['','Todas as famílias']].concat(ix.fams.map(x=>[x,x]),[[V154_SEM_FAM,'(sem família)']]),f.fam)+'</select></label></div>'+
+  '<p class="sub" id="v154EstTot" style="margin:0">'+rows.length.toLocaleString('pt-BR')+' produto(s) encontrado(s)'+(rows.length>lim?' · mostrando os primeiros '+lim.toLocaleString('pt-BR'):'')+'</p>'+
+  '<div class="tw"><table><thead><tr><th>SKU</th><th>Produto</th><th>Família</th><th>Localização</th><th>NCM</th><th class="num">Saldo</th><th class="num">Custo médio</th><th class="num">Valor</th><th class="num">Mínimo</th><th>Situação</th><th></th></tr></thead><tbody>'+
+  (rows.length?rows.slice(0,lim).map(p=>{const s=st.of(p.id);return '<tr><td class="mono">'+esc(p.sku||'—')+'</td><td>'+esc(p.nome)+(v154EhEpi(p)&&(p.ca||p.tam)?'<div class="sub">'+esc([p.tam?'Tam. '+p.tam:'',p.ca?'CA '+p.ca:''].filter(Boolean).join(' · '))+'</div>':'')+'</td><td class="sub">'+esc(p.familia||'—')+'</td><td>'+prodLocHtml(p,smL)+'</td><td class="mono">'+esc(p.ncm||'—')+'</td><td class="num">'+fmtQ(s.saldo)+' '+esc(p.un||'')+'</td><td class="num">'+money(s.custo)+'</td><td class="num">'+money(s.valor)+'</td><td class="num">'+fmtQ(p.minimo)+'</td><td>'+(s.saldo<=0?pill('Zerado','neg'):stockLow(p)?pill('Baixo','warn'):pill('Ok','pos'))+'</td><td class="act"><button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="entrada">Entrada</button><button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="saida">Saída</button><button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="ajuste">Ajuste</button><button class="btn sm" data-act="histProd" data-id="'+p.id+'">Histórico</button><button class="btn sm" data-act="editProd" data-id="'+p.id+'">Editar</button></td></tr>';}).join(''):emptyRow(11,S.prod.length?'Nada encontrado com essa busca ou família.':'Nenhum produto cadastrado.'))+
+  (rows.length>lim?'<tr><td colspan="11" style="text-align:center"><button class="btn sm" data-act="v154EstMais">Mostrar mais '+Math.min(100,rows.length-lim)+' (faltam '+(rows.length-lim).toLocaleString('pt-BR')+' de '+rows.length.toLocaleString('pt-BR')+')</button></td></tr>':'')+'</tbody></table></div></div>';}
+A.v154EstMais=()=>{ui.est.lim=(ui.est.lim||100)+100;render();};ACT_GROUP.v154EstMais=null;
+{const e0=A.exportEst;A.exportEst=()=>{const st=stockAll(),smL=v154Sm(),rows=[['SKU','Produto','Família','Localização','Unidade','NCM','Saldo','Custo médio','Valor em estoque','Mínimo']];
+  v154EstFiltra(ui.est.q,ui.est.fam).forEach(p=>{const s=st.of(p.id);rows.push([p.sku||'',p.nome,p.familia||'',prodLocTxt(p,smL),p.un||'',p.ncm||'',s.saldo,s.custo,s.valor,+p.minimo||0]);});saveFile('estoque.csv',csv(rows));};}
+
+/* ---------- 3. família EPI e configuração ---------- */
+const V154_FAM_PAD='EPI';
+const v154Fam=()=>String((cfg()||{}).epiFamilia||'').trim()||V154_FAM_PAD;
+function v154EhFamEpi(f){const k=v154N(f);return !!k&&(k===v154N(v154Fam())||/^epis?$/.test(k)||/^equipamentos? de protecao individual$/.test(k));}
+const v154EhEpi=p=>!!p&&(p.epi===true||v154EhFamEpi(p.familia));
+/* RH e SST registram EPI mas não leem o cadastro de produtos nem os almoxarifados: no servidor próprio recebem só o necessário
+   (GET /api/epi/estoque: almoxarifados ativos e produtos da família EPI com o saldo de cada almoxarifado) */
+const v154LeProd=()=>!v154Srv()||me.owner||mayR('est')||mayR('comp');
+const v154Cache=()=>!v154LeProd()&&V154.est?V154.est:null;
+async function v154Carrega(forca){if(v154LeProd())return null;if(V154.est&&!forca&&Date.now()-V154.est.em<60000)return V154.est;
+  if(V154.estP)return V154.estP;V154.estP=segaPost('/api/epi/estoque',null,'GET').then(j=>{V154.est=Object.assign(j,{em:Date.now()});return V154.est;},()=>V154.est||null).finally(()=>{V154.estP=null;});return V154.estP;}
+async function v154Garante(fn){if(!v154LeProd()&&!(V154.est&&Date.now()-V154.est.em<60000))await v154Carrega(true);return fn();}
+const v154EpiProds=()=>{const c=v154Cache();return (c?c.prods.slice():S.prod.filter(v154EhEpi)).sort(byNome);};
+const v154Prod=id=>{if(!id)return null;const p=get('prod',id);if(p)return p;const c=v154Cache();return c?c.prods.find(x=>x.id===id)||null:null;};
+const v154Als=()=>{const c=v154Cache();return c?c.almox:v153AlmAtivos();};
+const v154AlmNm=id=>{if(!id)return '';const n=almNome(id);if(n)return n;const c=v154Cache();const a=c&&c.almox.find(x=>x.id===id);return a?a.nome:'';};
+/* almoxarifado de higienização: o configurado; senão o principal de Tuiuti; senão um de Tuiuti; senão o único ativo (igual ao servidor) */
+function v154AlmHig(){const cc=v154Cache();if(cc)return cc.almHig||'';const c=cfg()||{},als=(S.almox||[]).filter(a=>a&&a.ativo!==false);if(c.epiHigAlmox&&als.some(a=>a.id===c.epiHigAlmox))return c.epiHigAlmox;
+  const tu=als.filter(a=>v154N(a.cidade)==='tuiuti'),p=tu.find(a=>a.principal===true)||tu[0];if(p)return p.id;return als.length===1?als[0].id:'';}
+function v154Saldo(pid,alm){const c=v154Cache();if(c){const p=c.prods.find(x=>x.id===pid);return p?(+(p.saldos||{})[alm||'']||0):0;}if(!alm&&!(S.almox||[]).some(a=>a.ativo!==false))return stockAll().of(pid).saldo;const m=v154Sm().get(alm||'');return m?(m.get(pid)||0):0;}
+const v154AlmOpts=()=>v154Als().slice().sort(byNome).map(a=>[a.id,a.nome]);
+const v154Meus=()=>{const u=actorId();return v154Als().filter(a=>u&&(a.respUid===u||a.substUid===u)).map(a=>a.id);};
+function v154AlmPadrao(fid){const meus=v154Meus();if(meus.length)return meus[0];const f=fid?get('func',fid):null;const o=f&&f.projId&&typeof v153AlmoxObra==='function'?v153AlmoxObra(f.projId):'';if(o)return o;const as=v154Als();return as.length===1?as[0].id:'';}
+function v154ProdLbl(p,sd){const vc=p.caVal&&p.caVal<todayStr();return p.nome+(p.tam?' · tam. '+p.tam:'')+(p.ca?' · CA '+p.ca+(p.caVal?(vc?' (CA VENCIDO)':' (val. '+fmtDate(p.caVal)+')'):''):' · sem CA')+(sd!=null?' · saldo '+fmtQ(sd)+' '+(p.un||''):'');}
+function v154EpiOpts(alm,inclui){return v154EpiProds().map(p=>[p,v154Saldo(p.id,alm)]).filter(x=>x[1]>1e-9||x[0].id===inclui).map(x=>[x[0].id,v154ProdLbl(x[0],x[1])]);}
+
+/* cadastro de produtos: Nº do CA, validade do CA e tamanho (aparecem quando a família é EPI) */
+{const pf0=prodFicha;prodFicha=function(){const m0=modal;modal=function(o){try{if(o&&typeof o.body==='string'&&o.body.indexOf('id="f_familia"')>=0&&o.body.indexOf('id="v154EpiBox"')<0&&typeof PF!=='undefined'&&PF.p){const p=PF.p,vis=v154EhEpi(p);
+    const box='<div class="fg" id="v154EpiBox" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:8px'+(vis?'':';display:none')+'"><div class="sect" style="grid-column:1/-1;margin:0">EPI (família '+esc(v154Fam())+')</div>'+field('Nº do CA (Certificado de Aprovação)','ca','text',p.ca||'',{ph:'Ex.: 31469'})+field('Validade do CA','caVal','date',p.caVal||'')+field('Tamanho / variação','tam','text',p.tam||'',{ph:'Ex.: G, 42, único'})+field('Vida útil prevista (dias)','vidaEpi','number',p.vidaEpi||'')+'</div>';
+    o=Object.assign({},o,{body:o.body.replace('<div class="pf-def">',box+'<div class="pf-def">')});}}catch(e){}return m0.call(this,o);};try{return pf0.apply(this,arguments);}finally{modal=m0;}};}
+document.addEventListener('input',e=>{const t=e.target;if(!t||t.id!=='f_familia')return;const b=document.getElementById('v154EpiBox');if(b&&b.style)b.style.display=v154EhFamEpi(t.value)||(typeof PF!=='undefined'&&PF.p&&PF.p.epi===true)?'':'none';});
+
+/* ---------- 4. Controle de EPI: estoque (produtos da família EPI) e migração ---------- */
+function v154EpiTop(){const ps=v154EpiProds(),st=stockAll(),w=mayW('est'),c=cfg()||{},adm=me.owner||me.perfil==='admin';
+  const low=v154Cache()?[]:ps.filter(p=>stockLow(p)),mig=c.epi154Mig;
+  const migH=!mig&&adm?'<div class="note" style="margin:0 0 10px"><b>Unificar o estoque de EPI com o cadastro de produtos (uma vez).</b> Produtos marcados como EPI passam para a família '+esc(v154Fam())+' e os EPI digitados nas entregas sem produto viram produtos dessa família. <button class="btn sm pri" data-act="v154MigVer">Ver o que muda e unificar</button></div>':'';
+  if(!ui.epi.estAberto)return migH+'<div class="card" style="padding:10px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b>Estoque de EPI</b><span class="sub">'+ps.length+' produto(s) da família '+esc(v154Fam())+(low.length?' · <span class="neg">'+low.length+' abaixo do mínimo</span>':'')+(mig?' · unificado em '+fmtDate(new Date(mig.em).toISOString().slice(0,10)):'')+'</span><span style="flex:1"></span>'+(mig?'<button class="btn sm" data-act="v154MigVer">Relatório da unificação</button>':'')+'<button class="btn sm" data-act="epiEstToggle">Ver o estoque de EPI</button></div>';
+  const cc=v154Cache(),sm=cc?null:v154Sm(),als=v154Als(),stOf=id=>{if(!cc)return st.of(id);const x=cc.prods.find(y=>y.id===id);return {saldo:x?Object.values(x.saldos||{}).reduce((a,b)=>a+(+b||0),0):0};},baixo=p=>(+p.minimo||0)>0&&stOf(p.id).saldo<=+p.minimo;
+  return migH+'<div class="card"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Estoque de EPI</h2><span class="sub">produtos da família '+esc(v154Fam())+' no cadastro</span><span style="flex:1"></span>'+(w?'<button class="btn sm" data-act="epiEstNovo">Cadastrar EPI</button><button class="btn sm" data-act="epiEstMarcar">Colocar produto na família EPI</button>':'')+'<button class="btn sm" data-act="epiEstToggle">Fechar</button></div>'+
+    '<div class="tw" style="border:0;margin-top:8px"><table style="min-width:820px"><thead><tr><th>EPI</th><th>Tam.</th><th>CA</th><th class="num">Saldo total</th><th>Por almoxarifado</th><th class="num">Mínimo</th><th class="num">Entregue (30 dias)</th><th>Situação</th><th></th></tr></thead><tbody>'+
+    (ps.length?ps.map(p=>{const s=stOf(p.id),e30=sum(S.mov.filter(m=>m.prodId===p.id&&m.tipo==='saida'&&m.epiId&&dTo(m.data)>=-30),m=>+m.qtd||0);const pa=als.map(a=>{const q=cc?v154Saldo(p.id,a.id):((sm.get(a.id)||new Map()).get(p.id)||0);return Math.abs(q)>1e-9?esc(a.nome)+': '+fmtQ(q):'';}).filter(Boolean).join('<br>');const vc=p.caVal&&p.caVal<todayStr();
+      return '<tr><td>'+esc(p.nome)+(p.sku?'<div class="sub">'+esc(p.sku)+'</div>':'')+'</td><td>'+esc(p.tam||'—')+'</td><td class="mono">'+esc(p.ca||'—')+(p.caVal?'<div>'+(vc?pill('vencido '+fmtDate(p.caVal),'neg'):'<span class="sub">val. '+fmtDate(p.caVal)+'</span>')+'</div>':'')+'</td><td class="num">'+fmtQ(s.saldo)+' '+esc(p.un||'')+'</td><td class="sub">'+(pa||'—')+'</td><td class="num">'+fmtQ(p.minimo||0)+'</td><td class="num">'+fmtQ(e30)+'</td><td>'+(s.saldo<=0?pill('Zerado','neg'):baixo(p)?pill('Comprar','warn'):pill('Ok','pos'))+'</td><td class="act">'+(w&&!cc?'<button class="btn sm" data-act="mov" data-id="'+p.id+'" data-tipo="entrada">Entrada</button><button class="btn sm" data-act="editProd" data-id="'+p.id+'">Editar</button><button class="btn sm" data-act="epiEstTirar" data-id="'+p.id+'">Não é EPI</button>':'')+'</td></tr>';}).join(''):emptyRow(9,'Nenhum produto da família '+esc(v154Fam())+'. Cadastre o EPI como produto (família '+esc(v154Fam())+') e dê entrada no estoque.'))+'</tbody></table></div><p class="sub" style="margin:6px 0 0">A entrega de EPI escolhe o produto com saldo no almoxarifado e dá baixa sozinha. A devolução em condição de uso vai para a higienização; só volta ao estoque depois de higienizada.</p></div>';}
+MODS2.epi.top=v154EpiTop;
+A.epiEstNovo=()=>modal({title:'Cadastrar EPI (produto da família '+v154Fam()+')',body:'<div class="fg">'+field('Nome do EPI *','nome','text','',{full:true,ph:'Ex.: Luva de vaqueta, Capacete classe B'})+field('Código (SKU)','sku','text','')+field('Nº do CA','ca','text','')+field('Validade do CA','caVal','date','')+field('Tamanho / variação','tam','text','')+field('Unidade','un','text','PAR')+field('Estoque mínimo','minimo','number',0)+field('Custo de referência (R$)','custoPadrao','number',0)+'</div>',saveLabel:'Cadastrar',
+  save:root=>{const v=readForm(root);if(!v.nome){toast('Informe o nome.','neg');return false;}if(v.sku&&S.prod.some(x=>x.sku===v.sku)){toast('Já existe um produto com o código '+v.sku+'.','neg');return false;}
+    put('prod',{id:uid(),nome:v.nome,sku:v.sku||'',ca:v.ca||'',caVal:v.caVal||'',tam:v.tam||'',un:v.un||'UN',minimo:+v.minimo||0,custoPadrao:+v.custoPadrao||0,preco:0,ncm:'',familia:v154Fam(),epi:true});toast('EPI cadastrado na família '+v154Fam()+'. Dê entrada no estoque.','pos');}});
+A.epiEstMarcar=()=>{const ps=S.prod.filter(p=>!v154EhEpi(p)).sort(byNome).slice(0,8000).map(p=>[p.id,(p.sku?p.sku+' · ':'')+p.nome+(p.familia?' ('+p.familia+')':'')]);
+  modal({title:'Colocar produto na família '+v154Fam(),body:'<div class="fg">'+field('Buscar','q','text','',{full:true,ph:'Ex.: luva, bota, capacete'})+field('Produto','prodId','select','',{opts:ps,blank:'Selecione…',full:true})+field('Nº do CA','ca','text','')+field('Validade do CA','caVal','date','')+'</div><p class="sub">A família do produto passa a ser '+esc(v154Fam())+'.</p>',saveLabel:'Colocar na família EPI',
+    save:root=>{const v=readForm(root),p=get('prod',v.prodId);if(!p){toast('Escolha o produto.','neg');return false;}put('prod',Object.assign(cl(p),{epi:true,familia:v154Fam(),ca:v.ca||p.ca||'',caVal:v.caVal||p.caVal||''}));toast('Produto colocado na família '+v154Fam()+'.','pos');}});
+  if(typeof romFiltro==='function')romFiltro('#f_q','#f_prodId');};
+A.epiEstTirar=d=>{const p=get('prod',d.id);if(p)put('prod',Object.assign(cl(p),{epi:false,familia:v154EhFamEpi(p.familia)?'':p.familia||''}));};
+
+/* migração única (igual ao servidor: epi154.js › plano) */
+function v154Hash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h*33)^s.charCodeAt(i))>>>0;return h.toString(36);}
+function v154MigPlano(prods,epis,fam){const ehF=f=>{const k=v154N(f);return !!k&&(k===v154N(fam)||/^epis?$/.test(k)||/^equipamentos? de protecao individual$/.test(k));};
+  const marcar=prods.filter(p=>p.epi===true&&!ehF(p.familia)&&!String(p.familia||'').trim()).map(p=>({id:p.id,nome:p.nome||''}));
+  const outra=prods.filter(p=>p.epi===true&&!ehF(p.familia)&&String(p.familia||'').trim()).map(p=>({id:p.id,nome:p.nome||'',familia:p.familia}));
+  const nomes=new Set(prods.map(p=>v154N(p.nome))),criar=new Map();
+  epis.slice().sort((a,b)=>String(b.entrega||'').localeCompare(String(a.entrega||''))).forEach(e=>{if(e.prodId)return;const k=v154N(e.item);if(!k||nomes.has(k)||criar.has(k))return;
+    criar.set(k,{id:'epi154_'+v154Hash(k),nome:String(e.item).trim(),familia:fam,epi:true,ca:e.ca||'',caVal:e.caVal||'',un:'UN',minimo:0,preco:0,ncm:'',migV154:true});});
+  return {marcar,outra,criar:[...criar.values()]};}
+const V154_MIG_SALDO='Os saldos ficaram como estavam: o estoque de EPI já era o saldo do produto no cadastro. Os produtos criados começam com saldo zero (antes eram só o nome digitado na entrega).';
+function v154MigRelHtml(r){const l=(t,a)=>'<p style="margin:8px 0 2px"><b>'+t+' ('+a.length+')</b></p>'+(a.length?'<ul style="margin:0;padding-left:18px">'+a.slice(0,200).map(x=>'<li>'+esc(x)+'</li>').join('')+(a.length>200?'<li>… e mais '+(a.length-200)+'</li>':'')+'</ul>':'<p class="sub" style="margin:0">Nenhum.</p>');
+  return l('Produtos marcados como EPI que passam para a família '+(r.familia||v154Fam()),r.marcados)+l('Produtos marcados como EPI com outra família (continuam EPI pela marcação)',r.outraFamilia)+l('Produtos criados na família '+(r.familia||v154Fam())+' a partir das entregas',r.criados)+'<p class="sub">'+esc(r.saldo||V154_MIG_SALDO)+'</p>';}
+A.v154MigVer=()=>{const c=cfg()||{};if(c.epi154Mig){modal({title:'Unificação do estoque de EPI (feita em '+fmtDT(c.epi154Mig.em)+')',body:v154MigRelHtml(c.epi154Mig),foot:'<button class="btn pri" data-act="closeModal">Fechar</button>'});return;}
+  const pl=v154MigPlano(S.prod,S.epi,v154Fam()),rel={familia:v154Fam(),marcados:pl.marcar.map(x=>x.nome),outraFamilia:pl.outra.map(x=>x.nome+' ('+x.familia+')'),criados:pl.criar.map(x=>x.nome),saldo:V154_MIG_SALDO};
+  modal({title:'Unificar o estoque de EPI com o cadastro de produtos',body:'<p style="margin:0">A família usada é <b>'+esc(v154Fam())+'</b> (Configurações › EPI). A unificação é feita uma vez só e não duplica produtos. O histórico das fichas, assinaturas e trocas não muda.</p>'+v154MigRelHtml(rel),saveLabel:'Unificar agora',save:()=>{v154Migrar();}});};
+async function v154Migrar(){if(v154Srv()){try{const j=await segaPost('/api/epi/migrar',{});(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));toast(j.ja?'A unificação já tinha sido feita.':'Estoque de EPI unificado: '+(j.rel.criados.length)+' produto(s) criado(s), '+j.rel.marcados.length+' na família EPI.','pos');render();}catch(e){toast('A unificação não foi feita: '+e.message,'neg');}return;}
+  const c=cfg()||{};if(c.epi154Mig){toast('A unificação já tinha sido feita.');return;}const fam=v154Fam(),pl=v154MigPlano(S.prod,S.epi,fam);
+  pl.marcar.forEach(m=>{const p=get('prod',m.id);if(p)put('prod',Object.assign(cl(p),{familia:fam}));});pl.criar.forEach(n=>{if(!get('prod',n.id))put('prod',n);});
+  const rel={em:Date.now(),por:actorId(),familia:fam,marcados:pl.marcar.map(x=>x.nome),outraFamilia:pl.outra.map(x=>x.nome+' ('+x.familia+')'),criados:pl.criar.map(x=>x.nome),saldo:V154_MIG_SALDO};
+  put('cfg',Object.assign({},cfg(),{id:'empresa',epi154Mig:rel}));toast('Estoque de EPI unificado: '+rel.criados.length+' produto(s) criado(s), '+rel.marcados.length+' na família EPI.','pos');}
+Object.assign(ACT_GROUP,{v154MigVer:null});
+
+/* ---------- 5. Nova entrega: produto da família EPI com saldo no almoxarifado; baixa junto com a entrega ---------- */
+{const d=MODS2.epi,f0=d.fields,v0=d.validate,p0=d.pre,a0=d.after;
+  d.fields=r=>{const novo=!get('epi',r.id);let fs=f0(r).filter(f=>f.k!=='prodId'&&f.k!=='devolucao');
+    fs=fs.map(f=>f.k==='item'?Object.assign({},f,{req:!novo,l:novo?'Descrição na ficha (vem do produto)':'EPI'}):f);
+    if(novo){const alm=r.almoxId!==undefined?r.almoxId:(r.almoxId=v154AlmPadrao(r.funcId)),als=v154AlmOpts();
+      const extra=(als.length?[F('almoxId','Almoxarifado de onde sai o EPI','select',{o:als,blank:alm?null:'Selecione…'})]:[]).concat([F('prodId','EPI do cadastro de produtos (família '+v154Fam()+', com saldo)','select',{req:true,o:()=>v154EpiOpts(r.almoxId,r.prodId),blank:'Selecione…',full:true})]);
+      const i=fs.findIndex(f=>f.k==='funcId');fs.splice(i+1,0,...extra);}
+    return fs;};
+  d.fnote=(d.fnote||'')+'<span id="v154EpiForm" class="sub" style="display:block;margin-top:6px">A lista mostra os produtos da família '+esc(v154Fam())+' com saldo no almoxarifado escolhido (saldo, tamanho e CA). Ao salvar, a saída do estoque é registrada junto com a entrega, para a obra do colaborador.</span>';
+  d.validate=(r,isNew)=>{if(isNew){const p=v154Prod(r.prodId);
+      if(!p)return 'Escolha o EPI no cadastro de produtos (família '+v154Fam()+'). Sem saldo? Dê entrada no estoque.';
+      if(!v154EhEpi(p))return 'O produto escolhido não é da família '+v154Fam()+'.';
+      if(v154Als().length&&!r.almoxId)return 'Escolha o almoxarifado de onde sai o EPI.';
+      if(!r.item)r.item=p.nome;if(!r.ca&&p.ca)r.ca=p.ca;if(!r.caVal&&p.caVal)r.caVal=p.caVal;if(!r.tam&&p.tam)r.tam=p.tam;if((r.vida===''||r.vida==null)&&p.vidaEpi)r.vida=p.vidaEpi;
+      const q=+r.qtd||0;if(!(q>0))return 'Informe a quantidade.';const sd=v154Saldo(p.id,r.almoxId);
+      if(sd-q<-1e-9)return 'Sem saldo de '+p.nome+(r.almoxId?' no '+v154AlmNm(r.almoxId):'')+': saldo '+fmtQ(sd)+', pedido '+fmtQ(q)+'. Dê entrada no estoque ou escolha outro almoxarifado.';}
+    else{const o=get('epi',r.id)||{};if(o.movId&&(String(o.prodId||'')!==String(r.prodId||'')||(+o.qtd||1)!==(+r.qtd||1)||String(o.almoxId||'')!==String(r.almoxId||'')))return 'A entrega já deu baixa no estoque: produto, quantidade e almoxarifado não mudam. Use Devolução e registre outra entrega.';}
+    return v0?v0(r,isNew):'';};
+  d.pre=(r,isNew)=>{if(p0)p0(r,isNew);if(isNew&&r.prodId){r.qtd=+r.qtd||1;r.movId='epimv_'+r.id;V154.nova=r.id;if(v154Srv())V154.cap='epi/'+r.id;}};
+  d.after=(r,isNew)=>{V154.cap=null;const nova=isNew&&V154.nova===r.id;V154.nova=null;if(a0)a0(r,isNew);if(!nova)return;
+    const f=get('func',r.funcId),mov={id:r.movId,data:r.entrega||todayStr(),prodId:r.prodId,tipo:'saida',qtd:+r.qtd||1,custoUnit:0,projId:f&&f.projId||'',almoxId:r.almoxId||'',epiId:r.id,funcId:r.funcId,obs:'Entrega de EPI a '+(f?f.nome:'')};
+    if(v154Srv()){segaLocal('mov',mov);v154EnviaEntrega(r.id,mov.id);return;}
+    put('mov',mov);const sd=v154Saldo(r.prodId,r.almoxId);toast('Baixa de '+fmtQ(+r.qtd||1)+' no estoque'+(r.almoxId?' do '+v154AlmNm(r.almoxId):'')+'. Saldo: '+fmtQ(sd)+'.','pos');};}
+{const p0=persist;persist=function(col,rec,isDel){if(V154.cap&&rec&&col+'/'+rec.id===V154.cap&&!isDel)return;return p0.apply(this,arguments);};}
+const v154Limpa=e=>cl(e);
+function v154EnviaEntrega(id,movId){const e=get('epi',id);if(!e)return;
+  const pr=segaPost('/api/epi/entrega',{epi:v154Limpa(e)}).then(j=>{(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));if(!v154LeProd())v154Carrega(true).then(()=>render());const x=get('epi',id);toast('Entrega registrada. Baixa de '+fmtQ(+((x||e).qtd)||1)+' no estoque. Saldo: '+fmtQ(v154Saldo(e.prodId,e.almoxId))+'.','pos');render();},
+    er=>{segaTira('epi',id);segaTira('mov',movId);if($('#sigPad'))closeModal();msgModal('A entrega de EPI não foi registrada',[er.message,'Nada foi gravado: a ficha e o estoque continuam como estavam.']);render();});
+  V154.pend[id]=pr.catch(()=>{}).then(()=>{delete V154.pend[id];});return pr;}
+/* a assinatura na tela espera a entrega chegar ao servidor */
+{const s0=segaPost;segaPost=function(url,body){if(url==='/api/epi/assinar'&&body&&V154.pend[body.id]){const a=arguments,t=this;return V154.pend[body.id].then(()=>{if(!get('epi',body.id))throw new Error('A entrega não foi registrada.');return s0.apply(t,a);});}return s0.apply(this,arguments);};}
+/* formulário: troca de almoxarifado refaz a lista; produto escolhido preenche descrição, CA, validade e tamanho */
+document.addEventListener('change',e=>{const t=e.target;if(!t||!document.getElementById('v154EpiForm'))return;
+  if(t.id==='f_almoxId'){const sel=$('#f_prodId');if(!sel)return;const cur=sel.value;sel.innerHTML=opt(v154EpiOpts(t.value,''),cur,'Selecione…');const m=$('#v154EpiSaldo');if(m)m.remove&&m.remove();}
+  if(t.id==='f_prodId'){const p=v154Prod(t.value);if(!p)return;const set=(k,v,forca)=>{const el=$('#mb [data-f="'+k+'"]');if(el&&v!=null&&v!==''&&(forca||!el.value||el.dataset.v154))el.value=v,el.dataset.v154='1';};
+    set('item',p.nome,true);set('ca',p.ca||'',true);set('caVal',p.caVal||'',true);set('tam',p.tam||'');if(p.vidaEpi)set('vida',p.vidaEpi);
+    if(p.ca&&typeof epiCaInfo==='function'){const i=epiCaInfo(p.ca);if(i)epiCaPreenche(Object.assign({},i,{validade:p.caVal||i.validade}),false);}}});
+Object.assign(FLABEL,{almoxId:'Almoxarifado',prodId:'Produto (EPI)'});
+
+/* ---------- 6. devolução e troca ---------- */
+const V154_MOT=[['desgaste','Desgaste'],['dano','Dano'],['tamanho','Tamanho'],['ca','Vencimento do CA'],['desligamento','Desligamento'],['fim','Fim da obra ou da atividade'],['outro','Outro']];
+const V154_DESC=[['danificado','Danificado'],['vencido','Vencido (CA ou vida útil)'],['contaminado','Contaminado'],['outro','Outro']];
+const v154MotNome=k=>(V154_MOT.find(x=>x[0]===k)||[k,k||''])[1];
+A.epiDev=x=>{const e=get('epi',x.id);if(!e)return;if(e.devolucao){toast('Esta entrega já tem devolução registrada.');return;}
+  const als=v154AlmOpts(),alm=v154AlmPadrao(e.funcId)||e.almoxId||'',semProd=!e.prodId,ah=v154AlmHig(),almNome=v154AlmNm;
+  modal({title:'Devolução ou troca de EPI',wide:true,body:'<p style="margin:0 0 10px"><b>'+esc(funcNome(e.funcId))+'</b> devolve '+fmtQ(+e.qtd||1)+' × '+esc(e.item)+(e.tam?' (tam. '+esc(e.tam)+')':'')+(e.ca?' · CA '+esc(e.ca):'')+', entregue em '+fmtDate(e.entrega)+'.</p><div class="fg" id="v154DevForm">'+
+    field('Data da devolução','data','date',todayStr())+field('Motivo','motivo','select','desgaste',{opts:V154_MOT})+
+    field('Condição do EPI devolvido','cond','select','uso',{opts:[['uso','Em condição de uso (vai para a higienização em '+(ah?almNome(ah):'Tuiuti')+')'],['descarte','Descarte (danificado, vencido ou contaminado)']],full:true})+
+    field('Motivo do descarte','descMotivo','select','danificado',{opts:V154_DESC})+(als.length?field('Almoxarifado onde foi devolvido','almoxDev','select',alm,{opts:als}):'')+
+    (semProd?field('Produto do cadastro (para voltar ao estoque depois de higienizado)','prodIdDev','select','',{opts:v154EpiProds().map(p=>[p.id,v154ProdLbl(p)]),blank:'Escolher depois',full:true}):'')+
+    field('Troca: entregar outro EPI agora (no mesmo ato)','troca','checkbox',false,{full:true})+
+    '<div id="v154Troca" class="fg" style="grid-column:1/-1;display:none">'+field('Novo EPI (com saldo no almoxarifado)','trProd','select',e.prodId||'',{opts:v154EpiOpts(alm,''),blank:'Selecione…',full:true})+field('Quantidade','trQtd','number',+e.qtd||1)+field('Tamanho','trTam','text',e.tam||'')+'</div>'+
+    field('Observação','obs','text','',{full:true})+'</div><p class="sub" style="margin:8px 0 0">Em condição de uso o EPI não volta direto ao estoque: fica aguardando a higienização (tela Higienização de EPI). No descarte, a baixa é definitiva e fica registrada na ficha.</p>',
+    saveLabel:'Confirmar',save:root=>{const v=readForm(root);if(!v.data){toast('Informe a data.','neg');return false;}if(v.data<e.entrega){toast('A devolução não pode ser anterior à entrega.','neg');return false;}
+      const b={id:e.id,data:v.data,cond:v.cond,motivo:v154MotNome(v.motivo),descMotivo:v.cond==='descarte'?(V154_DESC.find(x=>x[0]===v.descMotivo)||[0,v.descMotivo])[1]:'',almoxDev:v.almoxDev||'',prodId:v.prodIdDev||'',obs:v.obs||'',troca:null};
+      if(v.troca){const p=v154Prod(v.trProd),q=+v.trQtd||1;if(!p){toast('Escolha o novo EPI.','neg');return false;}const sd=v154Saldo(p.id,b.almoxDev);if(sd-q<-1e-9){toast('Sem saldo de '+p.nome+(b.almoxDev?' no '+almNome(b.almoxDev):'')+' (saldo '+fmtQ(sd)+').','neg');return false;}
+        if(p.caVal&&p.caVal<v.data){toast('O CA do novo EPI está vencido.','neg');return false;}
+        const nid=uid(),vida=e.vida||p.vidaEpi||'';b.troca={epi:Object.assign(MODS2.epi.blank(),{id:nid,funcId:e.funcId,prodId:p.id,item:p.nome,tam:v.trTam||p.tam||'',ca:p.ca||'',caVal:p.caVal||'',entrega:v.data,qtd:q,vida,troca:+vida>0?addDays(v.data,Math.round(+vida)):'',almoxId:b.almoxDev,obs:'Troca ('+b.motivo+') da entrega de '+fmtDate(e.entrega),movId:'epimv_'+nid})};}
+      v154Devolver(b);}});
+  const tg=()=>{const c=$('#f_troca'),bx=$('#v154Troca');if(bx&&bx.style)bx.style.display=c&&c.checked?'':'none';const cd=$('#f_cond'),dm=$('#f_descMotivo');if(cd&&dm&&dm.closest){const l=dm.closest('label');if(l&&l.style)l.style.display=cd.value==='descarte'?'':'none';}};
+  const ft=$('#f_troca'),fc=$('#f_cond'),fa=$('#f_almoxDev');if(ft&&ft.addEventListener)ft.addEventListener('change',tg);if(fc&&fc.addEventListener)fc.addEventListener('change',tg);
+  if(fa&&fa.addEventListener)fa.addEventListener('change',()=>{const s=$('#f_trProd');if(s)s.innerHTML=opt(v154EpiOpts(fa.value,''),s.value,'Selecione…');});tg();};
+/* aplica a devolução (sem servidor próprio: aqui mesmo; com servidor: POST /api/epi/devolucao, tudo numa transação) */
+function v154DevMonta(b){const e=get('epi',b.id),ts=Date.now(),ah=v154AlmHig(),als=v154Als(),alm=b.almoxDev||e.almoxId||'',out=[];
+  const n=Object.assign(cl(e),{devolucao:b.data,devCond:b.cond,devDestino:b.cond==='uso'?'higien':'descarte',devMotivo:b.motivo,devDescMotivo:b.descMotivo||'',devAlmox:alm,devPor:actorId(),devEm:ts,
+    obs:[e.obs,'Devolução em '+fmtDate(b.data)+': '+(b.cond==='uso'?'em condição de uso, enviada para higienização':'descarte ('+b.descMotivo+')')+(b.motivo?' · motivo: '+b.motivo:'')+(b.obs?' · '+b.obs:'')].filter(Boolean).join(' · ')});
+  if(b.cond==='uso'){const hid='hg_'+e.id,st=(!als.length||!ah||alm===ah)?'hig':'aguardando';n.higId=hid;
+    out.push(['epihig',{id:hid,epiId:e.id,funcId:e.funcId||'',prodId:e.prodId||b.prodId||'',item:e.item||'',tam:e.tam||'',ca:e.ca||'',caVal:e.caVal||'',qtd:+e.qtd||1,devData:b.data,motivo:b.motivo,almoxDev:alm,almoxHig:ah,almoxAtual:alm,st,passos:[{st,em:ts,por:actorId(),obs:'Devolvido em condição de uso'}],cr:ts,crBy:actorId()}]);}
+  if(b.troca){n.trocaId=b.troca.epi.id;const t=Object.assign(cl(b.troca.epi),{trocaDe:e.id,trocaMotivo:b.motivo}),f=get('func',e.funcId);out.push(['epi',t]);
+    out.push(['mov',{id:t.movId,data:t.entrega,prodId:t.prodId,tipo:'saida',qtd:+t.qtd||1,custoUnit:0,projId:f&&f.projId||'',almoxId:t.almoxId||'',epiId:t.id,funcId:e.funcId,obs:'Entrega de EPI a '+(f?f.nome:'')}]);}
+  out.unshift(['epi',n]);return out;}
+async function v154Devolver(b){const e=get('epi',b.id),docs=v154DevMonta(b),ah=v154AlmHig();
+  const fim=()=>{toast(b.cond==='uso'?'Devolução registrada: o EPI vai para a higienização'+(ah?' em '+v154AlmNm(ah):'')+'.':'Devolução registrada: EPI descartado.','pos');
+    if(b.cond==='uso')try{const ds=v153Dest(ah,[]);ds.forEach(u=>avisoChat(u,'EPI devolvido em condição de uso para higienizar: '+e.item+(e.tam?' tam. '+e.tam:'')+' de '+funcNome(e.funcId)+' ('+(v154AlmNm(b.almoxDev)||'almoxarifado')+'). Veja Higienização de EPI.'));}catch(er){}
+    if(b.troca&&RHX().epiAssinarAoSalvar)setTimeout(()=>{if(get('epi',b.troca.epi.id))A.epiAssinar({id:b.troca.epi.id});},120);render();};
+  if(v154Srv()){try{const j=await segaPost('/api/epi/devolucao',b);(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));if(!v154LeProd())await v154Carrega(true);fim();}catch(er){msgModal('A devolução não foi registrada',[er.message,'Nada foi gravado: a ficha e o estoque continuam como estavam.']);}return;}
+  docs.forEach(([c,r])=>put(c,r));fim();}
+Object.assign(ACT_GROUP,{epiDev:'sst'});
+/* ficha NR-6: a coluna Devolução mostra o destino (higienização, descarte, troca) */
+function v154DestTxt(e){if(!e.devolucao)return '';const h=e.higId?get('epihig',e.higId):null;
+  return fmtDate(e.devolucao)+' · '+(e.devCond==='descarte'?'descarte'+(e.devDescMotivo?' ('+e.devDescMotivo+')':''):e.devCond==='uso'?'higienização'+(h?': '+(V154_ST[h.st]||[h.st])[0].toLowerCase():''):e.devDestino==='estoque'||e.devDestino==='higien'?'voltou ao estoque':e.devDestino==='descarte'?'descarte':'')+(e.devMotivo?' · '+e.devMotivo:'')+(e.trocaId?' · trocado':'');}
+{const fd0=epiFichaDoc;epiFichaDoc=function(fid,de,ate){const o=fd0.apply(this,arguments);try{const es=S.epi.filter(e=>e.funcId===fid&&(!de||e.entrega>=de)&&(!ate||e.entrega<=ate)).sort((a,b)=>String(a.entrega).localeCompare(String(b.entrega)));
+  const t=o.tables&&o.tables[0];if(t){const k=t.head.indexOf('Devolução');if(k>=0)t.rows=t.rows.map((r,i)=>{const e=es[i];if(e&&e.devolucao){r=r.slice();r[k]=v154DestTxt(e);}return r;});}}catch(e){}return o;};}
+/* lista do Controle de EPI: situação com o destino da devolução */
+{const d=MODS2.epi;d.cols=d.cols.map(c=>c[0]==='Situação'?['Situação',r=>c[1](r)+(r.devolucao&&r.devCond?'<div class="sub">'+esc(v154DestTxt(r))+'</div>':'')]:c);
+  const ra=d.rowActs;d.rowActs=r=>(ra?ra(r):'').replace('>Devolução</button>','>Devolução ou troca</button>');}
+
+/* ---------- 7. higienização ---------- */
+const V154_ST={aguardando:['Aguardando envio','warn'],transito:['Em trânsito','acc'],hig:['Em higienização','acc'],ok:['Higienizado e retornado','pos'],reprovado:['Reprovado (descarte)','neg']};
+const v154Dias=h=>{const ini=h.devData||'';const fim=h.st==='ok'?(h.higData||''):h.st==='reprovado'?(h.repData||''):todayStr();return ini?Math.max(0,-dTo(ini)+(fim===todayStr()?0:dTo(fim))):0;};
+function v154PodeHig(alm){if(me.owner||me.perfil==='admin')return true;const a=alm?(get('almox',alm)||v154Als().find(x=>x.id===alm)):null,r=a?[a.respUid,a.substUid].filter(Boolean):[];if(r.length)return r.includes(actorId());return mayW('est');}
+function v154HigLinhas(){const f=V154.hig,meus=v154Meus(),almNome=v154AlmNm;if(f.alm===undefined)f.alm=meus.length?'meu':'';const q=v154N(f.q);
+  return S.epihig.filter(h=>{if(f.st==='abertos'?!['aguardando','transito','hig'].includes(h.st):f.st&&h.st!==f.st)return false;
+    if(f.alm==='meu'){if(!meus.includes(h.almoxAtual)&&!meus.includes(h.almoxHig))return false;}else if(f.alm&&h.almoxAtual!==f.alm&&h.almoxHig!==f.alm)return false;
+    return !q||v154N([funcNome(h.funcId),h.item,h.tam,h.ca,almNome(h.almoxAtual)].join(' ')).includes(q);}).sort((a,b)=>String(a.devData).localeCompare(String(b.devData)));}
+function v154HigKpis(){const L=S.epihig,ab=L.filter(h=>['aguardando','transito','hig'].includes(h.st)),ok=L.filter(h=>h.st==='ok'),rep=L.filter(h=>h.st==='reprovado'),ym0=todayStr().slice(0,7);
+  const tm=ok.length?Math.round(sum(ok,h=>v154Dias(h))/ok.length):null,desc=S.epi.filter(e=>e.devCond==='descarte');
+  const conc=ok.length+rep.length+desc.length,descMes=desc.filter(e=>String(e.devolucao).slice(0,7)===ym0).length+rep.filter(h=>String(h.repData||'').slice(0,7)===ym0).length;
+  return {ab:sum(ab,h=>+h.qtd||1),tm,pct:conc?Math.round(ok.length*100/conc):null,descMes,ag:ab.filter(h=>h.st==='aguardando').length,tr:ab.filter(h=>h.st==='transito').length,hg:ab.filter(h=>h.st==='hig').length};}
+V.epihig=()=>{if(!v154LeProd()&&!V154.est&&!V154.estP)v154Carrega().then(x=>{if(x)render();});const f=V154.hig,L=v154HigLinhas(),k=v154HigKpis(),ah=v154AlmHig(),meus=v154Meus(),almNome=v154AlmNm;
+  const alOpts=(meus.length?[['meu','Meu almoxarifado']]:[]).concat(v154AlmOpts());
+  const rom=id=>{const r=id?get('rom',id):null;return r?'romaneio nº '+r.numero+' ('+((typeof ROM_ST!=='undefined'&&ROM_ST[r.status])?ROM_ST[r.status][0]:r.status)+')':'';};
+  return pageHead('Higienização de EPI','EPI devolvido em condição de uso: enviado ao almoxarifado de higienização'+(ah?' ('+almNome(ah)+')':'')+', higienizado e devolvido ao estoque, ou reprovado e descartado.','<button class="btn" data-act="v154HigCsv">Exportar CSV</button><button class="btn" data-act="v154HigPdf">PDF</button>')+
+  '<div class="stack"><div class="kpis">'+kpi('Itens em higienização',String(k.ab),k.ag+' aguardando envio · '+k.tr+' em trânsito · '+k.hg+' em higienização')+kpi('Tempo médio',k.tm==null?'—':k.tm+' dia(s)','da devolução à volta ao estoque')+kpi('Reaproveitado',k.pct==null?'—':k.pct+'%','higienizados ÷ (higienizados + reprovados + descartados na devolução)')+kpi('Descartes no mês',String(k.descMes),'na devolução ou reprovados',k.descMes?'warn':'')+'</div>'+
+  (ah?'':'<div class="note">Defina o almoxarifado de higienização em Configurações › EPI (padrão: o principal de Tuiuti).</div>')+
+  '<div class="bar"><label class="f"><span>Situação</span><select data-v154h="st">'+opt([['abertos','Em aberto (aguardando, trânsito, higienização)'],['','Todas']].concat(Object.keys(V154_ST).map(x=>[x,V154_ST[x][0]])),f.st)+'</select></label><label class="f"><span>Almoxarifado</span><select data-v154h="alm">'+opt([['','Todos']].concat(alOpts),f.alm)+'</select></label><label class="f grow"><span>Buscar</span><input data-v154h="q" id="v154HigQ" value="'+esc(f.q)+'" placeholder="Colaborador, EPI, tamanho ou CA"></label></div>'+
+  '<div class="acts" style="flex-wrap:wrap;justify-content:flex-start"><button class="btn" data-act="v154HigAcao" data-a="enviar">Enviar selecionados para higienização</button><button class="btn" data-act="v154HigAcao" data-a="receber">Confirmar chegada</button><button class="btn pri" data-act="v154HigAcao" data-a="higienizado">Marcar higienizados</button><button class="btn dng" data-act="v154HigAcao" data-a="reprovado">Reprovar (descarte)</button><span class="sub" style="align-self:center">'+V154.sel.size+' selecionado(s)</span></div>'+
+  '<div class="tw"><table style="min-width:980px"><thead><tr><th><input type="checkbox" data-v154all="1" aria-label="Selecionar todos"></th><th>Colaborador</th><th>EPI</th><th>Tam.</th><th>CA</th><th>Devolução</th><th class="num">Dias</th><th>Almoxarifado</th><th>Situação</th></tr></thead><tbody>'+
+  (L.length?L.map(h=>'<tr><td><input type="checkbox" data-v154sel="'+esc(h.id)+'"'+(V154.sel.has(h.id)?' checked':'')+(['ok','reprovado'].includes(h.st)?' disabled':'')+' aria-label="Selecionar"></td><td>'+esc(funcNome(h.funcId))+'</td><td>'+esc(h.item)+(+h.qtd>1?' × '+fmtQ(h.qtd):'')+(h.prodId?'':'<div class="sub warn">sem produto no cadastro</div>')+'</td><td>'+esc(h.tam||'—')+'</td><td class="mono">'+esc(h.ca||'—')+'</td><td class="mono">'+fmtDate(h.devData)+(h.motivo?'<div class="sub">'+esc(h.motivo)+'</div>':'')+'</td><td class="num">'+v154Dias(h)+'</td><td>'+esc(almNome(h.almoxAtual)||'—')+(h.almoxHig&&h.almoxHig!==h.almoxAtual?'<div class="sub">→ '+esc(almNome(h.almoxHig))+'</div>':'')+'</td><td>'+pill((V154_ST[h.st]||[h.st])[0],(V154_ST[h.st]||[0,''])[1])+(h.romId?'<div class="sub">'+esc(rom(h.romId))+'</div>':'')+(h.st==='reprovado'&&h.motivoRep?'<div class="sub">'+esc(h.motivoRep)+'</div>':'')+(h.st==='ok'&&h.higData?'<div class="sub">em '+fmtDate(h.higData)+'</div>':'')+'</td></tr>').join(''):emptyRow(9,'Nenhum EPI nesta situação.'))+'</tbody></table></div></div>';};
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset)return;if(t.dataset.v154h&&t.tagName==='SELECT'){V154.hig[t.dataset.v154h]=t.value;V154.sel.clear();render();return;}
+  if(t.dataset.v154sel){if(t.checked)V154.sel.add(t.dataset.v154sel);else V154.sel.delete(t.dataset.v154sel);const s=document.querySelector('#view .acts .sub');if(s)s.textContent=V154.sel.size+' selecionado(s)';return;}
+  if(t.dataset.v154all){v154HigLinhas().forEach(h=>{if(['ok','reprovado'].includes(h.st))return;if(t.checked)V154.sel.add(h.id);else V154.sel.delete(h.id);});render();}});
+document.addEventListener('input',e=>{const t=e.target;if(!t||!t.dataset||t.dataset.v154h!=='q')return;V154.hig.q=t.value;clearTimeout(V154.hq);V154.hq=setTimeout(render,V154_ESPERA);});
+/* ações (sem servidor próprio: aqui mesmo; com servidor: POST /api/epihig) */
+function v154HigMonta(acao,hs,o){const ts=Date.now(),data=o.data||todayStr(),out=[],passo=(h,st,x)=>Object.assign(cl(h),x||{},{st,passos:(h.passos||[]).concat([{st,em:ts,por:actorId(),data,obs:(x&&x.motivoRep)||o.obs||''}])});
+  if(acao==='enviar'){const r=o.rom;out.push(['rom',r]);hs.forEach(h=>out.push(['epihig',passo(h,'transito',{romId:r.id,almoxHig:r.destAlmoxId})]));}
+  else hs.forEach(h=>{if(acao==='receber')out.push(['epihig',passo(h,'hig',{almoxAtual:h.almoxHig,recEm:ts,recPor:actorId()})]);
+    else if(acao==='higienizado'){const pid=h.prodId||(o.prodIds||{})[h.id]||'',mid='hgmv_'+h.id;out.push(['epihig',passo(h,'ok',{prodId:pid,higEm:ts,higPor:actorId(),higData:data,higObs:o.obs||'',movId:mid})]);
+      out.push(['mov',{id:mid,data,prodId:pid,tipo:'ajuste',qtd:+h.qtd||1,custoUnit:0,projId:'',almoxId:h.almoxHig,epiId:h.epiId,higId:h.id,higienizado:true,obs:'EPI higienizado (usado), devolvido por '+funcNome(h.funcId)+(o.obs?' · '+o.obs:'')}]);}
+    else out.push(['epihig',passo(h,'reprovado',{repEm:ts,repPor:actorId(),repData:data,motivoRep:o.motivo})]);});
+  if(acao==='receber'){const rec=new Set(hs.map(h=>h.id));[...new Set(hs.map(h=>h.romId).filter(Boolean))].forEach(rid=>{const ro=get('rom',rid);if(!ro||['entregue','divergencia','cancelado'].includes(ro.status))return;
+    if((ro.epiHig||[]).every(x=>rec.has(x)||(get('epihig',x)||{}).st!=='transito'))out.push(['rom',Object.assign(cl(ro),{status:'entregue',entregueEm:data,recebidoPor:nameOf?nameOf(actorId()):'',obs:[ro.obs,'Chegada dos EPI confirmada na Higienização de EPI'].filter(Boolean).join(' · ')})]);});}
+  return out;}
+const V154_ACAO={enviar:'Enviar para higienização',receber:'Confirmar chegada no almoxarifado de higienização',higienizado:'Marcar como higienizados (voltam ao estoque)',reprovado:'Reprovar na higienização (descarte)'};
+function v154HigConfere(acao,hs){const ah=v154AlmHig(),almNome=v154AlmNm;
+  if(acao==='enviar'){if(hs.some(h=>h.st!=='aguardando'))return 'Só itens "Aguardando envio" são enviados.';if(new Set(hs.map(h=>h.almoxAtual)).size>1)return 'Envie juntos só itens do mesmo almoxarifado.';if(!ah||hs[0].almoxAtual===ah)return 'O almoxarifado de higienização não está definido (Configurações › EPI) ou é o próprio almoxarifado.';return '';}
+  if(!v154PodeHig(hs[0].almoxHig||ah))return 'Quem registra a higienização é o responsável ou o substituto do almoxarifado de higienização ('+almNome(hs[0].almoxHig||ah)+').';
+  if(acao==='receber'&&hs.some(h=>!(h.st==='transito'||(h.st==='aguardando'&&h.almoxAtual===h.almoxHig))))return 'Só itens em trânsito têm a chegada confirmada.';
+  if((acao==='higienizado'||acao==='reprovado')&&hs.some(h=>h.st!=='hig'))return 'Só itens "Em higienização" são marcados como higienizados ou reprovados.';return '';}
+A.v154HigAcao=d=>v154Garante(()=>v154HigAcao0(d));
+function v154HigAcao0(d){const almNome=v154AlmNm;const acao=d.a,hs=[...V154.sel].map(id=>get('epihig',id)).filter(Boolean);if(!hs.length){toast('Selecione os itens na lista.','neg');return;}
+  const er=v154HigConfere(acao,hs);if(er){toast(er,'neg');return;}const sem=acao==='higienizado'?hs.filter(h=>!h.prodId):[],ps=v154EpiProds().map(p=>[p.id,v154ProdLbl(p)]);
+  modal({title:V154_ACAO[acao]+' · '+hs.length+' item(ns)',body:'<ul style="margin:0 0 10px;padding-left:18px">'+hs.map(h=>'<li>'+esc(h.item)+(h.tam?' tam. '+esc(h.tam):'')+' · '+esc(funcNome(h.funcId))+'</li>').join('')+'</ul><div class="fg">'+field('Data','data','date',todayStr())+
+    (acao==='reprovado'?field('Motivo da reprovação *','motivo','text','',{full:true,ph:'Ex.: rasgado, sem condição de higienizar'}):'')+sem.map(h=>field('Produto do cadastro para '+h.item,'p_'+h.id,'select','',{opts:ps,blank:'Selecione…',full:true})).join('')+field('Observação','obs','text','',{full:true})+'</div>'+
+    (acao==='enviar'?'<p class="sub">Cria o romaneio de transferência de '+esc(almNome(hs[0].almoxAtual))+' para '+esc(almNome(v154AlmHig()))+' (Romaneios de envio): despache e confirme o recebimento por lá ou aqui.</p>':acao==='higienizado'?'<p class="sub">Entrada no estoque de '+esc(almNome(hs[0].almoxHig))+', marcada como "higienizado (usado)" no histórico do produto.</p>':''),
+    saveLabel:'Confirmar',save:root=>{const v=readForm(root),o={data:v.data,obs:v.obs||'',motivo:v.motivo||''};if(acao==='reprovado'&&o.motivo.length<3){toast('Informe o motivo.','neg');return false;}
+      if(sem.length){o.prodIds={};for(const h of sem){if(!v['p_'+h.id]){toast('Escolha o produto de '+h.item+'.','neg');return false;}o.prodIds[h.id]=v['p_'+h.id];}}
+      if(acao==='enviar')o.rom=Object.assign(romBlank(),{almoxId:hs[0].almoxAtual,destTipo:'almox',destAlmoxId:v154AlmHig(),destNome:almNome(v154AlmHig()),itens:hs.map(h=>({origem:'livre',desc:'EPI para higienização: '+h.item+(h.tam?' tam. '+h.tam:'')+(h.ca?' · CA '+h.ca:'')+' · devolvido por '+funcNome(h.funcId),un:'UN',qtd:+h.qtd||1,vol:'',peso:'',obs:'',higId:h.id})),epiHig:hs.map(h=>h.id),obs:'EPI devolvidos para higienização'});
+      v154HigExec(acao,hs,o);}});}
+async function v154HigExec(acao,hs,o){const ids=hs.map(h=>h.id),msg={enviar:'Romaneio de transferência criado para a higienização.',receber:'Chegada registrada: itens em higienização.',higienizado:'Higienizado: o EPI voltou ao estoque.',reprovado:'Reprovado na higienização: EPI descartado.'}[acao];
+  if(v154Srv()){try{const j=await segaPost('/api/epihig',Object.assign({acao,ids},o));(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));V154.sel.clear();if(!v154LeProd())await v154Carrega(true);toast(j.msg||msg,'pos');render();return true;}catch(er){msgModal('Não foi registrado',[er.message,'Nada foi gravado.']);return false;}}
+  v154HigMonta(acao,hs,o).forEach(([c,r])=>put(c,r));V154.sel.clear();toast(msg,'pos');
+  if(acao==='enviar')try{v153Dest(v154AlmHig(),[]).forEach(u=>avisoChat(u,'Romaneio nº '+o.rom.numero+' com '+hs.length+' EPI para higienizar a caminho de '+almNome(v154AlmHig())+'.'));}catch(e){}return true;}
+/* o recebimento do romaneio de transferência confirma a chegada dos EPI dele */
+{const p0=put;put=function(col,rec){const old=col==='rom'&&rec&&rec.id?get('rom',rec.id):null;const r=p0.apply(this,arguments);
+  try{if(col==='rom'&&rec&&Array.isArray(rec.epiHig)&&old&&!['entregue','divergencia'].includes(old.status)&&['entregue','divergencia'].includes(rec.status)){
+    const hs=rec.epiHig.map(id=>get('epihig',id)).filter(h=>h&&h.st==='transito');if(hs.length&&v154PodeHig(hs[0].almoxHig))setTimeout(()=>v154HigExec('receber',hs,{data:rec.entregueEm||todayStr(),obs:'Recebido pelo romaneio nº '+rec.numero}),30);}}catch(e){}return r;};}
+function v154HigRows(){return v154HigLinhas().map(h=>[funcNome(h.funcId),h.item,h.tam||'',h.ca||'',fmtDate(h.devData),String(v154Dias(h)),v154AlmNm(h.almoxAtual),(V154_ST[h.st]||[h.st])[0],h.motivo||'',h.motivoRep||'']);}
+A.v154HigCsv=()=>saveFile('higienizacao-epi.csv',csv([['Colaborador','EPI','Tamanho','CA','Devolução','Dias','Almoxarifado','Situação','Motivo da devolução','Motivo da reprovação']].concat(v154HigRows())));
+A.v154HigPdf=()=>{const k=v154HigKpis();showDoc({tipo:'Higienização de EPI',numero:'',landscape:true,meta:[['Situação',V154.hig.st==='abertos'?'Em aberto':V154.hig.st?(V154_ST[V154.hig.st]||[V154.hig.st])[0]:'Todas'],['Almoxarifado de higienização',v154AlmNm(v154AlmHig())],['Em higienização',String(k.ab)],['Tempo médio',k.tm==null?'—':k.tm+' dia(s)'],['Reaproveitado',k.pct==null?'—':k.pct+'%'],['Descartes no mês',String(k.descMes)]],
+  tables:[{head:['Colaborador','EPI','Tam.','CA','Devolução','Dias','Almoxarifado','Situação','Motivo','Reprovação'],num:[5],rows:v154HigRows()}]},'higienizacao-epi');};
+Object.assign(ACT_GROUP,{v154HigAcao:null,v154HigCsv:null,v154HigPdf:null});
+/* tela no menu do SST (que o Almoxarife também tem, com o Controle de EPI) */
+GROUP_OF_TAB.epihig='sst';TAB_COLS.epihig=['epihig'];if(typeof DBW_TABCOLS!=='undefined')DBW_TABCOLS.epihig=['epihig','epi','almox','rom','prod','mov','func'];
+if(!NAV.some(n=>n[0]==='epihig'))NAV.push(['epihig','Higienização de EPI','SST']);
+{const add=(area,it,depois)=>{const m=MENU.find(x=>x[0]===area);if(!m||m[2].some(i=>i[0]===it[0]))return;const k=m[2].findIndex(i=>i[0]===depois);m[2].splice(k>=0?k+1:m[2].length,0,it);};
+  add('sstq',['epihig','Higienização de EPI'],'epi');} /* o Almoxarife já tem o SST (Controle de EPI) no menu; em Suprimentos fica o cartão do painel */
+if(typeof COL_NOME!=='undefined')COL_NOME.epihig='Higienização de EPI';
+/* cartão no Painel de Suprimentos (almoxarifado de Tuiuti / quem tem itens) */
+{const v0=V.pnSup;if(v0)V.pnSup=function(){let h=v0.apply(this,arguments);try{if(!mayR('sst'))return h;const k=v154HigKpis(),ah=v154AlmHig(),meus=typeof v153Meus==='function'?v153Meus():[];if(!k.ab&&!meus.includes(ah))return h;
+  const card='<div class="card" id="v154HigCard"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Higienização de EPI'+(ah?' · '+esc(almNome(ah)):'')+'</h2><span class="sub">'+k.ag+' aguardando envio · '+k.tr+' em trânsito · '+k.hg+' em higienização</span><span style="flex:1"></span><button class="btn sm" data-act="nav" data-tab="epihig">Abrir</button></div></div>';
+  const i=h.indexOf('<div class="stack">');return i>=0?h.slice(0,i+19)+card+h.slice(i+19):h+card;}catch(e){return h;}};}
+
+/* ---------- 8. Configurações › EPI ---------- */
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!mayR('cfg'))return h;const c=cfg()||{},w=mayW('cfg'),ah=v154AlmHig();
+  const card='<div class="card" id="v154CfgEpi"><h2>EPI</h2><p class="sub" style="margin:0 0 8px">A entrega de EPI usa os produtos desta família (também vale "EPI" e "Equipamento de Proteção Individual"). EPI devolvido em condição de uso vai para a higienização neste almoxarifado (padrão: o principal de Tuiuti).</p><div class="fg">'+
+    field('Família dos EPI no cadastro de produtos','v154Fam','text',c.epiFamilia||V154_FAM_PAD,{dis:!w})+field('Almoxarifado de higienização','v154Hig','select',c.epiHigAlmox||'',{opts:v154AlmOpts(),blank:'Automático'+(ah&&!c.epiHigAlmox?' ('+almNome(ah)+')':''),dis:!w})+'</div>'+
+    (w?'<div class="acts" style="margin-top:8px"><button class="btn" data-act="v154CfgSalvar">Salvar EPI</button>'+(c.epi154Mig?'<button class="btn" data-act="v154MigVer">Relatório da unificação</button>':(me.owner||me.perfil==='admin')?'<button class="btn" data-act="v154MigVer">Unificar o estoque de EPI</button>':'')+'</div>':'')+'</div>';
+  const i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+card+h.slice(i):h+card;};}
+A.v154CfgSalvar=()=>{const f=($('#f_v154Fam')||{}).value,a=($('#f_v154Hig')||{}).value;put('cfg',Object.assign({},cfg(),{id:'empresa',epiFamilia:String(f||'').trim()||V154_FAM_PAD,epiHigAlmox:a||''}));toast('Configuração de EPI salva.','pos');render();};
+ACT_GROUP.v154CfgSalvar='cfg';
+try{if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v154HigAcao:'Ação nos itens selecionados da higienização de EPI.',v154EstMais:'Mostra mais 100 produtos da busca.'});}catch(e){}
+
+/* ---------- 9. Matriz de treinamentos: "Lançar renovação" (uma pessoa ou em lote) ----------
+   Em Pendências, cada NR vencida, a vencer ou que falta ganha o botão "Lançar renovação": abre Documentos e ASO › novo
+   documento com o colaborador e o tipo (o mesmo nome que a matriz usa para casar), emissão hoje e a validade sugerida pela
+   reciclagem da matriz das NRs (ex.: "a cada 2 anos" → 2 anos; "anual" → 1 ano; sem prazo: em branco). Em lote: marcar
+   várias pessoas com a mesma NR e "Lançar renovação para os selecionados" (mesma emissão/validade, anexo comum e/ou um
+   anexo por pessoa). Só para quem grava Documentos e ASO (RH, SST; o Técnico de SST grava só certificados de NR). */
+modAnexos('rhdoc',{k:'anexos',label:'Certificado ou documento (PDF ou imagem)',colLabel:'Arquivo',btn:'Anexar certificado'});
+V154.trm=new Set();V154.trmAnx={};
+function v154TrmPode(tipo){try{if(store.mode!=='db'||me.owner)return true;if(!(mayW('rh')||mayW('sst')))return false;
+  if(typeof p2PodeGravar==='function'&&p2PodeGravar('rhdoc',null,{id:'novo',tipo,funcId:''},false))return false;if(typeof pfnPodeGravar==='function'&&pfnPodeGravar('rhdoc',null,false))return false;return true;}catch(e){return false;}}
+function v154TrmValidade(tipo,em){const c=(typeof nrCurso==='function'?nrCurso()[tipo]:null)||{},t=v154N(c.rec||'');em=em||todayStr();let m=0;
+  const a=/(\d+)\s*anos?/.exec(t),ms=/(\d+)\s*mes/.exec(t);if(a)m=+a[1]*12;else if(ms)m=+ms[1];else if(/anual/.test(t))m=12;else if(/bienal/.test(t))m=24;return m?addMonthsDate(em,m):'';}
+A.v154TrmRen=d=>{const tipo=d.t,f=get('func',d.f);if(!f||!v154TrmPode(tipo)){toast('Seu perfil não registra este documento.','neg');return;}
+  const em=todayStr();formMod(MODS2.rhdoc,Object.assign(MODS2.rhdoc.blank(),{funcId:f.id,tipo,emissao:em,validade:v154TrmValidade(tipo,em)}));};
+A.v154TrmLote=()=>{const sel=[...V154.trm].map(k=>{const i=k.indexOf('|');return {f:get('func',k.slice(0,i)),t:k.slice(i+1)};}).filter(x=>x.f);
+  if(!sel.length){toast('Marque as pessoas na lista de pendências.','neg');return;}const tipos=[...new Set(sel.map(x=>x.t))];
+  if(tipos.length>1){toast('Selecione pessoas com a mesma NR ('+tipos.map(t=>t.replace(/^(NR-\d+).*/,'$1')).join(', ')+' marcadas).','neg');return;}
+  const tipo=tipos[0];if(!v154TrmPode(tipo)){toast('Seu perfil não registra este documento.','neg');return;}const em=todayStr();
+  V154.trmAnx={};ANXF.tab='v154trm';ANXF.rid='lote';ANXF.o={k:'anexos',label:'Anexo comum (lista de presença ou certificado da turma)',btn:'Anexar arquivo comum'};ANXF.arqs=[];ANXF.busy=0;
+  modal({title:'Lançar renovação de '+tipo+' · '+sel.length+' pessoa(s)',wide:true,body:'<div class="fg">'+field('Emissão','emissao','date',em)+field('Validade','validade','date',v154TrmValidade(tipo,em))+field('Número ou protocolo (opcional)','numero','text','')+field('Observações','obs','text','',{full:true})+'</div>'+
+    '<div class="tw" style="margin-top:8px"><table><thead><tr><th>Colaborador</th><th>Função</th><th>Anexo próprio (opcional)</th></tr></thead><tbody>'+sel.map(x=>'<tr><td>'+esc(x.f.nome)+'</td><td>'+esc(x.f.funcao||'')+'</td><td><button type="button" class="btn sm" data-act="v154TrmAnxP" data-f="'+esc(x.f.id)+'">Anexar certificado</button> <span class="sub" id="v154TrmAnx_'+esc(x.f.id)+'"></span></td></tr>').join('')+'</tbody></table></div>'+
+    '<div id="anxfWrap">'+anxBox()+'</div><p class="sub">Um registro em Documentos e ASO para cada pessoa, com a mesma emissão e validade. O anexo comum vai em todos; o anexo próprio, só no da pessoa.</p>',
+    saveLabel:'Lançar para os selecionados',save:root=>{const v=readForm(root);if(ANXF.busy||V154.trmBusy){toast('Aguarde o envio dos arquivos terminar.','neg');return false;}if(!v.emissao){toast('Informe a emissão.','neg');return false;}
+      if(v.validade&&v.validade<v.emissao){toast('A validade não pode ser anterior à emissão.','neg');return false;}const comum=ANXF.arqs.slice();
+      sel.forEach(x=>put('rhdoc',{id:uid(),funcId:x.f.id,tipo,descr:'',numero:v.numero||'',emissao:v.emissao,validade:v.validade||'',obs:v.obs||'',anexos:(V154.trmAnx[x.f.id]||[]).concat(comum)}));
+      V154.trm.clear();V154.trmAnx={};toast(sel.length+' renovação(ões) de '+tipo+' lançada(s).','pos');}});};
+A.v154TrmAnxP=d=>{if(store.mode!=='db'){toast('Anexos funcionam na página publicada.','neg');return;}arqEscolher('application/pdf,.pdf,image/*',async fs=>{const f0=fs&&fs[0];if(!f0)return;V154.trmBusy=(V154.trmBusy||0)+1;const sp=document.getElementById('v154TrmAnx_'+d.f);if(sp)sp.textContent='Enviando…';
+  try{const a=await arqSalvar(await imgReduz(f0,1600));V154.trmAnx[d.f]=[a];if(sp)sp.textContent=f0.name;}catch(e){if(sp)sp.textContent='';toast(f0.name+': '+arqErr(e),'neg');}finally{V154.trmBusy--;}});};
+Object.assign(ACT_GROUP,{v154TrmRen:null,v154TrmLote:null,v154TrmAnxP:null});
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||!t.dataset.v154tr)return;if(t.checked)V154.trm.add(t.dataset.v154tr);else V154.trm.delete(t.dataset.v154tr);const b=document.getElementById('v154TrmN');if(b)b.textContent=V154.trm.size+' selecionada(s)';});
+function v154TrmPend(){const fs=S.func.filter(f=>f.status!=='desligado').sort(byNome),pend=fs.map(f=>({f,s:treinStatus(f).filter(x=>x.st!=='ok')})).filter(x=>x.s.length);
+  const algum=pend.some(x=>x.s.some(y=>v154TrmPode(y.t)));
+  return '<div class="card" id="v154TrmPend"><h2>Pendências</h2>'+(pend.length?(algum?'<div class="acts" style="justify-content:flex-start;margin:0 0 8px;flex-wrap:wrap"><button class="btn" data-act="v154TrmLote">Lançar renovação para os selecionados</button><span class="sub" id="v154TrmN" style="align-self:center">'+V154.trm.size+' selecionada(s)</span><span class="sub" style="align-self:center">Marque pessoas com a mesma NR.</span></div>':'')+
+    '<div class="tw" style="border:0"><table style="min-width:640px"><thead><tr><th>Colaborador</th><th>Função</th><th>Treinamentos</th></tr></thead><tbody>'+pend.map(x=>'<tr><td>'+esc(x.f.nome)+'</td><td>'+esc(x.f.funcao||'')+'</td><td><div style="display:flex;flex-wrap:wrap;gap:6px">'+x.s.map(y=>{const k=x.f.id+'|'+y.t,pd=v154TrmPode(y.t);
+      return '<span style="display:inline-flex;gap:4px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:2px 6px">'+(pd?'<input type="checkbox" data-v154tr="'+esc(k)+'"'+(V154.trm.has(k)?' checked':'')+' aria-label="Selecionar '+esc(x.f.nome+' '+y.t)+'">':'')+pill(y.t.replace(/^(NR-\d+).*/,'$1')+' '+(y.st==='falta'?'falta':y.st==='venc'?'vencido':'vence '+fmtDate(y.d.validade).slice(0,5)),y.st==='avenc'?'warn':'neg')+(pd?'<button class="btn sm" data-act="v154TrmRen" data-f="'+esc(x.f.id)+'" data-t="'+esc(y.t)+'">Lançar renovação</button>':'')+'</span>';}).join('')+'</div></td></tr>').join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Nenhuma pendência.</p>')+'</div>';}
+{const v0=V.trm;V.trm=function(){const h=v0.apply(this,arguments);try{const i=h.indexOf('<div class="card"><h2>Pendências</h2>');if(i<0)return h;let j=h.indexOf('<div class="card"><h2>Fonte da obrigação',i);if(j<0)j=h.lastIndexOf('</div>');
+  return h.slice(0,i)+v154TrmPend()+h.slice(j);}catch(e){return h;}};}
+/* entrega, devolução e o estoque do Controle de EPI esperam os dados do estoque de EPI (RH e SST no servidor próprio) */
+{const n0=A.epiNovo;if(n0)A.epiNovo=d=>v154Garante(()=>n0(d));const n1=A.epiNovoPara;A.epiNovoPara=d=>v154Garante(()=>n1(d));const n2=A.epiDev;A.epiDev=d=>v154Garante(()=>n2(d));
+  const t0=MODS2.epi.top;MODS2.epi.top=function(){if(!v154LeProd()&&!V154.est&&!V154.estP)v154Carrega().then(x=>{if(x)render();});return t0.apply(this,arguments);};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='153.1',APP_DATA='2026-11-04';
+const APP_VER='154',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['154','2026-11-04',['Estoque: a busca espera você parar de digitar (Enter busca na hora), procura por código, descrição, família, NCM, prateleira e código do fornecedor, e mostra os 100 primeiros com o total encontrado e Mostrar mais. Notas, Pedidos e Produtos também esperam a digitação.', 'Estoque com a coluna Família e o filtro por família (a Família de produto do cadastro).', 'Entrega de EPI pelo cadastro de produtos: escolha o EPI da família EPI com saldo no seu almoxarifado (saldo, tamanho e CA na lista). Ao salvar, a saída do estoque é registrada junto, para a obra do colaborador; sem saldo, a entrega é recusada.', 'Devolução e troca de EPI: em condição de uso o EPI vai para a higienização (não volta direto ao estoque); descarte fica só na ficha; a troca registra a devolução e a nova entrega no mesmo ato. A ficha NR-6 mostra o destino.', 'Nova tela Higienização de EPI: aguardando envio, transferência por romaneio para o almoxarifado de Tuiuti, em higienização, higienizado (volta ao estoque) ou reprovado, com indicadores, ações em lote e exportação.', 'Configurações › EPI: nome da família dos EPI e almoxarifado de higienização; botão para unificar uma vez o estoque de EPI com o cadastro de produtos (com relatório).', 'Matriz de treinamentos: botão Lançar renovação em cada NR vencida, a vencer ou que falta (abre Documentos e ASO já com o colaborador, a NR e a validade sugerida, com anexo do certificado) e renovação em lote para várias pessoas com a mesma NR.']],
   ['153.1','2026-11-04',['Chat: a mensagem lida num computador, aba ou celular não volta mais a aparecer como não lida por causa de outra aba aberta há tempo (o servidor guarda sempre a leitura mais recente). A mensagem recebida com o sistema fechado passa a contar ao abrir.', 'Chat: clicar no balão de não lidas abre direto a conversa com a mensagem nova; novo botão Marcar todas como lidas no topo da lista de conversas. No celular, a conversa só conta como lida quando é aberta (na lista, continua marcada).', 'Almoxarifados no mesmo endereço ou CEP: o aviso aparece junto do botão Salvar, que passa a dizer Salvar mesmo assim; um clique confirma e grava (cadastro e edição).']],
   ['153','2026-11-04',['Painel de Suprimentos com quadro do processo de compra: solicitação, cotação, pedido, recebimento e nota em colunas, com quem precisa agir, atraso em cor e filtros por obra, comprador, tipo e almoxarifado.', 'Almoxarifados com cidade, responsável, substituto e principal da cidade; a obra indica o almoxarifado que a atende. Separação, recebimento, romaneio e devolução avisam só o responsável daquele almoxarifado, e as telas abrem em Meu almoxarifado. Vários almoxarifados podem ficar no mesmo endereço.', 'Pedido de separação mostra almoxarifado, prateleira e saldo de cada item, em ordem de prateleira; se faltar material, sugere a transferência entre almoxarifados.', 'Novo perfil Almoxarife e fábrica: tudo do Almoxarife, mais solicitação de compra de qualquer tipo e movimentação das etapas das OS de fabricação. O Almoxarife deixa de ver Controles de compras e cria solicitação só de reposição e administrativa.']],
   ['152','2026-11-04',['Solicitação recusada ganhou Corrigir e reenviar: cria uma nova já preenchida, com o motivo da recusa no topo, ligada à recusada.', 'Solicitações e pedidos aguardando aprovação mostram quem precisa aprovar (com o nível da alçada no pedido) e há quanto tempo; o botão Pedir aprovação avisa o aprovador no chat e por e-mail e copia a mensagem para o WhatsApp (um lembrete a cada 2 horas).', 'Almoxarife pode criar solicitação de compra de Reposição de estoque e Administrativa (sem obra); no Estoque, Gerar solicitação de reposição com os itens abaixo do mínimo.', 'Pedidos de compra, Solicitações, Cotações, Separação e Notas de entrada se ajustam à largura da tela: botões sempre visíveis e, no celular, cada linha vira um cartão.']],

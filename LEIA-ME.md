@@ -665,6 +665,63 @@ Cadastrar outro no mesmo endereço?" aparece junto do rodapé, o botão vira **S
 Alterados `gestao/server.js` e `gestao/public/index.html`: reconstruir a imagem do serviço `gestao`. Quem estiver com o
 sistema aberto deve recarregar a página (F5) em cada computador e no celular.
 
+## Busca do Estoque, família, entrega e higienização de EPI e renovação pela Matriz de treinamentos (v154)
+
+**Busca mais rápida**: no Estoque (e em Produtos, Produtos inativos, Notas, Pedidos de compra e NFs recebidas) a lista é
+refeita ~300 ms depois da última tecla; **Enter** busca na hora; o campo não perde o foco nem o cursor. O Estoque procura
+num índice já preparado (sem acento e sem maiúsculas: código, descrição, família, NCM, prateleira, almoxarifado onde há
+saldo, EAN, marca e o código do produto no fornecedor, tirado das notas de entrada), refeito só quando os dados mudam, e
+mostra os **100 primeiros** com o total encontrado e **Mostrar mais**. A busca aceita várias palavras em qualquer ordem
+("cabo 2,5 flex"). Medido com 5.000 produtos e 20.000 movimentos (navegador real): antes ~0,5 s travado a cada tecla
+(11 teclas ≈ 5–6 s); agora digitar fica livre e o resultado aparece ~0,5 s depois da última tecla.
+
+**Família**: coluna **Família** e filtro por família (com "sem família") no Estoque. É o campo **Família de produto** do
+cadastro (não há outro conceito de grupo/categoria de produto; "categoria" é do financeiro).
+
+**EPI pelo cadastro de produtos**: EPI é o produto da **família EPI** (o nome é configurável em Configurações › EPI; também
+valem "EPI", "Equipamento de Proteção Individual" e a marca antiga "é EPI"). O cadastro do produto dessa família tem **Nº do
+CA, validade do CA, tamanho/variação e vida útil**. Em **CIPA e SST › Controle de EPI › Nova entrega** (e Colaboradores ›
+Nova entrega de EPI) escolhe-se o almoxarifado de onde sai (abre em **Meu almoxarifado**) e o **produto com saldo nesse
+almoxarifado** (a lista mostra tamanho, CA, validade e saldo; CA vencido aparece marcado e é recusado). Ao salvar, o
+servidor confere permissão (Almoxarife, RH, SST continuam registrando), produto da família EPI e **saldo no almoxarifado
+(não deixa negativo)**, e grava **a entrega e a saída do estoque juntas** (rota `POST /api/epi/entrega`, arquivo
+`gestao/epi154.js`): ou as duas, ou nenhuma. A saída vai para a **obra do colaborador** (custo médio na obra). Depois de
+gravada, produto, quantidade e almoxarifado da entrega não mudam (use Devolução). A ficha NR-6, a assinatura (na tela ou
+pela Minha área) e a troca prevista continuam iguais.
+
+**Devolução e troca**: botão **Devolução ou troca** na entrega. Condição **"Em condição de uso"** → vai para a
+**higienização** (não volta direto ao estoque); **"Descarte"** (danificado, vencido, contaminado, outro) → baixa definitiva,
+registrada na ficha. Motivo: desgaste, dano, tamanho, vencimento do CA, desligamento, fim da obra, outro. **Troca** = a
+devolução e a nova entrega (com a baixa dela) no mesmo ato e na mesma gravação. A ficha NR-6 mostra o destino de cada
+devolução.
+
+**Higienização de EPI** (tela nova em CIPA e SST e em Suprimentos; cartão no Painel de Suprimentos do almoxarifado de
+higienização): **Aguardando envio** (no almoxarifado onde foi devolvido) → **Enviar selecionados** cria o romaneio de
+transferência para o **almoxarifado de higienização** (Configurações › EPI; padrão: o principal de Tuiuti) → **Em
+trânsito** → **Confirmar chegada** (ou o recebimento do romaneio) → **Em higienização** → **Marcar higienizados** (entrada
+no estoque daquele almoxarifado, marcada "EPI higienizado (usado)" no histórico do produto) ou **Reprovar** (descarte, com
+motivo). Receber, higienizar e reprovar: responsável ou substituto desse almoxarifado (sem responsável: quem grava estoque),
+o Administrador ou o dono. Indicadores (itens em higienização, tempo médio, % reaproveitado, descartes do mês), filtros,
+ações em lote, CSV e PDF. Avisos: chat e e-mail ao responsável do almoxarifado de higienização. O servidor garante que o
+EPI devolvido **só volta ao estoque pelo "Higienizado"** (a gravação comum recusa movimento ligado a EPI e qualquer mudança
+na higienização) e que nada conta duas vezes; tudo fica na auditoria (`EPI_ENTREGA`, `EPI_DEVOLUCAO`, `EPI_HIG_*`).
+Decisão: o estoque não tem lote/condição por unidade; o item higienizado entra no mesmo produto, marcado só no movimento.
+
+**Unificação do estoque de EPI (uma vez)**: o "estoque de EPI" das versões anteriores já era o saldo do produto marcado
+como EPI — não havia estoque separado. O botão **Unificar o estoque de EPI** (Controle de EPI ou Configurações › EPI,
+Administrador/dono) mostra antes o que muda: produtos marcados como EPI sem família passam para a família EPI; EPI digitados
+nas entregas antigas sem produto viram produtos da família EPI (saldo zero; um por nome, sem duplicar). Os saldos não mudam.
+O relatório fica guardado (rota `POST /api/epi/migrar`; uma segunda vez só mostra o relatório).
+
+**Matriz de treinamentos**: em Pendências, cada NR vencida, a vencer ou que falta tem **Lançar renovação**: abre Documentos
+e ASO com o colaborador e a NR preenchidos, emissão hoje e a validade sugerida pela reciclagem da matriz das NRs ("a cada 2
+anos" → 2 anos; sem prazo: em branco), e o anexo do certificado (Documentos e ASO passa a ter anexo). Em lote: marcar várias
+pessoas com a mesma NR e **Lançar renovação para os selecionados** (mesma emissão/validade, anexo comum e anexo por pessoa).
+Só aparece para quem grava Documentos e ASO (o Técnico de SST, só certificados de NR). A matriz se atualiza ao salvar.
+
+**Subir**: `gestao/epi154.js` (novo), `gestao/regras.js`, `gestao/Dockerfile`, `gestao/perfis.json` e
+`gestao/public/index.html`; reconstruir a imagem do serviço `gestao`.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".
