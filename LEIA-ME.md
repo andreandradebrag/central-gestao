@@ -599,6 +599,49 @@ Arquivo novo `gestao/treino.js` (no `Dockerfile`) e pasta `gestao/public/treino/
 
 Arquivo novo `gestao/compras152.js` (no `Dockerfile`); alterados `gestao/regras.js`, `gestao/permfn.js`, `gestao/perfis.json` e `gestao/public/index.html`: reconstruir a imagem do serviço `gestao`.
 
+## Almoxarifados por cidade, quadro de compras e perfil Almoxarife e fábrica (v153)
+
+**Quadro do processo de compra** (Suprimentos › Painel): colunas na ordem do fluxo — SC aguardando aprovação · SC aguardando
+cotação · Em cotação · Pedido aguardando aprovação · Pedido enviado (com "aceito pelo fornecedor" e "entrega atrasada") ·
+Recebido aguardando nota · Concluído (nota lançada nos últimos 7/15/30/60 dias). Cada cartão mostra número, obra ou tipo
+(Reposição/Administrativa), fornecedor, necessidade, há quanto tempo está na etapa e quem precisa agir. Borda amarela: perto
+da necessidade (até 3 dias) ou parado (SC/pedido a aprovar 2 dias, cotação 3, recebido sem nota 3); vermelha: necessidade
+vencida, entrega atrasada ou parado (4/5/7 dias). Clique abre o documento na tela dele. Filtros: obra, comprador ou
+solicitante, tipo, almoxarifado ou cidade. Valores em R$ só para quem vê valores gerenciais. No celular as colunas viram
+seções empilhadas. **Os cartões não se arrastam**: o andamento vem das ações reais (aprovar, cotar, gerar pedido, receber,
+lançar a nota), que têm regras e permissões próprias.
+
+**Almoxarifados** (Suprimentos › Almoxarifados): além do endereço, **responsável** e **substituto** (usuários) e
+**"principal da cidade"** (um por cidade: marcar outro desmarca o anterior). **Vários almoxarifados podem ficar no mesmo
+endereço** (ex.: materiais, ferramentas/EPI e fábrica no mesmo terreno): o cadastro avisa "Já existe o almoxarifado X neste
+endereço. Cadastrar outro no mesmo endereço?" e grava ao confirmar. Nome repetido continua bloqueado.
+
+**Obra** (cadastro do projeto): "Almoxarifado que atende a obra". Automático: o principal da cidade da obra; sem ele, o
+mais usado pelas separações da obra; com um único almoxarifado ativo, ele.
+
+**Solicitação de compra**: a de obra (e a administrativa) guarda o **almoxarifado de origem** da separação (padrão: o que
+atende a obra; quem cria e quem aprova podem trocar). A separação gerada nasce nesse almoxarifado e a entrega dá baixa nele.
+A separação (tela e Visualizar/PDF) mostra, para cada item, almoxarifado, **prateleira/local** e **saldo no local**, em
+ordem de prateleira. Faltando no almoxarifado de origem e havendo em outro, mostra a sugestão e o botão **Gerar
+transferência** (romaneio de transferência entre almoxarifados, já preenchido).
+
+**Avisos por almoxarifado**: separar material (chat e e-mail), falta do recebimento físico, transferência em trânsito,
+romaneio para despachar e devolução de sobras para conferir vão ao **responsável e ao substituto** daquele almoxarifado.
+Almoxarifado sem responsável: para todos os almoxarifes, como antes. Na primeira subida da v153, as pendências que já existem
+não geram e-mail (só as novas). Separação, Romaneios, Devolução de sobras e Recebimento de notas › O que precisa de ação
+abrem em **"Meu almoxarifado"** para quem é responsável ou substituto (documentos sem almoxarifado aparecem também); o filtro
+"Todos" ou outro almoxarifado mostra o resto em consulta (as permissões não mudam).
+
+**Perfis**: o **Almoxarife** não vê mais **Controles de compras** (menu, Ctrl+K, atalhos e o quadro de exceções do painel;
+os dados de pedidos, notas, cotações, acordos e ajustes continuam porque outras telas dele usam) e cria solicitação de
+compra **só de reposição e administrativa** (servidor confere). Perfil padrão novo **"Almoxarife e fábrica"** (Sistema ›
+Usuários): tudo do Almoxarife + SC de qualquer tipo (inclusive Obra) + módulo Fábrica (cria, altera e avança etapas das
+ordens de fabricação; **não exclui** OS; aprovação da OS e configurações continuam com o gestor). Sem Controles de compras e
+sem valores gerenciais. Recebe os avisos de almoxarife.
+
+Arquivo novo do servidor: `gestao/almox153.js` (já no Dockerfile). `perfis.json` regerado (Almoxarife: `telasFora` com
+`supctl` e `scTipos`; perfil novo `almoxfab`).
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

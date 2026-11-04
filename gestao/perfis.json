@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-04T18:05:04.577Z",
+ "gerado": "2026-11-04T19:30:25.651Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -697,7 +697,8 @@
     "vanal",
     "frloc",
     "nfse",
-    "arqf"
+    "arqf",
+    "supctl"
    ],
    "itensFora": [
     "fisc:nf"
@@ -720,6 +721,10 @@
      "rascunho"
     ]
    },
+   "scTipos": [
+    "repos",
+    "adm"
+   ],
    "valNao": true,
    "nome": "Almoxarife"
   },
@@ -980,6 +985,197 @@
    },
    "valNao": true,
    "nome": "Fábrica (encarregado)"
+  },
+  "almoxfab": {
+   "w": [
+    "est",
+    "comp",
+    "nf",
+    "ferr",
+    "sst",
+    "chat",
+    "agenda",
+    "fab"
+   ],
+   "r": [
+    "proj",
+    "cad",
+    "meu",
+    "ajuda"
+   ],
+   "so": {
+    "est": [
+     "almox",
+     "devobra",
+     "invaj",
+     "mov",
+     "prod"
+    ],
+    "comp": [
+     "sep",
+     "almox",
+     "invaj",
+     "mov",
+     "prod",
+     "sc"
+    ],
+    "nf": [
+     "ped",
+     "notas"
+    ],
+    "sst": [
+     "epi"
+    ]
+   },
+   "papel": "almoxarife",
+   "campos": {
+    "ped": [
+     "recebs",
+     "notaId",
+     "notaIds",
+     "status",
+     "recParcial",
+     "recAguardAprov",
+     "saldoEnc",
+     "recebidoEm"
+    ],
+    "sc": [
+     "status",
+     "sepId",
+     "sepPend",
+     "reenviadaId"
+    ]
+   },
+   "camposSt": {
+    "ped": [
+     "enviado",
+     "recebido"
+    ],
+    "sc": [
+     "atendida"
+    ]
+   },
+   "rascunho": [
+    "notas"
+   ],
+   "naoExclui": [
+    "osf"
+   ],
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n",
+     "heaut": "n",
+     "obrchk": "n"
+    },
+    "sst": {
+     "tterc": "n",
+     "sstv": "n",
+     "cipa": "n",
+     "acid": "n",
+     "ppp": "n",
+     "pgrdoc": "n",
+     "pgr": "n",
+     "isochk": "n",
+     "ambdoc": "n",
+     "ambind": "n",
+     "ambres": "n",
+     "ambforn": "n",
+     "psicamp": "n",
+     "pte": "n",
+     "sstdoc": "n",
+     "integ": "n",
+     "rda": "n",
+     "rel": "n",
+     "hht": "n",
+     "cipam": "n",
+     "cipar": "n",
+     "cipaa": "n"
+    },
+    "comp": {
+     "sc": "a"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "pobra",
+    "pnObr",
+    "proj",
+    "etapa",
+    "curva",
+    "rdo",
+    "hepedir",
+    "ctremp",
+    "medemp",
+    "tterc",
+    "mo",
+    "rproj",
+    "rmes",
+    "obrchk",
+    "pnSst",
+    "gvsst",
+    "cipa",
+    "acid",
+    "trm",
+    "aso",
+    "pgrdoc",
+    "amb",
+    "pgr",
+    "psico",
+    "pte",
+    "sstdoc",
+    "integ",
+    "aptlib",
+    "treinm",
+    "rda",
+    "rel",
+    "hht",
+    "isst",
+    "pnFrota",
+    "veic",
+    "vsai",
+    "vrota",
+    "vabas",
+    "vman",
+    "vfrete",
+    "vcond",
+    "multa",
+    "vanal",
+    "frloc",
+    "nfse",
+    "arqf",
+    "supctl"
+   ],
+   "itensFora": [
+    "fisc:nf"
+   ],
+   "leMin": {
+    "func": [
+     "id",
+     "nome",
+     "matricula",
+     "funcao",
+     "cargo",
+     "projId",
+     "status",
+     "ts",
+     "ex"
+    ]
+   },
+   "camposProprio": {
+    "sc": [
+     "rascunho",
+     "aprovacao"
+    ]
+   },
+   "valNao": true,
+   "nome": "Almoxarife e fábrica"
   }
  },
  "colecoes": {

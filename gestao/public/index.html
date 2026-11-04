@@ -29850,9 +29850,345 @@ function v152Resp(h,tab){if(typeof h!=='string')return h;const i=h.indexOf('<div
 /* primeira célula do cartão (o número) ocupa a linha inteira */
 try{const st=document.getElementById('css_v152');if(st)st.textContent+='@media (max-width:900px){table.v152t>tbody>tr>td[data-c1]{grid-column:1/-1;font-weight:600}}';}catch(e){}
 
+/* ===== v153 (relatorios/feito_v153.md): quadro do processo de compra no Painel de Suprimentos, almoxarifados por cidade com
+   responsável, avisos e filas por almoxarifado, separação com almoxarifado/prateleira, Almoxarife sem "Controles de compras"
+   e perfil novo "Almoxarife e fábrica" =====
+   1. Quadro (Kanban) no Painel de Suprimentos: colunas na ordem do fluxo (SC aguardando aprovação · SC aguardando cotação ·
+      Em cotação · Pedido aguardando aprovação · Pedido enviado · Recebido aguardando nota · Concluído nos últimos N dias).
+      Só mostra (o andamento vem das ações reais nas telas; não se arrasta cartão). Clique abre o documento na tela dele.
+   2. Almoxarife: "Controles de compras" sai do menu, do Ctrl+K e dos atalhos (telasFora, como na v146) e o painel deixa de
+      mostrar o quadro de exceções dessa tela.
+   3. Almoxarifado: cidade/UF, responsável e substituto (usuários) e "principal da cidade". Obra: "Almoxarifado que atende"
+      (padrão: o principal da cidade da obra; senão o mais usado pela obra; senão o único ativo). SC de obra/administrativa
+      guarda o almoxarifado de origem (almoxOrigId) e a separação gerada nasce com ele (almoxId). Avisos de separar material
+      (chat) vão ao responsável e ao substituto do almoxarifado; sem responsável, como antes. Separação, Romaneios, Devolução
+      de sobras e Recebimento de notas (O que precisa de ação) abrem em "Meu almoxarifado" para quem é responsável ou
+      substituto de algum. Separação mostra o saldo no almoxarifado de origem e sugere a transferência (romaneio de
+      transferência entre almoxarifados, mecanismo que já existe).
+   4. Perfil padrão "Almoxarife e fábrica" (almoxfab) = Almoxarife + SC de qualquer tipo + módulo Fábrica (ordens de
+      fabricação: cria, altera e avança etapas; não exclui; aprovação e configurações continuam com o gestor).
+      O Almoxarife passa a criar só SC de reposição e administrativa (scTipos), como descrito na v152.
+   5. Separação (tela e documento): almoxarifado, prateleira/local e saldo no local de cada item, itens em ordem de prateleira.
+   Servidor: deploy/gestao/almox153.js (mesmo cálculo do almoxarifado, avisos por almoxarifado, scTipos e almoxOrigId).
+   Prefixos v153*, V153*. */
+const V153={curSc:null,apAlm:null,almManual:false};
+
+/* ---------- 0. utilidades ---------- */
+const v153Nome=u=>{const n=nameOf(u);if(n&&n!=='Usuário')return n;const r=(S.usr||[]).find(x=>x.uid===u);return (r&&(r.nome||r.apelido))||n;};
+const v153Uniq=a=>[...new Set((a||[]).filter(Boolean))];
+const v153Norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+function v153TabOk(tab,pf){try{return typeof pfnTabOk!=='function'||pfnTabOk(tab,pf);}catch(e){return true;}}
+const v153Ts=d=>d?(typeof d==='number'?d:new Date(String(d).slice(0,10)+'T12:00:00').getTime()):0;
+const v153AlmAtivos=()=>(S.almox||[]).filter(a=>a&&a.ativo!==false);
+const v153PorNome=(a,b)=>{const x=v153Norm(a.nome),y=v153Norm(b.nome);return x<y?-1:x>y?1:0;};
+
+/* ---------- 1. almoxarifado de cada documento (igual a almox153.js do servidor) ---------- */
+function v153AlmoxObra(pid,info){const p=pid?get('proj',pid):null;if(!p)return '';const als=v153AlmAtivos().slice().sort(v153PorNome),tem=id=>als.some(a=>a.id===id);
+  const ret=(id,por)=>{if(info)info.por=por;return id;};
+  if(p.almoxId&&tem(p.almoxId))return ret(p.almoxId,'obra');
+  const cid=v153Norm(p.obraCidade||p.cidade),uf=v153Norm(p.obraUf||p.uf);
+  if(cid){const pr=als.find(a=>a.principal===true&&v153Norm(a.cidade)===cid&&(!uf||!a.uf||v153Norm(a.uf)===uf));if(pr)return ret(pr.id,'cidade');}
+  const cnt=new Map();(S.sep||[]).forEach(s=>{if(s.projId===pid&&s.almoxId&&tem(s.almoxId))cnt.set(s.almoxId,(cnt.get(s.almoxId)||0)+1);});
+  let best='',n=0;als.forEach(a=>{const k=cnt.get(a.id)||0;if(k>n){n=k;best=a.id;}});if(best)return ret(best,'uso');
+  if(als.length===1)return ret(als[0].id,'unico');return '';}
+function v153AlmoxSc(s){if(!s)return '';if(s.tipo==='repos')return s.almoxId||'';if(s.almoxOrigId)return s.almoxOrigId;if(s.projId)return v153AlmoxObra(s.projId);return '';}
+function v153AlmoxPed(p){if(!p)return '';const s=p.scId?get('sc',p.scId):null;return v153AlmoxSc(s)||(p.projId?v153AlmoxObra(p.projId):'');}
+function v153AlmoxSep(s){if(!s)return '';return s.almoxId||v153AlmoxSc(s.scId?get('sc',s.scId):null)||(s.projId?v153AlmoxObra(s.projId):'');}
+function v153AlmoxNota(n){if(!n)return '';const p=n.pedId?get('ped',n.pedId):null;const a=v153AlmoxPed(p);if(a)return a;const it=(n.itens||[]).find(i=>i&&i.almoxId);return it?it.almoxId:'';}
+/* responsável e substituto do almoxarifado */
+const v153Resp=a=>a?v153Uniq([a.respUid,a.substUid]):[];
+function v153Meus(u){u=u||actorId();return v153AlmAtivos().filter(a=>u&&(a.respUid===u||a.substUid===u)).map(a=>a.id);}
+/* destinatários do aviso: responsável e substituto; sem eles, quem já recebia */
+function v153Dest(almId,antes){const a=almId?get('almox',almId):null,l=v153Resp(a).filter(u=>!(S.usr||[]).some(x=>x.uid===u&&x.ativo===false));return l.length?l:v153Uniq([].concat(antes||[]));}
+const v153AlmTxt=id=>{const n=almNome(id)||'';return !n?'':/^almox/i.test(n)?n:'Almoxarifado '+n;};
+
+/* ---------- 2. cadastro do almoxarifado: cidade, responsável, substituto, principal ---------- */
+function v153UsrOpts(cur){const l=(typeof usrOpts==='function'?usrOpts():[]).slice();[].concat(cur||[]).forEach(u=>{if(u&&!l.some(x=>x[0]===u))l.push([u,v153Nome(u)]);});return l;}
+{const f0=almForm;almForm=function(r){f0.apply(this,arguments);try{const mb=$('#mb');if(!mb||!mb.querySelector)return;const fg=mb.querySelector('.fg');if(!fg||!fg.insertAdjacentHTML)return;
+  V153.dupOk=null;mb.querySelectorAll('.sect').forEach(x=>{if(/um almoxarifado por endereço/.test(x.textContent))x.textContent='Endereço (cada almoxarifado tem um endereço; vários podem ficar no mesmo endereço, ex.: materiais e ferramentas)';});
+  const us=v153UsrOpts([r.respUid,r.substUid]);
+  fg.insertAdjacentHTML('beforeend','<div class="sect" style="grid-column:1/-1;margin:10px 0 0">Responsável e cidade (avisos e filas por almoxarifado)</div>'+
+    field('Responsável (usuário que recebe os avisos)','respUid','select',r.respUid||'',{opts:us,blank:'Sem responsável (avisos para todos os almoxarifes)'})+
+    field('Substituto (opcional)','substUid','select',r.substUid||'',{opts:us,blank:'Sem substituto'})+
+    field('Almoxarifado principal da cidade','principal','checkbox',r.principal===true)+
+    '<p class="sub" style="grid-column:1/-1;margin:0">A cidade e a UF são as do endereço acima. As obras dessa cidade são atendidas pelo almoxarifado principal (a obra pode escolher outro). Avisos de separar material, recebimento, romaneio e devolução vão só para o responsável e o substituto; sem responsável, vão para todos os almoxarifes, como antes.</p>');}catch(e){}};}
+/* cadastro: vários almoxarifados podem ficar no mesmo endereço (antes: um por endereço); nome repetido continua bloqueado */
+function v153AlmSalvarBase(root,isNew){
+  almPrRead();const v=readForm(root);delete v.lLet;delete v.lNiv;const r=Object.assign(cl(ALM.rec),v);r.uf=String(r.uf||'').toUpperCase().slice(0,2);
+  if(!String(r.nome||'').trim()){toast('Informe o nome.','neg');return false;}
+  if(!String(r.end||'').trim()||!String(r.num||'').trim()||!String(r.cidade||'').trim()){toast('Informe logradouro, número e cidade: cada almoxarifado fica em um endereço.','neg');return false;}
+  if(S.almox.some(a=>a.id!==r.id&&rsNorm(a.nome)===rsNorm(r.nome))){toast('Já existe um almoxarifado com este nome.','neg');return false;}
+  /* v153: vários almoxarifados no mesmo endereço (materiais, ferramentas/EPI, fábrica): aviso com confirmação na própria tela */
+  const k=almChave(r),dups=k?S.almox.filter(a=>a.id!==r.id&&almChave(a)===k):[];if(dups.length&&V153.dupOk!==r.id+'|'+k){v153DupAviso(dups,r.id+'|'+k);return false;}
+  const prats=ALM.prats.map(p=>({cod:String(p.cod||'').trim().toUpperCase(),desc:p.desc||'',setor:p.setor||''})).filter(p=>p.cod);
+  const cods=prats.map(p=>p.cod);const rep=cods.find((c,i)=>cods.indexOf(c)!==i);if(rep){toast('Código de prateleira repetido: '+rep,'neg');return false;}
+  if(prats.some(p=>/[,;]/.test(p.cod))){toast('O código da prateleira não pode ter vírgula.','neg');return false;}
+  const old=get('almox',r.id),antes=old?almPratList(old).map(p=>p.cod):[],sai=antes.filter(c=>!cods.includes(c));
+  r.prats=prats;r.prateleiras=cods.join(', ');r.ativo=!!v.ativo;
+  put('almox',r);
+  if(sai.length){S.prod.filter(p=>p.almoxId===r.id&&sai.includes(p.prateleira)).forEach(p=>put('prod',Object.assign(cl(p),{prateleira:''})));S.ferr.filter(f=>f.almoxId===r.id&&sai.includes(f.prateleira)).forEach(f=>put('ferr',Object.assign(cl(f),{prateleira:''})));}
+  toast('Almoxarifado salvo.','pos');
+}
+function v153DupAviso(dups,chave){const mb=$('#mb');if(!mb||!mb.insertAdjacentHTML){toast('Já existe o almoxarifado "'+dups[0].nome+'" neste endereço.','neg');return;}const x=$('#v153dup');if(x&&x.remove)x.remove();
+  mb.insertAdjacentHTML('afterbegin','<div class="note" id="v153dup" style="margin:0 0 10px;border-color:var(--warn)"><b>'+(dups.length>1?'Já existem os almoxarifados '+esc(dups.map(a=>'"'+a.nome+'"').join(', ')):'Já existe o almoxarifado "'+esc(dups[0].nome)+'"')+' neste endereço.</b> Cadastrar outro no mesmo endereço? (ex.: materiais, ferramentas/EPI e fábrica no mesmo terreno)<div class="acts" style="margin-top:8px"><button type="button" class="btn sm pri" data-act="v153DupSim" data-k="'+esc(chave)+'">Sim, cadastrar no mesmo endereço</button><button type="button" class="btn sm" data-act="v153DupNao">Não, revisar</button></div></div>');
+  try{mb.scrollTop=0;}catch(e){}toast('Confirme: já existe almoxarifado neste endereço.','neg');}
+A.v153DupSim=d=>{V153.dupOk=d.k;const b=$('#mf [data-act="modalSave"]')||$('[data-act="modalSave"]');if(b&&b.click)b.click();};
+A.v153DupNao=()=>{const x=$('#v153dup');if(x&&x.remove)x.remove();V153.dupOk=null;};
+Object.assign(ACT_GROUP,{v153DupSim:null,v153DupNao:null});
+{const s0=v153AlmSalvarBase;almSalvar=function(root,isNew){const v=readForm(root);
+  if(v.respUid&&v.substUid&&v.respUid===v.substUid){toast('O substituto precisa ser outra pessoa.','neg');return false;}
+  const r=s0.apply(this,arguments);if(r===false)return r;
+  try{const id=ALM.rec&&ALM.rec.id,a=id&&get('almox',id);if(a){let x=a;
+      if(v.respUid&&!String(a.resp||'').trim())x=Object.assign(cl(x),{resp:v153Nome(v.respUid)});
+      x=Object.assign(x===a?cl(a):x,{principal:v.principal===true||v.principal==='on'});
+      if(JSON.stringify(x)!==JSON.stringify(a))put('almox',x);
+      if(x.principal){const c=v153Norm(x.cidade),u=v153Norm(x.uf);v153AlmAtivos().forEach(o=>{if(o.id!==x.id&&o.principal===true&&v153Norm(o.cidade)===c&&(!u||!o.uf||v153Norm(o.uf)===u)){put('almox',Object.assign(cl(o),{principal:false}));toast('"'+o.nome+'" deixou de ser o principal de '+(x.cidade||'')+'.','pos');}});}}}catch(e){}
+  return r;};}
+{const d=MODS2.almox;if(d)d.sub='Cada almoxarifado tem um endereço; vários podem ficar no mesmo endereço (ex.: materiais, ferramentas/EPI e fábrica no mesmo terreno). Dentro dele você cadastra as prateleiras, o responsável e se é o principal da cidade (padrão das obras dessa cidade).';if(d&&Array.isArray(d.cols)){d.cols=d.cols.map(c=>c[0]==='Responsável'?['Responsável',r=>{const l=[];if(r.respUid)l.push('<b>'+esc(v153Nome(r.respUid))+'</b>');else if(r.resp)l.push(esc(r.resp));if(r.substUid)l.push('<div class="sub">substituto: '+esc(v153Nome(r.substUid))+'</div>');if(r.tel)l.push('<div class="sub">'+esc(r.tel)+'</div>');return l.join('')||'<span class="sub">sem responsável (avisos para todos)</span>';}].concat(c.slice(2)):c);
+  d.cols.splice(2,0,['Cidade',r=>esc([r.cidade,r.uf].filter(Boolean).join('/')||'—')+(r.principal===true?' '+pill('principal da cidade','acc'):'')]);
+  const s0=d.search;d.search=r=>[s0?s0(r):'',r.cidade,r.respUid?v153Nome(r.respUid):'',r.substUid?v153Nome(r.substUid):''].join(' ');}}
+FLABEL.respUid='Responsável';FLABEL.substUid='Substituto';FLABEL.principal='Principal da cidade';FLABEL.almoxOrigId='Almoxarifado de origem';
+
+/* ---------- 3. obra: "Almoxarifado que atende" ---------- */
+{const f0=projForm;projForm=function(p){f0.apply(this,arguments);try{const mb=$('#mb');if(!mb||!mb.querySelector)return;const fg=mb.querySelector('.fg');if(!fg||!fg.insertAdjacentHTML)return;
+  const info={},aut=v153AlmoxObra(p&&p.id?p.id:'',info),semP=Object.assign({},p||{},{almoxId:''});let sug='';
+  try{if(p&&p.id){const x=get('proj',p.id);if(x&&x.almoxId){const bak=x.almoxId;x.almoxId='';try{sug=v153AlmoxObra(p.id);}finally{x.almoxId=bak;}}else sug=aut;}}catch(e){}
+  const opts=v153AlmAtivos().slice().sort(v153PorNome).map(a=>[a.id,a.nome+(a.cidade?' ('+a.cidade+(a.uf?'/'+a.uf:'')+')':'')+(a.principal===true?' · principal':'')]);
+  fg.insertAdjacentHTML('beforeend','<div class="sect" style="grid-column:1/-1">Almoxarifado</div>'+field('Almoxarifado que atende a obra','almoxId','select',(p&&p.almoxId)||'',{opts,blank:'Automático'+(sug?' ('+almNome(sug)+')':'')})+
+    '<p class="sub" style="grid-column:1/-1;margin:0">De onde sai a separação do material da obra. Automático: o almoxarifado principal da cidade da obra; sem ele, o mais usado pela obra (ou o único ativo). A solicitação de compra pode trocar.</p>');void semP;}catch(e){}};}
+
+/* ---------- 4. SC: almoxarifado de origem e tipos permitidos pelo perfil ---------- */
+const v153Perfil=()=>{try{return (typeof p2Def==='function'?p2Def(me.perfil):null)||PERFIS[me.perfil]||null;}catch(e){return PERFIS[me.perfil]||null;}};
+function v153ScTipos(){if(store.mode!=='db'||me.owner)return null;const p=PERFIS[me.perfil];return p&&!p.custom&&Array.isArray(p.scTipos)&&p.scTipos.length?p.scTipos:null;}
+{const b0=scBody;scBody=function(){let h=b0.apply(this,arguments);const x=scd||{},t=v152Tipo(x);
+  const st=v153ScTipos();if(st){V152_TIPOS.forEach(o=>{if(!st.includes(o[0])&&o[0]!==t)h=h.replace(new RegExp('<option value="'+o[0]+'"[^>]*>[^<]*</option>'),'');});
+    if(!h.includes('v153tp'))h=h.replace('<div class="fg">','<p class="sub v153tp" style="margin:0 0 6px">Seu perfil cria solicitação de: '+esc(st.map(k=>(V152_TIPOS.find(o=>o[0]===k)||[k,k])[1]).join(', '))+'.</p><div class="fg">');}
+  if(t!=='repos'){const opts=v153AlmAtivos().slice().sort(v153PorNome).map(a=>[a.id,a.nome+(a.cidade?' ('+a.cidade+')':'')]);
+    if(opts.length){const auto=x.projId?v153AlmoxObra(x.projId):'';
+      const f=field('Almoxarifado de origem (separação)','almoxOrigId','select',x.almoxOrigId||'',{opts,blank:auto?'Automático ('+almNome(auto)+')':'Não definido'}).replace('data-f="','data-cf="');
+      const k='<div class="sect">Itens solicitados</div>',i=h.indexOf(k);
+      const bloco='<div class="fg v153orig" style="margin-top:6px">'+f+'</div><p class="sub" style="margin:2px 0 10px">O que existe no estoque é separado deste almoxarifado (padrão: o que atende a obra). Faltando lá e havendo em outro, a separação sugere a transferência.</p>';
+      h=i>=0?h.slice(0,i)+bloco+h.slice(i):h+bloco;}}
+  return h;};}
+document.addEventListener('change',e=>{const t=e.target;if(!scActive||!scd||!t||!t.dataset)return;const k=t.dataset.cf;
+  if(k==='almoxOrigId'){V153.almManual=!!t.value;return;}
+  if(k==='projId'&&!V153.almManual){scd.almoxOrigId=scd.projId?v153AlmoxObra(scd.projId):'';if(!scd.almoxOrigId)delete scd.almoxOrigId;setTimeout(()=>{try{v152ScRedesenha();}catch(z){}},0);}});
+{const o0=openSc;openSc=function(s){V153.almManual=!!(s&&s.almoxOrigId);return o0.apply(this,arguments);};}
+{const s0=scSave;scSave=function(){const x=scd||{},st=v153ScTipos(),t=v152Tipo(x)||(x.projId?'obra':'');
+  if(st&&!get('sc',x.id)&&!st.includes(t)){toast('Seu perfil cria solicitação de compra só de: '+st.map(k=>(V152_TIPOS.find(o=>o[0]===k)||[k,k])[1]).join(', ')+'.','neg');return false;}
+  if(st&&get('sc',x.id)&&(get('sc',x.id).tipo||'')!==(x.tipo||'')&&!st.includes(t)){toast('Seu perfil não muda a solicitação para este tipo.','neg');return false;}
+  if(t==='repos')delete x.almoxOrigId;else if(!x.almoxOrigId){const a=x.projId?v153AlmoxObra(x.projId):'';if(a)x.almoxOrigId=a;}
+  return s0.apply(this,arguments);};}
+/* a SC nova (também do diário de obra e da fábrica) já nasce com o almoxarifado de origem; a separação nasce com ele */
+{const p0=put;put=function(col,rec){try{
+  if(col==='sc'&&rec&&!(rec.id&&get('sc',rec.id))&&!rec.almoxOrigId&&rec.tipo!=='repos'&&rec.projId){const a=v153AlmoxObra(rec.projId);if(a)rec=Object.assign({},rec,{almoxOrigId:a});}
+  if(col==='sep'&&rec&&!(rec.id&&get('sep',rec.id))&&!rec.almoxId){const sc=V153.curSc&&V153.curSc.id===rec.scId?V153.curSc:(rec.scId?get('sc',rec.scId):null);const a=v153AlmoxSc(sc)||(rec.projId?v153AlmoxObra(rec.projId):'');if(a)rec=Object.assign({},rec,{almoxId:a});}
+  if(col==='mov'&&rec&&rec.sepId&&!rec.almoxId&&rec.tipo==='saida'&&!(rec.id&&get('mov',rec.id))){const s=get('sep',rec.sepId);if(s&&s.almoxId)rec=Object.assign({},rec,{almoxId:s.almoxId});}
+  }catch(e){}return p0.apply(this,[col,rec]);};}
+/* aprovação: quem aprova confirma (ou troca) o almoxarifado de origem */
+{const e0=scEnviarCore;scEnviarCore=function(sc0){let s=sc0;try{if(s&&s.tipo!=='repos'){const ap=V153.apAlm&&V153.apAlm.id===s.id?V153.apAlm.alm:null;
+    if(ap&&ap!==s.almoxOrigId)s=Object.assign(cl(s),{almoxOrigId:ap});else if(!s.almoxOrigId&&s.projId){const a=v153AlmoxObra(s.projId);if(a)s=Object.assign(cl(s),{almoxOrigId:a});}}}catch(e){}
+  V153.apAlm=null;const bak=V153.curSc;V153.curSc=s;try{return e0.call(this,s);}finally{V153.curSc=bak;}};}
+{const a0=A.matAprovar;A.matAprovar=d=>{const r=a0(d);try{const sc=get('sc',d.id);if(!sc||d.dec==='nao'||sc.tipo==='repos')return r;const mb=$('#mb');if(!mb||!mb.querySelector)return r;
+    const atual=v153AlmoxSc(sc),opts=v153AlmAtivos().slice().sort(v153PorNome).map(a=>[a.id,a.nome]);if(!opts.length)return r;
+    V153.apAlm=atual?{id:sc.id,alm:atual}:null;
+    const box='<div class="fg" style="margin-top:10px">'+field('Separar do almoxarifado','v153AlmAp','select',atual,{opts,blank:'Não definido'})+'</div>';
+    const ta=mb.querySelector('label.f.full');if(ta&&ta.insertAdjacentHTML)ta.insertAdjacentHTML('beforebegin',box);else if(mb.insertAdjacentHTML)mb.insertAdjacentHTML('beforeend',box);
+    const el=$('#f_v153AlmAp');if(el&&el.addEventListener)el.addEventListener('change',()=>{V153.apAlm={id:sc.id,alm:el.value||''};});}catch(e){}return r;};}
+/* aviso de separar material: ao responsável e ao substituto do almoxarifado de origem */
+{const c0=avisoChat;avisoChat=function(u,txt){try{const m=/^Separar material da solicitação nº (\S+?) /.exec(String(txt||''));
+    if(m){const sc=S.sc.find(s=>String(s.numero)===m[1]&&s.sepId)||S.sc.find(s=>String(s.numero)===m[1]);const sp=sc&&sc.sepId?get('sep',sc.sepId):null,alm=sp?v153AlmoxSep(sp):v153AlmoxSc(sc);
+      const ds=v153Dest(alm,u?[u]:[]);if(ds.length&&!(ds.length===1&&ds[0]===u)){const t2=txt+(alm?' Almoxarifado: '+almNome(alm)+'.':'');let ok=false;ds.forEach(x=>{if(c0.call(this,x,t2))ok=true;});return ok;}}}catch(e){}
+  return c0.apply(this,arguments);};}
+
+/* ---------- 5. separação: almoxarifado, prateleira e saldo no local; transferência ---------- */
+function v153Prat(pid,alm){const p=get('prod',pid)||{};if(alm&&p.almoxId===alm&&p.prateleira)return p.prateleira;if(!alm)return p.prateleira||'';
+  let m=null;(S.mov||[]).forEach(x=>{if(x.prodId===pid&&x.prateleira&&(x.almoxId===alm||(x.tipo==='transf'&&x.almoxDest===alm&&false))&&(x.tipo==='entrada'||x.tipo==='ajuste')&&(!m||String(x.data||'')>=String(m.data||'')))m=x;});return m?m.prateleira:'';}
+const v153PratOrd=(a,b)=>{const x=a.prat||'',y=b.prat||'';if(!x&&y)return 1;if(x&&!y)return -1;return String(x).localeCompare(String(y),'pt-BR',{numeric:true})||String(a.desc||'').localeCompare(String(b.desc||''),'pt-BR');};
+/* linhas da separação com o local de cada item, em ordem de prateleira */
+function v153SepLinhas(s){const sm=almSaldosMap(),alm0=v153AlmoxSep(s);
+  return (s.itens||[]).map((i,k)=>{const p=i.prodId?get('prod',i.prodId):null,alm=alm0||(p&&p.almoxId)||'',sd=i.prodId?(alm?+((sm.get(alm)||new Map()).get(i.prodId)||0):+stockAll().of(i.prodId).saldo||0):null;
+    const outros=i.prodId?v153AlmAtivos().filter(a=>a.id!==alm).map(a=>({id:a.id,nome:a.nome,saldo:r3(+((sm.get(a.id)||new Map()).get(i.prodId)||0))})).filter(o=>o.saldo>1e-9):[];
+    return {k,prodId:i.prodId||'',desc:i.desc||(p&&p.nome)||'',cod:(p&&p.sku)||'',un:i.un||(p&&p.un)||'',qtd:+i.qtd||0,alm,prat:i.prodId?v153Prat(i.prodId,alm):'',saldo:sd==null?null:r3(sd),total:i.prodId?r3(+stockAll().of(i.prodId).saldo||0):null,falta:sd==null?0:r3(Math.max(0,(+i.qtd||0)-sd)),outros};}).sort(v153PratOrd);}
+/* sugestão de transferência: de onde vem o que falta no almoxarifado de origem */
+function v153Transf(s,ls){ls=ls||v153SepLinhas(s);const alm=v153AlmoxSep(s);if(!alm)return [];const por=new Map();
+  ls.filter(l=>l.falta>1e-9&&l.outros.length).forEach(l=>{let falta=l.falta;l.outros.slice().sort((a,b)=>b.saldo-a.saldo).forEach(o=>{if(falta<=1e-9)return;const q=r3(Math.min(falta,o.saldo));falta=r3(falta-q);
+      if(!por.has(o.id))por.set(o.id,{de:o.id,nome:o.nome,para:alm,itens:[]});por.get(o.id).itens.push({prodId:l.prodId,desc:l.desc,un:l.un,qtd:q});});});
+  return [...por.values()];}
+const v153RomTr=(s,de)=>(S.rom||[]).find(r=>r.destTipo==='almox'&&r.destAlmoxId===v153AlmoxSep(s)&&(!de||r.almoxId===de)&&['rascunho','conferido','transito'].includes(r.status)&&String(r.obs||'').includes('separação nº '+s.numero));
+function v153SepTabela(s){const ls=v153SepLinhas(s),tr=v153Transf(s,ls),alm=v153AlmoxSep(s),podeT=mayW('est')&&SEP_ABERTA(s);
+  return (alm?'<p style="margin:0 0 8px"><b>Separar do '+esc(v153AlmTxt(alm))+'</b>'+(get('almox',alm)&&almEnd(get('almox',alm))?'<span class="sub"> · '+esc(almEnd(get('almox',alm)))+'</span>':'')+'</p>':'<p class="sub" style="margin:0 0 8px">Separação sem almoxarifado definido: cada item mostra o local padrão do produto.</p>')+
+    '<div class="tw v153sep"><table style="min-width:0;width:100%"><thead><tr><th>Prateleira / local</th><th>Item</th><th class="num">Separar</th><th class="num">Saldo no local</th><th>Almoxarifado</th></tr></thead><tbody>'+
+    ls.map(l=>'<tr><td class="mono"><b>'+esc(l.prat||'—')+'</b></td><td>'+esc(l.desc)+(l.cod?'<div class="sub mono">'+esc(l.cod)+'</div>':'')+'</td><td class="num">'+fmtQ(l.qtd)+' '+esc(l.un)+'</td><td class="num'+(l.falta>1e-9?' neg':'')+'">'+(l.saldo==null?'—':fmtQ(l.saldo))+(l.falta>1e-9?'<div class="sub">falta '+fmtQ(l.falta)+'</div>':'')+'</td><td>'+esc(l.alm?almNome(l.alm):'—')+(l.outros.length&&l.falta>1e-9?'<div class="sub">há em: '+esc(l.outros.map(o=>o.nome+' '+fmtQ(o.saldo)).join(', '))+'</div>':'')+'</td></tr>').join('')+'</tbody></table></div>'+
+    (tr.length?'<div class="note v153tr" style="margin:10px 0 0"><b>Falta material no '+esc(v153AlmTxt(alm))+'.</b> Sugestão: transferência entre almoxarifados (romaneio de transferência).'+tr.map(t=>'<div style="margin-top:6px">'+esc(t.nome)+' → '+esc(almNome(t.para))+': '+esc(t.itens.map(i=>fmtQ(i.qtd)+' '+i.un+' '+i.desc).join('; '))+(v153RomTr(s,t.de)?' '+pill('transferência nº '+v153RomTr(s,t.de).numero+' '+(ROM_ST[v153RomTr(s,t.de).status]||[''])[0].toLowerCase(),'acc'):(podeT?' <button class="btn sm pri" data-act="v153Transferir" data-id="'+esc(s.id)+'" data-de="'+esc(t.de)+'">Gerar transferência</button>':''))+'</div>').join('')+(podeT?'':'<div class="sub" style="margin-top:4px">Peça a transferência ao almoxarife (Romaneios › transferência).</div>')+'</div>':'');}
+A.sepVer=d=>{const s=get('sep',d.id);if(!s)return;
+  modal({title:'Pedido de separação nº '+s.numero,wide:true,nofocus:true,foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="sepPrint" data-id="'+esc(s.id)+'">Visualizar / PDF</button>',
+    body:'<p class="sub" style="margin:0 0 10px">'+esc(s.projId?projNome(s.projId):'Sem projeto')+' · solicitante '+esc(s.solicitante||'—')+' · levar para '+esc(s.localEntrega||'—')+' · necessidade '+fmtDate(s.necessidade)+'</p>'+v153SepTabela(s)});};
+A.v153Transferir=d=>{const s=get('sep',d.id);if(!s)return;if(!mayW('est')){toast('Seu perfil não gera romaneio de transferência.','neg');return;}
+  const t=v153Transf(s).find(x=>x.de===d.de);if(!t){toast('Nada a transferir deste almoxarifado.','neg');return;}
+  const r=romBlank();Object.assign(r,{almoxId:t.de,destTipo:'almox',destAlmoxId:t.para,obs:'Transferência para a separação nº '+s.numero+(s.projId?' ('+projNome(s.projId)+')':''),
+    itens:t.itens.map(i=>{const p=get('prod',i.prodId)||{};return {origem:'prod',prodId:i.prodId,desc:i.desc,cod:p.sku||'',un:i.un,qtd:i.qtd,vol:'',peso:'',obs:'separação nº '+s.numero};})});
+  try{const e=romEndDe(r);if(e)Object.assign(r,e);}catch(e){}closeModal();setTimeout(()=>romForm(r),40);};
+Object.assign(ACT_GROUP,{v153Transferir:null});
+/* romaneio gerado da separação sai do almoxarifado dela */
+{const r0=romAddSepIt;romAddSepIt=function(s){const vazio=RM&&!(RM.itens||[]).length;const n=r0.apply(this,arguments);try{const a=v153AlmoxSep(s);if(a&&RM&&vazio&&RM.destTipo!=='almox')RM.almoxId=a;}catch(e){}return n;};}
+{const d0=sepDoc;sepDoc=function(s){const o=d0.apply(this,arguments);try{const ls=v153SepLinhas(s),alm=v153AlmoxSep(s),a=alm?get('almox',alm):null;
+  if(o&&o.meta)o.meta.splice(1,0,['Almoxarifado',a?a.nome+(almEnd(a)?' · '+almEnd(a):''):'Local padrão de cada produto']);
+  o.tables=[{head:['#','Prateleira / local','Código','Descrição','Un.','Separar','Saldo no local','Separado'],num:[0,5,6],rows:ls.map((l,k)=>[String(k+1),l.prat||'—',l.cod||'',l.desc+(!alm&&l.alm?' ('+almNome(l.alm)+')':''),l.un||'',fmtQ(l.qtd),l.saldo==null?'—':fmtQ(l.saldo)+(l.falta>1e-9?' (falta '+fmtQ(l.falta)+')':''),'☐'])}];
+  const tr=v153Transf(s,ls);if(tr.length)o.obs=[o.obs,'Falta no almoxarifado de origem: transferir '+tr.map(t=>'de '+t.nome+' ('+t.itens.map(i=>fmtQ(i.qtd)+' '+i.un+' '+i.desc).join('; ')+')').join(' e ')+'.'].filter(Boolean).join(' ');
+  o.obs=[o.obs,'Itens em ordem de prateleira para o caminho de separação.'].filter(Boolean).join(' ');}catch(e){}return o;};}
+
+/* ---------- 6. filtro "Meu almoxarifado" (Separação, Romaneios, Devolução de sobras, Recebimento de notas) ---------- */
+function v153Filtro(f){const meus=v153Meus();if(f.alm===undefined)f.alm=meus.length?'meu':'';const v=f.alm;if(!v)return null;
+  if(v==='meu')return ids=>!ids.filter(Boolean).length||ids.some(x=>meus.includes(x));return ids=>ids.includes(v);}
+function v153SelAlm(id,path,f){const meus=v153Meus(),l=(meus.length||f.alm==='meu'?[['meu','Meu almoxarifado'+(meus.length?' ('+meus.map(almNome).join(', ')+')':'')]]:[]).concat(v153AlmAtivos().slice().sort(v153PorNome).map(a=>[a.id,a.nome]));
+  return '<label class="f v153alm"><span>Almoxarifado</span><select id="'+id+'" data-filter="'+path+'">'+opt(l,f.alm||'','Todos')+'</select></label>';}
+function v153ComFiltro(col,pred,fn){const all=S[col];if(!pred||!Array.isArray(all))return fn();S[col]=all.filter(pred);try{return fn();}finally{S[col]=all;}}
+const v153InsBar=(h,sel)=>{const i=h.indexOf('<div class="bar">');return i<0?h:h.slice(0,i+17)+sel+h.slice(i+17);};
+{const v0=V.sep;V.sep=function(){const f=ui.sep,fl=v153AlmAtivos().length?v153Filtro(f):null;
+  let h=v153ComFiltro('sep',fl?s=>fl([v153AlmoxSep(s)]):null,()=>v0.apply(this,arguments));
+  if(v153AlmAtivos().length)h=v153InsBar(h,v153SelAlm('s_v153sep','sep.alm',f));
+  /* almoxarifado e sugestão de transferência em cada linha */
+  S.sep.forEach(s=>{const k='data-act="sepVer" data-id="'+s.id+'"';const i=h.indexOf(k);if(i<0)return;const ti=h.lastIndexOf('<tr',i);if(ti<0)return;const c=h.indexOf('</div></td>',ti);if(c<0||c>i)return;
+    const a=v153AlmoxSep(s);let x=a?'<div class="sub">'+esc(v153AlmTxt(a))+'</div>':'';if(SEP_ABERTA(s)&&a)try{if(v153Transf(s).length)x+=pill('falta no almoxarifado: transferir','warn');}catch(e){}
+    if(x)h=h.slice(0,c+6)+x+h.slice(c+6);});
+  return h;};}
+{const v0=V.rom;V.rom=function(){const f=ui.rom,fl=v153AlmAtivos().length?v153Filtro(f):null;
+  let h=v153ComFiltro('rom',fl?r=>fl([r.almoxId,r.destTipo==='almox'?r.destAlmoxId:'']):null,()=>v0.apply(this,arguments));
+  return v153AlmAtivos().length?v153InsBar(h,v153SelAlm('s_v153rom','rom.alm',f)):h;};}
+if(typeof V.devobra==='function'){const v0=V.devobra;V.devobra=function(){const f=ui.devobra,fl=v153AlmAtivos().length?v153Filtro(f):null;
+  let h=v153ComFiltro('devobra',fl?d=>fl([d.almoxId]):null,()=>v0.apply(this,arguments));return v153AlmAtivos().length?v153InsBar(h,v153SelAlm('s_v153dev','devobra.alm',f)):h;};}
+/* Recebimento de notas › O que precisa de ação: as pendências do almoxarife pelo almoxarifado do pedido */
+ui.p2q=ui.p2q||{};
+function v153P2qFiltra(its,f){const fl=v153AlmAtivos().length?v153Filtro(f):null;if(!fl)return its;return its.filter(i=>i.quem!=='almoxarife'||fl([v153AlmoxNota(i.ref)]));}
+{const v0=p2qView;p2qView=function(){const f=ui.p2q,i0=p2qItens;p2qItens=function(){return v153P2qFiltra(i0.apply(this,arguments),f);};let h;try{h=v0.apply(this,arguments);}finally{p2qItens=i0;}
+  if(!v153AlmAtivos().length)return h;const k='<label class="f"><span>Mostrar</span>',i=h.indexOf(k);const sel=v153SelAlm('s_v153p2q','p2q.alm',f).replace('<span>Almoxarifado</span>','<span>Almoxarifado (pendências do almoxarife)</span>');
+  return i<0?v153InsBar(h,sel):h.slice(0,i)+sel+h.slice(i);};}
+{const c0=p2qContagem;p2qContagem=function(){try{if(!v153Meus().length)return c0.apply(this,arguments);return p2qMinhas(v153P2qFiltra(p2qItens(),{alm:'meu'})).filter(i=>!i.auto).length;}catch(e){return c0.apply(this,arguments);}};}
+
+/* ---------- 7. Almoxarife sem "Controles de compras"; perfil "Almoxarife e fábrica"; Almoxarife cria SC de reposição e administrativa ---------- */
+if(PERFIS.almoxarife&&!PERFIS.almoxarife.custom){const p=PERFIS.almoxarife;p.telasFora=v153Uniq((p.telasFora||[]).concat(['supctl']));p.scTipos=['repos','adm'];
+  if(p.desc&&!/Controles de compras/.test(p.desc))p.desc+=' Não vê Controles de compras.';}
+if(PERFIS.almoxarife&&!PERFIS.almoxfab){const b=PERFIS.almoxarife,x=JSON.parse(JSON.stringify(b));
+  delete x.scTipos;x.nome='Almoxarife e fábrica';x.papel='almoxarife';
+  x.w=v153Uniq((Array.isArray(x.w)?x.w:[]).concat(['fab']));
+  x.naoExclui=v153Uniq((x.naoExclui||[]).concat(['osf']));
+  x.camposProprio=Object.assign({},x.camposProprio||{},{sc:['rascunho','aprovacao']});
+  x.telasFora=v153Uniq((x.telasFora||[]).concat(['supctl']));
+  x.desc='Almoxarife de uma unidade com fábrica (ex.: Tuiuti): tudo o que o Almoxarife faz (recebimento, estoque, separação, romaneios, devolução de sobras, inventário, EPI e ferramentas), cria e envia solicitação de compra de qualquer tipo (obra, reposição e administrativa) e, no módulo Fábrica, cria, altera e avança as etapas das ordens de fabricação (sem excluir a OS; a aprovação da OS e as configurações continuam com o gestor). Não aprova compras, não vê Controles de compras nem valores gerenciais em R$.';
+  PERFIS.almoxfab=x;try{if(typeof U3_ORIG!=='undefined')U3_ORIG.almoxfab=x;U3_BASE_=null;}catch(e){}
+  try{P0_PREF.almoxfab='pnSup';}catch(e){}
+  try{const d=(typeof PN2_DEF!=='undefined'?PN2_DEF:null);if(d){const s=d.find(z=>z.id==='pnSup');if(s&&!s.perfis.includes('almoxfab'))s.perfis.push('almoxfab');}}catch(e){}}
+/* painel de Suprimentos: sem o quadro de exceções de Controles de compras para quem não tem a tela */
+function v153TiraCard(h,marca){const i=h.indexOf(marca);if(i<0)return h;const a=h.lastIndexOf('<div class="card">',i);if(a<0)return h;let n=0,j=a;
+  const rx=/<div\b|<\/div>/g;rx.lastIndex=a;let m;while((m=rx.exec(h))){if(m[0]==='</div>'){n--;if(n===0){j=m.index+6;break;}}else n++;}return n===0?h.slice(0,a)+h.slice(j):h;}
+
+/* ---------- 8. quadro do processo de compra (Painel de Suprimentos) ---------- */
+ui.v153kb=ui.v153kb||{proj:'',pes:'',tipo:'',alm:'',dias:'15',mais:''};
+const V153_COLS=[['scap','SC aguardando aprovação'],['sccot','SC aguardando cotação'],['cot','Em cotação'],['pedap','Pedido aguardando aprovação'],['peden','Pedido enviado'],['rec','Recebido aguardando nota'],['fim','Concluído']];
+/* dias parado na coluna: [amarelo, vermelho] */
+const V153_LIM={scap:[2,4],sccot:[2,5],cot:[3,7],pedap:[2,4],peden:null,rec:[3,7],fim:null};
+function v153Tom(c,nec,desde,prev){let t=0;const dd=nec?dTo(nec):null;if(c!=='fim'){if(dd!=null&&dd<0)t=2;else if(dd!=null&&dd<=3)t=1;}
+  const l=V153_LIM[c];if(l&&desde){const d=(Date.now()-desde)/864e5;if(d>=l[1])t=2;else if(d>=l[0])t=Math.max(t,1);}
+  if(c==='peden'&&prev){const p=dTo(prev);if(p<0)t=2;else if(p<=1)t=Math.max(t,1);}return t;}
+const v153Nm=l=>{l=v153Uniq(l);try{v152Nomes(l);}catch(e){}return l.map(u=>v153Nome(u)).filter(Boolean);};
+function v153QuemTxt(q){if(!q||!q.pend)return '';if(q.fallback)return 'dono ou Administrador';const n=v153Nm(q.principais);return n.length?n.join(' ou '):'aprovador';}
+function v153AlmDe(c,r){try{return c==='sc'?v153AlmoxSc(r):c==='cot'?v153AlmoxSc(r.scId?get('sc',r.scId):null)||(r.projId?v153AlmoxObra(r.projId):''):c==='ped'?v153AlmoxPed(r):'';}catch(e){return '';}}
+function v153TipoDe(c,r){const sc=c==='sc'?r:r&&r.scId?get('sc',r.scId):null;return (sc&&v152Tipo(sc))||(r&&r.projId?'obra':'');}
+function v153Notas(p){return (S.notas||[]).filter(n=>n.tipo==='entrada'&&n.status!=='cancelada'&&(n.pedId===p.id||(Array.isArray(p.notaIds)&&p.notaIds.includes(n.id))||p.notaId===n.id));}
+function v153KbDados(f){f=f||ui.v153kb;const h=todayStr(),N=Math.max(1,+f.dias||15),out={};V153_COLS.forEach(c=>{out[c[0]]=[];});
+  const add=(col,o)=>{out[col].push(o);};
+  const base=(c,r,extra)=>Object.assign({c,id:r.id,proj:r.projId||'',alm:v153AlmDe(c,r),tipo:v153TipoDe(c,r),pes:[]},extra);
+  const cotAb=(S.cot||[]).filter(x=>x.status==='aberta'),scComCot=new Set(cotAb.map(x=>x.scId).filter(Boolean));
+  (S.sc||[]).forEach(s=>{if(s.ex===true&&false)return;
+    if(s.status==='aprovacao'){let q=null;try{q=v152Quem('sc',s);}catch(e){}const desde=+s.aprovPedidoEm||v153Ts(s.enviadoEm)||+s.cr||v153Ts(s.data);
+      add('scap',base('sc',s,{num:'SC nº '+(s.numero||''),nec:s.necessidade||'',desde,pes:[s.solUid,s.crBy],quem:q&&q.pend?'Aprovar: '+v153QuemTxt(q):'Aprovar: aprovador de material',sol:s.solicitante||''}));}
+    else if((s.status==='enviada'&&!scComCot.has(s.id))||(s.status==='cotacao'&&!scComCot.has(s.id))){const desde=(s.aprovMat&&+s.aprovMat.em)||v153Ts(s.enviadoEm)||+s.cr||v153Ts(s.data);let cmp='';try{cmp=matCfg().comprador;}catch(e){}
+      add(s.status==='cotacao'?'cot':'sccot',base('sc',s,{num:'SC nº '+(s.numero||''),nec:s.necessidade||'',desde,pes:[s.solUid,s.crBy,cmp],quem:'Comprador: '+(cmp?v153Nome(cmp):'abrir a cotação'),sol:s.solicitante||''}));}});
+  cotAb.forEach(x=>{const sc=x.scId?get('sc',x.scId):null;add('cot',base('cot',x,{num:'Cotação nº '+(x.numero||'')+(sc?' · SC nº '+(sc.numero||''):''),nec:(sc&&sc.necessidade)||'',desde:+x.cr||v153Ts(x.data),pes:[x.crBy,sc&&sc.solUid,sc&&sc.crBy],
+    forn:((x.forn||x.forns||[]).length)+' fornecedor(es)',quem:'Comprador: '+(x.crBy?v153Nome(x.crBy):'escolher o vencedor e gerar o pedido'),sol:sc?sc.solicitante||'':''}));});
+  (S.ped||[]).forEach(p=>{if(p.status==='cancelado')return;const sc=p.scId?get('sc',p.scId):null,nec=p.necessidade||(sc&&sc.necessidade)||'',ns=v153Notas(p),lanc=ns.filter(n=>n.status==='lancada'),recs=supRecs(p);
+    const ex={num:'Pedido nº '+(p.numero||''),forn:parcNome(p.parcId),nec,pes:[p.crBy,sc&&sc.solUid,sc&&sc.crBy],sol:sc?sc.solicitante||'':'',valor:vgOculto()?null:pedTotal(p),aceito:!!(p.aceite&&p.aceite.ok&&(typeof ppdfAceiteValido!=='function'||ppdfAceiteValido(p)))};
+    let ag=false;try{ag=supAguardAprov(p);}catch(e){}
+    let pend=false;try{pend=v152Pend('ped',p);}catch(e){}
+    if(ag||pend){let q=null;try{q=v152Quem('ped',ag?Object.assign({},p,{status:'aberto'}):p);}catch(e){}
+      add('pedap',base('ped',p,Object.assign(ex,{desde:Math.max(+p.cr||0,v153Ts(p.data),+(p.aprovReaberta&&p.aprovReaberta.em)||0),quem:'Aprovar: '+(q&&q.pend?v153QuemTxt(q):'aprovador da alçada')+(q&&q.nivelNome?' ('+q.nivelNome+')':''),pills:ag?[['recebido sem aprovação','neg']]:[]})));return;}
+    const ultRec=recs.reduce((m,r)=>Math.max(m,v153Ts(r.data)||+r.em||0),0)||v153Ts(p.recebidoEm);
+    if(p.status==='recebido'||(recs.length&&!lanc.length)){
+      if(lanc.length&&p.status==='recebido'){const em=lanc.reduce((m,n)=>Math.max(m,v153Ts(n.efetivadaEm)||+n.ts||0),0);if(em&&(Date.now()-em)/864e5<=N)add('fim',base('ped',p,Object.assign(ex,{desde:em,quem:'',notaId:lanc[0].id,pills:[['nota lançada '+fmtDate(new Date(em).toISOString().slice(0,10)),'pos']]})));return;}
+      const rasc=ns.find(n=>n.status==='rascunho');
+      add('rec',base('ped',p,Object.assign(ex,{desde:ultRec,quem:rasc?'Fiscal: lançar a NF '+(rasc.numero||'s/n'):'Fornecedor: enviar a nota (XML)',pills:p.status!=='recebido'?[['recebido em parte','warn']]:[]})));return;}
+    const alm=v153AlmoxPed(p),resp=v153Resp(alm?get('almox',alm):null);
+    add('peden',base('ped',p,Object.assign(ex,{prev:p.previsao||'',desde:(p.aprov&&+p.aprov.em)||+p.cr||v153Ts(p.data),
+      quem:p.status==='aberto'?'Comprador: enviar ao fornecedor':'Receber: '+(resp.length?v153Nm(resp).join(' ou '):'almoxarife')+(p.previsao?' · entrega '+fmtDate(p.previsao):''),
+      pills:[[p.status==='aberto'?'a enviar':recs.length?'recebido em parte':'enviado',p.status==='aberto'?'':'acc']].concat(ex.aceito?[['aceito pelo fornecedor','pos']]:[]).concat(p.previsao&&p.previsao<h?[['entrega atrasada','neg']]:[])})));});
+  /* filtros */
+  const fa=f.alm||'',cid=fa.startsWith('c:')?fa.slice(2):'',meus=fa==='meu'?v153Meus():null;
+  const okAlm=it=>{if(!fa)return true;if(meus)return !it.alm||meus.includes(it.alm);if(cid){const a=it.alm?get('almox',it.alm):null;return !!a&&v153Norm(a.cidade)===cid;}return it.alm===fa.replace(/^a:/,'');};
+  Object.keys(out).forEach(k=>{out[k]=out[k].filter(it=>(!f.proj||it.proj===f.proj)&&(!f.tipo||(it.tipo||'obra')===f.tipo)&&(!f.pes||it.pes.includes(f.pes))&&okAlm(it)).map(it=>Object.assign(it,{tom:v153Tom(k,it.nec,it.desde,it.prev)}))
+    .sort((a,b)=>b.tom-a.tom||String(a.nec||'9').localeCompare(String(b.nec||'9'))||(a.desde||0)-(b.desde||0));});
+  return out;}
+function v153Alvo(it){if(it.c==='sc')return {tab:'sc',act:'scVer'};if(it.c==='cot')return {tab:'cot',act:'cotAbrir'};if(it.notaId)return {tab:'nf',act:'verNota',id:it.notaId};return {tab:'ped',act:'pedEdit'};}
+function v153Card(k,it){const al=v153Alvo(it),tp=it.tipo==='repos'?pill('Reposição','acc'):it.tipo==='adm'?pill('Administrativa','warn'):'';
+  const obra=it.proj?projNome(it.proj):it.tipo==='repos'?v153AlmTxt(it.alm):it.tipo==='adm'?'Administrativa':'Sem obra';
+  return '<button type="button" class="v153c v153t'+it.tom+'" data-act="v153Abrir" data-col="'+it.c+'" data-id="'+esc(it.id)+'"'+(al.id?' data-nota="'+esc(al.id)+'"':'')+' title="Abrir '+esc(it.num)+'">'+
+    '<span class="v153c-h"><b>'+esc(it.num)+'</b>'+tp+'</span>'+
+    '<span class="v153c-l">'+esc(obra)+'</span>'+(it.forn?'<span class="v153c-l v153c-s">'+esc(it.forn)+(it.valor!=null&&it.valor!==undefined&&k!=='scap'?' · '+esc(money(it.valor)):'')+'</span>':'')+
+    '<span class="v153c-l v153c-s">'+(it.nec?'Necessidade '+esc(fmtDate(it.nec))+' · ':'')+(it.desde?esc(v152Ha(it.desde))+(k==='fim'?'':' nesta etapa'):'')+'</span>'+
+    ((it.pills||[]).length?'<span class="v153c-p">'+it.pills.map(p=>pill(p[0],p[1])).join(' ')+'</span>':'')+
+    (it.quem?'<span class="v153c-q">'+esc(it.quem)+'</span>':'')+'</button>';}
+function v153KbHtml(){const f=ui.v153kb,D=v153KbDados(f),max=12;
+  const pessoas=new Map();Object.values(D).forEach(l=>l.forEach(it=>it.pes.forEach(u=>{if(u&&!pessoas.has(u))pessoas.set(u,v153Nome(u));})));
+  if(f.pes&&!pessoas.has(f.pes))pessoas.set(f.pes,v153Nome(f.pes));
+  const cids=v153Uniq(v153AlmAtivos().map(a=>v153Norm(a.cidade))).map(c=>{const a=v153AlmAtivos().find(x=>v153Norm(x.cidade)===c);return ['c:'+c,'Cidade: '+(a.cidade||c)+(a.uf?'/'+a.uf:'')];});
+  const almOpts=(v153Meus().length?[['meu','Meu almoxarifado']]:[]).concat(cids,v153AlmAtivos().slice().sort(v153PorNome).map(a=>['a:'+a.id,a.nome]));
+  const fil='<div class="bar v153kbf">'+
+    '<label class="f"><span>Obra</span><select id="s_v153kb_p" data-filter="v153kb.proj">'+opt(S.proj.filter(p=>p.status!=='concluido').map(p=>[p.id,projOptNome(p.id)]),f.proj,'Todas')+'</select></label>'+
+    '<label class="f"><span>Comprador ou solicitante</span><select id="s_v153kb_u" data-filter="v153kb.pes">'+opt([...pessoas.entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1]))),f.pes,'Todos')+'</select></label>'+
+    '<label class="f"><span>Tipo</span><select id="s_v153kb_t" data-filter="v153kb.tipo">'+opt(V152_TIPOS,f.tipo,'Todos')+'</select></label>'+
+    (v153AlmAtivos().length?'<label class="f"><span>Almoxarifado ou cidade</span><select id="s_v153kb_a" data-filter="v153kb.alm">'+opt(almOpts,f.alm,'Todos')+'</select></label>':'')+
+    '<label class="f"><span>Concluídos dos últimos</span><select id="s_v153kb_d" data-filter="v153kb.dias">'+opt([['7','7 dias'],['15','15 dias'],['30','30 dias'],['60','60 dias']],String(f.dias||'15'))+'</select></label></div>';
+  const tot=V153_COLS.reduce((n,c)=>n+D[c[0]].length,0),atr=V153_COLS.reduce((n,c)=>n+D[c[0]].filter(x=>x.tom===2).length,0);
+  const cols=V153_COLS.map(([k,nome])=>{const l=D[k],ab=f.mais===k,vis=ab?l:l.slice(0,max);
+    return '<section class="v153col" data-col="'+k+'"><header class="v153h"><span>'+esc(nome)+(k==='fim'?' <small>('+esc(String(f.dias||15))+' dias)</small>':'')+'</span><span class="v153n'+(l.some(x=>x.tom===2)?' v153n2':'')+'" title="'+l.length+' documento(s)">'+l.length+'</span></header>'+
+      '<div class="v153cards">'+(vis.length?vis.map(it=>v153Card(k,it)).join(''):'<div class="v153vazio">Nada aqui.</div>')+
+      (l.length>max?'<button type="button" class="btn sm v153mais" data-act="v153Mais" data-col="'+k+'">'+(ab?'Mostrar menos':'Ver todos ('+l.length+')')+'</button>':'')+'</div></section>';}).join('');
+  return '<div class="card v153kbc"><h2>Processo de compra<small>'+tot+' documento(s) em andamento'+(atr?' · '+atr+' atrasado(s) ou parado(s)':'')+'</small></h2>'+fil+
+    '<div class="v153leg sub"><span class="v153d v153d1"></span> perto da necessidade ou parado · <span class="v153d v153d2"></span> necessidade vencida ou parado há muito tempo · clique no cartão para abrir o documento. O andamento vem das ações nas telas (o cartão não se arrasta).</div>'+
+    '<div class="v153kb" role="list">'+cols+'</div></div>';}
+A.v153Mais=d=>{ui.v153kb.mais=ui.v153kb.mais===d.col?'':d.col;render();};
+A.v153Abrir=d=>{const c=d.col,r=get(c,d.id);if(!r){toast('Documento não encontrado.','neg');return;}
+  const al=d.nota?{tab:'nf',act:'verNota',id:d.nota}:c==='sc'?{tab:'sc',act:'scVer'}:c==='cot'?{tab:'cot',act:'cotAbrir'}:{tab:'ped',act:'pedEdit'};
+  if(!mayR(GROUP_OF_TAB[al.tab])||!v153TabOk(al.tab)){toast('Seu perfil não abre a tela deste documento.','neg');return;}
+  try{const b=document.createElement('button');b.dataset.act='nav';b.dataset.tab=al.tab;document.body.appendChild(b);b.click();b.remove();}catch(e){ui.tab=al.tab;render();}
+  setTimeout(()=>{try{if(typeof A[al.act]==='function')A[al.act]({id:al.id||r.id});}catch(e){}},60);};
+Object.assign(ACT_GROUP,{v153Mais:null,v153Abrir:null});
+try{if(!document.getElementById('css_v153')){const st=document.createElement('style');st.id='css_v153';st.textContent=
+  '.v153kbc{min-width:0;overflow:hidden}.v153kbf{flex-wrap:wrap}.v153kbf .f{min-width:150px}'+
+  '.v153kb{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(212px,1fr);gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x proximity;max-width:100%}'+
+  '.v153col{background:var(--surface2,var(--bg));border:1px solid var(--line);border-radius:10px;padding:8px;min-width:0;scroll-snap-align:start;display:flex;flex-direction:column}'+
+  '.v153h{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);margin:2px 2px 8px}'+
+  '.v153h small{text-transform:none;font-weight:400}.v153n{background:var(--accent-soft);color:var(--fg);border-radius:999px;padding:1px 8px;font-size:12px}.v153n2{background:var(--neg-soft);color:var(--neg)}'+
+  '.v153cards{display:flex;flex-direction:column;gap:8px}.v153vazio{font-size:12px;color:var(--muted);padding:6px 4px}'+
+  '.v153c{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:3px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:13px;color:var(--fg);min-width:0}'+
+  '.v153c:hover{background:var(--hover)}.v153c:focus-visible{outline:2px solid var(--accent);outline-offset:1px}'+
+  '.v153c.v153t1{border-left-color:var(--warn)}.v153c.v153t2{border-left-color:var(--neg)}'+
+  '.v153c-h{display:flex;justify-content:space-between;align-items:center;gap:6px}.v153c-l{overflow-wrap:anywhere}.v153c-s{font-size:12px;color:var(--muted)}.v153c-p{display:flex;flex-wrap:wrap;gap:4px}'+
+  '.v153c-q{font-size:12px;border-top:1px dashed var(--line);padding-top:4px;margin-top:2px;overflow-wrap:anywhere}'+
+  '.v153leg{margin:0 0 8px}.v153d{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle}.v153d1{background:var(--warn)}.v153d2{background:var(--neg)}'+
+  '.v153mais{align-self:flex-start}'+
+  '@media (max-width:900px){.v153kb{display:block;overflow:visible}.v153col{margin:0 0 10px}.v153cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}'+
+  '.v153sep td{vertical-align:top}';document.head.appendChild(st);}}catch(e){}
+{const v0=V.pnSup;V.pnSup=function(){let h=v0.apply(this,arguments);try{const d=pn2Def('pnSup');if(!mayR(d.group))return h;
+    if(!v153TabOk('supctl'))h=v153TiraCard(h,'<h2>Exceções de compras de ');
+    const kb=v153KbHtml(),k='<div class="stack">',i=h.indexOf(k);if(i<0)return h+kb;const j=h.indexOf('<div class="g2">',i);
+    return j>0?h.slice(0,j)+kb+h.slice(j):h.slice(0,i+k.length)+kb+h.slice(i+k.length);}catch(e){return h;}};}
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v153Abrir:'Abre o documento na tela dele.',v153Mais:'Mostra todos os cartões desta coluna.',v153Transferir:'Abre um romaneio de transferência entre almoxarifados com o que falta.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='152',APP_DATA='2026-11-04';
+const APP_VER='153',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['153','2026-11-04',['Painel de Suprimentos com quadro do processo de compra: solicitação, cotação, pedido, recebimento e nota em colunas, com quem precisa agir, atraso em cor e filtros por obra, comprador, tipo e almoxarifado.', 'Almoxarifados com cidade, responsável, substituto e principal da cidade; a obra indica o almoxarifado que a atende. Separação, recebimento, romaneio e devolução avisam só o responsável daquele almoxarifado, e as telas abrem em Meu almoxarifado. Vários almoxarifados podem ficar no mesmo endereço.', 'Pedido de separação mostra almoxarifado, prateleira e saldo de cada item, em ordem de prateleira; se faltar material, sugere a transferência entre almoxarifados.', 'Novo perfil Almoxarife e fábrica: tudo do Almoxarife, mais solicitação de compra de qualquer tipo e movimentação das etapas das OS de fabricação. O Almoxarife deixa de ver Controles de compras e cria solicitação só de reposição e administrativa.']],
   ['152','2026-11-04',['Solicitação recusada ganhou Corrigir e reenviar: cria uma nova já preenchida, com o motivo da recusa no topo, ligada à recusada.', 'Solicitações e pedidos aguardando aprovação mostram quem precisa aprovar (com o nível da alçada no pedido) e há quanto tempo; o botão Pedir aprovação avisa o aprovador no chat e por e-mail e copia a mensagem para o WhatsApp (um lembrete a cada 2 horas).', 'Almoxarife pode criar solicitação de compra de Reposição de estoque e Administrativa (sem obra); no Estoque, Gerar solicitação de reposição com os itens abaixo do mínimo.', 'Pedidos de compra, Solicitações, Cotações, Separação e Notas de entrada se ajustam à largura da tela: botões sempre visíveis e, no celular, cada linha vira um cartão.']],
   ['151.2','2026-11-04',['Treinamentos: a tela de cada passo agora cabe na janela, com a explicação e os botões à vista sem rolar. Novo botão Aproximar do destaque, que amplia a área a clicar; Tela cheia abre a imagem inteira.']],
   ['151.1','2026-11-04',['Ao entrar no sistema, cada pessoa abre direto no painel do próprio setor (o Almoxarife e o Comprador no Painel de Suprimentos). Antes, o Almoxarife caía em Pedidos de venda.']],

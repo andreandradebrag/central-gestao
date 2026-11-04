@@ -475,10 +475,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
         if (n.confPend && !confOk(n.confAprov)) ev.push({ k: 'div:' + n.id, quem: QUEM.comprador().concat(todosAprovadores()), tipo: 'Nota com divergência', txt: 'A ' + nf + ' tem divergência com o pedido ou o recebimento e aguarda a aprovação do comprador e do gestor.' });
         if (n.status !== 'rascunho') continue;
         if (n.p2qMot && n.p2qMot.sig) ev.push({ k: 'fila:' + n.id + ':' + n.p2qMot.sig, quem: quemPapel(n.p2qMot.quem || 'fiscal'), tipo: 'Nota parada no recebimento', txt: 'A ' + nf + ' não foi lançada automaticamente: ' + (Array.isArray(n.p2qMot.motivos) ? n.p2qMot.motivos.slice(0, 3).join(' ') : '') });
-        if (n.pedId && !n.recebId && (n.chave || n.recebida)) { const p = doc('ped/' + String(n.pedId)) || {}; ev.push({ k: 'semrec:' + n.id, quem: quemPapel('almoxarife'), tipo: 'Falta o recebimento físico', txt: 'A ' + nf + ' chegou e falta registrar o recebimento físico do pedido nº ' + (p.numero || '') + ' (Pedidos de compra › Receber).' }); }
+        if (n.pedId && !n.recebId && (n.chave || n.recebida)) { const p = doc('ped/' + String(n.pedId)) || {}; ev.push({ k: 'semrec:' + n.id, quem: C153.quemPed(p, () => QUEM.almoxarife()), /* v153: responsável do almoxarifado do pedido */ tipo: 'Falta o recebimento físico', txt: 'A ' + nf + ' chegou e falta registrar o recebimento físico do pedido nº ' + (p.numero || '') + ' (Pedidos de compra › Receber).' }); }
         const pq = P2.pequena(n, c, n.cr, n.pequenaAprov);
         if (pq && !pq.aprov && !pq.falta.length && !(n.pequenaAprov && n.pequenaAprov.dec === 'nao')) ev.push({ k: 'peq:' + n.id + ':' + pq.valor, quem: quemAprova(1).length ? quemAprova(1) : quemPapel('aprovador'), tipo: 'Compra pequena sem pedido', txt: 'A ' + nf + ' (' + moedaQ(pq.valor) + ') é uma compra pequena sem pedido e aguarda a sua aprovação (Suprimentos › Recebimento de notas).' });
       }
+      try { for (const e of C153.eventos(() => QUEM.almoxarife())) ev.push(e); } catch (e) { console.error('[v153] avisos:', e.message); } /* v153: separar, transferência, romaneio e devolução por almoxarifado */
       return ev;
     }
     function avisosVarrer(silencioso) {
@@ -2111,6 +2112,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const ACEITE = require('./aceite.js')({ db, q, doc, salvar, erro, ehDono, gravaCol, pode, perfilPermite, gravacaoPermitida, cfgEmp, ipDe, json, html: X.html, pag, lerJson, lerCorpo: X.lerCorpo, APP_URL, SEG, avisarDoc, auditar: (...a) => auditar(...a) }); /* v150: código de verificação e aceite do fornecedor (aceite.js) */
   const TREINO = require('./treino.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaGrupo, PERM, NIV }); /* v151: treinamentos dentro do sistema (treino.js) */
   const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual }); /* v152: compras (compras152.js) */
+  const C153 = require('./almox153.js')({ q, db, col, doc, erro, PERM, papelDe, defDe, igual }); /* v153: almoxarifados por cidade com responsável (almox153.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
     if (c0 === 'treino') { const e = TREINO.antes(conta, p, velho, novo); return e.erro ? e : { data: e.data, ctx }; } /* v151: cada pessoa grava só o próprio progresso */
@@ -2146,6 +2148,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     let e = regraAprov(c0, conta, req, velho, novo, ctx); if (e) return e;
     if (s.length === 2) {
       if (c0 === 'sc' || c0 === 'ped') { e = C152.antes(conta, c0, s[1], velho, novo, ctx); if (e) return e; } /* v152: lembrete só pela rota; SC reenviada e tipo */
+      if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
       if (c0 === 'lanc') { e = P2N.regraLancNota(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
