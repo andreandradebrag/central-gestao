@@ -1,5 +1,5 @@
 Bibliotecas do navegador servidas pelo próprio servidor (sem depender da CDN).
-O sistema usa a cópia daqui; a CDN (cdnjs) só entra se a cópia local faltar ou não carregar.
+O sistema usa a cópia daqui; a CDN (cdnjs; para o SheetJS, cdn.sheetjs.com) só entra se a cópia local faltar ou não carregar.
 
 Já incluídas:
   pdfjs/         pdf.js 6.2.108 (pdfjs-dist, build "legacy"), com cmaps, fontes padrão, wasm e iccs. Licença Apache-2.0.
@@ -9,9 +9,10 @@ Já incluídas:
 
 Ainda faltam (o ambiente onde o pacote foi montado não conseguiu baixar do npm):
   jspdf/jspdf.umd.min.js     jsPDF 2.5.1    (pacote npm jspdf@2.5.1, dist/jspdf.umd.min.js)
-  xlsx/xlsx.full.min.js      SheetJS 0.18.5 (pacote npm xlsx@0.18.5, dist/xlsx.full.min.js)
+  xlsx/xlsx.full.min.js      SheetJS 0.20.3 (site oficial: cdn.sheetjs.com/xlsx-0.20.3, dist/xlsx.full.min.js). v158: a reserva
+                             da CDN também é a 0.20.3 de cdn.sheetjs.com (a 0.18.5 tem as falhas CVE-2023-30533 e CVE-2024-22363).
 
 Como: rode  bash gestao/baixar-bibliotecas.sh  (num computador com Node e internet, na pasta do repositório). Ele baixa
 pelo npm as MESMAS versões que o sistema usa hoje, copia os arquivos para cá e mostra o hash de cada um. Confira, envie ao
 GitHub e implante. O servidor calcula o hash (SRI) de cada arquivo daqui e o navegador confere ao carregar. Quando todos
-existirem, a CSP deixa de liberar cdnjs.cloudflare.com.
+existirem, a CSP deixa de liberar cdnjs.cloudflare.com (e cdn.sheetjs.com).

@@ -827,6 +827,54 @@ Sólides) continua mostrando o último erro de cada sincronização.
 **Bibliotecas do navegador.** html2canvas 1.4.1 e pdf-lib 1.17.1 foram copiados para `gestao/public/vendor` (pacotes npm
 das mesmas versões usadas). jsPDF 2.5.1 e SheetJS 0.18.5 ainda não puderam ser baixados: veja "Bibliotecas do navegador".
 
+## Perfis Recursos humanos e compras e Administrador de frota (v158)
+
+Dois perfis padrão novos, em **Sistema › Usuários** (escolha do perfil da pessoa) e em **Sistema › Perfis de acesso** (o
+Administrador pode ajustar o acesso por função, como nos outros perfis padrão). Os perfis que já existiam, inclusive o
+**Recursos humanos**, não mudaram. Servidor em `gestao/ajuste158.js` (novo), ligado por `v158/ed_v158.py` em `regras.js`,
+`compras152.js`, `almox153.js` e no `Dockerfile`; o resto está no `perfis.json` (regerado).
+
+**Recursos humanos e compras** (`rhcompras`). Tudo o que o perfil Recursos humanos faz (é montado a partir dele no fim da
+carga do sistema; o que mudar no RH vale também aqui) e, em **Suprimentos › Solicitações**:
+- cria solicitação de compra dos tipos **RH** (EPI, uniforme, material de treinamento, exames) e **Administrativa**, como o
+  Almoxarife; a aprovação segue a alçada normal (aprovadores de material);
+- vê e acompanha **só as próprias** solicitações: situação, quem precisa aprovar, **Pedir aprovação** e, se recusada,
+  **Corrigir e reenviar**; não exclui (usa **Cancelar** no rascunho);
+- **não vê** cotações, pedidos de compra, acordos de preço, preços negociados (o produto chega sem preço e custo),
+  Controles de compras nem o Painel de Suprimentos. O servidor não entrega esses dados e recusa a gravação;
+- entra no **Painel de Pessoal**.
+
+**Administrador de frota** (`frotaadm`):
+- Frota inteira com gravação (veículos, saídas, rota diária, abastecimentos, manutenção, entregas com frete e multas), de
+  todos os locais, com os valores da frota (custo por veículo, Análise da frota, combustível no Painel da Frota);
+- **não exclui** nenhum registro da frota (só o Administrador): `FROTA_EXCLUSAO_RECUSADA` na auditoria;
+- **correção** de abastecimento e de manutenção concluída pede o **motivo** (sem ele o servidor recusa:
+  `FROTA_CORRECAO_SEM_MOTIVO`); o servidor guarda quem, quando, o motivo e o que mudou (de → para) no **histórico de
+  correções** do registro, que aparece no formulário (`FROTA_CORRECAO`). Concluir uma manutenção agendada não é correção.
+  O lançamento em contas a pagar desses registros fica com o Financeiro;
+- **Frota › Condutores**: colaboradores só para escolher o condutor (nome, função, CNH: número, categoria e validade) com o
+  **CPF mascarado** (`***.456.789-**`). O servidor entrega a este perfil só esses campos: nada de salário, documentos do RH,
+  ASO, endereço, contato ou folha;
+- **Cadastros** (clientes, fornecedores, transportadoras, produtos) e **Estoque** (saldo e local das peças) só para
+  consulta, sem custo e sem entradas, saídas, ajustes, inventário ou romaneios;
+- cria solicitação de compra dos tipos **Frota** (peças, pneus, serviço de oficina; pode ligar ao veículo) e
+  **Administrativa**, com o mesmo acompanhamento (só as próprias);
+- não vê financeiro, fluxo de caixa, DRE, obras e o resultado delas (a obra chega sem valores), folha, cotações, pedidos,
+  SST, jurídico nem LGPD. Chat, agenda, Minha área e Ajuda continuam;
+- entra no **Painel da Frota**.
+
+**Tipos de solicitação de compra.** Entram os tipos **RH** e **Frota** (sem obra; categoria do plano de contas opcional;
+a da frota pode ter o veículo). Os outros perfis podem usar os tipos novos como antes usavam os demais.
+
+**Atenção.** Um perfil personalizado criado com **Duplicar** a partir de um destes segue a configuração dele (as regras de
+"só as próprias solicitações", da correção com motivo e dos colaboradores mascarados são do perfil padrão).
+
+**SheetJS (leitura de planilhas).** A reserva pela internet passou a ser a versão **0.20.3**, do site oficial
+(`https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js`), no lugar da 0.18.5 da cdnjs (falhas CVE-2023-30533 e
+CVE-2024-22363). A cópia local `gestao/public/vendor/xlsx/xlsx.full.min.js` continua sendo a primeira escolha (o
+`baixar-bibliotecas.sh` já baixa a 0.20.3). Enquanto a cópia local faltar, a política de conteúdo libera também
+`cdn.sheetjs.com`; não há hash da 0.18.5 em lugar nenhum.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".
@@ -846,9 +894,9 @@ Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no top
 O sistema usa pdf.js (ler PDFs), SheetJS (planilhas), html2canvas e jsPDF (gerar PDF) e JSZip. Elas ficam em `gestao/public/vendor` e são servidas pelo próprio servidor, com hash de integridade (SRI) calculado na hora de subir:
 
 - **Já incluídas**: pdf.js 6.2.108, JSZip 3.10.1 e (v157) html2canvas 1.4.1 e pdf-lib 1.17.1.
-- **Falta copiar** (o ambiente onde o pacote foi montado não conseguiu baixar do npm): jsPDF 2.5.1 e SheetJS 0.18.5. Num computador com Node e internet, na raiz do repositório: `bash gestao/baixar-bibliotecas.sh` (v157: baixa pelo **npm** as mesmas versões que o sistema usa hoje), confira os hashes, envie ao GitHub e implante. Enquanto não copiar, essas duas continuam vindo da cdnjs e a política de conteúdo libera `cdnjs.cloudflare.com`; depois de copiar todas, a CDN deixa de ser liberada sozinha.
-- **Cópia local primeiro, CDN só de reserva**: o navegador carrega a cópia de `vendor` (com o hash conferido); se ela faltar ou não carregar, usa a cdnjs (com o hash conhecido, quando houver).
-- **Atenção ao SheetJS**: a 0.18.5 (a última publicada no npm) tem as falhas CVE-2023-30533 e CVE-2024-22363. As versões corrigidas (0.20.3 ou mais nova) só existem no site da SheetJS (`https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js`). Copiar essa versão para `vendor/xlsx/xlsx.full.min.js` também funciona e é o mais seguro; a decisão é do dono.
+- **Falta copiar** (o ambiente onde o pacote foi montado não conseguiu baixar): jsPDF 2.5.1 e SheetJS (v158: **0.20.3**, do site oficial; a reserva pela internet também é a 0.20.3 de `cdn.sheetjs.com`). Num computador com Node e internet, na raiz do repositório: `bash gestao/baixar-bibliotecas.sh` (v157: baixa pelo **npm** as mesmas versões que o sistema usa hoje), confira os hashes, envie ao GitHub e implante. Enquanto não copiar, essas duas continuam vindo da internet (jsPDF da cdnjs, SheetJS de `cdn.sheetjs.com`) e a política de conteúdo libera só essas origens; depois de copiar todas, a CDN deixa de ser liberada sozinha.
+- **Cópia local primeiro, CDN só de reserva**: o navegador carrega a cópia de `vendor` (com o hash conferido); se ela faltar ou não carregar, usa a reserva pela internet (cdnjs; para o SheetJS, cdn.sheetjs.com), com o hash conhecido, quando houver.
+- **SheetJS** (v158): o sistema usa a **0.20.3** (corrige as falhas CVE-2023-30533 e CVE-2024-22363 da 0.18.5). Primeiro a cópia `vendor/xlsx/xlsx.full.min.js`; se faltar, a reserva é `https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js`. A 0.18.5 da cdnjs não é mais usada.
 - Política de conteúdo (CSP): sem `unsafe-eval`; o sistema só conversa com o próprio servidor e com ViaCEP, BrasilAPI e CNPJ.ws (consulta de CEP e CNPJ). As páginas simples (login, contas, segurança) não podem ser abertas dentro de outro site. Se algum recurso parar por causa da CSP, `CSP_UNSAFE_EVAL=1` devolve o `unsafe-eval` enquanto se investiga.
 
 ## Endurecimento do servidor (para o dono ou a TI)

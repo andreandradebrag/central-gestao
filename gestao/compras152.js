@@ -91,7 +91,7 @@ module.exports = function (X) {
   function resumo(c, r, comValor) {
     const pj = r.projId ? doc('proj/' + r.projId) : null, obra = pj ? [pj.codigo, pj.nome].filter(Boolean).join(' · ') : '';
     if (c === 'sc') {
-      const tipo = r.tipo === 'repos' ? 'reposição de estoque' + (r.almoxId && doc('almox/' + r.almoxId) ? ' (' + doc('almox/' + r.almoxId).nome + ')' : '') : r.tipo === 'adm' ? 'administrativa' + (r.categoria ? ' (' + r.categoria + ')' : '') : '';
+      const tipo = r.tipo === 'repos' ? 'reposição de estoque' + (r.almoxId && doc('almox/' + r.almoxId) ? ' (' + doc('almox/' + r.almoxId).nome + ')' : '') : r.tipo === 'adm' ? 'administrativa' + (r.categoria ? ' (' + r.categoria + ')' : '') : r.tipo === 'rh' ? 'solicitação de RH' + (r.categoria ? ' (' + r.categoria + ')' : '') : r.tipo === 'frota' ? 'solicitação da frota' + (r.veicId && doc('veic/' + r.veicId) ? ' (veículo ' + (doc('veic/' + r.veicId).placa || '') + ')' : '') : ''; /* v158 */
       return ['Solicitação de compra nº ' + (r.numero || ''), obra ? 'obra ' + obra : tipo, (Array.isArray(r.itens) ? r.itens.length : 0) + ' item(ns)', r.necessidade ? 'necessidade ' + brData(r.necessidade) : ''].filter(Boolean).join(' · ');
     }
     const f = r.parcId ? doc('parc/' + r.parcId) : null;
@@ -102,6 +102,7 @@ module.exports = function (X) {
     const c = String(b.col || ''), id = String(b.id || ''), p = c + '/' + id;
     if (!['sc', 'ped'].includes(c) || !ID_OK.test(id)) return erro('Documento inválido.', 400);
     const r = doc(p); if (!r) return erro('Documento não encontrado.', 404);
+    if (X.podeVer && !X.podeVer(conta, p, r)) { auditar(conta, req, 'APROV_LEMBRETE_NEGADO', p, null, null); return erro('Sem acesso a este documento.', 403); } /* v158: quem não vê o documento (SC de outra pessoa para quem acompanha só as próprias) não pede a aprovação dele */
     const qa = quem(c, Object.assign({}, r, { id }));
     if (!qa.pend) return erro('Este documento não está aguardando aprovação.', 409);
     if (!podePedir(conta, c, r)) { auditar(conta, req, 'APROV_LEMBRETE_NEGADO', p, null, null); return erro('Pedir aprovação é de quem criou ou enviou o documento, de quem grava esta tela ou do Administrador.'); }
@@ -134,7 +135,7 @@ module.exports = function (X) {
   }
 
   /* ---------- 3 e 4. regras da SC e proteção do lembrete (antesGravar, sc/<id> e ped/<id>) ---------- */
-  const TIPOS = ['obra', 'repos', 'adm'];
+  const TIPOS = ['obra', 'repos', 'adm', 'rh', 'frota']; /* v158: RH (EPI, uniforme, treinamento, exames) e Frota (peças, pneus, oficina) */
   function antes(conta, c, id, velho, novo, ctx) {
     const v = velho || {};
     /* lembrete: só pela rota */
@@ -157,9 +158,10 @@ module.exports = function (X) {
     }
     /* tipo */
     if (novo.tipo !== undefined && novo.tipo !== '' && !TIPOS.includes(novo.tipo)) return erro('Tipo de solicitação inválido.', 400);
-    if (novo.status !== 'cancelada' && (!velho || !igual(v.tipo, novo.tipo) || !igual(v.projId, novo.projId) || !igual(v.almoxId, novo.almoxId) || !igual(v.categoria, novo.categoria))) {
+    if (novo.status !== 'cancelada' && (!velho || !igual(v.tipo, novo.tipo) || !igual(v.projId, novo.projId) || !igual(v.almoxId, novo.almoxId) || !igual(v.categoria, novo.categoria) || !igual(v.veicId, novo.veicId))) {
       if (novo.tipo === 'obra' && !novo.projId) return erro('Solicitação de obra: escolha a obra (ou use o tipo Reposição de estoque ou Administrativa).', 400);
       if (novo.tipo === 'repos') { if (novo.projId) return erro('Reposição de estoque não tem obra.', 400); if (!novo.almoxId || !doc('almox/' + String(novo.almoxId))) return erro('Reposição de estoque: escolha o almoxarifado de destino.', 400); }
+      if (novo.tipo === 'rh' || novo.tipo === 'frota') { if (novo.projId) return erro('Solicitação ' + (novo.tipo === 'rh' ? 'de RH' : 'da frota') + ' não tem obra.', 400); if (novo.veicId && (novo.tipo !== 'frota' || !doc('veic/' + String(novo.veicId)))) return erro(novo.tipo === 'frota' ? 'Veículo da solicitação não encontrado.' : 'Só a solicitação da frota é ligada a um veículo.', 400); } /* v158 */
       if (novo.tipo === 'adm') { if (novo.projId) return erro('Solicitação administrativa não tem obra.', 400); if (!String(novo.categoria || '').trim()) return erro('Solicitação administrativa: escolha a categoria (plano de contas).', 400); }
     }
     return null;

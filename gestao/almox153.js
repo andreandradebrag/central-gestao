@@ -80,7 +80,7 @@ module.exports = function (X) {
   });
 
   /* ---------- 3. SC: tipos por perfil e almoxarifado de origem ---------- */
-  const NOME_T = { obra: 'Obra', repos: 'Reposição de estoque', adm: 'Administrativa' };
+  const NOME_T = { obra: 'Obra', repos: 'Reposição de estoque', adm: 'Administrativa', rh: 'RH', frota: 'Frota' }; /* v158 */
   function antes(conta, id, velho, novo) {
     const v = velho || {};
     if (!igual(v.almoxOrigId, novo.almoxOrigId) && novo.almoxOrigId !== undefined && novo.almoxOrigId !== '') {

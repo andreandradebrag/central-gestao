@@ -22,7 +22,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 /* bibliotecas do navegador: endereço da CDN usado pelo sistema -> cópia local em public/ */
 const VENDOR = [
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', local: 'vendor/pdfjs/pdf.min.mjs', tipo: 'pdfjs', worker: 'vendor/pdfjs/pdf.worker.min.mjs', base: 'vendor/pdfjs/' },
-  { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', local: 'vendor/xlsx/xlsx.full.min.js' },
+  { cdn: 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js', local: 'vendor/xlsx/xlsx.full.min.js' }, /* v158: reserva no site oficial da SheetJS, 0.20.3 (a 0.18.5 da cdnjs tem as falhas CVE-2023-30533 e CVE-2024-22363) */
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', local: 'vendor/html2canvas/html2canvas.min.js' },
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', local: 'vendor/jspdf/jspdf.umd.min.js' },
   { cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', local: 'vendor/jszip/jszip.min.js' },
@@ -301,7 +301,8 @@ module.exports = function criar(o) {
       if (fs.existsSync(arq) && (!v.worker || fs.existsSync(path.join(PUB, v.worker)))) mapa[v.cdn] = Object.assign({ local: '/' + v.local, sri: sri(arq) }, v.tipo ? { tipo: v.tipo, worker: '/' + v.worker, base: '/' + v.base } : {});
       else faltam.push(v);
     }
-    VEND = { mapa, cdnSri: CDN_SRI, faltam: faltam.map(v => v.local), precisaCdn: faltam.length > 0, pdfLocal: !faltam.some(v => v.tipo === 'pdfjs') };
+    const org = [...new Set(faltam.map(v => new URL(v.cdn).origin))].sort((a, b) => (b === 'https://cdnjs.cloudflare.com') - (a === 'https://cdnjs.cloudflare.com')); /* v158: cada biblioteca que falta libera só a origem da reserva dela (cdnjs primeiro) */
+    VEND = { mapa, cdnSri: CDN_SRI, faltam: faltam.map(v => v.local), precisaCdn: faltam.length > 0, origens: org, pdfLocal: !faltam.some(v => v.tipo === 'pdfjs') };
     if (faltam.length) console.log('[seguranca] bibliotecas ainda pela CDN (copie para public/' + 'vendor, veja o LEIA-ME): ' + faltam.map(v => v.local.split('/')[1]).join(', '));
     return VEND;
   }
@@ -319,7 +320,7 @@ module.exports = function criar(o) {
 
   /* ---------------- CSP do sistema (index.html) ---------------- */
   function cspApp(hashes) {
-    const v = vendor(), cdn = v.precisaCdn ? ' https://cdnjs.cloudflare.com' : '';
+    const v = vendor(), cdn = v.precisaCdn ? ' ' + (v.origens && v.origens.length ? v.origens : ['https://cdnjs.cloudflare.com']).join(' ') : ''; /* v158 */
     return ["default-src 'self'",
       "script-src 'self' " + hashes.join(' ') + (env.CSP_UNSAFE_EVAL === '1' ? " 'unsafe-eval'" : '') + cdn,
       "worker-src 'self' blob:" + (v.pdfLocal ? '' : ' https://cdnjs.cloudflare.com'),

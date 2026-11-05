@@ -1462,6 +1462,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (c0 === 'treino') return TREINO.podeLer(conta, p); /* v151: o próprio; todos só Administrador, dono e RH */
     if (c0 === 'lixo') { if (!data || !data.col) return true; if (data.col === 'func' && !veFuncCompleto(conta)) return false; const pp = data.col + '/' + (data.rid || 'x'); return perfilPermite(conta, pp, 'r') && podeLer(conta, pp, data.rec || null, memo); }
     if (VEIC_COLS.has(c0) && !veicOk(conta, c0, data, memo)) return false;
+    if (c0 === 'sc' && C158.scAlheia(conta, data)) return false; /* v158: Recursos humanos e compras e Administrador de frota veem só as próprias SC */
     if ((c0 === 'nfse' || (c0 === 'notas' && data && data.tipo === 'saida')) && !veFaturamento(conta)) return false; /* v115.2 */
     if (c0 === 'tdoc' && !tdocLe(conta)) return false; /* v112: vale também com PERFIL_LEITURA=avisar */
     if (c0 === 'rhdoc' && data && soNr(conta) && !docNr(data)) return false; /* v114: o Técnico de SST não vê ASO nem os outros documentos */
@@ -1484,6 +1485,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     return ['folha', 'rh'].some(g => pr.w.includes(g) || pr.r.includes(g));
   }
   function redigir(conta, p, data) {
+    data = C158.redigir(conta, p, data); /* v158: Administrador de frota (colaborador só para o condutor, CPF mascarado) e estoque sem custo */
     if (data && /^proj\/[^/]+$/.test(p) && soFabProj(conta)) { /* v125: perfil Fábrica vê do projeto só o necessário para a OS */
       const o = {}; PROJ_FAB.forEach(k => { if (data[k] !== undefined) o[k] = data[k]; }); const pc = data.parcId ? doc('parc/' + data.parcId) : null; if (pc && pc.nome) o.cliNome = String(pc.nome); o._restrito = true; return o; }
     if (data && !veBanco(conta)) { /* v111: dados bancários e arquivo da remessa só para Financeiro, Administrador e Diretoria */
@@ -2115,6 +2117,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual }); /* v152: compras (compras152.js) */
   const C153 = require('./almox153.js')({ q, db, col, doc, erro, PERM, papelDe, defDe, igual }); /* v153: almoxarifados por cidade com responsável (almox153.js) */
   const C157 = require('./ajuste157.js')({ doc, erro, ehDono, papelConta, auditar: (...a) => auditar(...a), alcadas: () => alcadas(), pedTotal: p => pedTotal(p), antesDaAlcada: (...a) => P2N.antesDaAlcada(...a) }); /* v157: SC em rascunho, aceite com aprovação, família do produto (ajuste157.js) */
+  const C158 = require('./ajuste158.js')({ erro, ehDono, perfilDe, PERM, igual, auditar: (...a) => auditar(...a) }); /* v158: perfis Recursos humanos e compras e Administrador de frota (ajuste158.js) */
   const C156 = require('./fam156.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, papelConta, cfgEmp, lerJson, json, antesGravar: (...a) => antesGravar(...a) }); /* v156: Famílias de produto (fam156.js) */
   const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson, json, famEpi: f => C156.ehFamEpi(f), famEpiNome: () => C156.nomeEpi(), antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
@@ -2153,6 +2156,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     let e = regraAprov(c0, conta, req, velho, novo, ctx); if (e) return e;
     if (s.length === 2) {
       if (c0 === 'sc' || c0 === 'ped') { e = C152.antes(conta, c0, s[1], velho, novo, ctx); if (e) return e; } /* v152: lembrete só pela rota; SC reenviada e tipo */
+      if (c0 === 'sc') { e = C158.antesSc(conta, req, s[1], velho, novo); if (e) return e; } /* v158: só as próprias SC */
+      if (c0 === 'vabas' || c0 === 'vman') { e = C158.antesFrota(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v158: correção com motivo e histórico */
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
       if (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig') { e = C154.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v154: EPI com baixa e higienização só pelas rotas */
       if (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat') { e = C155.antes(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v155: estorno, motivo da entrada/saída manual, campos fiscais do produto */
@@ -2213,6 +2218,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (s.length === 2 && (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat')) { const e = C155.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v155: movimento não se exclui (estorno); produto só Administrador e sem histórico */
     if (s.length === 2 && (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig')) { const e = C154.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v154 */
     if (s.length === 2 && c0 === 'prodfam') { const e = C156.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v156: família só sai sem produtos; Almoxarife não exclui */
+    if (s.length === 2) { const e = (c0 === 'sc' ? C158.antesExcluirSc(conta, req, s[1], velho) : null) || C158.antesExcluirFrota(conta, req, c0, s[1], velho); if (e) return e; } /* v158: SC só as próprias; o Administrador de frota não exclui registros da frota */
     if (s.length === 2 && c0 === 'sc') { const e = C157.antesExcluirSc(conta, req, s[1], velho); if (e) return e; } /* v157: o Almoxarife não exclui SC em rascunho (usa Cancelar) */
     if (c0 === 'cot' && s.length === 2) { const e = NEGF.excluir(conta, velho); if (e) return e; } /* v149 */
     if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, /^a_/.test(s[1] || '') ? 'PERFIL_PADRAO_RESTAURADO' : 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome, base: velho.base }); } /* v114; v127: excluir o ajuste = voltar ao padrão */

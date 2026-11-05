@@ -7304,7 +7304,7 @@ function impPdfRows(pages){
 }
 /* ===== v20: importação de cadastros (PDF, CSV ou Excel) ===== */
 GROUP_OF_TAB.imp='cfg';
-const PDFJS_URL='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',PDFJS_WK='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+const PDFJS_URL='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',PDFJS_WK='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',XLSX_URL='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
 const IMP_COLS_MODELO=['Tags','CNPJ/CPF','Razão Social','Nome Fantasia','Contato','Bairro','Cidade','Estado','Telefone','E-mail','WebSite','Inscrição Estadual'];
 const impND=v=>{v=String(v==null?'':v).trim();return /^(n\/?d|n\.d\.|-|—|null|undefined)$/i.test(v)?'':v;};
 function impTabular(linhas){
@@ -31093,9 +31093,168 @@ try{V155_REGRAS.forEach(r=>{for(let i=1;i<r.length;i++)if(typeof r[i]==='string'
 {const r0=v156RegrasHtml;v156RegrasHtml=function(){return String(r0.apply(this,arguments)).replace('<li><b>Almoxarife</b>: não cria família nem produto; no cadastro do produto escolhe a família entre as cadastradas e ativas.</li>',
   '<li><b>Almoxarife</b>: não cria família nem produto e não muda a família de um produto; consulta as famílias e filtra por elas (Estoque, separação, EPI, relatórios).</li>');};}
 
+/* ===== v158: perfis novos "Recursos humanos e compras" (rhcompras) e "Administrador de frota" (frotaadm) (relatorios/feito_v158.md) =====
+   1. Recursos humanos e compras (rhcompras): tudo o que o perfil "Recursos humanos" (rh) tem (copiado do rh no fim da carga do
+      sistema, então o que mudar no rh vale também aqui; papel 'rh' nas regras por nome) e mais: cria solicitação de compra como o
+      Almoxarife (tipos RH e Administrativa), vê e acompanha só as PRÓPRIAS solicitações (situação, quem aprova, Corrigir e
+      reenviar, Pedir aprovação). Aprovação normal pela alçada. Não vê cotações, pedidos de compra, acordos de preço, preços
+      negociados, Controles de compras nem o quadro do Painel de Suprimentos (o servidor não entrega: permfn.js › leFora). Entra no
+      Painel de Pessoal.
+   2. Administrador de frota (frotaadm): Frota inteira com gravação (veículos, saídas, rota diária, abastecimentos, manutenção,
+      entregas com frete e multas), todos os locais da frota e com os valores da frota (custo por veículo, análise). NÃO exclui
+      nenhum registro da frota (só o Administrador); abastecimento e manutenção (concluída) se corrigem com motivo obrigatório,
+      guardado no histórico de correções do registro (servidor: ajuste158.js). Colaboradores só para escolher o condutor (nome,
+      função, CNH e CPF mascarado: tela Frota › Condutores); Cadastros (fornecedores, clientes) e Estoque (saldo e local) só para
+      consulta, sem custo. Cria solicitação de compra dos tipos Frota (peças, pneus, oficina; pode ligar a um veículo) e
+      Administrativa, com o mesmo acompanhamento do perfil 1. Sem financeiro, fluxo, DRE, obras, folha, cotações/pedidos, SST,
+      jurídico e LGPD. Entra no Painel da Frota.
+   Os dois aparecem em Sistema › Usuários (escolha do perfil) e em Sistema › Perfis de acesso (Ajustar por função).
+   Prefixos: v158*, V158*. */
+const V158_COMP_FUN=['sc','cot','notas','acordo','invaj','almox','parc','mov','ped','prod','sep'];
+const V158_COMP_FORA=['cot','ped','acordo','notas','invaj','mov'];
+const V158_TELAS_COMP=['pnSup','cot','ped','nfrec','nf','supctl','sep','avforn','acordo','arqf'];
+const V158_FROTA_COLS=['veic','vsai','vrota','vabas','vman','vfrete','multa'];
+const V158_CORR_COLS=['vabas','vman'];
+const V158_PERFIS=['rhcompras','frotaadm'];
+const v158Uniq=a=>[...new Set((a||[]).filter(Boolean))];
+function v158CompFn(){let l=V158_COMP_FUN;try{if(typeof pfnFunDump==='function'){const f=pfnFunDump().comp;if(f&&Object.keys(f).length)l=v158Uniq(Object.keys(f).concat(V158_COMP_FUN));}}catch(e){}
+  const o={};l.forEach(c=>{o[c]=c==='sc'?'a':'n';});return o;}
+function v158Registra(k,x,painel){PERFIS[k]=x;
+  try{if(typeof U3_ORIG!=='undefined')U3_ORIG[k]=x;U3_BASE_=null;}catch(e){}
+  try{if(typeof SSTP_CACHE!=='undefined')delete SSTP_CACHE[k];}catch(e){}
+  try{P0_PREF[k]=painel;}catch(e){}
+  try{(window.PAINEIS_SETOR||[]).concat(typeof P1_PAINEIS!=='undefined'?P1_PAINEIS:[]).forEach(p=>{if(p&&p.id===painel&&Array.isArray(p.perfis)&&!p.perfis.includes(k))p.perfis.push(k);});}catch(e){}}
+/* monta (ou monta de novo) os dois perfis; roda aqui e de novo no fim da carga (patch140.py), para levar o que mudou no rh depois */
+function v158Perfis(){
+  const rh0=(typeof U3_ORIG!=='undefined'&&U3_ORIG.rh)||PERFIS.rh;
+  if(rh0&&!rh0.custom){const x=JSON.parse(JSON.stringify(rh0));delete x.ajustado;
+    x.nome='Recursos humanos e compras';x.papel='rh';
+    x.w=v158Uniq((Array.isArray(x.w)?x.w:[]).concat(['comp']));
+    x.so=Object.assign({},x.so||{},{comp:['sc']});
+    x.padFn=Object.assign({},x.padFn||{},{comp:v158CompFn()});
+    x.leFora=Object.assign({},x.leFora||{},{comp:V158_COMP_FORA.slice()});
+    x.telasFora=v158Uniq((x.telasFora||[]).concat(V158_TELAS_COMP));
+    x.scTipos=['rh','adm'];x.scProprias=true;
+    x.desc='Tudo o que o perfil Recursos humanos faz (colaboradores, documentos, ASO, EPI, salários e folha, ponto, SST em consulta com convocação de ASO, acidentes e EPI) e, em Suprimentos, cria solicitação de compra dos tipos RH (EPI, uniforme, material de treinamento, exames) e Administrativa. Vê e acompanha só as próprias solicitações (situação, quem aprova, Corrigir e reenviar, Pedir aprovação); a aprovação segue a alçada normal. Não vê cotações, pedidos de compra, preços negociados, Controles de compras nem o quadro do Painel de Suprimentos.';
+    v158Registra('rhcompras',x,'pnPes');}
+  const y={nome:'Administrador de frota',w:['frota','comp','chat','agenda'],r:['cad','est','meu','ajuda'],frotaTodos:true,
+    so:{comp:['sc']},
+    padFn:{frota:{veic:'a',vsai:'a',vrota:'a',vabas:'a',vman:'a',vfrete:'a',multa:'a',func:'r'},comp:v158CompFn()},
+    leFora:{comp:V158_COMP_FORA.slice()},valCols:['proj'],
+    telasFora:V158_TELAS_COMP.concat(['rom','devobra','invaj','prodinat','vcond']),
+    scTipos:['frota','adm'],scProprias:true,valGrupos:['frota'],
+    desc:'Cuida da frota inteira (veículos, saídas, rota diária, abastecimentos, manutenção, entregas com frete e multas), de todos os locais, com os valores da frota (custo por veículo e análise). Não exclui registros da frota: abastecimento e manutenção concluída se corrigem com o motivo, que fica no histórico de correções. Consulta os colaboradores só para escolher o condutor (nome, função, CNH e CPF mascarado), fornecedores e clientes (oficina, posto) e o saldo e o local das peças no estoque, sem custo. Cria solicitação de compra dos tipos Frota (peças, pneus, serviço de oficina) e Administrativa e acompanha só as próprias. Não vê financeiro, fluxo, DRE, obras, folha, cotações, pedidos, SST, jurídico nem LGPD.'};
+  v158Registra('frotaadm',y,'pnFrota');}
+v158Perfis();
+
+/* ---------- quem é quem ---------- */
+const v158Pf=()=>{try{if(store.mode!=='db'||me.owner)return null;const p=PERFIS[me.perfil];return p&&!p.custom&&p.w!=='*'?p:null;}catch(e){return null;}};
+const v158ScProprias=()=>{const p=v158Pf();return !!(p&&p.scProprias);};
+const v158FrotaAdm=()=>{try{return store.mode==='db'&&!me.owner&&me.perfil==='frotaadm'&&!!PERFIS.frotaadm&&!PERFIS.frotaadm.custom;}catch(e){return false;}};
+const v158MinhaSc=s=>{if(!s)return false;const u=actorId();return s.crBy===u||s.solUid===u;};
+const V158_SC_ALHEIA='Seu perfil cria e acompanha só as próprias solicitações de compra.';
+const V158_FROTA_DEL='O Administrador de frota não exclui registros da frota. Corrija o registro (abastecimento e manutenção pedem o motivo da correção) ou peça ao Administrador.';
+const V158_CORR_MSG='Informe o motivo da correção (fica no histórico de correções do registro).';
+
+/* ---------- 1. o que o sistema confere pelo nome do perfil rh vale para o rhcompras ---------- */
+try{if(typeof V111_LE_RH!=='undefined'&&!V111_LE_RH.includes('rhcompras'))V111_LE_RH.push('rhcompras');}catch(e){}
+try{if(typeof VG_GRUPO_LIVRE!=='undefined'&&VG_GRUPO_LIVRE.rh)VG_GRUPO_LIVRE.rhcompras=VG_GRUPO_LIVRE.rh.slice();}catch(e){}
+function v158ComoRh(f){return function(){if(me.perfil!=='rhcompras')return f.apply(this,arguments);const k=me.perfil;me.perfil='rh';try{return f.apply(this,arguments);}finally{me.perfil=k;}};}
+if(typeof obrMoVivoOk==='function')obrMoVivoOk=v158ComoRh(obrMoVivoOk);
+if(typeof j3ApagaArea==='function')j3ApagaArea=v158ComoRh(j3ApagaArea);
+if(typeof multaResp==='function'){const m0=multaResp;multaResp=function(){const l=m0.apply(this,arguments);try{if(J2().multaResp.length)return l;return v158Uniq(l.concat(S.usr.filter(u=>u.uid&&u.ativo!==false&&u.perfil==='rhcompras').map(u=>u.uid)));}catch(e){return l;}};}
+
+/* ---------- 2. tipos de SC: RH e Frota ---------- */
+if(!V152_TIPOS.some(o=>o[0]==='rh'))V152_TIPOS.push(['rh','RH (EPI, uniforme, material de treinamento, exames)']);
+if(!V152_TIPOS.some(o=>o[0]==='frota'))V152_TIPOS.push(['frota','Frota (peças, pneus, serviço de oficina)']);
+const v158TipoNome=t=>t==='rh'?'RH':t==='frota'?'Frota':'';
+const v158TipoPill=s=>{const t=v152Tipo(s);return t==='rh'?pill('RH','pos'):t==='frota'?pill('Frota','acc'):'';};
+const v158Destino=s=>{const t=v152Tipo(s),p=[];if(t==='frota'&&s.veicId)p.push('Veículo '+veicNome(s.veicId));if(s.categoria)p.push(s.categoria);return p.join(' · ')||(t==='rh'?'Recursos humanos':'Frota');};
+{const b0=scBody;scBody=function(){let h=b0.apply(this,arguments);const x=scd||{},t=v152Tipo(x);if(t!=='rh'&&t!=='frota')return h;
+  h=v152TiraCampo(v152TiraCampo(h,'projId'),'etapaId');
+  const F2=(l,k,ty,o)=>field(l,k,ty,x[k],o).replace('data-f="','data-cf="');
+  const bloco='<div class="fg v158tp">'+(t==='frota'?F2('Veículo (opcional)','veicId','select',{opts:veicOpts(),blank:'Sem veículo'}):'')+F2('Categoria (plano de contas, opcional)','categoria','select',{opts:catOpts('despesa',x.categoria),blank:'O comprador define'})+'</div>'+
+    '<p class="sub v158tpn" style="margin:4px 0 10px">'+(t==='rh'?'Solicitação de RH: EPI, uniforme, material de treinamento ou exames. Sem obra; o comprador cota e compra. O que existe no estoque continua sendo separado.':'Solicitação da frota: peças, pneus ou serviço de oficina. Sem obra; ligue ao veículo quando for para um veículo só. O que existe no estoque continua sendo separado.')+'</p>';
+  const i=h.indexOf('data-cf="tipo"'),j=i<0?-1:h.indexOf('</div>',i);
+  return j<0?bloco+h:h.slice(0,j+6)+bloco+h.slice(j+6);};}
+document.addEventListener('change',e=>{const t=e.target;if(!scActive||!scd||!t||!t.dataset||t.dataset.cf!=='tipo')return;if(scd.tipo!=='frota')delete scd.veicId;});
+{const n0=A.scNovo;A.scNovo=d=>{const r=n0(d);try{const st=v153ScTipos();if(scd&&!get('sc',scd.id)&&st&&!st.includes(scd.tipo)){scd.tipo=st[0];scd.projId='';scd.etapaId='';delete scd.almoxId;v152ScRedesenha();}}catch(e){}return r;};}
+{const s0=scSave;scSave=function(){const x=scd||{},t=v152Tipo(x);
+  if(t==='rh'||t==='frota'){x.projId='';x.etapaId='';delete x.almoxId;if(t!=='frota')delete x.veicId;else if(x.veicId&&!get('veic',x.veicId)){toast('Veículo não encontrado. Escolha outro ou deixe sem veículo.','neg');return false;}if(!x.categoria)delete x.categoria;}
+  else if(x.veicId!==undefined)delete x.veicId;
+  if(v158ScProprias()){const ant=get('sc',x.id);if(ant&&!v158MinhaSc(ant)){toast(V158_SC_ALHEIA,'neg');return false;}}
+  return s0.apply(this,arguments);};}
+/* lista: só as próprias para quem acompanha só as próprias; etiqueta e destino dos tipos novos */
+{const v0=V.sc;V.sc=function(){const all=S.sc,so=v158ScProprias();let h;
+  if(so){S.sc=all.filter(v158MinhaSc);try{h=v0.apply(this,arguments);}finally{S.sc=all;}}else h=v0.apply(this,arguments);
+  h=v152Linhas(h,'sc',(tr,s)=>{const t=v152Tipo(s);if(t!=='rh'&&t!=='frota')return tr;return tr.replace('<span class="mut">Sem projeto</span>',v158TipoPill(s)+' <span>'+esc(v158Destino(s))+'</span>');});
+  if(so){(all||[]).forEach(s=>{if(!v158MinhaSc(s))return;
+    let canc=false;try{canc=(s.status||'rascunho')==='rascunho'&&!p2PodeGravar('sc',s,Object.assign(cl(s),{status:'cancelada'}),false);}catch(e){}
+    h=h.split('<button class="btn sm dng" data-act="scDel" data-id="'+s.id+'">Excluir</button>').join(canc?'<button class="btn sm dng" data-act="scCancel" data-id="'+s.id+'" title="A solicitação fica guardada como cancelada">Cancelar</button>':'');});
+    if(!h.includes('v158aviso'))h=h.replace('<div class="stack">','<div class="stack"><div class="note v158aviso" style="margin:0">Aqui aparecem só as solicitações de compra que você criou: situação, quem precisa aprovar, Pedir aprovação e, se recusada, Corrigir e reenviar. Cotações e pedidos de compra ficam com o Comprador.</div>');}
+  return h;};}
+{const v0=A.scVer;A.scVer=d=>{const s=get('sc',d&&d.id);if(s&&v158ScProprias()&&!v158MinhaSc(s)){toast(V158_SC_ALHEIA,'neg');return;}const r=v0(d);
+  try{const t=v152Tipo(s),mb=$('#mb');if(s&&mb&&(t==='rh'||t==='frota')&&mb.insertAdjacentHTML)mb.insertAdjacentHTML('afterbegin','<p class="sub v158tpv" style="margin:0 0 8px">'+v158TipoPill(s)+' '+esc(v158Destino(s))+'</p>');}catch(e){}return r;};}
+{const d0=scDoc;scDoc=function(sc){const o=d0.apply(this,arguments);try{const t=v152Tipo(sc);if(o&&o.meta&&(t==='rh'||t==='frota'))o.meta.push(['Tipo',v158TipoNome(t)+' · '+v158Destino(sc)]);}catch(e){}return o;};}
+if(typeof v152Resumo==='function'){const r0=v152Resumo;v152Resumo=function(c,r){const t=String(r0.apply(this,arguments));try{const tp=c==='sc'?v152Tipo(r):'';if(tp==='rh'||tp==='frota'){const p=t.split(' · ');p.splice(1,0,'solicitação '+(tp==='rh'?'de RH':'da frota')+(r.veicId?' (veículo '+veicNome(r.veicId)+')':'')+(r.categoria?' ('+r.categoria+')':''));return p.filter(Boolean).join(' · ');}}catch(e){}return t;};}
+
+/* ---------- 3. gravação comum do navegador (igual ao servidor) ---------- */
+{const g0=p2PodeGravar;p2PodeGravar=function(col,velho,novo,exclui){const m=g0.apply(this,arguments);if(m||me.owner||store.mode!=='db')return m;
+  try{if(col==='sc'&&v158ScProprias()&&velho&&!v158MinhaSc(velho))return V158_SC_ALHEIA;
+    if(v158FrotaAdm()&&V158_FROTA_COLS.includes(col)&&exclui&&velho)return V158_FROTA_DEL;
+    if(v158FrotaAdm()&&V158_CORR_COLS.includes(col)&&!exclui&&velho&&novo&&v158PedeMotivo(col,velho,novo)&&String(novo.corrMotivo||'').trim().length<3)return V158_CORR_MSG;}catch(e){}return m;};}
+const V158_IGNORA=new Set(['id','ts','cr','crBy','ed','edBy','hist','v','lancId','correcoes','corrMotivo','_valOculto','_restrito']);
+function v158Mudou(velho,novo){return [...new Set(Object.keys(velho||{}).concat(Object.keys(novo||{})))].filter(k=>!V158_IGNORA.has(k)&&!p2Igual((velho||{})[k],(novo||{})[k]));}
+/* abastecimento sempre; manutenção só depois de concluída (concluir a agendada não é correção) */
+function v158PedeMotivo(col,velho,novo){if(!velho||!V158_CORR_COLS.includes(col))return false;if(col==='vman'&&(velho.status||'concluida')==='agendada')return false;return v158Mudou(velho,novo).length>0;}
+
+/* ---------- 4. Administrador de frota: sem Excluir na frota ---------- */
+V158_FROTA_COLS.forEach(t=>{if(typeof V[t]==='function'){const v0=V[t];V[t]=function(){const h=v0.apply(this,arguments);if(!v158FrotaAdm()||typeof h!=='string')return h;
+    return h.replace(new RegExp('<button class="btn sm dng" data-act="'+t+'Del" data-id="[^"]*">Excluir</button>','g'),'');};}
+  if(typeof A[t+'Del']==='function'){const d0=A[t+'Del'];A[t+'Del']=function(){if(v158FrotaAdm()){toast(V158_FROTA_DEL,'neg');return;}return d0.apply(this,arguments);};}});
+/* correção de abastecimento e manutenção: motivo obrigatório e histórico; o lançamento em contas a pagar fica com o Financeiro */
+const V158_FIN_FORA=['gerarLanc','venc','pago','contaId'];
+V158_CORR_COLS.forEach(c=>{const d=MODS2[c];if(!d)return;
+  const f0=d.fields;d.fields=function(r){let fs=f0.apply(this,arguments);if(!v158FrotaAdm())return fs;fs=fs.filter(f=>!V158_FIN_FORA.includes(f.k));
+    const ant=r&&r.id?get(c,r.id):null;if(ant&&(c!=='vman'||(ant.status||'concluida')!=='agendada'))fs=[{t:'sect',l:'Correção do registro'},F('corrMotivo','Motivo da correção','text',{req:true,full:true,ph:'Ex.: litros digitados errado; valor da nota corrigido'}),{t:'sect',l:'Dados'}].concat(fs);
+    return fs;};
+  const b0=d.blank;d.blank=function(){const o=b0.apply(this,arguments);if(v158FrotaAdm())o.gerarLanc=false;return o;};
+  const v0=d.validate;d.validate=function(r,isNew){if(v158FrotaAdm()&&!isNew){const ant=get(c,r.id);if(ant&&v158PedeMotivo(c,ant,r)&&String(r.corrMotivo||'').trim().length<3)return V158_CORR_MSG;}return v0?v0.apply(this,arguments):'';};});
+if(typeof syncLanc==='function'){const s0=syncLanc;syncLanc=function(){if(v158FrotaAdm()&&!mayW('fin'))return;return s0.apply(this,arguments);};}
+function v158HistCorr(r){const l=(r&&Array.isArray(r.correcoes)?r.correcoes:[]).slice().reverse();if(!l.length)return '';
+  return '<div class="card v158corr" style="margin:12px 0 0"><h2>Histórico de correções <small>'+l.length+'</small></h2><div class="list">'+l.slice(0,20).map(x=>'<div class="li"><div><div class="t">'+esc(fmtDT(x.em))+' · '+esc(nameOf(x.por)||'')+'</div><div class="sub">Motivo: '+esc(x.motivo||'')+'</div>'+
+    (Array.isArray(x.campos)&&x.campos.length?'<div class="sub">'+x.campos.slice(0,12).map(k=>esc(FLABEL[k.k]||k.k)+': '+esc(k.de==null||k.de===''?'—':String(k.de))+' → '+esc(k.para==null||k.para===''?'—':String(k.para))).join(' · ')+'</div>':'')+'</div></div>').join('')+'</div></div>';}
+{const f0=formMod;formMod=function(d,rec){if(d&&V158_CORR_COLS.includes(d.col)&&rec&&'corrMotivo' in rec)rec=Object.assign({},rec,{corrMotivo:''});const r=f0.call(this,d,rec);
+  try{if(d&&V158_CORR_COLS.includes(d.col)&&rec&&rec.id){const ant=get(d.col,rec.id),mb=$('#mb'),hh=v158HistCorr(ant);if(hh&&mb&&mb.insertAdjacentHTML)mb.insertAdjacentHTML('beforeend',hh);}}catch(e){}return r;};}
+FLABEL.corrMotivo='Motivo da correção';
+
+/* ---------- 5. Frota › Condutores (colaboradores só para escolher o condutor; CPF mascarado) ---------- */
+function v158MascCpf(f){if(f&&f.mascCpf)return String(f.mascCpf);const d=String((f&&f.cpf)||'').replace(/\D/g,'');if(!d)return '';if(d.length!==11)return '***';return '***.'+d.slice(3,6)+'.'+d.slice(6,9)+'-**';}
+GROUP_OF_TAB.v158cond='frota'; /* sem TAB_COLS: a tela só mostra colaboradores, que a frota já lê (não muda o mapa de funções) */
+if(!NAV.some(n=>n[0]==='v158cond'))NAV.push(['v158cond','Condutores','Frota']);
+{const m=MENU.find(x=>x[0]==='frota');if(m&&!m[2].some(i=>i[0]==='v158cond')){const i=m[2].findIndex(x=>x[0]==='vsai');m[2].splice(i<0?m[2].length:i+1,0,['v158cond','Condutores']);}}
+ui.v158cond={q:'',cnh:''};
+/* a tela é do Administrador de frota (e de quem administra tudo) */
+{const t0=pfnTabOk;pfnTabOk=function(tab,pf){if(tab==='v158cond'&&store.mode==='db'){if(!pf&&me.owner)return true;const k=pf||me.perfil,p=PERFIS[k];if(!(k==='frotaadm'||(p&&p.w==='*')))return false;}return t0.apply(this,arguments);};}
+V.v158cond=()=>{const f=ui.v158cond,q=gsNorm(f.q||''),h=todayStr(),em30=addDays(h,30);
+  const sit=x=>!x.cnhNum&&!x.cnhCat?'sem':!x.cnhValidade?'semval':x.cnhValidade<h?'venc':x.cnhValidade<=em30?'avenc':'ok';
+  const fs=(S.func||[]).filter(x=>x&&x.status!=='desligado').filter(x=>!q||gsNorm([x.nome,x.funcao,x.cargo,x.cnhNum,x.cnhCat].join(' ')).includes(q)).filter(x=>!f.cnh||sit(x)===f.cnh).slice().sort(byNome);
+  const todos=(S.func||[]).filter(x=>x&&x.status!=='desligado'),n=k=>todos.filter(x=>sit(x)===k).length;
+  const pil=x=>{const s=sit(x);return s==='venc'?pill('CNH vencida','neg'):s==='avenc'?pill('Vence em até 30 dias','warn'):s==='ok'?pill('Em dia','pos'):s==='semval'?pill('Sem validade','warn'):'<span class="mut">Sem CNH</span>';};
+  return pageHead('Condutores','Colaboradores para escolher o condutor nas saídas e na rota diária: nome, função e CNH. O CPF aparece mascarado (LGPD); salário, documentos do RH, ASO e folha não aparecem aqui.')+
+    '<div class="stack"><div class="kpis">'+kpi('Com CNH',String(todos.length-n('sem')),todos.length+' colaborador(es) ativo(s)')+kpi('CNH vencida',String(n('venc')),'não podem dirigir',n('venc')?'neg':'')+kpi('Vence em 30 dias',String(n('avenc')),'avise a pessoa',n('avenc')?'warn':'')+'</div>'+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_v158cond" data-filter="v158cond.q" value="'+esc(f.q||'')+'" placeholder="Nome, função ou CNH"></label><label class="f"><span>CNH</span><select id="s_v158cond" data-filter="v158cond.cnh">'+opt([['ok','Em dia'],['avenc','Vence em 30 dias'],['venc','Vencida'],['semval','Sem validade'],['sem','Sem CNH']],f.cnh||'','Todas')+'</select></label></div>'+
+    '<div class="tw"><table style="min-width:760px"><thead><tr><th>Nome</th><th>Função</th><th>CNH nº</th><th>Categoria</th><th>Validade</th><th>CPF</th></tr></thead><tbody>'+
+    (fs.length?fs.map(x=>'<tr><td><b>'+esc(x.nome||'')+'</b></td><td>'+esc(x.funcao||x.cargo||'—')+'</td><td class="mono">'+esc(x.cnhNum||'—')+'</td><td>'+esc(x.cnhCat||'—')+'</td><td><span class="mono">'+(x.cnhValidade?fmtDate(x.cnhValidade):'—')+'</span> '+pil(x)+'</td><td class="mono v158cpf">'+esc(v158MascCpf(x)||'—')+'</td></tr>').join(''):emptyRow(6,'Nenhum colaborador encontrado.'))+'</tbody></table></div></div>';};
+
+/* ---------- 6. valores: o Administrador de frota vê os valores da frota (e não os do estoque) ---------- */
+if(typeof vgMascara==='function'){const m0=vgMascara;vgMascara=function(){try{const p=v158Pf();if(p&&!p.valNao&&Array.isArray(p.valGrupos)){if(VG.forca)return true;if(vgTabLivre(ui.tab))return false;return !p.valGrupos.includes(GROUP_OF_TAB[ui.tab]);}}catch(e){}return m0.apply(this,arguments);};}
+if(typeof p1Fin==='function'){const f0=p1Fin;p1Fin=function(){try{const p=v158Pf();if(p&&!p.valNao&&Array.isArray(p.valGrupos)&&p.valGrupos.includes(GROUP_OF_TAB[ui.tab]))return true;}catch(e){}return f0.apply(this,arguments);};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='157',APP_DATA='2026-11-05';
+const APP_VER='158',APP_DATA='2026-11-05';
 const CHANGELOG=[
+  ['158','2026-11-05',['Perfil novo Recursos humanos e compras: tudo o que o RH faz e, em Suprimentos, cria solicitação de compra dos tipos RH (EPI, uniforme, material de treinamento, exames) e Administrativa. Vê só as próprias solicitações, com a situação, quem precisa aprovar, Pedir aprovação e Corrigir e reenviar. Não vê cotações, pedidos de compra nem preços negociados. Entra no Painel de Pessoal.', 'Perfil novo Administrador de frota: cuida da frota inteira, de todos os locais, com os valores da frota. Não exclui registros da frota; abastecimento e manutenção se corrigem com o motivo, que fica no histórico de correções do registro. Entra no Painel da Frota.', 'Frota › Condutores (Administrador de frota): nome, função e CNH dos colaboradores para escolher o condutor, com o CPF mascarado. Salário, documentos do RH, ASO e folha não aparecem.', 'O Administrador de frota consulta fornecedores e clientes e o saldo e o local das peças no estoque (sem custo) e cria solicitação de compra dos tipos Frota (peças, pneus, serviço de oficina, com o veículo) e Administrativa.', 'Leitura de planilhas (SheetJS): se a cópia do próprio servidor faltar, a reserva passa a ser a versão 0.20.3, do site oficial da SheetJS, que corrige falhas de segurança da versão antiga (0.18.5).', 'Os dois perfis aparecem em Sistema › Usuários e em Sistema › Perfis de acesso, onde o administrador pode ajustar as funções. O servidor confere tudo: o que o perfil não pode ver não é entregue, e o que não pode gravar ou excluir é recusado.']],
   ['157','2026-11-05',['Solicitações de compra: o Almoxarife não exclui mais a solicitação em rascunho. No lugar de Excluir aparece Cancelar, e ela fica guardada como cancelada. O servidor confere.', 'O Almoxarife não muda a família do produto: no cadastro do produto o campo fica só para consulta, e Colocar produto na família EPI e Não é EPI não aparecem para ele. O servidor recusa a troca por qualquer caminho. Os filtros por família (Estoque, Produtos, separação, EPI, relatórios) continuam.', 'Aceite do fornecedor: o servidor só gera o link, mostra o pedido e registra o aceite quando o pedido está aprovado dentro da alçada. Se não estiver, a página do fornecedor explica que o pedido ainda está em aprovação.', 'Integração Sólides: o aviso de endereço não encontrado (404) ou de falta de configuração aparece no registro do servidor uma vez e depois no máximo a cada 6 horas, em vez de a cada sincronização.', 'Bibliotecas de imagem da página (html2canvas) e de montagem de PDF (pdf-lib) passam a vir do próprio servidor. A internet externa (CDN) fica só como reserva se a cópia local falhar.']],
   ['156','2026-11-04',['Cadastros › Famílias de produto: cadastro das famílias com descrição, ativa/inativa e a marca "É EPI"; mostra quantos produtos cada família tem e tem busca.', 'Renomear uma família muda o nome em todos os produtos dela de uma vez. Juntar famílias repetidas (ex.: "Epi" e "EPIs") leva os produtos para uma só e inativa as outras.', 'Criar a partir dos produtos: as famílias já digitadas nos produtos viram o cadastro, com prévia para conferir; variações do mesmo nome (maiúsculas, acento, espaços) ficam juntas e nomes diferentes não são juntados.', 'No cadastro do produto a família é escolhida de uma lista com busca. Quem cadastra família tem "+ Nova família" ali mesmo, com aviso de nome parecido. Produto com família fora do cadastro mostra aviso.', 'O Almoxarife não cadastra produto nem família (sem Novo produto, Duplicar, + Nova família e Criar produto ao lançar). Ele continua editando prateleira, mínimo, dados de EPI e escolhe a família entre as cadastradas. O servidor confere.', 'Entrega de EPI e Estoque de EPI usam a marca "É EPI" da família (Configurações › EPI mostra quais famílias estão marcadas).']],
   ['155','2026-11-04',['Estoque: movimento não se exclui mais (nem pelo administrador). Lançamento errado se desfaz com Estornar no Histórico do produto: entra o movimento contrário ligado ao original, com motivo, quem e quando; o original fica marcado como estornado e um estorno não se estorna de novo.', 'Entrada manual e baixa manual pedem o motivo (doação, devolução de obra sem romaneio, sobra de inventário; perda, consumo interno, descarte; ou outro, descrito). Nota, romaneio, separação, EPI, higienização, fábrica e inventário continuam sem pedir motivo.', 'O botão Ajuste do Estoque virou proposta de ajuste de inventário: até o limite por item (R$ 300) entra na hora; acima, outra pessoa aprova em Ajustes de inventário.', 'Cancelar nota fiscal e desfazer recebimento estornam o estoque (antes apagavam os movimentos).', 'Cadastro de produto: o Almoxarife altera prateleira, mínimo, família, lote, dados de EPI, observações e imagem; preço, NCM, dados fiscais e unidade tributável ficam com o Fiscal (o servidor recusa).', 'Excluir produto: só o Administrador e só produto sem nenhum histórico; com histórico, use Inativar.', 'Estoque e Cadastros › Produtos mostram o quadro Quem faz o quê no Estoque e o que o seu perfil pode fazer.', 'Produto novo nasce só em Cadastros › Produtos ou na entrada da nota fiscal: Controle de EPI e o pedido de compra levam para Cadastros › Produtos.', 'Estoque: os botões da linha quebram dentro da célula (o Histórico não passa mais da tabela).']],
@@ -31530,6 +31689,7 @@ A.chLerTodas=()=>{const L=Object.assign({},CH.st.lido||{});let n=0;chConvs().for
 {const v0=V.chat;V.chat=function(){let h=v0.apply(this,arguments);try{if(!chOk()||chUi.aba||String(chUi.q||'').trim())return h;const oc=chOcultas();
   if(chConvs().some(c=>!oc[c._k]&&chNaoLidas(c._k)>0))h=h.replace('<div class="wa-fil">','<div class="wa-lt" style="padding:6px 12px 0"><button class="wa-chip" data-act="chLerTodas" title="Marca como lidas as mensagens de todas as conversas">✓ Marcar todas como lidas</button></div><div class="wa-fil">');}catch(e){}return h;};}
 try{if(typeof TIP_ACT!=='undefined')TIP_ACT.chLerTodas='Marca como lidas as mensagens de todas as conversas.';}catch(e){}
+try{v158Perfis();}catch(e){} /* v158: perfis montados de novo com o rh completo */
 boot();
 })();
 </script>

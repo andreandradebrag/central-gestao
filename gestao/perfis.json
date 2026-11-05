@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-05T12:42:15.775Z",
+ "gerado": "2026-11-05T13:44:07.919Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1176,6 +1176,218 @@
    },
    "valNao": true,
    "nome": "Almoxarife e fábrica"
+  },
+  "rhcompras": {
+   "w": [
+    "rh",
+    "ponto",
+    "sst",
+    "jur",
+    "folha",
+    "chat",
+    "agenda",
+    "empdoc",
+    "comp"
+   ],
+   "r": [
+    "proj",
+    "frota",
+    "ferr",
+    "lgpd",
+    "meu",
+    "ajuda"
+   ],
+   "frotaTodos": true,
+   "so": {
+    "comp": [
+     "sc"
+    ]
+   },
+   "papel": "rh",
+   "padFn": {
+    "proj": {
+     "proj": "n",
+     "rmesf": "n",
+     "ctremp": "n",
+     "medemp": "n",
+     "obrchk": "n"
+    },
+    "sst": {
+     "tterc": "r",
+     "sstv": "r",
+     "cipa": "r",
+     "pgrdoc": "r",
+     "pgr": "r",
+     "isochk": "r",
+     "ambdoc": "r",
+     "ambind": "r",
+     "ambres": "r",
+     "ambforn": "r",
+     "psicamp": "r",
+     "pte": "r",
+     "sstdoc": "r",
+     "integ": "r",
+     "aptlib": "r",
+     "treinc": "r",
+     "trein": "r",
+     "rda": "r",
+     "rel": "r",
+     "hht": "r",
+     "insp": "r",
+     "pa": "r",
+     "cipam": "r",
+     "cipar": "r",
+     "cipaa": "r"
+    },
+    "comp": {
+     "sc": "a",
+     "cot": "n",
+     "notas": "n",
+     "acordo": "n",
+     "invaj": "n",
+     "almox": "n",
+     "parc": "n",
+     "mov": "n",
+     "ped": "n",
+     "prod": "n",
+     "sep": "n"
+    }
+   },
+   "leDep": {
+    "proj": [
+     "proj"
+    ]
+   },
+   "telasFora": [
+    "pobra",
+    "proj",
+    "curva",
+    "pmat",
+    "ctremp",
+    "medemp",
+    "rproj",
+    "rmes",
+    "obrchk",
+    "gvsst",
+    "trm",
+    "pgrdoc",
+    "aptlib",
+    "pgr",
+    "pte",
+    "integ",
+    "treinm",
+    "rda",
+    "amb",
+    "pnSup",
+    "cot",
+    "ped",
+    "nfrec",
+    "nf",
+    "supctl",
+    "sep",
+    "avforn",
+    "acordo",
+    "arqf"
+   ],
+   "itensFora": [
+    "sstq:tterc"
+   ],
+   "leFora": {
+    "comp": [
+     "cot",
+     "ped",
+     "acordo",
+     "notas",
+     "invaj",
+     "mov"
+    ]
+   },
+   "scTipos": [
+    "rh",
+    "adm"
+   ],
+   "valNao": true,
+   "nome": "Recursos humanos e compras"
+  },
+  "frotaadm": {
+   "w": [
+    "frota",
+    "comp",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "cad",
+    "est",
+    "meu",
+    "ajuda"
+   ],
+   "frotaTodos": true,
+   "so": {
+    "comp": [
+     "sc"
+    ]
+   },
+   "padFn": {
+    "frota": {
+     "veic": "a",
+     "vsai": "a",
+     "vrota": "a",
+     "vabas": "a",
+     "vman": "a",
+     "vfrete": "a",
+     "multa": "a",
+     "func": "r"
+    },
+    "comp": {
+     "sc": "a",
+     "cot": "n",
+     "notas": "n",
+     "acordo": "n",
+     "invaj": "n",
+     "almox": "n",
+     "parc": "n",
+     "mov": "n",
+     "ped": "n",
+     "prod": "n",
+     "sep": "n"
+    }
+   },
+   "telasFora": [
+    "pnSup",
+    "cot",
+    "ped",
+    "nfrec",
+    "nf",
+    "supctl",
+    "sep",
+    "avforn",
+    "acordo",
+    "arqf",
+    "rom",
+    "devobra",
+    "invaj",
+    "prodinat",
+    "vcond"
+   ],
+   "leFora": {
+    "comp": [
+     "cot",
+     "ped",
+     "acordo",
+     "notas",
+     "invaj",
+     "mov"
+    ]
+   },
+   "valCols": [
+    "proj"
+   ],
+   "scTipos": [
+    "frota",
+    "adm"
+   ],
+   "nome": "Administrador de frota"
   }
  },
  "colecoes": {
