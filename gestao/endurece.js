@@ -32,7 +32,9 @@ const VENDOR = [
    calculado sobre o arquivo da mesma versão: jszip.min.js 3.10.1 do pacote npm (o mesmo que a cdnjs publica).
    Os outros não puderam ser baixados neste ambiente; veja o LEIA-ME (Bibliotecas do navegador). */
 const CDN_SRI = {
-  'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js': 'sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG'
+  'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js': 'sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG',
+  /* v157: html2canvas.min.js 1.4.1 copiado para public/vendor; o SHA-512 do arquivo é o mesmo que a cdnjs publica */
+  'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js': 'sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA=='
 };
 const CONEXOES_EXTERNAS = ['https://viacep.com.br', 'https://brasilapi.com.br', 'https://publica.cnpj.ws'];
 const PESSOAIS = new Set(['chat', 'ponto', 'meu']);

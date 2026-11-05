@@ -20,6 +20,11 @@ const ocultar = t => String(t == null ? '' : t)
   .replace(/<ArgumentValue>[^<]*<\/ArgumentValue>/gi, '<ArgumentValue>[oculto]</ArgumentValue>')
   .replace(/\b(Basic|Bearer)\s+[A-Za-z0-9+/=._~-]{6,}/gi, '$1 [oculto]')
   .replace(TOKEN && TOKEN.length >= 6 ? new RegExp(TOKEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g') : /$^/, '[oculto]');
+/* v157: o mesmo aviso da sincronização automática (404, falta de configuração ou outro) aparece uma vez e depois no máximo
+   uma vez a cada 6 horas (ajuste157.js); uma sincronização que dá certo zera a contagem */
+const LOG157 = (() => { try { const L = require('./ajuste157.js'); return { f: L.limitador(6), tipo: L.tipoSolides }; } catch (e) { return null; } })();
+const logSol = m => { const t = 'Sólides: ' + ocultar(m); if (LOG157) LOG157.f(LOG157.tipo(m), t); else console.log(t); };
+const okSol = r => { if (r && r.ok && LOG157) LOG157.f.zerar(); };
 const resumoXml = t => { const s = String(t || ''); if (!/^\s*<\?xml|^\s*<Error>/i.test(s)) return s; const c = (s.match(/<Code>([^<]*)</i) || [])[1], m = (s.match(/<Message>([^<]*)</i) || [])[1]; return [c, m].filter(Boolean).join(': ') || 'erro em XML'; };
 /* segue redirecionamentos sem levar a credencial para outro endereço (ex.: link de arquivo no S3, que recusa o Authorization) */
 async function solFetch(u, opts) {
@@ -194,8 +199,8 @@ module.exports = function (ctx) {
     } finally { rodando = false; }
   }
   if (TOKEN) {
-    setTimeout(() => sincronizar().catch(e => console.log('Sólides: ' + ocultar(e.msg || e))), 20000);
-    setInterval(() => sincronizar().catch(e => console.log('Sólides: ' + ocultar(e.msg || e))), INTERVALO * 60e3);
+    setTimeout(() => sincronizar().then(okSol).catch(e => logSol(e.msg || e)), 20000);
+    setInterval(() => sincronizar().then(okSol).catch(e => logSol(e.msg || e)), INTERVALO * 60e3);
   }
 
   /* ---------- envio para a Sólides ---------- */

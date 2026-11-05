@@ -796,6 +796,37 @@ Texto de família que ainda não está no cadastro segue a regra antiga (nome de
 **Depois de implantar**: o Fiscal ou o Administrador abre Cadastros › Famílias de produto › **Criar a partir dos produtos**,
 confere a prévia (nomes e "É EPI") e confirma; depois junta as repetidas (ex.: "EPIs" em "EPI").
 
+## Ajustes do Almoxarife, aceite com aprovação, aviso da Sólides e bibliotecas locais (v157)
+
+Servidor em `gestao/ajuste157.js` (novo), ligado por `v157/ed_v157.py` em `regras.js`, `aceite.js`, `solides.js`,
+`endurece.js` e no `Dockerfile`.
+
+**Solicitação de compra em rascunho.** O Almoxarife, o Almoxarife e fábrica e o antigo "Comprador / almoxarife" não excluem
+solicitação em rascunho: na lista, no lugar de **Excluir** aparece **Cancelar** (a solicitação fica guardada como cancelada).
+O servidor recusa a exclusão (`SC_EXCLUSAO_RECUSADA` na auditoria). Administrador, Comprador e os outros perfis continuam
+como antes.
+
+**Família do produto.** Esses mesmos perfis não mudam a família de um produto, por nenhum caminho: no cadastro do produto o
+campo fica só para consulta; "Colocar produto na família EPI" e "Não é EPI" não aparecem para eles; e o servidor recusa
+qualquer gravação de produto (ativo ou inativo, editar, inativar, reativar, importar) que troque a família
+(`PRODUTO_FAMILIA_RECUSADA`). A família fica exatamente como estava. Famílias de produto (criar, renomear, juntar, "É EPI",
+excluir) eles já não gravavam desde a v156. **Continua**: escolher uma família nos filtros e buscas (Estoque, Cadastros ›
+Produtos, separação, Estoque de EPI, relatórios) e editar prateleira, mínimo, lote, dados de EPI e observações.
+
+**Aceite do fornecedor (v150) só com o pedido aprovado.** O servidor confere a aprovação dentro da alçada (a mesma regra da
+tela: pedido acima do limite de Controles de compras precisa de aprovação válida para o total atual) antes de: gerar o link
+(`PED_ACEITE_LINK_SEM_APROVACAO` na auditoria), mostrar o pedido na página `/aceite/…` e registrar o aceite. Se o pedido
+ainda não estiver aprovado, o fornecedor vê: "Este pedido ainda está em aprovação na empresa e não pode ser aceito agora.
+Quando for aprovado, este mesmo link passa a funcionar."
+
+**Aviso da Sólides no registro do servidor.** O aviso da sincronização automática (endereço não encontrado/404, falta de
+configuração ou outro erro) aparece uma vez e depois, para o mesmo tipo de aviso, no máximo uma vez a cada 6 horas, dizendo
+quantas vezes se repetiu nesse meio-tempo. Uma sincronização que dá certo zera a contagem. A situação na tela (Integrações ›
+Sólides) continua mostrando o último erro de cada sincronização.
+
+**Bibliotecas do navegador.** html2canvas 1.4.1 e pdf-lib 1.17.1 foram copiados para `gestao/public/vendor` (pacotes npm
+das mesmas versões usadas). jsPDF 2.5.1 e SheetJS 0.18.5 ainda não puderam ser baixados: veja "Bibliotecas do navegador".
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".
@@ -814,8 +845,10 @@ Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no top
 
 O sistema usa pdf.js (ler PDFs), SheetJS (planilhas), html2canvas e jsPDF (gerar PDF) e JSZip. Elas ficam em `gestao/public/vendor` e são servidas pelo próprio servidor, com hash de integridade (SRI) calculado na hora de subir:
 
-- **Já incluídas**: pdf.js 6.2.108 e JSZip 3.10.1.
-- **Falta copiar** (o pacote foi montado sem internet): SheetJS **0.20.3** (a 0.18.5 da cdnjs tem as falhas CVE-2023-30533 e CVE-2024-22363), html2canvas 1.4.1 e jsPDF 2.5.1. Num computador com internet, na raiz do repositório: `bash gestao/baixar-bibliotecas.sh`, envie ao GitHub e implante. Enquanto não copiar, essas três continuam vindo da cdnjs e a política de conteúdo libera `cdnjs.cloudflare.com`; depois de copiar, a CDN deixa de ser liberada sozinha.
+- **Já incluídas**: pdf.js 6.2.108, JSZip 3.10.1 e (v157) html2canvas 1.4.1 e pdf-lib 1.17.1.
+- **Falta copiar** (o ambiente onde o pacote foi montado não conseguiu baixar do npm): jsPDF 2.5.1 e SheetJS 0.18.5. Num computador com Node e internet, na raiz do repositório: `bash gestao/baixar-bibliotecas.sh` (v157: baixa pelo **npm** as mesmas versões que o sistema usa hoje), confira os hashes, envie ao GitHub e implante. Enquanto não copiar, essas duas continuam vindo da cdnjs e a política de conteúdo libera `cdnjs.cloudflare.com`; depois de copiar todas, a CDN deixa de ser liberada sozinha.
+- **Cópia local primeiro, CDN só de reserva**: o navegador carrega a cópia de `vendor` (com o hash conferido); se ela faltar ou não carregar, usa a cdnjs (com o hash conhecido, quando houver).
+- **Atenção ao SheetJS**: a 0.18.5 (a última publicada no npm) tem as falhas CVE-2023-30533 e CVE-2024-22363. As versões corrigidas (0.20.3 ou mais nova) só existem no site da SheetJS (`https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js`). Copiar essa versão para `vendor/xlsx/xlsx.full.min.js` também funciona e é o mais seguro; a decisão é do dono.
 - Política de conteúdo (CSP): sem `unsafe-eval`; o sistema só conversa com o próprio servidor e com ViaCEP, BrasilAPI e CNPJ.ws (consulta de CEP e CNPJ). As páginas simples (login, contas, segurança) não podem ser abertas dentro de outro site. Se algum recurso parar por causa da CSP, `CSP_UNSAFE_EVAL=1` devolve o `unsafe-eval` enquanto se investiga.
 
 ## Endurecimento do servidor (para o dono ou a TI)

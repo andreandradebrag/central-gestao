@@ -1,0 +1,1 @@
+pdf-lib 1.17.1 (arquivo dist/pdf-lib.min.js do pacote npm pdf-lib@1.17.1). Licença MIT (LICENSE.md).

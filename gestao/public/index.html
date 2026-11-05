@@ -31032,9 +31032,71 @@ try{const i=V155_REGRAS.findIndex(r=>r[0]==='Editar produto');
 {const f0=v155FichaAjusta;v155FichaAjusta=function(o){o=f0.apply(this,arguments);try{if(o&&typeof o.body==='string')o=Object.assign({},o,{body:o.body.replace('estoque mínimo, família, controle de lote','estoque mínimo, família (da lista do cadastro), controle de lote')
   .replace('<li><b>Fiscal</b> e <b>Administrador</b>: tudo,','<li><b>Cadastrar produto e família</b>: só o Fiscal e o Administrador (o Almoxarife escolhe a família entre as cadastradas).</li><li><b>Fiscal</b> e <b>Administrador</b>: tudo,')});}catch(e){}return o;};}
 
+/* ===== v157: pequenos ajustes (relatorios/feito_v157.md) =====
+   - Solicitações de compra: o Almoxarife (almoxarife, almoxfab e o antigo "compras") não vê "Excluir" na SC em rascunho. Se o
+     perfil dele pode cancelar a solicitação (o antigo "compras"), aparece "Cancelar" no lugar (ela fica guardada como
+     cancelada); o Almoxarife e o Almoxarife e fábrica já não mudam a situação da SC (perfis.json) e ficam sem o botão.
+     O servidor também recusa a exclusão.
+   - Família do produto: o Almoxarife não muda a família de um produto (no cadastro o campo fica só para consulta; "Colocar
+     produto na família EPI" e "Não é EPI" saem para ele; qualquer gravação que troque a família é recusada aqui e no
+     servidor). Ele continua escolhendo família nos filtros (Estoque, Cadastros › Produtos, separação, EPI, relatórios).
+   - O aceite do fornecedor (v150) e o aviso repetido da Sólides são conferidos só no servidor (deploy/gestao/ajuste157.js).
+   Prefixos: v157*, V157*. */
+const V157_SC_DEL='O seu perfil (Almoxarife) não exclui solicitação de compra em rascunho. Para desistir dela, use Cancelar (se o seu perfil não puder, peça ao Comprador ou ao Administrador).';
+const V157_FAM='O seu perfil (Almoxarife) não muda a família do produto. Peça ao Fiscal ou ao Administrador.';
+const v157Rest=()=>{try{return !me.owner&&v155Restrito();}catch(e){return false;}};
+
+/* ---------- 1. SC em rascunho ---------- */
+if(V.sc){const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);if(!v157Rest())return h;
+  (S.sc||[]).forEach(s=>{if((s.status||'rascunho')!=='rascunho')return;
+    let canc=false;try{canc=!p2PodeGravar('sc',s,Object.assign(cl(s),{status:'cancelada'}),false);}catch(e){}
+    h=h.split('<button class="btn sm dng" data-act="scDel" data-id="'+s.id+'">Excluir</button>').join(canc?'<button class="btn sm dng" data-act="scCancel" data-id="'+s.id+'" title="A solicitação fica guardada como cancelada">Cancelar</button>':'');});
+  return h;};}
+{const d0=A.scDel;A.scDel=function(d){const s=get('sc',d&&d.id);if(s&&v157Rest()&&(s.status||'rascunho')==='rascunho'){toast(V157_SC_DEL,'neg');return;}return d0.apply(this,arguments);};}
+
+/* ---------- 2. gravação comum do navegador (igual ao servidor) ---------- */
+{const g0=p2PodeGravar;p2PodeGravar=function(col,velho,novo,exclui){const m=g0.apply(this,arguments);if(m||me.owner)return m;
+  try{if(typeof P2N_CAP!=='undefined'&&P2N_CAP)return m;if(!v157Rest())return m;
+    if(col==='sc'&&exclui&&velho&&(velho.status||'rascunho')==='rascunho')return V157_SC_DEL;
+    if((col==='prod'||col==='prodinat')&&!exclui&&novo&&novo._del!==true&&('familia' in novo)){
+      const ant=velho||get(col==='prod'?'prodinat':'prod',novo.id);if(ant&&v156N(novo.familia)!==v156N(ant.familia))return V157_FAM;}}catch(e){}return m;};}
+
+/* a mesma família com outra grafia: fica o texto de antes (como no servidor) */
+{const p0=put;put=function(col,rec){try{if((col==='prod'||col==='prodinat')&&rec&&rec.id&&rec._del!==true&&('familia' in rec)&&v157Rest()){
+  const ant=get(col,rec.id)||get(col==='prod'?'prodinat':'prod',rec.id);if(ant&&ant!==rec&&v156N(rec.familia)===v156N(ant.familia)){if(ant.familia===undefined)delete rec.familia;else rec.familia=ant.familia;}}}catch(e){}
+  return p0.apply(this,arguments);};}
+
+/* ---------- 3. cadastro do produto: família só para consulta ---------- */
+const V157_FAMDIV=/<div class="f v156-fam"[\s\S]*?<div id="v156FamAviso"[^>]*>[^<]*<\/div><\/div>/;
+function v157FichaFam(o){if(!o||typeof o.body!=='string')return o;let b=o.body;
+  b=b.replace(/estoque mínimo, família(?: \(da lista do cadastro\))?, (controle de )?lote/g,'estoque mínimo, $1lote')
+    .replace('(o Almoxarife escolhe a família entre as cadastradas)','(o Almoxarife não muda a família do produto)');
+  const p=typeof PF!=='undefined'?PF.p:null,existe=!!(p&&p.id&&(get('prod',p.id)||get('prodinat',p.id)));
+  if(v157Rest()&&existe){const atual=String(p.familia||'');
+    const ro='<div class="f v156-fam v157-famro" style="grid-column:span 2"><span>Família de produto</span><select data-f="familia" id="f_familia" disabled aria-label="Família de produto" title="'+esc(V157_FAM)+'">'+opt([[atual,v156L(atual)||'Sem família']],atual)+'</select><div class="sub">Só o Fiscal ou o Administrador muda a família do produto.</div></div>';
+    if(V157_FAMDIV.test(b))b=b.replace(V157_FAMDIV,()=>ro);
+    else b=b.replace(/data-f="familia"(?![^>]*\bdisabled\b)/g,'data-f="familia" disabled');}
+  return Object.assign({},o,{body:b});}
+if(typeof prodFicha==='function'){const f0=prodFicha;prodFicha=function(){const m0=modal;modal=function(o){modal=m0;try{o=v157FichaFam(o);}catch(e){}return m0.call(this,o);};
+  try{return f0.apply(this,arguments);}finally{if(modal!==m0)modal=m0;}};}
+
+/* ---------- 4. Estoque de EPI: colocar ou tirar da família EPI muda a família ---------- */
+{const k0=A.epiEstMarcar;A.epiEstMarcar=function(){if(v157Rest()){toast(V157_FAM,'neg');return;}return k0.apply(this,arguments);};}
+{const k0=A.epiEstTirar;A.epiEstTirar=function(d){const p=get('prod',d&&d.id);if(v157Rest()&&p&&v154EhFamEpi(p.familia)){toast(V157_FAM,'neg');return;}return k0.apply(this,arguments);};}
+try{if(MODS2.epi&&typeof MODS2.epi.top==='function'){const t1=MODS2.epi.top;MODS2.epi.top=function(){let h=t1.apply(this,arguments);if(!v157Rest()||typeof h!=='string')return h;
+  return h.replace(/<button class="btn sm" data-act="epiEstMarcar">[^<]*<\/button>/g,'').replace(/<button class="btn sm" data-act="epiEstTirar" data-id="[^"]+">Não é EPI<\/button>/g,'');};}}catch(e){}
+
+/* ---------- 5. textos "Quem faz o quê" ---------- */
+try{V155_REGRAS.forEach(r=>{for(let i=1;i<r.length;i++)if(typeof r[i]==='string')r[i]=r[i].replace(/mínimo, família(?: \(da lista do cadastro\))?, lote/,'mínimo, lote')
+  .replace('O Almoxarife escolhe a família do produto entre as cadastradas','O Almoxarife não muda a família do produto (consulta e filtra por família)');});}catch(e){}
+{const p0=v155Pode;v155Pode=function(){return p0.apply(this,arguments).map(t=>t==='não cadastra produto nem família (escolhe a família da lista)'?'não cadastra produto nem família e não muda a família do produto':t);};}
+{const r0=v156RegrasHtml;v156RegrasHtml=function(){return String(r0.apply(this,arguments)).replace('<li><b>Almoxarife</b>: não cria família nem produto; no cadastro do produto escolhe a família entre as cadastradas e ativas.</li>',
+  '<li><b>Almoxarife</b>: não cria família nem produto e não muda a família de um produto; consulta as famílias e filtra por elas (Estoque, separação, EPI, relatórios).</li>');};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='156',APP_DATA='2026-11-04';
+const APP_VER='157',APP_DATA='2026-11-05';
 const CHANGELOG=[
+  ['157','2026-11-05',['Solicitações de compra: o Almoxarife não exclui mais a solicitação em rascunho. No lugar de Excluir aparece Cancelar, e ela fica guardada como cancelada. O servidor confere.', 'O Almoxarife não muda a família do produto: no cadastro do produto o campo fica só para consulta, e Colocar produto na família EPI e Não é EPI não aparecem para ele. O servidor recusa a troca por qualquer caminho. Os filtros por família (Estoque, Produtos, separação, EPI, relatórios) continuam.', 'Aceite do fornecedor: o servidor só gera o link, mostra o pedido e registra o aceite quando o pedido está aprovado dentro da alçada. Se não estiver, a página do fornecedor explica que o pedido ainda está em aprovação.', 'Integração Sólides: o aviso de endereço não encontrado (404) ou de falta de configuração aparece no registro do servidor uma vez e depois no máximo a cada 6 horas, em vez de a cada sincronização.', 'Bibliotecas de imagem da página (html2canvas) e de montagem de PDF (pdf-lib) passam a vir do próprio servidor. A internet externa (CDN) fica só como reserva se a cópia local falhar.']],
   ['156','2026-11-04',['Cadastros › Famílias de produto: cadastro das famílias com descrição, ativa/inativa e a marca "É EPI"; mostra quantos produtos cada família tem e tem busca.', 'Renomear uma família muda o nome em todos os produtos dela de uma vez. Juntar famílias repetidas (ex.: "Epi" e "EPIs") leva os produtos para uma só e inativa as outras.', 'Criar a partir dos produtos: as famílias já digitadas nos produtos viram o cadastro, com prévia para conferir; variações do mesmo nome (maiúsculas, acento, espaços) ficam juntas e nomes diferentes não são juntados.', 'No cadastro do produto a família é escolhida de uma lista com busca. Quem cadastra família tem "+ Nova família" ali mesmo, com aviso de nome parecido. Produto com família fora do cadastro mostra aviso.', 'O Almoxarife não cadastra produto nem família (sem Novo produto, Duplicar, + Nova família e Criar produto ao lançar). Ele continua editando prateleira, mínimo, dados de EPI e escolhe a família entre as cadastradas. O servidor confere.', 'Entrega de EPI e Estoque de EPI usam a marca "É EPI" da família (Configurações › EPI mostra quais famílias estão marcadas).']],
   ['155','2026-11-04',['Estoque: movimento não se exclui mais (nem pelo administrador). Lançamento errado se desfaz com Estornar no Histórico do produto: entra o movimento contrário ligado ao original, com motivo, quem e quando; o original fica marcado como estornado e um estorno não se estorna de novo.', 'Entrada manual e baixa manual pedem o motivo (doação, devolução de obra sem romaneio, sobra de inventário; perda, consumo interno, descarte; ou outro, descrito). Nota, romaneio, separação, EPI, higienização, fábrica e inventário continuam sem pedir motivo.', 'O botão Ajuste do Estoque virou proposta de ajuste de inventário: até o limite por item (R$ 300) entra na hora; acima, outra pessoa aprova em Ajustes de inventário.', 'Cancelar nota fiscal e desfazer recebimento estornam o estoque (antes apagavam os movimentos).', 'Cadastro de produto: o Almoxarife altera prateleira, mínimo, família, lote, dados de EPI, observações e imagem; preço, NCM, dados fiscais e unidade tributável ficam com o Fiscal (o servidor recusa).', 'Excluir produto: só o Administrador e só produto sem nenhum histórico; com histórico, use Inativar.', 'Estoque e Cadastros › Produtos mostram o quadro Quem faz o quê no Estoque e o que o seu perfil pode fazer.', 'Produto novo nasce só em Cadastros › Produtos ou na entrada da nota fiscal: Controle de EPI e o pedido de compra levam para Cadastros › Produtos.', 'Estoque: os botões da linha quebram dentro da célula (o Histórico não passa mais da tabela).']],
   ['154.1','2026-11-04',['Cadastro de produto: os campos de EPI (Nº do CA, Validade do CA, Tamanho/variação e Vida útil) ficam numa faixa própria abaixo de Código NCM e Família, em colunas que se ajustam à tela. Aparecem só quando a família é EPI e somem ao trocar a família.', 'Estoque: saiu o botão Novo produto. Produto novo nasce na entrada da nota fiscal (quando o item não tem produto) ou em Cadastros › Produtos.']],

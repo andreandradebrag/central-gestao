@@ -1,14 +1,17 @@
 Bibliotecas do navegador servidas pelo próprio servidor (sem depender da CDN).
+O sistema usa a cópia daqui; a CDN (cdnjs) só entra se a cópia local faltar ou não carregar.
 
 Já incluídas:
-  pdfjs/   pdf.js 6.2.108 (pdfjs-dist, build "legacy"), com cmaps, fontes padrão, wasm e iccs. Licença Apache-2.0.
-  jszip/   JSZip 3.10.1 (MIT/GPLv3).
+  pdfjs/         pdf.js 6.2.108 (pdfjs-dist, build "legacy"), com cmaps, fontes padrão, wasm e iccs. Licença Apache-2.0.
+  jszip/         JSZip 3.10.1 (MIT/GPLv3).
+  html2canvas/   html2canvas 1.4.1 (pacote npm html2canvas@1.4.1, dist/html2canvas.min.js). MIT. (v157)
+  pdflib/        pdf-lib 1.17.1 (pacote npm pdf-lib@1.17.1, dist/pdf-lib.min.js). MIT. (v157)
 
-Para copiar (o ambiente onde o pacote foi montado não tinha acesso à internet):
-  xlsx/xlsx.full.min.js              SheetJS 0.20.3 ou mais nova: https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
-  html2canvas/html2canvas.min.js     html2canvas 1.4.1: https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
-  jspdf/jspdf.umd.min.js             jsPDF 2.5.1:      https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
+Ainda faltam (o ambiente onde o pacote foi montado não conseguiu baixar do npm):
+  jspdf/jspdf.umd.min.js     jsPDF 2.5.1    (pacote npm jspdf@2.5.1, dist/jspdf.umd.min.js)
+  xlsx/xlsx.full.min.js      SheetJS 0.18.5 (pacote npm xlsx@0.18.5, dist/xlsx.full.min.js)
 
-Como: rode  bash gestao/baixar-bibliotecas.sh  (num computador com internet, na pasta do repositório), confira os
-hashes que ele mostra, envie ao GitHub e implante. O servidor calcula o hash (SRI) de cada arquivo daqui e o
-navegador confere ao carregar. Quando todos existirem, a CSP deixa de liberar cdnjs.cloudflare.com.
+Como: rode  bash gestao/baixar-bibliotecas.sh  (num computador com Node e internet, na pasta do repositório). Ele baixa
+pelo npm as MESMAS versões que o sistema usa hoje, copia os arquivos para cá e mostra o hash de cada um. Confira, envie ao
+GitHub e implante. O servidor calcula o hash (SRI) de cada arquivo daqui e o navegador confere ao carregar. Quando todos
+existirem, a CSP deixa de liberar cdnjs.cloudflare.com.

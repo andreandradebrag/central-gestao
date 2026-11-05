@@ -1,0 +1,1 @@
+html2canvas 1.4.1 (arquivo dist/html2canvas.min.js do pacote npm html2canvas@1.4.1; SHA-512 igual ao publicado pela cdnjs). Licença MIT.
