@@ -314,9 +314,11 @@ const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano
 /* ===== estado e persistência ===== */
 const S={},IDX={};COLS.forEach(c=>{S[c]=[];IDX[c]=new Map();});
 let memo={};
+/* v159: estado do desempenho (new_v159.js): versão de cada coleção, índice do ponto, leituras de cada tela, redesenho vindo do servidor */
+const V159R={ver:{},pt:new WeakMap(),ctx:[],cols:new Set(),tRem:0,t0:0,le:new Map(),trk:new Set(),lendo:null,limpo:false,rLimpo:false,dentro:0,n:0,pulos:0,cheia:new Set(),on:false,sched0:null,semLer:null};
 const store={mode:'boot',db:null,ready:false};
 const LS='central-gestao-v1';
-function reindex(){COLS.forEach(c=>{IDX[c]=new Map(S[c].map(r=>[r.id,r]));});memo={};}
+function reindex(){COLS.forEach(c=>{const s=S[c];if(v159MesmoIdx(IDX[c],s))return;IDX[c]=new Map(s.map(r=>[r.id,r]));V159R.ver[c]=(V159R.ver[c]||0)+1;});memo={};if(V159R.dentro)V159R.rLimpo=true;else V159R.limpo=true;}
 const get=(c,id)=>IDX[c].get(id);
 let lsT=null;
 function saveLocal(){clearTimeout(lsT);lsT=setTimeout(()=>{try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){}},250);}
@@ -346,7 +348,7 @@ function persist(col,rec,isDel){
       const cur=pending.get(key);
       if(cur&&cur.del)await ref.delete();else await ref.set(cl(cur?cur.rec:rec));
     }catch(e){
-      if(typeof v148Falhou==='function')v148Falhou(key);
+      V159R.cheia.add(col);if(typeof v148Falhou==='function')v148Falhou(key);
       if(!(typeof v155Recusa==='function'&&v155Recusa(col,rec,isDel,e)))toast('Não foi possível salvar na nuvem'+(e&&e.code?' ('+e.code+')':'')+'. Confira se você tem permissão de edição.','neg');
     }finally{release();}
   });
@@ -2807,7 +2809,7 @@ V.cot=()=>{
 };
 ACT_GROUP.cotAbrir='comp';
 function cqTotalForn(c,j){
-  const f=c.forn[j]||{},pr=c.precos[j]||[];let t=0,n=0;
+  const f=(c.forn||[])[j]||{},pr=(c.precos||[])[j]||[];let t=0,n=0;
   c.itens.forEach((it,i)=>{const p=+pr[i];if(p>0){t+=p*(+it.qtd||0);n++;}});
   return {total:r2(t+(n?+f.frete||0:0)),completo:n===c.itens.length&&n>0,n};
 }
@@ -4410,21 +4412,21 @@ function nightMin(s,e){
 }
 function pontoCalc(f,from,to){
   const j=funcJor(f),carga=j?jorCarga(j):0,tol=j&&j.tolerancia!=null&&j.tolerancia!==''?+j.tolerancia:10,hoje=todayStr();
-  const ms=S.ponto.filter(p=>p.funcId===f.id&&!p.anulada&&p.data>=addDays(from,-1)&&p.data<=addDays(to,1)).sort((a,b)=>a.ts-b.ts);
+  const v159a=addDays(from,-1),v159b=addDays(to,1),ms=v159PtF(f.id).filter(p=>!p.anulada&&p.data>=v159a&&p.data<=v159b).sort((a,b)=>a.ts-b.ts);
   const pares=[],orf=[];let i=0;
   while(i<ms.length){const a=ms[i],b=ms[i+1];if(b&&b.ts-a.ts<=14*3600e3){pares.push([a,b]);i+=2;}else{orf.push(a);i+=1;}}
   const feriados=new Set(S.feriado.map(x=>x.data));
   const abonos=new Set(S.pajuste.filter(x=>x.funcId===f.id&&x.tipo==='abono'&&x.status==='aprovado').map(x=>x.data));
-  const primeiro=S.ponto.filter(p=>p.funcId===f.id).reduce((m,p)=>!m||p.data<m?p.data:m,'');
-  const days=[];
+  const primeiro=v159PtF(f.id).reduce((m,p)=>!m||p.data<m?p.data:m,'');
+  const days=[],v159mm=v159Grupo(ms,p=>p.data),v159pr=v159Grupo(pares,p=>p[0].data),v159orf=new Set(orf.map(x=>x.data));
   for(let d=from;d<=to;d=addDays(d,1)){
     const dw=dowOf(d),prog=!!(j&&j['d'+dw])&&!feriados.has(d)&&(!f.admissao||d>=f.admissao);
-    const mm=ms.filter(p=>p.data===d),an=S.ponto.filter(p=>p.funcId===f.id&&p.data===d&&p.anulada);
-    const pr=pares.filter(p=>p[0].data===d);
+    const mm=(v159mm.get(d)||[]).slice(),an=v159PtFD(f.id,d).filter(p=>p.anulada);
+    const pr=(v159pr.get(d)||[]).slice();
     let worked=0,noturno=0,interv=0;
     pr.forEach((p,k)=>{worked+=(p[1].ts-p[0].ts)/60000;noturno+=nightMin(p[0].ts,p[1].ts);if(k>0)interv+=(p[0].ts-pr[k-1][1].ts)/60000;});
     const o={date:d,dow:dw,feriado:feriados.has(d),prog,previsto:prog?carga:0,marcs:mm,anuladas:an,pares:pr.length,worked:Math.round(worked),noturno:Math.round(noturno),noturnoFicto:Math.round(noturno*60/52.5),interv:Math.round(interv),abono:abonos.has(d),flags:[],falta:false,ext50:0,ext100:0,dev:0,saldo:0,info:[]};
-    if(orf.some(x=>x.data===d))o.flags.push('Marcação sem par');
+    if(v159orf.has(d))o.flags.push('Marcação sem par');
     if(o.worked>600)o.flags.push('Jornada acima de 10 h');
     if(pr.length){
       const span=(pr[pr.length-1][1].ts-pr[0][0].ts)/60000;
@@ -4438,7 +4440,7 @@ function pontoCalc(f,from,to){
     if(o.abono)o.info.push('Ausência justificada');
     if(o.feriado)o.info.push('Feriado');
     if(o.previsto>0){
-      if(!o.pares&&!orf.some(x=>x.data===d)){if(!o.abono&&d<hoje&&f.status!=='ferias'&&!ferEm(f.id,d)&&!afastEm(f.id,d)&&primeiro&&d>=primeiro)o.falta=true;else if(!primeiro||d<primeiro)o.info.push('Antes do início do controle de ponto');}
+      if(!o.pares&&!v159orf.has(d)){if(!o.abono&&d<hoje&&f.status!=='ferias'&&!ferEm(f.id,d)&&!afastEm(f.id,d)&&primeiro&&d>=primeiro)o.falta=true;else if(!primeiro||d<primeiro)o.info.push('Antes do início do controle de ponto');}
       else if(o.pares){let s=o.worked-o.previsto;if(Math.abs(s)<=tol)s=0;o.saldo=s;if(s>0)o.ext50=s;else o.dev=-s;}
     }else if(o.worked>0){if(o.feriado||dw===0)o.ext100=o.worked;else o.ext50=o.worked;o.saldo=o.worked;}
     days.push(o);
@@ -6613,12 +6615,12 @@ const moCfg=()=>{const c=cfg();return {enc:c.moEnc===''||c.moEnc==null?80:+c.moE
 function custoHora(f){const c=moCfg(),sal=+f.salario||0,ben=typeof funcBenTot==='function'?funcBenTot(f):0;if(!sal)return null;return {base:sal/c.horas,total:(sal*(1+c.enc/100)+ben)/c.horas};}
 function moApuracao(m){
   const ini=m+'-01',fim=fimMes(m),out=new Map(),pes=[];
-  const fs=S.func.filter(f=>f.status!=='desligado'||S.ponto.some(p=>p.funcId===f.id&&String(p.data).slice(0,7)===m));
+  const fs=S.func.filter(f=>f.status!=='desligado'||v159PtFM(f.id,m));
   fs.forEach(f=>{
-    if(!S.ponto.some(p=>p.funcId===f.id&&String(p.data).slice(0,7)===m))return;
+    if(!v159PtFM(f.id,m))return;
     const pc=pontoCalc(f,ini,fim<todayStr()?fim:todayStr()),ch=custoHora(f);let tf={min:0,e50:0,e100:0,custo:0};
     pc.days.forEach(d=>{if(!d.worked)return;
-      const ms=S.ponto.filter(p=>p.funcId===f.id&&p.data===d.date&&!p.anulada&&p.projId),cnt={};ms.forEach(p=>{cnt[p.projId]=(cnt[p.projId]||0)+1;});
+      const ms=v159PtFD(f.id,d.date).filter(p=>!p.anulada&&p.projId),cnt={};ms.forEach(p=>{cnt[p.projId]=(cnt[p.projId]||0)+1;});
       const pid=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||f.projId||'';
       const h=d.worked/60,e50=(d.ext50||0)/60,e100=(d.ext100||0)/60,custo=ch?h*ch.total+e50*ch.base*0.5+e100*ch.base*1.0:0;
       const o=out.get(pid)||{pid,min:0,e50:0,e100:0,custo:0,pessoas:new Set(),semSal:new Set()};o.min+=d.worked;o.e50+=e50*60;o.e100+=e100*60;o.custo+=custo;o.pessoas.add(f.id);if(!ch)o.semSal.add(f.id);out.set(pid,o);
@@ -6721,9 +6723,9 @@ function dirKpis(){
   const dso=pagos.length?sum(pagos,l=>Math.max(0,(new Date(l.pago+'T12:00:00')-new Date(ref(l)+'T12:00:00'))/864e5))/pagos.length:null;
   const rec=S.lanc.filter(l=>l.tipo==='receber'&&!l.pago&&l.status!=='cancelado'),venc=rec.filter(l=>l.venc<h),inad=sum(rec,l=>+l.valor||0)?sum(venc,l=>+l.valor||0)/sum(rec,l=>+l.valor||0)*100:null;
   const pm=addMonths(cur,-1);let tw=0,te=0,fal=0,dp=0;
-  S.func.filter(f=>f.status!=='desligado').forEach(f=>{if(!S.ponto.some(p=>p.funcId===f.id&&String(p.data).slice(0,7)===pm))return;const t=pontoCalc(f,pm+'-01',fimMes(pm)).tot;tw+=t.worked;te+=t.ext50+t.ext100;fal+=t.faltas;dp+=t.diasPrev;});
+  S.func.filter(f=>f.status!=='desligado').forEach(f=>{if(!v159PtFM(f.id,pm))return;const t=pontoCalc(f,pm+'-01',fimMes(pm)).tot;tw+=t.worked;te+=t.ext50+t.ext100;fal+=t.faltas;dp+=t.diasPrev;});
   const ac12=S.acid.filter(a=>a.data>=addDays(h,-365)&&(+a.afast>0)).length;
-  const hht=(()=>{let m=0;S.func.forEach(f=>{S.ponto.filter(p=>p.funcId===f.id&&p.data>=addDays(h,-365)).length&&(m+=pontoCalc(f,addDays(h,-365),h).tot.worked);});return m/60;})();
+  const hht=(()=>{let m=0;S.func.forEach(f=>{(c=>v159PtF(f.id).filter(p=>p.data>=c))(addDays(h,-365)).length&&(m+=pontoCalc(f,addDays(h,-365),h).tot.worked);});return m/60;})();
   const tf=hht>0?ac12*1e6/hht:null;
   const vs=S.veic.filter(v=>v.status!=='inativo').map(v=>custoKm(v.id)).filter(x=>x!=null),ckm=vs.length?sum(vs,x=>x)/vs.length:null;
   const cart=sum(S.ctr.filter(c=>c.status==='vigente'),c=>Math.max(0,ctrAtual(c)-ctrMedido(c)));
@@ -9217,6 +9219,7 @@ boot=async function(){
     let first=true;
     let ultimo='';
     dbWatch('col:'+c,db.collection(c),snap=>{
+      if(!first&&snap&&snap.mud!==undefined&&!V159R.cheia.delete(c)){const r=v159Delta(c,snap.mud);if(r){ultimo='';if(r===2)schedule();return;}} /* v159 */
       const novo=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));
       /* consulta periódica sem mudança: não redesenha a tela */
       let j='';try{j=assinaTexto(JSON.stringify(novo));}catch(e){j=String(Math.random());}
@@ -14875,7 +14878,7 @@ function pdAusente(f,d){
   return '';}
 function pdLinha(f,d,agora){
   const j=funcJor(f),dw=dowOf(d),fer=S.feriado.some(x=>x.data===d);
-  const ms=S.ponto.filter(p=>p.funcId===f.id&&p.data===d&&!p.anulada).sort((a,b)=>a.ts-b.ts),hs=ms.map(pdHm);
+  const ms=v159PtFD(f.id,d).filter(p=>!p.anulada).sort((a,b)=>a.ts-b.ts),hs=ms.map(pdHm);
   const obra=(ms.find(p=>p.projId)||{}).projId||f.projId||'';
   const out={f,hs,obra,j,sit:'',falta:'',atraso:'',aus:pdAusente(f,d)};
   if(!j){out.sit=hs.length?'livre':'livre';return out;}
@@ -18002,9 +18005,9 @@ const heAutMin=(fid,d)=>heAutMap().get(fid+'|'+d)||0;
   if(n)r.tot=Object.assign({},r.tot,{flags:(r.tot.flags||0)+n,heNao:nao});return r;};}
 function heApur(m,pid){const ini=m+'-01',fim=fimMes(m),ate=fim<todayStr()?fim:todayStr(),R=RHX(),obras=new Map(),dias=[];
   if(ate<ini)return {obras:[],dias:[],tot:{ext:0,aut:0,nao:0}};
-  S.func.forEach(f=>{if(!S.ponto.some(p=>p.funcId===f.id&&String(p.data).slice(0,7)===m))return;const pc=pontoCalc(f,ini,ate);
+  S.func.forEach(f=>{if(!v159PtFM(f.id,m))return;const pc=pontoCalc(f,ini,ate);
     pc.days.forEach(d=>{const ext=(d.ext50||0)+(d.ext100||0);if(ext<=0||(R.heIni&&d.date<R.heIni))return;
-      const ms=S.ponto.filter(p=>p.funcId===f.id&&p.data===d.date&&!p.anulada&&p.projId),cnt={};ms.forEach(p=>{cnt[p.projId]=(cnt[p.projId]||0)+1;});
+      const ms=v159PtFD(f.id,d.date).filter(p=>!p.anulada&&p.projId),cnt={};ms.forEach(p=>{cnt[p.projId]=(cnt[p.projId]||0)+1;});
       const ob=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||f.projId||'';if(pid&&ob!==pid)return;
       const aut=Math.min(ext,d.heAut||0),nao=d.heNao||0,o=obras.get(ob)||{pid:ob,ext:0,aut:0,nao:0,pessoas:new Set()};o.ext+=ext;o.aut+=aut;o.nao+=nao;o.pessoas.add(f.id);obras.set(ob,o);
       dias.push({f,data:d.date,obra:ob,ext,aut:d.heAut||0,nao});});});
@@ -18560,7 +18563,7 @@ function indLista(){const h=todayStr(),cur=ym(h),pm=addMonths(cur,-1),ini12=addM
   add('Fiscal','Alterações após o fechamento',()=>{let n=0,meses=0;quaMesesAte(pm,12).forEach(m=>{const r=ctrlAltFech(m);if(r.disp){meses++;n+=r.itens.length;}});return {v:String(n),s:meses?'em '+meses+' competência(s) fechada(s) nos últimos 12 meses':'nenhuma competência fechada nos últimos 12 meses',tone:n?'neg':''};},'lançamentos e notas criados, alterados ou excluídos depois do fechamento contábil da competência, mais reaberturas (Controles internos).');
   /* pessoal */
   add('Pessoal','Horas extras por obra ('+fmtYm(pm)+')',()=>{const r=moApuracao(pm).rows,t=sum(r,x=>x.min),e=sum(r,x=>(x.e50||0)+(x.e100||0)),top=r.slice().sort((a,b)=>((b.e50||0)+(b.e100||0))-((a.e50||0)+(a.e100||0)))[0];return {v:t?pctV(e/t):'—',s:t?minHm(e)+' de extras'+(top&&(top.e50||top.e100)?' · maior: '+(top.pid?projNome(top.pid):'sem obra')+' ('+minHm((top.e50||0)+(top.e100||0))+')':''):'sem horas no mês'};},'horas extras ÷ horas trabalhadas no mês anterior, pelo ponto, por obra (Mão de obra por obra). O % de extras sem autorização está em Pessoal › Horas extras.');
-  add('Pessoal','Absenteísmo ('+fmtYm(pm)+')',()=>{let fal=0,dp=0;S.func.filter(f=>f.status!=='desligado').forEach(f=>{if(!S.ponto.some(p=>p.funcId===f.id&&String(p.data).slice(0,7)===pm))return;const t=pontoCalc(f,pm+'-01',fimMes(pm)).tot;fal+=t.faltas||0;dp+=t.diasPrev||0;});return {v:dp?pctV(fal/dp):'—',s:fal+' falta(s) em '+dp+' dia(s) previstos'};},'faltas ÷ dias de trabalho previstos no mês anterior, pelo ponto.');
+  add('Pessoal','Absenteísmo ('+fmtYm(pm)+')',()=>{let fal=0,dp=0;S.func.filter(f=>f.status!=='desligado').forEach(f=>{if(!v159PtFM(f.id,pm))return;const t=pontoCalc(f,pm+'-01',fimMes(pm)).tot;fal+=t.faltas||0;dp+=t.diasPrev||0;});return {v:dp?pctV(fal/dp):'—',s:fal+' falta(s) em '+dp+' dia(s) previstos'};},'faltas ÷ dias de trabalho previstos no mês anterior, pelo ponto.');
   add('Pessoal','Rotatividade (12 meses)',()=>{const at=S.func.filter(f=>f.status!=='desligado').length,ad=S.func.filter(f=>f.admissao&&f.admissao>=addDays(h,-365)).length,dl=S.func.filter(f=>f.status==='desligado'&&f.demissao&&f.demissao>=addDays(h,-365)).length;return {v:at?pctV((ad+dl)/2/at):'—',s:ad+' admissão(ões) e '+dl+' desligamento(s) · '+at+' ativos'};},'((admissões + desligamentos) ÷ 2) ÷ colaboradores ativos, nos últimos 12 meses.');
   add('Pessoal','Custo de mão de obra por obra x orçado',()=>{const ps=S.proj.filter(p=>+p.orcMO>0&&(p.status||'ativo')!=='concluido'),L=ps.map(p=>{const ap=sum(S.moapr.filter(x=>x.obraId===p.id),x=>+x.valor||0);return {p,ap,pc:ap/(+p.orcMO)};}),t=sum(L,x=>x.ap),o=sum(L,x=>+x.p.orcMO),ac=L.filter(x=>x.pc>1);
     return {v:o>0?pctV(t/o):'—',s:o>0?money(t)+' apropriados de '+money(o)+' orçados · '+ac.length+' obra(s) acima do orçado':'nenhuma obra em andamento com orçamento de mão de obra',tone:ac.length?'neg':''};},'mão de obra apropriada à obra (Pessoal › Apropriação do mês, ajustada pela folha oficial quando importada) ÷ orçamento de mão de obra da obra, nas obras em andamento.');
@@ -25646,7 +25649,7 @@ function v132Html(h){if(V132.off||typeof h!=='string'||!/\d{4}-\d{2}/.test(h))re
     return /\d{4}-\d{2}/.test(m0)?v132Txt(m0):m0;});}
 /* telas: embrulha todas as V.* (as que surgirem depois também, a cada render) */
 function v132EmbrulhaV(){Object.keys(V).forEach(k=>{const f=V[k];if(typeof f!=='function'||f.__v132)return;
-  const g=function(){return v132Html(f.apply(this,arguments));};g.__v132=true;g.__v132orig=f;V[k]=g;});}
+  const g=function(){return v132Html(f.apply(this,arguments));};g.__v132=true;g.__v132orig=f;if(f.__v148)g.__v148=true;V[k]=g;});}
 RH_PRE.push(v132EmbrulhaV);
 /* janelas (modal, confirmações, visualização de documentos) */
 {const m0=modal;modal=function(o){if(o&&typeof o==='object'){o=Object.assign({},o);if(typeof o.body==='string')o.body=v132Html(o.body);if(typeof o.title==='string')o.title=v132Txt(o.title);}
@@ -28760,7 +28763,7 @@ function v148Dedup(h){try{if(typeof h!=='string'||h.indexOf('data-act=')<0)retur
     return a+meio.replace(/<button\b[^>]*>[\s\S]*?<\/button>/g,b=>{const ac=(b.match(/data-act="([^"]*)"/)||[])[1];if(!ac)return b;
       const k=ac+'|'+((b.match(/data-id="([^"]*)"/)||[])[1]||'')+'|'+((b.match(/data-dec="([^"]*)"/)||[])[1]||'')+'|'+b.replace(/<[^>]+>/g,'').trim();
       if(vis.has(k))return '';vis.add(k);return b;})+z;});}catch(e){return h;}}
-function v148EmbrulhaV(){Object.keys(V).forEach(t=>{const f=V[t];if(typeof f!=='function'||f.__v148)return;const g=function(){return v148Dedup(f.apply(this,arguments));};g.__v148=true;V[t]=g;});}
+function v148EmbrulhaV(){Object.keys(V).forEach(t=>{const f=V[t];if(typeof f!=='function'||f.__v148)return;const g=function(){return v148Dedup(f.apply(this,arguments));};g.__v148=true;if(f.__v132){g.__v132=true;g.__v132orig=f.__v132orig;}V[t]=g;});}
 v148EmbrulhaV();RH_PRE.push(v148EmbrulhaV);
 /* na tela: o mesmo para listas desenhadas fora do V (painéis, janelas) */
 function v148DedupDom(root){try{if(!root||!root.querySelectorAll)return;root.querySelectorAll('td.act').forEach(td=>{const vis=new Set();
@@ -28817,7 +28820,7 @@ function negPrep(c,origem){if(!c||!Array.isArray(c.itens)||!Array.isArray(c.forn
   if(rev&&!NEG.av){NEG.av=true;try{toast('Preço já registrado na cotação só muda pelo botão Negociar (fica no histórico). O valor anterior foi mantido.','neg');}catch(e){}setTimeout(()=>{NEG.av=false;},3000);}
   return c;}
 /* ---- totais: proposta inicial × negociado ---- */
-function negTotForn(c,j){const f=c.forn[j]||{},pr=c.precos[j]||[];let ini=0,neg=0,n=0,rods=f.parcId?negRods(c,f.parcId).length:0;
+function negTotForn(c,j){const f=(c.forn||[])[j]||{},pr=(c.precos||[])[j]||[];let ini=0,neg=0,n=0,rods=f.parcId?negRods(c,f.parcId).length:0;
   c.itens.forEach((it,i)=>{const p=+pr[i];if(!(p>0))return;n++;const q=+it.qtd||0,pi=f.parcId&&it.k?negIni(c,f.parcId,it.k):null;neg+=p*q;ini+=(pi!=null&&pi>0?pi:p)*q;});
   if(n){neg+=+f.frete||0;const fi=f.parcId?negIniF(c,f.parcId,'frete'):null;ini+=fi&&negNum(fi.valor)!=null?+fi.valor:(+f.frete||0);}
   return {ini:r2(ini),neg:r2(neg),eco:r2(ini-neg),pct:ini>0?(ini-neg)/ini:0,n,rods};}
@@ -31251,9 +31254,159 @@ V.v158cond=()=>{const f=ui.v158cond,q=gsNorm(f.q||''),h=todayStr(),em30=addDays(
 if(typeof vgMascara==='function'){const m0=vgMascara;vgMascara=function(){try{const p=v158Pf();if(p&&!p.valNao&&Array.isArray(p.valGrupos)){if(VG.forca)return true;if(vgTabLivre(ui.tab))return false;return !p.valGrupos.includes(GROUP_OF_TAB[ui.tab]);}}catch(e){}return m0.apply(this,arguments);};}
 if(typeof p1Fin==='function'){const f0=p1Fin;p1Fin=function(){try{const p=v158Pf();if(p&&!p.valNao&&Array.isArray(p.valGrupos)&&p.valGrupos.includes(GROUP_OF_TAB[ui.tab]))return true;}catch(e){}return f0.apply(this,arguments);};}
 
+/* ===== v159: desempenho (relatorios/feito_v159.md, diagnóstico em relatorios/lentidao_diagnostico.md) =====
+   Só velocidade: o que a tela mostra, as permissões e as gravações continuam iguais.
+   1. Marcas dos embrulhos v132 × v148 (feito no patch141.py, nas duas funções): as telas não são mais embrulhadas de novo a
+      cada redesenho.
+   2. Menos redesenhos:
+      - leitura periódica ou ao vivo sem mudança não redesenha (assinatura por leitura, v159Assin);
+      - o eco do próprio salvamento (o servidor devolve o mesmo documento) não redesenha nem refaz a coleção (v159Delta, com a
+        lista de documentos alterados que o shim.js passa a mandar em snap.mud);
+      - mudança de outra pessoa numa coleção que a tela aberta não leu no último desenho não redesenha a tela (v159Lidas:
+        o próprio desenho registra quais coleções leu);
+      - rajadas de mudanças vindas do servidor viram um redesenho só (espera curta, v159Remoto).
+   3. Índice do ponto por pessoa, por pessoa e dia e por pessoa e mês (v159PtIx), usado por pontoCalc, moApuracao e Painel
+      da diretoria; refeito quando a coleção ponto muda (reindex) ou quando a lista é outra.
+   Estado compartilhado em V159R (declarado no topo do app, junto do reindex). */
+
+/* ---------- 3. índice do ponto ---------- */
+function v159PtIx(){
+  const a=S.ponto,ver=V159R.ver.ponto||0;let e=V159R.pt.get(a);
+  if(e&&e.n===a.length&&e.v===ver)return e;
+  const f=new Map(),fd=new Map(),fm=new Map();
+  for(let i=0;i<a.length;i++){const p=a[i],fid=p.funcId;
+    let l=f.get(fid);if(!l){l=[];f.set(fid,l);fd.set(fid,new Map());fm.set(fid,new Set());}l.push(p);
+    const dm=fd.get(fid);let ld=dm.get(p.data);if(!ld){ld=[];dm.set(p.data,ld);}ld.push(p);
+    fm.get(fid).add(String(p.data).slice(0,7));}
+  e={n:a.length,v:ver,f,fd,fm};V159R.pt.set(a,e);return e;}
+const V159_VAZIO=Object.freeze([]);
+/* marcações da pessoa, na ordem de S.ponto (igual a S.ponto.filter(p=>p.funcId===fid)); não alterar a lista devolvida */
+function v159PtF(fid){return v159PtIx().f.get(fid)||V159_VAZIO;}
+/* marcações da pessoa no dia (igual a S.ponto.filter(p=>p.funcId===fid&&p.data===d)) */
+function v159PtFD(fid,d){const m=v159PtIx().fd.get(fid);return (m&&m.get(d))||V159_VAZIO;}
+/* lista agrupada por chave, na ordem original (igual a L.filter(x=>k(x)===chave) para cada chave) */
+function v159Grupo(L,k){const m=new Map();for(const x of L){const c=k(x);let l=m.get(c);if(!l){l=[];m.set(c,l);}l.push(x);}return m;}
+/* a pessoa tem marcação no mês (igual a S.ponto.some(p=>p.funcId===fid&&String(p.data).slice(0,7)===m)) */
+function v159PtFM(fid,m){const s=v159PtIx().fm.get(fid);return !!s&&s.has(m);}
+
+/* moApuracao (mão de obra por obra no mês) guardada enquanto nada do que ela leu mudou: o próprio cálculo registra as coleções
+   lidas (S.<c>/IDX.<c>) e o resultado vale enquanto essas coleções forem as mesmas (mesma lista, mesmo mapa, mesma versão) e
+   o dia for o mesmo. Antes o resultado só durava até o próximo reindex de qualquer coleção (o fechamento automático do
+   relatório mensal grava uma coleção por obra e refazia o mês inteiro de todo mundo a cada obra). */
+function v159Memo(fn){
+  const cache=new Map();
+  const ok=e=>{const L=V159R.lendo;V159R.lendo=null;try{for(const c of e.cols){const x=e.ref[c];if((V159R.ver[c]||0)!==x.v||S[c]!==x.s||IDX[c]!==x.i||(Array.isArray(x.s)&&x.s.length!==x.n))return false;}return true;}finally{V159R.lendo=L;}};
+  return function(m){
+    if(!V159R.on||arguments.length!==1||(typeof BH_CTX!=='undefined'&&BH_CTX))return fn.apply(this,arguments);
+    const k=String(m)+'|'+todayStr(),L=V159R.lendo,e=cache.get(k);
+    if(e&&ok(e)){if(L)e.cols.forEach(c=>L.add(c));return e.v;}
+    const lido=new Set();V159R.lendo=lido;let v;
+    try{v=fn.apply(this,arguments);}finally{V159R.lendo=L;if(L)lido.forEach(c=>L.add(c));}
+    const ref={};V159R.semLer(()=>lido.forEach(c=>{const s=S[c];ref[c]={v:V159R.ver[c]||0,s,i:IDX[c],n:Array.isArray(s)?s.length:0};}));
+    cache.delete(k);cache.set(k,{v,cols:[...lido],ref});if(cache.size>48)cache.delete(cache.keys().next().value);
+    return v;};}
+
+/* ---------- 2. redesenhos ---------- */
+/* reindex: refaz o mapa só da coleção que mudou (mesmo conteúdo = mesmo mapa) */
+function v159MesmoIdx(m,s){if(!m||m.size!==s.length)return false;for(let i=0;i<s.length;i++){const r=s[i];if(!r||m.get(r.id)!==r)return false;}return true;}
+/* texto estável (chaves em ordem) de um valor já no formato JSON */
+function v159Est(v){if(v===null||typeof v!=='object')return JSON.stringify(v);
+  if(Array.isArray(v))return '['+v.map(v159Est).join(',')+']';
+  return '{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+v159Est(v[k])).join(',')+'}';}
+const v159Json=o=>{try{return v159Est(JSON.parse(JSON.stringify(o)));}catch(e){return null;}};
+/* assinatura de uma leitura (lista ou documento) */
+function v159Assin(s){
+  if(!s)return null;
+  if(Array.isArray(s.docs)){let t='';for(const d of s.docs){const x=typeof d.data==='function'?d.data():d.data;t+=d.id+'\u0001'+JSON.stringify(x===undefined?null:x)+'\u0002';}return 'q'+s.docs.length+':'+assinaTexto(t);}
+  if('exists' in s){const x=s.exists?(typeof s.data==='function'?s.data():s.data):null;return 'd'+assinaTexto(JSON.stringify(x===undefined?null:x));}
+  return null;}
+/* eco ao vivo de uma coleção (col:<c>) com a lista dos documentos alterados (snap.mud, do shim.js):
+   0 = não dá (refaz a coleção inteira, como antes) · 1 = nada mudou · 2 = aplicado, houve mudança.
+   O resultado em S[c], IDX[c] e PK.norm[c] é o mesmo da reconstrução completa. */
+function v159Delta(c,mud){
+  if(!Array.isArray(mud)||!mud.length)return mud&&Array.isArray(mud)?1:0;
+  if(PK.cols[c]&&PK.cols[c].length)return 0;
+  const norm=PK.norm[c];if(!Array.isArray(norm))return 0;
+  const L=S[c],ix=IDX[c];if(!Array.isArray(L)||!ix)return 0;
+  /* documento novo criado aqui e ainda não confirmado: a reconstrução poria o do servidor antes dele; deixa a reconstrução fazer */
+  for(const p of pending.values())if(p.col===c&&!p.del&&!norm.some(r=>r&&r.id===p.rec.id))return 0;
+  const mudou=[];
+  for(const [id,dat] of mud){
+    const srv=dat==null?null:Object.assign(JSON.parse(JSON.stringify(dat)),{id});
+    const i=norm.findIndex(r=>r&&r.id===id);
+    if(srv){if(i>=0)norm[i]=srv;else norm.push(srv);}else if(i>=0)norm.splice(i,1);
+    if(pending.has(c+'/'+id))continue; /* gravação daqui ainda a caminho: vale a local (applyPending) */
+    const loc=ix.get(id),vivo=srv&&!srv._del;
+    if(!vivo){if(loc)mudou.push([id,null]);continue;}
+    if(loc&&v159Json(loc)===v159Est(srv))continue;
+    mudou.push([id,srv]);}
+  if(!mudou.length)return 1;
+  for(const [id,srv] of mudou){const i=L.findIndex(r=>r&&r.id===id);
+    if(!srv){if(i>=0)L.splice(i,1);}else if(i>=0)L[i]=srv;
+    else{const k=L.findIndex(r=>r&&r._pm);if(k>=0)L.splice(k,0,srv);else L.push(srv);}} /* as marcações da Sólides (_pm) ficam no fim, como na reconstrução */
+  reindex();return 2;}
+
+/* leituras: guarda a assinatura da última leitura de cada assinatura (não col:) e não redesenha quando chega igual;
+   marca o redesenho como vindo do servidor (espera curta, junta rajadas) */
+{const dw0=dbWatch;dbWatch=function(key,ref,onData,o){
+  const col=/^col:/.test(String(key))?String(key).slice(4):null;let ult=null,n=0;
+  const f=function(s){let igual=false;const prim=n++===0; /* a primeira leitura de cada assinatura sempre redesenha (dados chegando) */
+    if(!col){let a=null;try{a=v159Assin(s);}catch(e){a=null;}igual=!prim&&a!==null&&a===ult;ult=a;}
+    V159R.ctx.push({col:prim?null:col,igual});
+    try{return onData.apply(this,arguments);}finally{V159R.ctx.pop();}};
+  return dw0.call(this,key,ref,f,o);};}
+
+/* redesenho pedido por mudança vinda do servidor: espera 100 ms (no máximo 400 ms) para juntar rajadas */
+function v159Remoto(col){
+  V159R.cols.add(col||'*');const now=Date.now();
+  if(V159R.tRem){if(now-V159R.t0>=400)return;clearTimeout(V159R.tRem);}else V159R.t0=now;
+  V159R.tRem=setTimeout(v159RemotoJa,100);}
+function v159RemotoJa(){
+  clearTimeout(V159R.tRem);V159R.tRem=0;const cols=[...V159R.cols];V159R.cols.clear();if(!cols.length)return;
+  if(v159PodePular(cols)){V159R.pulos++;
+    /* a manutenção que o desenho faria roda do mesmo jeito: marcações da Sólides em S.ponto e a importação do ponto do app */
+    if(cols.some(c=>c==='ponto'||c==='pmmes'||c==='func'||c==='cfg'))try{V159R.semLer(pmInjetar);}catch(e){}
+    try{V159R.semLer(ptAdminRun);}catch(e){}
+    return;}
+  V159R.sched0();}
+/* a tela atual não leu nenhuma das coleções que mudaram (num desenho feito com os dados recém-indexados) */
+function v159PodePular(cols){
+  if(!store.ready||cols.includes('*'))return false;
+  const e=V159R.le.get(ui.tab);if(!e||!e.limpo)return false;
+  return cols.every(c=>V159R.trk.has(c)&&!e.s.has(c));}
+{const s0=schedule;V159R.sched0=function(){return s0();};
+  schedule=function(){const x=V159R.ctx.length?V159R.ctx[V159R.ctx.length-1]:null;
+    if(x){if(x.igual)return;v159Remoto(x.col);return;}
+    return s0.apply(this,arguments);};}
+V159R.semLer=function(fn){const L=V159R.lendo;V159R.lendo=null;try{return fn();}finally{V159R.lendo=L;}};
+
+/* instalado logo antes do boot(): o desenho registra as coleções lidas (S.<c> e IDX.<c>) */
+function v159Instala(){
+  if(V159R.on)return;V159R.on=true;
+  const acc=(O,c)=>{const d=Object.getOwnPropertyDescriptor(O,c);if(!d||!('value' in d)||!d.configurable||!d.writable)return false;let v=d.value;
+    Object.defineProperty(O,c,{configurable:true,enumerable:d.enumerable,get(){const L=V159R.lendo;if(L)L.add(c);return v;},set(x){v=x;}});return true;};
+  new Set(COLS.concat(Object.keys(S))).forEach(c=>{if(acc(S,c)&&acc(IDX,c))V159R.trk.add(c);});
+  /* manutenção de dados feita a cada desenho (não é leitura da tela; quando o desenho é pulado, v159RemotoJa roda as duas):
+     injeção das marcações da Sólides em S.ponto e importação das marcações do app do colaborador */
+  const i=RH_PRE.indexOf(pmInjetar);if(i>=0){const pm=RH_PRE[i];RH_PRE[i]=function(){return V159R.semLer(pm);};}
+  const k=RH_POST.indexOf(ptAdminRun);if(k>=0){const pa=RH_POST[k];RH_POST[k]=function(){return V159R.semLer(pa);};}
+  moApuracao=v159Memo(moApuracao);
+  /* o reindex lê todas as coleções: não conta como leitura da tela */
+  const ri=reindex;reindex=function(){const a=arguments,t=this;return V159R.semLer(()=>ri.apply(t,a));};
+  const r0=render;render=function(){
+    if(V159R.tRem){clearTimeout(V159R.tRem);V159R.tRem=0;V159R.cols.clear();}
+    const limpo=V159R.limpo;V159R.limpo=false;V159R.rLimpo=false;
+    const leu=new Set(),ant=V159R.lendo;V159R.lendo=leu;V159R.dentro++;
+    try{return r0.apply(this,arguments);}
+    finally{V159R.lendo=ant;V159R.dentro--;V159R.n++;
+      let e=V159R.le.get(ui.tab);if(!e){e={s:new Set(),limpo:false};V159R.le.set(ui.tab,e);}
+      leu.forEach(c=>e.s.add(c));if(limpo||V159R.rLimpo)e.limpo=true;V159R.rLimpo=false;}};
+}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='158',APP_DATA='2026-11-05';
+const APP_VER='159',APP_DATA='2026-11-05';
 const CHANGELOG=[
+  ['159','2026-11-05',['Troca de tela e gravação muito mais rápidas. As telas eram preparadas de novo a cada redesenho e ficavam mais lentas ao longo do dia; isso acabou.', 'A tela não é mais redesenhada quando nada mudou: as leituras periódicas e o retorno do servidor depois de salvar não travam mais a página. Salvar faz um redesenho só.', 'Quando outra pessoa grava algo que a tela aberta não mostra, a sua tela não é redesenhada. Várias mudanças seguidas viram um redesenho só.', 'Painel, Painel da diretoria, espelho de ponto e custo de mão de obra por obra calculam o ponto bem mais rápido, com o mesmo resultado.', 'A página chega comprimida (cerca de 4 vezes menor) e, ao recarregar, o navegador só confere se mudou, sem baixar de novo. As listas grandes do servidor também chegam comprimidas.', 'A sincronização da Sólides não regrava mais os meses em que nenhuma marcação mudou.', 'A tela Mapa de cotação não fica mais em branco quando uma cotação está sem a tabela de preços.']],
   ['158','2026-11-05',['Perfil novo Recursos humanos e compras: tudo o que o RH faz e, em Suprimentos, cria solicitação de compra dos tipos RH (EPI, uniforme, material de treinamento, exames) e Administrativa. Vê só as próprias solicitações, com a situação, quem precisa aprovar, Pedir aprovação e Corrigir e reenviar. Não vê cotações, pedidos de compra nem preços negociados. Entra no Painel de Pessoal.', 'Perfil novo Administrador de frota: cuida da frota inteira, de todos os locais, com os valores da frota. Não exclui registros da frota; abastecimento e manutenção se corrigem com o motivo, que fica no histórico de correções do registro. Entra no Painel da Frota.', 'Frota › Condutores (Administrador de frota): nome, função e CNH dos colaboradores para escolher o condutor, com o CPF mascarado. Salário, documentos do RH, ASO e folha não aparecem.', 'O Administrador de frota consulta fornecedores e clientes e o saldo e o local das peças no estoque (sem custo) e cria solicitação de compra dos tipos Frota (peças, pneus, serviço de oficina, com o veículo) e Administrativa.', 'Leitura de planilhas (SheetJS): se a cópia do próprio servidor faltar, a reserva passa a ser a versão 0.20.3, do site oficial da SheetJS, que corrige falhas de segurança da versão antiga (0.18.5).', 'Os dois perfis aparecem em Sistema › Usuários e em Sistema › Perfis de acesso, onde o administrador pode ajustar as funções. O servidor confere tudo: o que o perfil não pode ver não é entregue, e o que não pode gravar ou excluir é recusado.']],
   ['157','2026-11-05',['Solicitações de compra: o Almoxarife não exclui mais a solicitação em rascunho. No lugar de Excluir aparece Cancelar, e ela fica guardada como cancelada. O servidor confere.', 'O Almoxarife não muda a família do produto: no cadastro do produto o campo fica só para consulta, e Colocar produto na família EPI e Não é EPI não aparecem para ele. O servidor recusa a troca por qualquer caminho. Os filtros por família (Estoque, Produtos, separação, EPI, relatórios) continuam.', 'Aceite do fornecedor: o servidor só gera o link, mostra o pedido e registra o aceite quando o pedido está aprovado dentro da alçada. Se não estiver, a página do fornecedor explica que o pedido ainda está em aprovação.', 'Integração Sólides: o aviso de endereço não encontrado (404) ou de falta de configuração aparece no registro do servidor uma vez e depois no máximo a cada 6 horas, em vez de a cada sincronização.', 'Bibliotecas de imagem da página (html2canvas) e de montagem de PDF (pdf-lib) passam a vir do próprio servidor. A internet externa (CDN) fica só como reserva se a cópia local falhar.']],
   ['156','2026-11-04',['Cadastros › Famílias de produto: cadastro das famílias com descrição, ativa/inativa e a marca "É EPI"; mostra quantos produtos cada família tem e tem busca.', 'Renomear uma família muda o nome em todos os produtos dela de uma vez. Juntar famílias repetidas (ex.: "Epi" e "EPIs") leva os produtos para uma só e inativa as outras.', 'Criar a partir dos produtos: as famílias já digitadas nos produtos viram o cadastro, com prévia para conferir; variações do mesmo nome (maiúsculas, acento, espaços) ficam juntas e nomes diferentes não são juntados.', 'No cadastro do produto a família é escolhida de uma lista com busca. Quem cadastra família tem "+ Nova família" ali mesmo, com aviso de nome parecido. Produto com família fora do cadastro mostra aviso.', 'O Almoxarife não cadastra produto nem família (sem Novo produto, Duplicar, + Nova família e Criar produto ao lançar). Ele continua editando prateleira, mínimo, dados de EPI e escolhe a família entre as cadastradas. O servidor confere.', 'Entrega de EPI e Estoque de EPI usam a marca "É EPI" da família (Configurações › EPI mostra quais famílias estão marcadas).']],
@@ -31690,6 +31843,7 @@ A.chLerTodas=()=>{const L=Object.assign({},CH.st.lido||{});let n=0;chConvs().for
   if(chConvs().some(c=>!oc[c._k]&&chNaoLidas(c._k)>0))h=h.replace('<div class="wa-fil">','<div class="wa-lt" style="padding:6px 12px 0"><button class="wa-chip" data-act="chLerTodas" title="Marca como lidas as mensagens de todas as conversas">✓ Marcar todas como lidas</button></div><div class="wa-fil">');}catch(e){}return h;};}
 try{if(typeof TIP_ACT!=='undefined')TIP_ACT.chLerTodas='Marca como lidas as mensagens de todas as conversas.';}catch(e){}
 try{v158Perfis();}catch(e){} /* v158: perfis montados de novo com o rh completo */
+try{v159Instala();}catch(e){} /* v159: o desenho registra as coleções que leu */
 boot();
 })();
 </script>

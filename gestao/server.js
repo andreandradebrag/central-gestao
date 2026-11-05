@@ -33,6 +33,7 @@ process.removeAllListeners('warning');
 const db = new DatabaseSync(path.join(DATA, 'gestao.db'));
 const BACKUP = require('./backup.js').criar(db, DATA);
 const SEG = require('./seguranca.js'), QR = require('./qr.js');
+const C159 = require('./comprime159.js'); C159.aquecer(path.join(PUB, 'index.html')); /* v159: compressão, ETag e 304 dos arquivos de texto; JSON grande em gzip */
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
 CREATE TABLE IF NOT EXISTS docs(path TEXT PRIMARY KEY, parent TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS docs_parent ON docs(parent);
@@ -368,7 +369,7 @@ function lerCorpo(req, max) {
   return new Promise((ok, err) => { const ch = []; let n = 0; req.on('data', d => { n += d.length; if (n > max) { err({ st: 413, msg: 'Conteúdo grande demais.' }); req.destroy(); } else ch.push(d); }); req.on('end', () => { const b = Buffer.concat(ch); if (n <= 20000) req._corpo = b; ok(b); }); req.on('error', err); });
 }
 async function lerJson(req) { const b = await lerCorpo(req, MAX_JSON); if (!b.length) return {}; try { return JSON.parse(b.toString('utf8')); } catch (e) { throw { st: 400, msg: 'JSON inválido.' }; } }
-function json(res, st, obj, extra) { const b = Buffer.from(JSON.stringify(obj)); res.writeHead(st, Object.assign({ 'content-type': 'application/json; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store' }, extra || {})); res.end(b); }
+function json(res, st, obj, extra) { const b = Buffer.from(JSON.stringify(obj)); if (C159.json(res, st, b, extra)) return; /* v159 */ res.writeHead(st, Object.assign({ 'content-type': 'application/json; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store' }, extra || {})); res.end(b); }
 function html(res, st, body, extra) { const pg = END.pagina(body, extra), b = Buffer.from(pg.body); res.writeHead(st, Object.assign({ 'content-type': 'text/html; charset=utf-8', 'content-length': b.length, 'cache-control': 'no-store' }, pg.cab, extra || {})); res.end(b); }
 function cookies(req) { const o = {}; String(req.headers.cookie || '').split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) o[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); }); return o; }
 const seguro = req => String(req.headers['x-forwarded-proto'] || '').includes('https') || !!req.socket.encrypted;
@@ -532,6 +533,7 @@ function estatico(req, res, arq) {
   const h = { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': ext === '.html' ? 'no-store' : 'private, max-age=3600', 'accept-ranges': 'bytes' };
   if (range && /^bytes=\d*-\d*$/.test(range)) { let [a, b] = range.slice(6).split('-'); a = a ? +a : st.size - +b; b = b && range.slice(6)[0] !== '-' ? Math.min(+b, st.size - 1) : st.size - 1; if (!(a >= 0 && a <= b && a < st.size)) { res.writeHead(416, { 'content-range': 'bytes */' + st.size }); res.end(); return true; } res.writeHead(206, Object.assign(h, { 'content-range': 'bytes ' + a + '-' + b + '/' + st.size, 'content-length': b - a + 1 })); fs.createReadStream(p, { start: a, end: b }).pipe(res); return true; }
   if (arq === 'index.html') h['content-security-policy'] = cspApp(p, st);
+  if (C159.estatico(req, res, p, st, ext, h, arq === 'index.html')) return true; /* v159: brotli/gzip conforme o navegador, ETag e 304; a página fica no-cache (sempre confere) */
   res.writeHead(200, Object.assign(h, { 'content-length': st.size })); fs.createReadStream(p).pipe(res); return true;
 }
 /* política de conteúdo do sistema: só roda o script da própria página (pelo hash) e as bibliotecas da cdnjs */

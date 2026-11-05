@@ -148,6 +148,9 @@ module.exports = function (ctx) {
   }
 
   /* ---------- sincronização de marcações ---------- */
+  /* v159: texto estável do mês para comparar (chaves em ordem; sem v, imp e a hora da consulta dos totais) */
+  const estS159 = v => v === null || typeof v !== 'object' ? JSON.stringify(v === undefined ? null : v) : Array.isArray(v) ? '[' + v.map(estS159).join(',') + ']' : '{' + Object.keys(v).sort().filter(k => v[k] !== undefined).map(k => JSON.stringify(k) + ':' + estS159(v[k])).join(',') + '}';
+  const est159 = d => { const c = Object.assign({}, d); delete c.v; delete c.imp; if (c.sum && typeof c.sum === 'object') { c.sum = Object.assign({}, c.sum); delete c.sum.em; } return estS159(c); };
   let rodando = false;
   async function sincronizar(op) {
     if (rodando) return { ok: false, msg: 'Já há uma sincronização em andamento.' };
@@ -163,7 +166,7 @@ module.exports = function (ctx) {
       catch (er) { if (!/ 404/.test(String(er.msg || ''))) throw er; brutos = await todas(await punchUrl(), '', query); }
       const funcs = col('func'), porExt = new Map(), porSol = new Map(), porCpf = new Map(), vinc = e.vinculos || {};
       funcs.forEach(f => { porExt.set(f.id, f.id); if (f.solidesId) porSol.set(String(f.solidesId), f.id); const c = dig(f.cpf); if (c.length === 11) porCpf.set(c, f.id); });
-      const docs = new Map(), sem = new Map(), empDe = new Map(); let n = 0, ex = 0, semN = 0;
+      const docs = new Map(), sem = new Map(), empDe = new Map(), orig159 = new Map(); let n = 0, ex = 0, semN = 0; /* v159: orig159 = conteúdo gravado antes */
       for (const o of brutos) {
         const p = normPunch(o); if (!p.tempos.length) continue;
         const fid = (p.ext && porExt.get(p.ext)) || (p.empId && (porSol.get(p.empId) || vinc[p.empId])) || (p.cpf && porCpf.get(p.cpf)) || '';
@@ -172,7 +175,7 @@ module.exports = function (ctx) {
         if (!fid) { const k = p.empId || p.cpf || p.nome; if (k && !sem.has(k)) sem.set(k, { solidesId: p.empId, nome: p.nome, cpf: p.cpf ? '***.' + p.cpf.slice(3, 6) + '.' + p.cpf.slice(6, 9) + '-**' : '' }); continue; }
         for (const [t, suf] of p.tempos) {
           const L = fmtLocal(t), id = 'pm_' + fid + '_' + L.data.slice(0, 7), key = (p.id || String(t)) + suf;
-          if (!docs.has(id)) docs.set(id, docGet('pmmes/' + id) || { id, funcId: fid, ym: L.data.slice(0, 7), dias: {} });
+          if (!docs.has(id)) { const v0 = docGet('pmmes/' + id); orig159.set(id, v0 ? est159(v0) : null); docs.set(id, v0 || { id, funcId: fid, ym: L.data.slice(0, 7), dias: {} }); }
           const d = docs.get(id), dia = d.dias[L.data] || (d.dias[L.data] = { m: [], dep: '', oc: '', t: {} });
           dia.p = dia.p || {};
           const antes = new Set(Object.values(dia.p)), outras = (dia.m || []).filter(h => !antes.has(h)); /* horários vindos de arquivo ficam */
@@ -189,7 +192,7 @@ module.exports = function (ctx) {
         const i0 = Date.parse(d.ym + '-01T00:00:00-03:00'), f0 = Math.min(Date.now(), Date.parse(new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 10) + 'T00:00:00-03:00') - 1);
         try { const r = await sol(PUNCHES, '/punch/v2/punches/employees/' + encodeURIComponent(empDe.get(d.funcId)) + '/summary', { query: { startDate: i0, endDate: f0 } });
           if (r && typeof r === 'object') d.sum = { trab: minDe(r.totalWorked), prev: minDe(r.totalExpected), ext: minDe(r.overtime), atraso: minDe(r.delays), falta: typeof r.absences === 'number' ? r.absences : null, bh: minDe(r.hoursBank), em: Date.now() }; } catch (x) { } } }));
-      docs.forEach((d, id) => { d.v = Date.now(); d.imp = 'solides'; docPut('pmmes/' + id, d); });
+      docs.forEach((d, id) => { const o = orig159.get(id); if (o != null && o === est159(d)) return; d.v = Date.now(); d.imp = 'solides'; docPut('pmmes/' + id, d); }); /* v159: mês sem mudança não é regravado (antes ganhava v novo a cada 15 min e todos os navegadores refaziam o ponto) */
       const novo = Object.assign(e, { locais: stLocal, lastUpdate: ini, ultimo: Date.now(), ok: true, erro: '', recebidas: n, excluidas: ex, docs: docs.size, semVinculo: [...sem.values()].slice(0, 200) });
       salvaEst(novo);
       return { ok: true, recebidas: n, excluidas: ex, dias: docs.size, semVinculo: novo.semVinculo.length, foraVinculo: semN, locais: stLocal };

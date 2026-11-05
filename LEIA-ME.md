@@ -875,6 +875,38 @@ CVE-2024-22363). A cópia local `gestao/public/vendor/xlsx/xlsx.full.min.js` con
 `baixar-bibliotecas.sh` já baixa a 0.20.3). Enquanto a cópia local faltar, a política de conteúdo libera também
 `cdn.sheetjs.com`; não há hash da 0.18.5 em lugar nenhum.
 
+## Sistema mais rápido ao trocar de tela, salvar e abrir (v159)
+
+Só desempenho: o que cada tela mostra, as permissões e as regras de gravação **não mudaram**. Diagnóstico em
+`relatorios/lentidao_diagnostico.md`; medidas de antes e depois em `relatorios/feito_v159.md`.
+
+**No navegador** (página `public/index.html`):
+- as telas não são mais "embrulhadas" de novo a cada redesenho (as camadas da v132 e da v148 se desfaziam uma à outra e se
+  acumulavam ao longo do dia; agora a troca de tela e a gravação não ficam mais lentas com o tempo de uso);
+- não redesenha quando nada mudou: as leituras periódicas iguais, e o retorno do servidor depois de salvar, não refazem a
+  tela. Salvar faz **um** redesenho;
+- quando outra pessoa grava uma coleção que a tela aberta não usa, a tela não é redesenhada; mudanças seguidas que chegam
+  do servidor viram um redesenho só;
+- ponto lido por pessoa e por dia (índice): Painel, Painel da diretoria, espelho de ponto e Mão de obra por obra calculam
+  muito mais rápido, com o mesmo resultado;
+- a tela Mapa de cotação não fica mais em branco com uma cotação sem a tabela de preços.
+
+**No servidor** (`gestao/comprime159.js`, novo, ligado por `v159/ed_v159.py` no `server.js`, `shim.js`, `solides.js` e no
+`Dockerfile`):
+- a página e os outros arquivos de texto saem comprimidos (brotli ou gzip, conforme o navegador): a página passa de 4,8 MB
+  para cerca de 1,2 MB. A compressão é feita uma vez por versão do arquivo, em memória, na subida do serviço;
+- a página tem **ETag** e `cache-control: no-cache`: o navegador guarda a página e, a cada abertura, só pergunta se mudou
+  (resposta **304**, sem baixar de novo). Depois de atualizar o `index.html`, todos recebem a versão nova na próxima abertura,
+  como antes. A CSP continua a mesma;
+- respostas JSON acima de 1 KB (as listas que o navegador baixa) saem em gzip;
+- o `shim.js` avisa o sistema de quais documentos mudaram em cada atualização ao vivo, e o sistema aplica só esses;
+- a sincronização da **Sólides** só regrava o mês (`pmmes`) de quem teve marcação nova, alterada ou cancelada. Antes regravava
+  todo mês tocado a cada 15 minutos, e todos os navegadores refaziam o ponto. Os totais do mês da Sólides continuam sendo
+  atualizados quando mudam (a hora da consulta deles sozinha não regrava).
+
+Nada a configurar. Se houver um proxy na frente que já comprima, não há conflito: o serviço responde já comprimido e o proxy
+repassa.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

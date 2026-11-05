@@ -34,7 +34,7 @@
   }
   function aplicar(ev) {
     var s = docSubs.get(ev.path); if (s) { s.data = ev.op === 'del' ? null : ev.data; s.fns.forEach(function (f) { try { f(docSnap(ev.id, s.data)); } catch (x) { } }); }
-    var cs = colSubs.get(ev.parent); if (cs) cs.forEach(function (sub) { if (!sub.map) return; if (ev.op === 'del') sub.map.delete(ev.id); else sub.map.set(ev.id, ev.data); emitir(sub); });
+    var cs = colSubs.get(ev.parent); if (cs) cs.forEach(function (sub) { if (!sub.map) return; if (ev.op === 'del') sub.map.delete(ev.id); else sub.map.set(ev.id, ev.data); if (sub.mud !== false) { if (!sub.mud) sub.mud = new Map(); sub.mud.set(ev.id, ev.op === 'del' ? null : ev.data); } emitir(sub); });
   }
   function ressinc() {
     docSubs.forEach(function (s, p) { api('GET', '/api/db/doc?path=' + encodeURIComponent(p)).then(function (j) { s.data = j.exists ? j.data : null; s.fns.forEach(function (f) { f(docSnap(p.split('/').pop(), s.data)); }); }, function (e) { s.errs.forEach(function (f) { f(e); }); }); });
@@ -55,8 +55,13 @@
     var docs = l.map(function (r) { return docSnap(r.id, r.data); });
     return { docs: docs, size: docs.length, empty: !docs.length, docChanges: function () { return []; }, metadata: META };
   }
-  function emitir(sub) { clearTimeout(sub.t); sub.t = setTimeout(function () { var rows = []; sub.map.forEach(function (d, id) { rows.push({ id: id, data: d }); }); var sn = montar(sub.q, rows); sub.fns.forEach(function (f) { try { f(sn); } catch (x) { } }); }, 30); }
-  function carregar(sub) { return api('GET', '/api/db/col?path=' + encodeURIComponent(sub.q.path)).then(function (j) { sub.map = new Map(j.docs.map(function (d) { return [d.id, d.data]; })); emitir(sub); }, function (e) { sub.errs.forEach(function (f) { f(e); }); }); }
+  /* v159: a leitura entrega junto a lista do que mudou desde a última entrega (mud: [[id, dados ou null]]; null quando a
+     coleção foi lida inteira de novo) e só monta a lista completa (docs) quando alguém a pede */
+  function emitir(sub) { clearTimeout(sub.t); sub.t = setTimeout(function () { var mud = sub.mud, m = sub.map, sn0 = null; sub.mud = new Map();
+    var tudo = function () { if (!sn0) { var rows = []; m.forEach(function (d, id) { rows.push({ id: id, data: d }); }); sn0 = montar(sub.q, rows); } return sn0; };
+    var sn = { get docs() { return tudo().docs; }, get size() { return tudo().size; }, get empty() { return tudo().empty; }, docChanges: function () { return []; }, metadata: META, mud: mud ? Array.from(mud) : null };
+    sub.fns.forEach(function (f) { try { f(sn); } catch (x) { } }); }, 30); }
+  function carregar(sub) { return api('GET', '/api/db/col?path=' + encodeURIComponent(sub.q.path)).then(function (j) { sub.map = new Map(j.docs.map(function (d) { return [d.id, d.data]; })); sub.mud = false; emitir(sub); }, function (e) { sub.errs.forEach(function (f) { f(e); }); }); }
   function query(q) {
     var o = {
       where: function (f, op, v) { return query(Object.assign({}, q, { where: q.where.concat([[f, op, v]]) })); },
