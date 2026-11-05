@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Baixa pelo npm, nas MESMAS versões que o sistema usa hoje, as bibliotecas do navegador que ainda vêm da CDN e copia para
+# Baixa pelo npm, nas versões que o sistema usa (a de Excel já na 0.20.3, corrigida), as bibliotecas do navegador que ainda vêm da CDN e copia para
 # gestao/public/vendor. Mostra o hash SHA-384 de cada arquivo. (v157: antes baixava direto da CDN.)
 # Rode num computador com Node e internet, na raiz do repositório:  bash gestao/baixar-bibliotecas.sh
 # Depois confira os hashes (anote no histórico do repositório), faça commit e implante.
@@ -9,7 +9,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # pacote@versão  arquivo dentro do pacote  destino em public/vendor
 LISTA=(
   "jspdf@2.5.1 dist/jspdf.umd.min.js jspdf/jspdf.umd.min.js"
-  "xlsx@0.18.5 dist/xlsx.full.min.js xlsx/xlsx.full.min.js"
+  # SheetJS 0.20.3 (corrige CVE-2023-30533 e CVE-2024-22363); não está no npm, vem do site oficial da SheetJS
+  "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz dist/xlsx.full.min.js xlsx/xlsx.full.min.js"
   "html2canvas@1.4.1 dist/html2canvas.min.js html2canvas/html2canvas.min.js"
   "pdf-lib@1.17.1 dist/pdf-lib.min.js pdflib/pdf-lib.min.js"
 )
