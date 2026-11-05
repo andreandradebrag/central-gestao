@@ -32,8 +32,11 @@ module.exports = function (X) {
 
   /* ---------- família EPI (igual ao navegador: new_v154.js › v154EhFamEpi) ---------- */
   const FAM_PAD = 'EPI';
-  const famCfg = () => String(cfgEmp().epiFamilia || '').trim() || FAM_PAD;
-  const ehFam = f => { const k = norm(f); if (!k) return false; return k === norm(famCfg()) || /^epis?$/.test(k) || /^equipamentos? de protecao individual$/.test(k); };
+  /* v156: família do cadastro (Cadastros › Famílias de produto) vale pela marca "É EPI" (fam156.js); texto ainda fora do
+     cadastro continua pela regra antiga (nome de Configurações › EPI, "EPI"/"EPIs", "Equipamento de Proteção Individual") */
+  const famLeg = () => String(cfgEmp().epiFamilia || '').trim() || FAM_PAD;
+  const famCfg = () => { let n = ''; try { n = X.famEpiNome ? X.famEpiNome() : ''; } catch (e) { } return n || famLeg(); };
+  const ehFam = f => { const k = norm(f); if (!k) return false; let r = null; try { r = X.famEpi ? X.famEpi(f) : null; } catch (e) { } if (r === true || r === false) return r; return k === norm(famLeg()) || /^epis?$/.test(k) || /^equipamentos? de protecao individual$/.test(k); };
   const ehEpi = p => !!p && (p.epi === true || ehFam(p.familia));
   /* almoxarifado de higienização: o configurado; senão o principal de Tuiuti; senão um de Tuiuti; senão o único ativo */
   function almHig() {

@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-04T23:27:02.375Z",
+ "gerado": "2026-11-05T00:03:03.751Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1207,6 +1207,9 @@
    "proj",
    "comp"
   ],
+  "prodfam": [
+   "est"
+  ],
   "proj": [
    "proj",
    "est",
@@ -1680,6 +1683,9 @@
    "est",
    "proj",
    "comp"
+  ],
+  "prodfam": [
+   "est"
   ],
   "proj": [
    "proj",
@@ -2553,6 +2559,10 @@
    ]
   },
   "est": {
+   "prodfam": [
+    "prodfam",
+    "prod"
+   ],
    "mov": [
     "mov",
     "prod",
@@ -2563,7 +2573,6 @@
    ],
    "prod": [
     "prod",
-    "mov",
     "proj",
     "almox"
    ],

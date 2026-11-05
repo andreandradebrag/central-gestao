@@ -756,6 +756,46 @@ Detalhes:
 - Implantar: subir `gestao/est155.js` (novo), `gestao/regras.js`, `gestao/Dockerfile`, `gestao/perfis.json` e
   `gestao/public/index.html` e reconstruir a imagem do serviço `gestao`.
 
+## Famílias de produto e quem cadastra produto (v156)
+
+**Cadastros › Famílias de produto** (coleção nova `prodfam`, gravada por quem grava o Estoque, menos o Almoxarife; servidor em
+`gestao/fam156.js`, ligado em `regras.js`, `epi154.js` e no `Dockerfile`).
+
+- Cada família tem nome, descrição, ativa/inativa e a marca **"É EPI"**. A lista mostra quantos produtos (ativos e inativos)
+  cada família tem, com busca e filtro de situação. O produto continua guardando o **nome** da família (`familia`); a ligação
+  com o cadastro é pelo nome sem acento/maiúsculas/espaços repetidos, que é único no cadastro.
+- **Renomear** (`POST /api/prodfam/renomear`): muda o nome da família e de todos os produtos dela numa transação só.
+  A gravação comum não muda o nome.
+- **Juntar famílias** (`POST /api/prodfam/juntar`): leva os produtos das famílias marcadas para a que fica, numa transação
+  só; as juntadas ficam inativas com a marca "juntada em …" e não se reativam. O nome antigo continua apontando para a que ficou.
+- **Criar a partir dos produtos** (`POST /api/prodfam/migrar`): prévia com os nomes já digitados nos produtos; cada linha
+  junta só variações do **mesmo nome** (maiúsculas, acento, espaços). Nomes diferentes (ex.: "EPI" e "EPIs") não são juntados
+  aqui: a prévia avisa e eles são juntados depois em Juntar famílias. "É EPI" vem marcado onde a regra antiga considerava EPI.
+- **Excluir**: só família sem produtos. Auditoria: `PRODFAM_CRIADA`, `PRODFAM_EPI`, `PRODFAM_INATIVADA/REATIVADA`,
+  `PRODFAM_RENOMEADA`, `PRODFAM_JUNTADAS`, `PRODFAM_MIGRACAO`, `PRODFAM_EXCLUIDA`, `PRODFAM_RECUSADA`.
+
+**Cadastro do produto**: a família é escolhida de uma lista com busca (sem texto livre). Quem cria família tem
+"+ Nova família" ali mesmo, com aviso de nome parecido (sem acento/maiúsculas, plural, 1–2 letras de diferença). Produto
+com família fora do cadastro (ou inativa) mostra aviso e continua com ela até alguém escolher outra.
+
+**Quem cadastra**
+
+| Ação | Quem |
+|---|---|
+| Cadastrar produto | Fiscal, Administrador/dono. Comprador: na tela não cadastra (não grava o Estoque); o servidor continua aceitando produto novo dele, como antes |
+| Criar, renomear, juntar, marcar "É EPI" e excluir família | Fiscal, Administrador/dono |
+| Almoxarife, Almoxarife e fábrica e o antigo "Comprador / almoxarife" | **não** cadastram produto (nem direto como inativo) nem família: sem Novo produto, Duplicar, "+ Nova família", "Criar produto ao lançar" e "Cadastrar EPI". Continuam editando prateleira, mínimo, lote, dados de EPI, observações e imagem, inativando/reativando, e **escolhem a família entre as cadastradas e ativas** (o servidor recusa família fora do cadastro: `PRODUTO_FAMILIA_RECUSADA`; produto novo: `PRODUTO_CRIACAO_RECUSADA`) |
+
+Item de nota importado do XML sem produto, no rascunho do recebimento, aparece como "Produto sem cadastro (o Fiscal cria ao
+lançar)": o produto nasce quando o Fiscal lança a nota.
+
+**EPI**: a entrega de EPI, o Estoque de EPI e a lista do RH/SST (`GET /api/epi/estoque`) usam a marca "É EPI" da família.
+Texto de família que ainda não está no cadastro segue a regra antiga (nome de Configurações › EPI, "EPI"/"EPIs",
+"Equipamento de Proteção Individual") até as famílias serem criadas. Configurações › EPI passa a mostrar as famílias marcadas.
+
+**Depois de implantar**: o Fiscal ou o Administrador abre Cadastros › Famílias de produto › **Criar a partir dos produtos**,
+confere a prévia (nomes e "É EPI") e confirma; depois junta as repetidas (ex.: "EPIs" em "EPI").
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

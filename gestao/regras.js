@@ -2114,7 +2114,8 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const TREINO = require('./treino.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaGrupo, PERM, NIV }); /* v151: treinamentos dentro do sistema (treino.js) */
   const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual }); /* v152: compras (compras152.js) */
   const C153 = require('./almox153.js')({ q, db, col, doc, erro, PERM, papelDe, defDe, igual }); /* v153: almoxarifados por cidade com responsável (almox153.js) */
-  const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson, json, antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
+  const C156 = require('./fam156.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, papelConta, cfgEmp, lerJson, json, antesGravar: (...a) => antesGravar(...a) }); /* v156: Famílias de produto (fam156.js) */
+  const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson, json, famEpi: f => C156.ehFamEpi(f), famEpiNome: () => C156.nomeEpi(), antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
@@ -2154,6 +2155,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
       if (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig') { e = C154.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v154: EPI com baixa e higienização só pelas rotas */
       if (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat') { e = C155.antes(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v155: estorno, motivo da entrada/saída manual, campos fiscais do produto */
+      if (c0 === 'prod' || c0 === 'prodinat' || c0 === 'prodfam') { e = C156.antes(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v156: famílias de produto; Almoxarife não cria produto nem família */
       if (c0 === 'lanc') { e = P2N.regraLancNota(conta, velho, novo); if (e) return e; } /* v140 */
       if (c0 === 'lanc') { if (novo.aprovHerdada && !igual((velho || {}).aprovHerdada, novo.aprovHerdada) && !herancaOk(novo)) delete novo.aprovHerdada; e = docLibRetem(c0, velho, novo) || regraPago(conta, p, velho, novo) || regraDocLib(conta, req, velho, novo) || regraRetLanc(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'medemp') { e = regraRetMed(conta, req, velho, novo) || docLibRetem(c0, velho, novo) || regraDocLib(conta, req, velho, novo) || regraMedemp(conta, req, velho, novo); if (e) return e; }
@@ -2207,6 +2209,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (!velho) return null;
     if (s.length === 2 && (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat')) { const e = C155.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v155: movimento não se exclui (estorno); produto só Administrador e sem histórico */
     if (s.length === 2 && (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig')) { const e = C154.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v154 */
+    if (s.length === 2 && c0 === 'prodfam') { const e = C156.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v156: família só sai sem produtos; Almoxarife não exclui */
     if (c0 === 'cot' && s.length === 2) { const e = NEGF.excluir(conta, velho); if (e) return e; } /* v149 */
     if (c0 === 'perfc') { if (!(ehDono(conta) || perfilEm(conta, ['admin']))) return erro('Só o Administrador ou o dono excluem perfis de acesso.'); const n = perfcUsado(s[1]); if (n) return erro('Este perfil é usado por ' + n + ' pessoa(s). Troque o perfil delas antes.', 409); if (req && !END.reautenticado(req)) return { reauth: true }; auditar(conta, req, /^a_/.test(s[1] || '') ? 'PERFIL_PADRAO_RESTAURADO' : 'PERFIL_ACESSO_EXCLUIDO', p, null, { nome: velho.nome, base: velho.base }); } /* v114; v127: excluir o ajuste = voltar ao padrão */
     { const e = regraFina(conta, p, velho, null, 'DELETE'); if (e) return e; }
@@ -2244,6 +2247,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
     if (await C154.rota(p, m, req, res, conta)) return true; /* v154: /api/epi/entrega, /api/epi/devolucao, /api/epihig, /api/epi/migrar */
+    if (await C156.rota(p, m, req, res, conta)) return true; /* v156: /api/prodfam/renomear, /api/prodfam/juntar, /api/prodfam/migrar */
     if (m === 'POST' && p === '/api/med/reabrir') { const b = await lerJson(req), r = MEDR(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro } : r); return true; } /* v144 */
     if (m === 'POST' && p === '/api/nota/lancar') { const b = await lerJson(req), r = P2N.rotaNotaLancar(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro, motivos: r.motivos || [] } : r); return true; } /* v140 */
     if (m === 'POST' && (p === '/api/fin/banco/confirmar' || p === '/api/fin/banco/recusar')) { await R(b => rotaBanco(p.endsWith('confirmar') ? 'confirmar' : 'recusar', conta, req, b)); return true; }

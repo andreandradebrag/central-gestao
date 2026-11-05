@@ -309,7 +309,7 @@ const digits=s=>String(s||'').replace(/\D/g,'');
 
 const CATS_REC=['Venda de produtos','Prestação de serviços','Contratos recorrentes','Outras receitas'];
 const CATS_DESP=['Compra de mercadorias e insumos','Folha e encargos','Aluguel e condomínio','Impostos e taxas','Energia, água e internet','Serviços de terceiros','Frete e logística','Marketing e vendas','Despesas bancárias','Outras despesas'];
-const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano','cat','recor','extrato','ped','psv','sc','sep','cot','etapa','func','rhdoc','epi','veic','vsai','vabas','vman','ferr','fmov','fman','almox','nfse','ctbfech','jornada','feriado','ponto','pajuste','cipa','cipam','cipar','cipaa','acid','proc','procp','riscoia','usrreq','lgpdreq','lgpdinc','lgpdc','lixo','reun','rdo','rmesf','ctr','med','opp','hab','eqc','pmoc','os','multa','fvs','nc','trec','gar','pgr','pte','obrig','fechm','arq','transp','implog','ferias','fpag','afast','adm','dpmov','desl','esoc','psicamp','psr','rel','dpsol','rsreq','vaga','cand','cap','rom','intra','eap','idxbal','sstv','bhlanc','hht','trein','treinc','epica','fapac','vrota','vfrete','rda','integ','pgrdoc','sstdoc','ppp','insp','ambdoc','ambres','ambforn','ambind','isochk','procd','procl','pa','epihig'];
+const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano','cat','recor','extrato','ped','psv','sc','sep','cot','etapa','func','rhdoc','epi','veic','vsai','vabas','vman','ferr','fmov','fman','almox','nfse','ctbfech','jornada','feriado','ponto','pajuste','cipa','cipam','cipar','cipaa','acid','proc','procp','riscoia','usrreq','lgpdreq','lgpdinc','lgpdc','lixo','reun','rdo','rmesf','ctr','med','opp','hab','eqc','pmoc','os','multa','fvs','nc','trec','gar','pgr','pte','obrig','fechm','arq','transp','implog','ferias','fpag','afast','adm','dpmov','desl','esoc','psicamp','psr','rel','dpsol','rsreq','vaga','cand','cap','rom','intra','eap','idxbal','sstv','bhlanc','hht','trein','treinc','epica','fapac','vrota','vfrete','rda','integ','pgrdoc','sstdoc','ppp','insp','ambdoc','ambres','ambforn','ambind','isochk','procd','procl','pa','epihig','prodfam'];
 
 /* ===== estado e persistência ===== */
 const S={},IDX={};COLS.forEach(c=>{S[c]=[];IDX[c]=new Map();});
@@ -30252,8 +30252,9 @@ A.v154EstMais=()=>{ui.est.lim=(ui.est.lim||100)+100;render();};ACT_GROUP.v154Est
 
 /* ---------- 3. família EPI e configuração ---------- */
 const V154_FAM_PAD='EPI';
-const v154Fam=()=>String((cfg()||{}).epiFamilia||'').trim()||V154_FAM_PAD;
-function v154EhFamEpi(f){const k=v154N(f);return !!k&&(k===v154N(v154Fam())||/^epis?$/.test(k)||/^equipamentos? de protecao individual$/.test(k));}
+const v154Fam=()=>{try{const n=v156FamEpiNome();if(n)return n;}catch(e){}return String((cfg()||{}).epiFamilia||'').trim()||V154_FAM_PAD;}; /* v156: família marcada "É EPI" (antes da carga do módulo v156: a regra antiga) */
+function v154EhFamEpi(f){const k=v154N(f);if(!k)return false;let r=null;try{r=v156FamEhEpi(f);}catch(e){}if(r===true||r===false)return r; /* v156: marca "É EPI" do cadastro de famílias */
+  return k===v154N(String((cfg()||{}).epiFamilia||'').trim()||V154_FAM_PAD)||/^epis?$/.test(k)||/^equipamentos? de protecao individual$/.test(k);}
 const v154EhEpi=p=>!!p&&(p.epi===true||v154EhFamEpi(p.familia));
 /* RH e SST registram EPI mas não leem o cadastro de produtos nem os almoxarifados: no servidor próprio recebem só o necessário
    (GET /api/epi/estoque: almoxarifados ativos e produtos da família EPI com o saldo de cada almoxarifado) */
@@ -30789,9 +30790,252 @@ A.pedNovoProd=()=>{confirmBox('Produto novo é cadastrado em <b>Cadastros › Pr
 function v155PedBtn(o){if(o&&typeof o.body==='string')o=Object.assign({},o,{body:o.body.replace('<button class="btn sm" data-act="pedNovoProd">+ Cadastrar novo produto</button>','<button class="btn sm ghost" data-act="pedNovoProd" title="Produto novo só nasce em Cadastros › Produtos ou na entrada da nota fiscal">Produto não cadastrado? Cadastros › Produtos</button>')});return o;}
 if(typeof openPed==='function'){const o0=openPed;openPed=function(){const m0=modal;modal=function(o){modal=m0;return m0.call(this,v155PedBtn(o));};try{return o0.apply(this,arguments);}finally{if(modal!==m0)modal=m0;}};}
 
+/* ===== v156: Cadastros › Famílias de produto (relatorios/feito_v156.md) =====
+   - Coleção prodfam {nome, desc, ativo, epi ("É EPI"), juntadaEm...}. O produto continua com o NOME da família em p.familia
+     (Estoque, filtros, CSV e relatórios não mudam); a ligação com o cadastro é pelo nome normalizado (sem acento, maiúsculas e
+     espaços repetidos), único no cadastro.
+   - Tela Cadastros › Famílias de produto: lista com quantos produtos cada família tem, busca, Nova família (aviso de nome
+     parecido), Editar (descrição, ativo, "É EPI"), Renomear (o servidor muda o nome em todos os produtos de uma vez), Juntar
+     famílias (move os produtos e inativa as outras), Criar a partir dos produtos (migração com prévia: só junta variações do
+     mesmo nome) e Excluir (só sem produtos).
+   - Cadastro do produto: família escolhida de uma lista com busca (sem texto livre); "+ Nova família" para quem cria família;
+     aviso quando a família do produto não está no cadastro.
+   - Almoxarife (almoxarife, almoxfab e o antigo "compras"): não cadastra produto nem família (sem Novo produto, Duplicar,
+     + Nova família, Criar produto ao lançar, Cadastrar EPI); continua editando o que a v155 deixa e escolhendo a família entre
+     as cadastradas. O servidor confere tudo (deploy/gestao/fam156.js).
+   - Família EPI (v154): família do cadastro vale pela marca "É EPI"; texto ainda fora do cadastro segue a regra antiga.
+   Prefixos: v156*, V156*. */
+const V156={nova:null,simOk:'',pf:{novaAberta:false}};
+ui.cadfam={q:'',sit:'ativas'};
+COL_NOME.prodfam='Família de produto';
+try{PFN_NOME.prodfam='Famílias de produto';}catch(e){}
+/* o cadastro de famílias é gravado por quem grava o Estoque (perfis.json: prodfam no módulo est); lido por quem lê o estoque */
+if(TAB_COLS.est&&!TAB_COLS.est.includes('prodfam'))TAB_COLS.est.push('prodfam');
+const v156N=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const v156L=s=>String(s||'').replace(/\s+/g,' ').trim();
+const v156Fams=()=>Array.isArray(S.prodfam)?S.prodfam:[];
+const v156Byn=(a,b)=>String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR');
+const v156Ativas=()=>v156Fams().filter(f=>f&&f.ativo!==false&&!f.juntadaEm).sort(v156Byn);
+/* nome normalizado → família (juntada: a que ficou) */
+function v156Mapa(){if(memo.v156m)return memo.v156m;const fs=v156Fams(),by=new Map(fs.map(f=>[f.id,f])),m=new Map();
+  fs.filter(f=>!f.juntadaEm).forEach(f=>m.set(v156N(f.nome),f));
+  fs.filter(f=>f.juntadaEm).forEach(f=>{const k=v156N(f.nome);if(m.has(k))return;let d=f,n=0;while(d&&d.juntadaEm&&n++<20)d=by.get(d.juntadaEm);if(d&&!d.juntadaEm)m.set(k,d);});
+  return memo.v156m=m;}
+const v156FamDe=f=>{const k=v156N(f);return k?(v156Mapa().get(k)||null):null;};
+/* null = texto fora do cadastro (vale a regra antiga da v154); true/false = marca "É EPI" */
+function v156FamEhEpi(f){const fm=v156FamDe(f);return fm?fm.epi===true:null;}
+const v156EpiLegNome=()=>String((cfg()||{}).epiFamilia||'').trim()||(typeof V154_FAM_PAD!=='undefined'?V154_FAM_PAD:'EPI');
+function v156EpiLegado(f){const k=v156N(f);return !!k&&(k===v156N(v156EpiLegNome())||/^epis?$/.test(k)||/^equipamentos? de protecao individual$/.test(k));}
+function v156FamEpiNome(){const l=v156Ativas().filter(f=>f.epi===true);if(!l.length)return '';const leg=v156N(v156EpiLegNome());return (l.find(f=>v156N(f.nome)===leg)||l[0]).nome;}
+/* produtos por família (ativos e inativos) */
+function v156Cont(){if(memo.v156c)return memo.v156c;const m=new Map(),add=(p,k)=>{const f=v156FamDe(p.familia),key=f?f.id:'';if(!key)return;const o=m.get(key)||{a:0,i:0};o[k]++;m.set(key,o);};
+  (S.prod||[]).forEach(p=>add(p,'a'));(S.prodinat||[]).filter(p=>!get('prod',p.id)).forEach(p=>add(p,'i'));return memo.v156c=m;}
+/* textos de família usados nos produtos que não estão no cadastro, agrupados pelas variações óbvias do mesmo nome */
+function v156Pendentes(){const m=new Map();
+  (S.prod||[]).concat((S.prodinat||[]).filter(p=>!get('prod',p.id))).forEach(p=>{const t=v156L(p.familia);if(!t||v156FamDe(t))return;const k=v156N(t);const g=m.get(k)||{k,vars:new Map(),n:0};g.vars.set(t,(g.vars.get(t)||0)+1);g.n++;m.set(k,g);});
+  /* nome sugerido: o mais usado; no empate, o com acento e mais maiúsculas ("Elétrica" e não "eletrica"; "EPI" e não "Epi") */
+  const pt=t=>(t.normalize('NFD').length>t.length?10:0)+(t.match(/[A-ZÀ-Ý]/g)||[]).length;
+  return [...m.values()].map(g=>{const vs=[...g.vars.entries()].sort((a,b)=>b[1]-a[1]||pt(b[0])-pt(a[0])||a[0].localeCompare(b[0],'pt-BR'));return {k:g.k,nome:vs[0][0],vars:vs,n:g.n,epi:v156EpiLegado(vs[0][0])};}).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));}
+/* nomes parecidos: iguais sem acento/maiúsculas, plural com "s" ou distância de edição pequena */
+function v156Lev(a,b,max){if(a===b)return 0;if(Math.abs(a.length-b.length)>max)return max+1;let p=Array.from({length:b.length+1},(x,i)=>i);
+  for(let i=1;i<=a.length;i++){const c=[i];let mn=i;for(let j=1;j<=b.length;j++){c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));if(c[j]<mn)mn=c[j];}if(mn>max)return max+1;p=c;}return p[b.length];}
+function v156Parecido(a,b){const x=v156N(a),y=v156N(b);if(!x||!y)return false;if(x===y)return true;const s=t=>t.replace(/s$/,'');if(s(x)===s(y))return true;
+  const mx=Math.min(x.length,y.length)<=4?1:2;return v156Lev(x,y,mx)<=mx;}
+const v156Parecidas=(nome,fora)=>v156Fams().filter(f=>f.id!==fora&&!f.juntadaEm&&v156Parecido(nome,f.nome));
+/* quem faz o quê */
+const v156Srv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV()&&typeof segaPost==='function';
+function v156PodeCol(col){if(me.owner)return true;if(!mayW('est')||v155Restrito())return false;
+  try{if(typeof p2PodeGravar==='function'&&p2PodeGravar(col,null,{id:'novo',nome:'x'},false))return false;if(typeof pfnPodeGravar==='function'&&pfnPodeGravar(col,null,false))return false;}catch(e){}return true;}
+const v156PodeFam=()=>v156PodeCol('prodfam');
+const v156PodeCriarProd=()=>v156PodeCol('prod');
+const V156_SEM_PROD='O seu perfil (Almoxarife) não cadastra produto. Quem cadastra é o Fiscal (Cadastros › Produtos ou a entrada da nota fiscal) ou o Administrador.';
+const V156_SEM_FAM='O seu perfil não cria nem altera famílias de produto: escolha a família entre as cadastradas. Quem cadastra é o Fiscal ou o Administrador.';
+/* a gravação comum do navegador: produto novo e família não saem do Almoxarife (igual ao servidor) */
+{const g0=p2PodeGravar;p2PodeGravar=function(col,velho,novo,exclui){const m=g0.apply(this,arguments);if(m||me.owner)return m;
+  try{if(typeof P2N_CAP!=='undefined'&&P2N_CAP)return m;if(!v155Restrito())return m;
+    if(col==='prodfam')return V156_SEM_FAM;
+    if(!exclui&&!velho&&novo&&novo.ex!==true){if(col==='prod'&&!(S.prodinat||[]).some(x=>x.id===novo.id))return V156_SEM_PROD;if(col==='prodinat'&&!get('prod',novo.id))return V156_SEM_PROD;}}catch(e){}return m;};}
+function v156Ir(tab){closeModal();ui.tab=tab;try{const m=MENU.find(x=>(x[2]||[]).some(i=>i[0]===tab));if(m)ui.mod=m[0];}catch(e){}try{history.replaceState(null,'','#'+tab);}catch(e){}render();}
+/* rotas do servidor (uma transação); fora do servidor próprio, o navegador grava como antes */
+async function v156Rota(url,body){const j=await segaPost(url,body);(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));memo.v156m=null;memo.v156c=null;return j;}
+const v156ProdsDe=nomes=>{const ks=new Set(nomes.map(v156N).filter(Boolean));return [['prod',S.prod||[]],['prodinat',(S.prodinat||[]).filter(p=>!get('prod',p.id))]].flatMap(([c,l])=>l.filter(p=>ks.has(v156N(p.familia))).map(p=>({c,p})));};
+async function v156Renomear(id,nome){const f=get('prodfam',id);if(!f)return false;
+  if(v156Srv()){try{const j=await v156Rota('/api/prodfam/renomear',{id,nome});toast(j.msg||'Família renomeada.','pos');render();return true;}catch(e){toast('Não renomeou: '+e.message,'neg');return false;}}
+  const ps=v156ProdsDe([f.nome]);put('prodfam',Object.assign(cl(f),{nome,nomeAnt:f.nome,renPor:actorId(),renEm:Date.now()}));ps.forEach(o=>put(o.c,Object.assign(cl(o.p),{familia:nome})));
+  toast('Família renomeada para "'+nome+'" em '+ps.length+' produto(s).','pos');render();return true;}
+async function v156Juntar(destino,origens,epi){const d=get('prodfam',destino);if(!d)return false;
+  if(v156Srv()){try{const j=await v156Rota('/api/prodfam/juntar',{destino,origens,epi});toast(j.msg||'Famílias juntadas.','pos');render();return true;}catch(e){toast('Não juntou: '+e.message,'neg');return false;}}
+  const os=origens.map(i=>get('prodfam',i)).filter(Boolean),ps=v156ProdsDe(os.map(o=>o.nome)),ts=Date.now();
+  put('prodfam',Object.assign(cl(d),{epi:!!epi}));os.forEach(o=>put('prodfam',Object.assign(cl(o),{ativo:false,juntadaEm:d.id,juntadaNome:d.nome,juntadaPor:actorId(),juntadaTs:ts})));
+  ps.forEach(o=>put(o.c,Object.assign(cl(o.p),{familia:d.nome})));toast(os.length+' família(s) juntada(s) em "'+d.nome+'": '+ps.length+' produto(s) mudaram de família.','pos');render();return true;}
+async function v156Migrar(grupos){
+  if(v156Srv()){try{const j=await v156Rota('/api/prodfam/migrar',{grupos});toast(j.msg||'Famílias criadas.','pos');render();return true;}catch(e){toast('Não criou as famílias: '+e.message,'neg');return false;}}
+  const novas=new Map();let n=0,c=0;const vistos=new Set();
+  grupos.forEach(g=>{const k=v156N(g.nome);let f=v156FamDe(g.nome)||novas.get(k);if(!f){f={id:uid(),nome:g.nome,desc:g.desc||'',ativo:true,epi:!!g.epi,crPor:actorId(),crEm:Date.now(),mig156:true};novas.set(k,f);put('prodfam',f);c++;}
+    v156ProdsDe(g.variantes.concat([g.nome])).filter(o=>!vistos.has(o.c+o.p.id)).forEach(o=>{vistos.add(o.c+o.p.id);n++;if(o.p.familia!==f.nome)put(o.c,Object.assign(cl(o.p),{familia:f.nome}));});});
+  memo.v156m=null;toast(c+' família(s) criada(s); '+n+' produto(s) ligados ao cadastro.','pos');render();return true;}
+
+/* ---------- tela Cadastros › Famílias de produto ---------- */
+function v156RegrasHtml(){return '<details class="card" id="v156Reg" style="padding:10px 14px"><summary style="cursor:pointer"><b>Quem faz o quê nas famílias</b> <span class="sub">· você ('+esc(v155PerfilNome())+'): '+esc(v156PodeFam()?'cria, renomeia, junta e marca "É EPI"':mayW('est')?'escolhe a família do produto entre as cadastradas':'consulta')+'</span></summary>'+
+  '<ul class="sub" style="margin:8px 0 0 18px"><li><b>Fiscal</b> e <b>Administrador</b>: criam, renomeiam (o nome muda em todos os produtos da família de uma vez), juntam famílias repetidas, inativam e marcam "É EPI".</li>'+
+  '<li><b>Almoxarife</b>: não cria família nem produto; no cadastro do produto escolhe a família entre as cadastradas e ativas.</li>'+
+  '<li><b>"É EPI"</b>: os produtos das famílias marcadas aparecem na entrega de EPI (Controle de EPI) e no Estoque de EPI.</li></ul></details>';}
+V.cadfam=()=>{const f=ui.cadfam,q=v156N(f.q),cn=v156Cont(),pode=v156PodeFam(),leProd=me.owner||mayR('est')||mayR('comp'),pend=v156Pendentes();
+  const todas=v156Fams().slice().sort(v156Byn),rows=todas.filter(x=>(f.sit==='todas'||(f.sit==='inativas'?(x.ativo===false||x.juntadaEm):(x.ativo!==false&&!x.juntadaEm)))&&(!q||v156N([x.nome,x.desc].join(' ')).includes(q)));
+  const semFam=(S.prod||[]).filter(p=>!v156L(p.familia)).length,ativas=v156Ativas();
+  const acts=pode?'<button class="btn pri" data-act="v156FamNova">Nova família</button><button class="btn" data-act="v156FamJuntar">Juntar famílias</button>'+(pend.length?'<button class="btn" data-act="v156FamMigrar">Criar a partir dos produtos ('+pend.length+')</button>':''):'';
+  const avisoPend=pend.length?'<div class="note'+(todas.length?'':' warn')+'" style="margin:0" id="v156Pend"><b>'+(todas.length?pend.length+' nome(s) de família usados nos produtos ainda não estão no cadastro':'O cadastro de famílias está vazio: '+pend.length+' nome(s) de família já são usados nos produtos')+'.</b> '+esc(pend.slice(0,12).map(g=>g.vars.map(v=>v[0]).join(' / ')+' ('+g.n+')').join(' · '))+(pend.length>12?'…':'')+
+    (pode?' <button class="btn sm pri" data-act="v156FamMigrar">Ver a prévia e criar</button>':'<div class="sub">Peça ao Fiscal ou ao Administrador para criar as famílias (Criar a partir dos produtos). Até lá, esses produtos aparecem com aviso no cadastro.</div>')+'</div>':'';
+  return pageHead('Famílias de produto','Cadastro das famílias usadas no cadastro de produtos, no Estoque e nos relatórios. A família marcada "É EPI" define os produtos da entrega de EPI.',acts)+
+  '<div class="stack">'+v156RegrasHtml()+avisoPend+
+  '<div class="kpis">'+kpi('Famílias ativas',ativas.length.toLocaleString('pt-BR'),'')+kpi('Marcadas "É EPI"',ativas.filter(x=>x.epi===true).length.toLocaleString('pt-BR'),esc(ativas.filter(x=>x.epi===true).map(x=>x.nome).join(', ')||'nenhuma'))+kpi('Produtos sem família',leProd?semFam.toLocaleString('pt-BR'):'—','')+kpi('Nomes fora do cadastro',pend.length.toLocaleString('pt-BR'),'',pend.length?'warn':'')+'</div>'+
+  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_cadfam" data-filter="cadfam.q" value="'+esc(f.q)+'" placeholder="Nome ou descrição da família"></label><label class="f"><span>Situação</span><select data-filter="cadfam.sit">'+opt([['ativas','Ativas'],['inativas','Inativas e juntadas'],['todas','Todas']],f.sit)+'</select></label></div>'+
+  '<div class="tw"><table class="v156-tab" style="min-width:760px"><thead><tr><th>Família</th><th>É EPI</th><th class="num">Produtos ativos</th><th class="num">Inativos</th><th>Situação</th><th></th></tr></thead><tbody>'+
+  (rows.length?rows.map(x=>{const c=cn.get(x.id)||{a:0,i:0},jun=!!x.juntadaEm;
+    const sit=jun?pill('Juntada','warn')+'<div class="sub">em '+esc(x.juntadaNome||(get('prodfam',x.juntadaEm)||{}).nome||'')+'</div>':x.ativo===false?pill('Inativa','warn'):pill('Ativa','pos');
+    const bt=[(c.a||c.i)&&leProd?'<button class="btn sm" data-act="v156FamVerProd" data-id="'+esc(x.id)+'">Ver produtos</button>':'',
+      pode&&!jun?'<button class="btn sm" data-act="v156FamEditar" data-id="'+esc(x.id)+'">Editar</button><button class="btn sm" data-act="v156FamRenomear" data-id="'+esc(x.id)+'">Renomear</button>'+(x.ativo!==false?'<button class="btn sm" data-act="v156FamJuntar" data-id="'+esc(x.id)+'" title="Leva os produtos de famílias repetidas para esta">Juntar nesta</button>':''):'',
+      pode&&!c.a&&!c.i?'<button class="btn sm dng" data-act="v156FamExcluir" data-id="'+esc(x.id)+'">Excluir</button>':''].join('');
+    return '<tr data-rid="'+esc(x.id)+'"><td><b>'+esc(x.nome)+'</b>'+(x.desc?'<div class="sub">'+esc(x.desc)+'</div>':'')+'</td><td>'+(x.epi===true?pill('É EPI','acc'):'<span class="sub">—</span>')+'</td><td class="num">'+(leProd?c.a.toLocaleString('pt-BR'):'—')+'</td><td class="num">'+(leProd?c.i.toLocaleString('pt-BR'):'—')+'</td><td>'+sit+'</td><td class="act">'+bt+'</td></tr>';}).join(''):
+    emptyRow(6,todas.length?'Nenhuma família com essa busca.':'Nenhuma família cadastrada.'+(pend.length?' Use "Criar a partir dos produtos".':'')))+'</tbody></table></div><p class="sub" style="margin:0">'+rows.length.toLocaleString('pt-BR')+' família(s).</p></div>';};
+novaTab('cadfam','Famílias de produto','Cadastros','cad','cad','cadprod');
+A.v156FamVerProd=d=>{const f=get('prodfam',d.id);if(!f)return;ui.cadprod=Object.assign(ui.cadprod||{},{fam:f.nome,q:'',sit:'ativos'});v156Ir('cadprod');};
+function v156SimHtml(nome,fora){const l=v156Parecidas(nome,fora);if(!l.length)return '';
+  return '<div class="note warn" style="margin:6px 0 0"><b>Nome parecido com família já cadastrada:</b> '+l.map(f=>esc(f.nome)+(f.ativo===false?' (inativa)':'')).join(', ')+'. Confira se não é a mesma família (sem acento, maiúsculas ou plural). Para criar mesmo assim, clique de novo em Salvar.</div>';}
+function v156FamForm(f,novo){f=f||{};
+  return '<div class="fg">'+(novo?field('Nome da família *','v156Nome','text','',{full:true,ph:'Ex.: Elétrica, Hidráulica, EPI'}):'<div class="f full"><span>Nome</span><b>'+esc(f.nome)+'</b><span class="sub">Para mudar o nome use Renomear (muda também nos produtos).</span></div>')+
+    field('Descrição (opcional)','v156Desc','text',f.desc||'',{full:true})+field('É EPI (os produtos desta família entram na entrega de EPI)','v156Epi','checkbox',f.epi===true,{full:true})+(novo?'':field('Ativa (aparece para escolher no cadastro do produto)','v156Ativa','checkbox',f.ativo!==false,{full:true}))+
+    '</div><div id="v156Sim"></div>';}
+A.v156FamNova=()=>{if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}V156.simOk='';
+  modal({title:'Nova família de produto',body:v156FamForm(null,true),saveLabel:'Criar família',save:root=>{const v=readForm(root),nome=v156L(v.v156Nome);
+    if(nome.length<2){toast('Informe o nome da família.','neg');return false;}
+    const ig=v156Fams().find(f=>v156N(f.nome)===v156N(nome));if(ig){toast('Já existe a família "'+ig.nome+'"'+(ig.juntadaEm?' (juntada)':ig.ativo===false?' (inativa: reative-a)':'')+'.','neg');return false;}
+    if(v156Parecidas(nome).length&&V156.simOk!==v156N(nome)){V156.simOk=v156N(nome);const b=$('#v156Sim');if(b)b.innerHTML=v156SimHtml(nome);toast('Nome parecido com família já cadastrada: confira.','neg');return false;}
+    put('prodfam',{id:uid(),nome,desc:v.v156Desc||'',epi:!!v.v156Epi,ativo:true,crPor:actorId(),crEm:Date.now()});toast('Família "'+nome+'" criada.','pos');}});};
+A.v156FamEditar=d=>{const f=get('prodfam',d.id);if(!f)return;if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}
+  modal({title:'Família · '+f.nome,body:v156FamForm(f,false),save:root=>{const v=readForm(root),c=v156Cont().get(f.id)||{a:0,i:0};
+    put('prodfam',Object.assign(cl(f),{desc:v.v156Desc||'',epi:!!v.v156Epi,ativo:!!v.v156Ativa}));
+    toast('Família salva.'+(!v.v156Ativa&&f.ativo!==false&&c.a?' Os '+c.a+' produto(s) dela continuam com a família; ela só deixa de aparecer para escolher.':'')+((f.epi===true)!==!!v.v156Epi?(v.v156Epi?' Os produtos dela passam a entrar na entrega de EPI.':' Os produtos dela deixam de entrar na entrega de EPI.'):''),'pos');}});};
+A.v156FamRenomear=d=>{const f=get('prodfam',d.id);if(!f)return;if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}const c=v156Cont().get(f.id)||{a:0,i:0};
+  modal({title:'Renomear a família '+f.nome,body:'<p style="margin:0 0 8px">O nome muda no cadastro e em <b>'+(c.a+c.i)+' produto(s)</b> da família ('+c.a+' ativo(s), '+c.i+' inativo(s)), de uma vez só: ou tudo, ou nada.</p><div class="fg">'+field('Nome novo *','v156Nome','text',f.nome,{full:true})+'</div><div id="v156Sim"></div>',saveLabel:'Renomear',
+    save:root=>{const nome=v156L(readForm(root).v156Nome);if(nome.length<2){toast('Informe o nome novo.','neg');return false;}if(nome===f.nome){toast('O nome novo é igual ao atual.','neg');return false;}
+      const ig=v156Fams().find(x=>x.id!==f.id&&v156N(x.nome)===v156N(nome));if(ig){toast('Já existe a família "'+ig.nome+'". Para unir as duas, use Juntar famílias.','neg');return false;}
+      v156Renomear(f.id,nome);}});};
+A.v156FamExcluir=d=>{const f=get('prodfam',d.id);if(!f)return;if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}const c=v156Cont().get(f.id)||{a:0,i:0};
+  if(!f.juntadaEm&&(c.a||c.i)){toast('A família tem produtos: use Juntar famílias ou Inativar.','neg');return;}
+  confirmBox('Excluir a família <b>'+esc(f.nome)+'</b>? Nenhum produto usa esta família.',()=>{del('prodfam',f.id);toast('Família excluída.','pos');},'Excluir',true);};
+A.v156FamJuntar=d=>{if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}const at=v156Ativas(),cn=v156Cont();if(at.length<2){toast('É preciso ter ao menos duas famílias ativas.','neg');return;}
+  const dest0=d&&d.id&&get('prodfam',d.id)?d.id:'';
+  const lin=f=>{const c=cn.get(f.id)||{a:0,i:0};return '<label class="f chk full v156-jo" data-fid="'+esc(f.id)+'"><input type="checkbox" data-f="o_'+esc(f.id)+'"'+(dest0&&f.id!==dest0&&v156Parecido(f.nome,get('prodfam',dest0).nome)?' checked':'')+'><span>'+esc(f.nome)+(f.epi?' · EPI':'')+' <span class="sub">('+(c.a+c.i)+' produto(s))</span></span></label>';};
+  modal({title:'Juntar famílias de produto',wide:true,body:'<p class="sub" style="margin:0 0 8px">Escolha a família que fica e marque as repetidas (ex.: "Epi", "EPIs"). Os produtos das marcadas passam para a família que fica, de uma vez só; as marcadas ficam inativas como "juntada" (o histórico fica).</p><div class="fg">'+
+    field('Família que fica *','v156Dest','select',dest0,{opts:at.map(f=>[f.id,f.nome+(f.epi?' · EPI':'')]),blank:'Selecione…',full:true})+field('A família que fica é EPI','v156Epi','checkbox',dest0?get('prodfam',dest0).epi===true:false,{full:true})+
+    '<div class="f full"><span>Juntar na que fica</span><div class="v156-jl">'+at.map(lin).join('')+'</div></div></div><div id="v156JPrev" class="sub"></div>',saveLabel:'Juntar',
+    save:root=>{const v=readForm(root),dest=v.v156Dest,ors=at.filter(f=>f.id!==dest&&v['o_'+f.id]).map(f=>f.id);
+      if(!dest){toast('Escolha a família que fica.','neg');return false;}if(!ors.length){toast('Marque as famílias que serão juntadas na que fica.','neg');return false;}
+      const n=ors.reduce((s,i)=>{const c=cn.get(i)||{a:0,i:0};return s+c.a+c.i;},0),df=get('prodfam',dest);
+      confirmBox('Juntar <b>'+ors.map(i=>esc(get('prodfam',i).nome)).join(', ')+'</b> em <b>'+esc(df.nome)+'</b>? '+n+' produto(s) mudam de família'+(v.v156Epi?'; "'+esc(df.nome)+'" fica marcada "É EPI"':'')+'. As juntadas ficam inativas.',()=>{v156Juntar(dest,ors,!!v.v156Epi);},'Juntar');return false;}});};
+/* a lista do Juntar: a família que fica não aparece entre as marcadas */
+document.addEventListener('change',e=>{const t=e.target;if(!t||t.id!=='f_v156Dest')return;try{const f=get('prodfam',t.value);document.querySelectorAll('.v156-jo').forEach(l=>{l.hidden=l.dataset.fid===t.value;});const ep=document.getElementById('f_v156Epi');if(ep&&f)ep.checked=f.epi===true||[...document.querySelectorAll('.v156-jo input:checked')].some(i=>{const o=get('prodfam',i.dataset.f.slice(2));return o&&o.epi===true;});}catch(x){}});
+A.v156FamMigrar=()=>{if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}const gs=v156Pendentes();if(!gs.length){toast('Todos os nomes de família usados nos produtos já estão no cadastro.','pos');return;}
+  const par=[];for(let i=0;i<gs.length;i++)for(let j=i+1;j<gs.length;j++)if(v156Parecido(gs[i].nome,gs[j].nome))par.push(gs[i].nome+' ~ '+gs[j].nome);
+  v156Fams().forEach(f=>gs.forEach(g=>{if(!f.juntadaEm&&v156Parecido(g.nome,f.nome))par.push(g.nome+' ~ '+f.nome+' (já cadastrada)');}));
+  modal({title:'Criar as famílias a partir dos produtos',wide:true,nofocus:true,body:'<p style="margin:0 0 8px">Cada linha vira uma família. As variações do <b>mesmo nome</b> (maiúsculas, acento, espaços) ficam juntas na mesma linha; nomes diferentes <b>não</b> são juntados aqui. Confira o nome, desmarque o que não quer criar e marque "É EPI" onde for o caso.</p>'+
+    (par.length?'<div class="note warn" style="margin:0 0 8px"><b>Nomes parecidos (não serão juntados):</b> '+esc(par.slice(0,20).join(' · '))+(par.length>20?'…':'')+'. Depois de criar, use <b>Juntar famílias</b> se forem a mesma família.</div>':'')+
+    '<div class="tw"><table class="v156-mig" style="min-width:640px"><thead><tr><th>Criar</th><th>Nome da família</th><th>É EPI</th><th>Como está nos produtos</th><th class="num">Produtos</th></tr></thead><tbody>'+
+    gs.map((g,i)=>'<tr><td><input type="checkbox" data-f="g'+i+'_on" checked aria-label="Criar '+esc(g.nome)+'"></td><td><input type="text" data-f="g'+i+'_nome" value="'+esc(g.nome)+'" style="min-width:180px"></td><td><input type="checkbox" data-f="g'+i+'_epi"'+(g.epi?' checked':'')+' aria-label="É EPI"></td><td>'+g.vars.map(v=>'<span class="mono">'+esc(v[0])+'</span> <span class="sub">('+v[1]+')</span>').join(' · ')+'</td><td class="num">'+g.n+'</td></tr>').join('')+
+    '</tbody></table></div><p class="sub" style="margin:6px 0 0">"É EPI" vem marcado onde o nome é o da família de EPI de Configurações › EPI (ou "EPI", "EPIs", "Equipamento de Proteção Individual"), como a entrega de EPI já considerava.</p>',saveLabel:'Criar famílias',
+    save:root=>{const v=readForm(root),out=[];for(let i=0;i<gs.length;i++){if(!v['g'+i+'_on'])continue;const nome=v156L(v['g'+i+'_nome']);if(nome.length<2){toast('Informe o nome da família na linha de "'+gs[i].nome+'".','neg');return false;}out.push({nome,variantes:gs[i].vars.map(x=>x[0]),epi:!!v['g'+i+'_epi']});}
+      if(!out.length){toast('Nenhuma família marcada para criar.','neg');return false;}v156Migrar(out);}});};
+Object.assign(ACT_GROUP,{v156FamNova:'est',v156FamEditar:'est',v156FamRenomear:'est',v156FamJuntar:'est',v156FamMigrar:'est',v156FamExcluir:'est',v156FamNovaPf:'est',v156FamCriarPf:'est',v156FamUsar:null,v156FamVerProd:null});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v156FamNova:'Cria uma família de produto (avisa se já existe uma parecida).',v156FamEditar:'Descrição, ativa e a marca "É EPI".',v156FamRenomear:'Muda o nome da família e de todos os produtos dela, de uma vez.',v156FamJuntar:'Leva os produtos de famílias repetidas para uma só e inativa as outras.',v156FamMigrar:'Cria as famílias a partir dos nomes já usados nos produtos (com prévia).',v156FamExcluir:'Exclui a família (só sem produtos).',v156FamVerProd:'Abre Cadastros › Produtos filtrado por esta família.',v156FamNovaPf:'Cria uma família sem sair do cadastro do produto.'});
+
+/* ---------- cadastro do produto: família de uma lista com busca ---------- */
+/* opções: sem família, a família atual fora do cadastro/inativa (para não perder), as ativas que batem com a busca e a escolhida */
+function v156FamOpts(atual,qv,cur){const fm=atual?v156FamDe(atual):null,l=v156Ativas(),qq=v156N(qv),def=fm&&fm.ativo!==false&&!fm.juntadaEm?fm.nome:atual,sel=cur===undefined?def:cur;
+  const o=[['','Sem família']];if(atual&&!(fm&&fm.ativo!==false))o.push([atual,atual+(fm?' (inativa)':' (fora do cadastro)')]);
+  l.filter(f=>!qq||v156N(f.nome).includes(qq)||f.nome===sel).forEach(f=>o.push([f.nome,f.nome+(f.epi?' · EPI':'')]));return opt(o,sel);}
+function v156AvisoTxt(atual){const fm=atual?v156FamDe(atual):null,pode=v156PodeFam();
+  if(!v156Fams().length)return 'O cadastro de famílias ainda está vazio. '+(pode?'Crie as famílias em Cadastros › Famílias de produto (Criar a partir dos produtos) ou use "+ Nova família".':'Peça ao Fiscal para criá-las em Cadastros › Famílias de produto.');
+  if(atual&&!fm)return 'A família "'+atual+'" deste produto não está no cadastro de famílias. Escolha uma da lista'+(pode?' ou crie a família (+ Nova família)':'')+'.';
+  if(fm&&fm.ativo===false)return 'A família "'+fm.nome+'" está inativa. Escolha uma família ativa.';
+  if(fm&&v156L(atual)!==fm.nome)return 'No cadastro a família se chama "'+fm.nome+'": ao salvar, o produto fica com esse nome.';
+  return '';}
+function v156FamCampo(p){const atual=v156L(p.familia),pode=v156PodeFam(),av=v156AvisoTxt(atual);
+  return '<div class="f v156-fam" style="grid-column:span 2"><span>Família de produto</span><div class="v156-famrow"><input type="search" id="v156FamQ" placeholder="Buscar família…" aria-label="Buscar família" autocomplete="off"><select data-f="familia" id="f_familia" aria-label="Família de produto">'+v156FamOpts(atual,'')+'</select>'+
+    (pode?'<button type="button" class="btn sm" data-act="v156FamNovaPf">+ Nova família</button>':'')+'</div>'+
+    (pode?'<div id="v156FamNovaBox" class="v156-novabox" hidden><div class="v156-famrow"><input type="text" id="v156FamNovoNome" placeholder="Nome da nova família" aria-label="Nome da nova família"><label class="v156-chk"><input type="checkbox" id="v156FamNovoEpi"> É EPI</label><button type="button" class="btn sm pri" data-act="v156FamCriarPf">Criar</button></div><div id="v156FamNovaSim"></div></div>':'')+
+    '<div id="v156FamAviso" class="v156-aviso"'+(av?'':' hidden')+'>'+esc(av)+'</div></div>';}
+const V156_FAM_RE=/<label class="f" style="grid-column:span 2"><span>Família de produto<\/span><input data-f="familia" id="f_familia" list="pfFamList"[^>]*><\/label>/;
+{const pf0=prodFicha;prodFicha=function(p0){const m0=modal;modal=function(o){modal=m0;try{if(o&&typeof o.body==='string'&&V156_FAM_RE.test(o.body)&&typeof PF!=='undefined'&&PF.p){
+      o=Object.assign({},o,{body:o.body.replace(V156_FAM_RE,()=>v156FamCampo(PF.p)).replace(/<datalist id="pfFamList">[\s\S]*?<\/datalist>/,'')});
+      if(!v156PodeCriarProd()&&typeof o.foot==='string')o.foot=o.foot.replace('<button class="btn" data-act="pfDuplicar">Duplicar</button>','');}}catch(e){}return m0.call(this,o);};
+  try{if(!(p0&&p0.id)&&!v156PodeCriarProd()){modal=m0;toast(V156_SEM_PROD,'neg');return;}return pf0.apply(this,arguments);}finally{if(modal!==m0)modal=m0;}};}
+/* busca: a lista mostra só as famílias que batem; a primeira que bate fica escolhida (a escolhida antes continua na lista) */
+function v156FamFiltra(){const s=document.getElementById('f_familia'),q=document.getElementById('v156FamQ');if(!s||!q)return;const cur=s.value,atual=PF&&PF.p?v156L(PF.p.familia):'',qq=v156N(q.value);
+  s.innerHTML=v156FamOpts(atual,q.value,cur);s.value=cur;
+  if(qq&&!v156N(cur).includes(qq)){const f=v156Ativas().find(x=>v156N(x.nome).includes(qq));if(f){s.value=f.nome;s.dispatchEvent(new Event('change',{bubbles:true}));}}}
+function v156FamAviso(){const s=document.getElementById('f_familia'),b=document.getElementById('v156FamAviso');if(!s||!b)return;const t=v156AvisoTxt(s.value);b.textContent=t;b.hidden=!t;}
+document.addEventListener('input',e=>{const t=e.target;if(!t)return;if(t.id==='v156FamQ')v156FamFiltra();else if(t.id==='v156FamNovoNome'){const b=document.getElementById('v156FamNovaSim');if(b){V156.simOk='';const l=v156Parecidas(t.value);b.innerHTML=l.length&&v156L(t.value).length>=2?v156SimPf(t.value,l):'';}}});
+document.addEventListener('change',e=>{const t=e.target;if(t&&t.id==='f_familia')v156FamAviso();});
+function v156SimPf(nome,l){return '<div class="note warn" style="margin:6px 0 0">Parecida com: '+l.map(f=>'<button type="button" class="btn sm" data-act="v156FamUsar" data-n="'+esc(f.nome)+'"'+(f.ativo===false?' disabled title="Inativa"':'')+'>Usar "'+esc(f.nome)+'"</button>').join(' ')+' <span class="sub">ou clique em Criar de novo para criar "'+esc(v156L(nome))+'" mesmo assim.</span></div>';}
+A.v156FamNovaPf=()=>{if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}const b=document.getElementById('v156FamNovaBox');if(!b)return;b.hidden=!b.hidden;if(!b.hidden){const i=document.getElementById('v156FamNovoNome');if(i&&i.focus)i.focus();}};
+function v156SelFam(nome){const s=document.getElementById('f_familia'),q=document.getElementById('v156FamQ');if(q)q.value='';if(!s)return;const atual=PF&&PF.p?v156L(PF.p.familia):'';s.innerHTML=v156FamOpts(atual,'');s.value=nome;s.dispatchEvent(new Event('change',{bubbles:true}));v156FamAviso();}
+A.v156FamUsar=d=>{v156SelFam(d.n);const b=document.getElementById('v156FamNovaBox');if(b)b.hidden=true;};
+A.v156FamCriarPf=()=>{if(!v156PodeFam()){toast(V156_SEM_FAM,'neg');return;}const i=document.getElementById('v156FamNovoNome'),ep=document.getElementById('v156FamNovoEpi'),nome=v156L(i&&i.value);
+  if(nome.length<2){toast('Informe o nome da nova família.','neg');return;}
+  const ig=v156Fams().find(f=>v156N(f.nome)===v156N(nome));if(ig){if(ig.ativo!==false&&!ig.juntadaEm){v156SelFam(ig.nome);toast('A família "'+ig.nome+'" já existe e foi escolhida.','pos');}else toast('Já existe a família "'+ig.nome+'" (inativa'+(ig.juntadaEm?' / juntada':'')+'): reative-a em Cadastros › Famílias de produto.','neg');return;}
+  const l=v156Parecidas(nome);if(l.length&&V156.simOk!==v156N(nome)){V156.simOk=v156N(nome);const b=document.getElementById('v156FamNovaSim');if(b)b.innerHTML=v156SimPf(nome,l);toast('Nome parecido com família já cadastrada: confira.','neg');return;}
+  put('prodfam',{id:uid(),nome,desc:'',epi:!!(ep&&ep.checked),ativo:true,crPor:actorId(),crEm:Date.now()});memo.v156m=null;
+  if(!v156FamDe(nome)){return;} /* recusado (a gravação já avisou) */
+  V156.simOk='';if(i)i.value='';const b=document.getElementById('v156FamNovaBox');if(b)b.hidden=true;const sb=document.getElementById('v156FamNovaSim');if(sb)sb.innerHTML='';
+  v156SelFam(v156FamDe(nome).nome);toast('Família "'+nome+'" criada e escolhida. Clique em Salvar no produto.','pos');};
+{const css='.v156-famrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}.v156-famrow input[type=search]{flex:0 1 150px;min-width:110px}.v156-famrow select{flex:1 1 170px;min-width:0}.v156-famrow input[type=text]{flex:1 1 160px;min-width:0}.v156-novabox{margin-top:6px;padding:8px;border:1px dashed var(--line);border-radius:6px}.v156-aviso{margin-top:4px;font-size:12px;color:var(--warn,#9a6700)}.v156-chk{display:flex;gap:4px;align-items:center;font-size:12px;white-space:nowrap}.v156-jl{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;max-height:320px;overflow:auto}.v156-tab td.act .btn{margin:2px}';
+  try{if(document.head&&document.head.insertAdjacentHTML)document.head.insertAdjacentHTML('beforeend','<style>'+css+'</style>');}catch(e){}}
+
+/* ---------- família EPI pela marca "É EPI" (v154: entrega, Estoque de EPI, unificação) ---------- */
+/* v154Fam/v154EhFamEpi passam por v156FamEpiNome/v156FamEhEpi (troca feita no patch138.py) */
+
+/* ---------- Almoxarife: sem cadastro de produto ---------- */
+{const n0=A.novoProd;A.novoProd=function(){if(!v156PodeCriarProd()){toast(V156_SEM_PROD,'neg');return;}return n0.apply(this,arguments);};}
+{const d0=A.pfDuplicar;A.pfDuplicar=function(){if(!v156PodeCriarProd()){toast(V156_SEM_PROD,'neg');return;}return d0.apply(this,arguments);};}
+if(V.cadprod){const v0=V.cadprod;V.cadprod=function(){let h=v0.apply(this,arguments);
+  if(!v156PodeCriarProd())h=h.replace('<button class="btn pri" data-act="novoProd">Novo produto</button>',mayW('est')?'<span class="sub" title="'+esc(V156_SEM_PROD)+'">Produto novo: o Fiscal cadastra</span>':'');
+  try{const pend=v156Pendentes().length;const i=h.indexOf('<div class="kpis">');if(i>=0&&(mayR('cad')||me.owner))h=h.slice(0,i)+'<div class="sub" style="margin:0 0 -4px">Famílias: <a href="#cadfam" data-act="nav" data-tab="cadfam">Cadastros › Famílias de produto</a>'+(pend?' · <span class="warn">'+pend+' nome(s) de família fora do cadastro</span>':'')+'</div>'+h.slice(i);}catch(e){}
+  return h;};}
+/* atalhos que abriam o Novo produto (Controle de EPI, pedido de compra): só para quem cadastra */
+{const c0=v155IrCadProd;v155IrCadProd=function(pre){if(pre&&!v156PodeCriarProd())pre=null;return c0.call(this,pre);};}
+A.epiEstNovo=()=>{if(!v156PodeCriarProd()){toast(V156_SEM_PROD,'neg');return;}v155IrCadProd({familia:v154Fam()});};
+function v156EpiBtn(h){if(typeof h!=='string'||v156PodeCriarProd())return h;return h.replace(/<button class="btn sm" data-act="epiEstNovo"[^>]*>[^<]*<\/button>/g,'');}
+['epi','epiest'].forEach(t=>{if(typeof V[t]==='function'){const v0=V[t];V[t]=function(){return v156EpiBtn(v0.apply(this,arguments));};}});
+if(typeof v154EpiTop==='function'){const t0=v154EpiTop;v154EpiTop=function(){return v156EpiBtn(t0.apply(this,arguments));};}
+try{if(MODS2.epi&&typeof MODS2.epi.top==='function'){const t1=MODS2.epi.top;MODS2.epi.top=function(){return v156EpiBtn(t1.apply(this,arguments));};}}catch(e){}
+/* nota de entrada: sem "+ Criar produto ao lançar" para o Almoxarife; item que já veio marcado (XML sem produto) fica para o Fiscal criar ao lançar */
+{const r0=itemRow;itemRow=function(it,i){let h=r0.apply(this,arguments);if(v156PodeCriarProd()||!v155Restrito())return h;
+  return it&&it.prodId==='__new'?h.replace(/>\+ Criar produto ao lançar</,'>Produto sem cadastro (o Fiscal cria ao lançar)<'):h.replace(/<option value="__new"[^>]*>\+ Criar produto ao lançar<\/option>/,'');};}
+/* "+ Novo › Produto" e Ctrl+K "Novo produto" exigem gravar Cadastros (cad): o Almoxarife já não os vê */
+
+/* ---------- Configurações › EPI: a família vem da marca "É EPI" ---------- */
+{const v0=V.cfg;V.cfg=function(){let h=v0.apply(this,arguments);try{if(h.indexOf('id="v154CfgEpi"')<0||!v156Fams().length)return h;
+  const l=v156Ativas().filter(f=>f.epi===true),c=cfg()||{};
+  const box='<div class="f full" id="v156CfgFam"><span>Famílias de EPI (marca "É EPI" em Cadastros › Famílias de produto)</span><div>'+(l.length?l.map(f=>pill(f.nome,'acc')).join(' '):'<span class="warn">Nenhuma família marcada "É EPI": a entrega de EPI não terá produtos.</span>')+' <button type="button" class="btn sm" data-act="nav" data-tab="cadfam">Cadastros › Famílias de produto</button></div><input type="hidden" id="f_v154Fam" value="'+esc(c.epiFamilia||'')+'"></div>';
+  h=h.replace(/<label class="f"><span>Família dos EPI no cadastro de produtos<\/span><input[^>]*><\/label>/,box)
+    .replace('A entrega de EPI usa os produtos desta família (também vale "EPI" e "Equipamento de Proteção Individual").','A entrega de EPI usa os produtos das famílias marcadas "É EPI" no cadastro de famílias.');}catch(e){}return h;};}
+{const s0=A.v154CfgSalvar;A.v154CfgSalvar=function(){const i=$('#f_v154Fam');if(i&&i.type==='hidden'){const a=($('#f_v154Hig')||{}).value;put('cfg',Object.assign({},cfg(),{id:'empresa',epiHigAlmox:a||''}));toast('Configuração de EPI salva.','pos');render();return;}return s0.apply(this,arguments);};}
+
+/* ---------- quadro "Quem faz o quê no Estoque" (v155) ---------- */
+try{const i=V155_REGRAS.findIndex(r=>r[0]==='Editar produto');
+  V155_REGRAS.splice(i>=0?i:4,0,['Cadastrar produto','Fiscal e Administrador','Em Cadastros › Produtos ou na entrada da nota fiscal ("Criar produto ao lançar"). O Almoxarife não cadastra: pede ao Fiscal'],
+    ['Famílias de produto','Fiscal e Administrador','Criar, renomear (muda em todos os produtos), juntar repetidas e marcar "É EPI" em Cadastros › Famílias de produto. O Almoxarife escolhe a família do produto entre as cadastradas']);
+  const e=V155_REGRAS.find(r=>r[0]==='Editar produto');if(e)e[1]=e[1].replace('mínimo, família, lote','mínimo, família (da lista do cadastro), lote');}catch(e){}
+{const p0=v155Pode;v155Pode=function(){const o=p0.apply(this,arguments);if(!mayW('est'))return o;
+  if(v156PodeCriarProd())o.splice(Math.max(0,o.length-1),0,'cadastrar produto'+(v156PodeFam()?' e família':''));else o.splice(Math.max(0,o.length-1),0,'não cadastra produto nem família (escolhe a família da lista)');return o;};}
+{const f0=v155FichaAjusta;v155FichaAjusta=function(o){o=f0.apply(this,arguments);try{if(o&&typeof o.body==='string')o=Object.assign({},o,{body:o.body.replace('estoque mínimo, família, controle de lote','estoque mínimo, família (da lista do cadastro), controle de lote')
+  .replace('<li><b>Fiscal</b> e <b>Administrador</b>: tudo,','<li><b>Cadastrar produto e família</b>: só o Fiscal e o Administrador (o Almoxarife escolhe a família entre as cadastradas).</li><li><b>Fiscal</b> e <b>Administrador</b>: tudo,')});}catch(e){}return o;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='155',APP_DATA='2026-11-04';
+const APP_VER='156',APP_DATA='2026-11-04';
 const CHANGELOG=[
+  ['156','2026-11-04',['Cadastros › Famílias de produto: cadastro das famílias com descrição, ativa/inativa e a marca "É EPI"; mostra quantos produtos cada família tem e tem busca.', 'Renomear uma família muda o nome em todos os produtos dela de uma vez. Juntar famílias repetidas (ex.: "Epi" e "EPIs") leva os produtos para uma só e inativa as outras.', 'Criar a partir dos produtos: as famílias já digitadas nos produtos viram o cadastro, com prévia para conferir; variações do mesmo nome (maiúsculas, acento, espaços) ficam juntas e nomes diferentes não são juntados.', 'No cadastro do produto a família é escolhida de uma lista com busca. Quem cadastra família tem "+ Nova família" ali mesmo, com aviso de nome parecido. Produto com família fora do cadastro mostra aviso.', 'O Almoxarife não cadastra produto nem família (sem Novo produto, Duplicar, + Nova família e Criar produto ao lançar). Ele continua editando prateleira, mínimo, dados de EPI e escolhe a família entre as cadastradas. O servidor confere.', 'Entrega de EPI e Estoque de EPI usam a marca "É EPI" da família (Configurações › EPI mostra quais famílias estão marcadas).']],
   ['155','2026-11-04',['Estoque: movimento não se exclui mais (nem pelo administrador). Lançamento errado se desfaz com Estornar no Histórico do produto: entra o movimento contrário ligado ao original, com motivo, quem e quando; o original fica marcado como estornado e um estorno não se estorna de novo.', 'Entrada manual e baixa manual pedem o motivo (doação, devolução de obra sem romaneio, sobra de inventário; perda, consumo interno, descarte; ou outro, descrito). Nota, romaneio, separação, EPI, higienização, fábrica e inventário continuam sem pedir motivo.', 'O botão Ajuste do Estoque virou proposta de ajuste de inventário: até o limite por item (R$ 300) entra na hora; acima, outra pessoa aprova em Ajustes de inventário.', 'Cancelar nota fiscal e desfazer recebimento estornam o estoque (antes apagavam os movimentos).', 'Cadastro de produto: o Almoxarife altera prateleira, mínimo, família, lote, dados de EPI, observações e imagem; preço, NCM, dados fiscais e unidade tributável ficam com o Fiscal (o servidor recusa).', 'Excluir produto: só o Administrador e só produto sem nenhum histórico; com histórico, use Inativar.', 'Estoque e Cadastros › Produtos mostram o quadro Quem faz o quê no Estoque e o que o seu perfil pode fazer.', 'Produto novo nasce só em Cadastros › Produtos ou na entrada da nota fiscal: Controle de EPI e o pedido de compra levam para Cadastros › Produtos.', 'Estoque: os botões da linha quebram dentro da célula (o Histórico não passa mais da tabela).']],
   ['154.1','2026-11-04',['Cadastro de produto: os campos de EPI (Nº do CA, Validade do CA, Tamanho/variação e Vida útil) ficam numa faixa própria abaixo de Código NCM e Família, em colunas que se ajustam à tela. Aparecem só quando a família é EPI e somem ao trocar a família.', 'Estoque: saiu o botão Novo produto. Produto novo nasce na entrada da nota fiscal (quando o item não tem produto) ou em Cadastros › Produtos.']],
   ['154','2026-11-04',['Estoque: a busca espera você parar de digitar (Enter busca na hora), procura por código, descrição, família, NCM, prateleira e código do fornecedor, e mostra os 100 primeiros com o total encontrado e Mostrar mais. Notas, Pedidos e Produtos também esperam a digitação.', 'Estoque com a coluna Família e o filtro por família (a Família de produto do cadastro).', 'Entrega de EPI pelo cadastro de produtos: escolha o EPI da família EPI com saldo no seu almoxarifado (saldo, tamanho e CA na lista). Ao salvar, a saída do estoque é registrada junto, para a obra do colaborador; sem saldo, a entrega é recusada.', 'Devolução e troca de EPI: em condição de uso o EPI vai para a higienização (não volta direto ao estoque); descarte fica só na ficha; a troca registra a devolução e a nova entrega no mesmo ato. A ficha NR-6 mostra o destino.', 'Nova tela Higienização de EPI: aguardando envio, transferência por romaneio para o almoxarifado de Tuiuti, em higienização, higienizado (volta ao estoque) ou reprovado, com indicadores, ações em lote e exportação.', 'Configurações › EPI: nome da família dos EPI e almoxarifado de higienização; botão para unificar uma vez o estoque de EPI com o cadastro de produtos (com relatório).', 'Matriz de treinamentos: botão Lançar renovação em cada NR vencida, a vencer ou que falta (abre Documentos e ASO já com o colaborador, a NR e a validade sugerida, com anexo do certificado) e renovação em lote para várias pessoas com a mesma NR.']],
