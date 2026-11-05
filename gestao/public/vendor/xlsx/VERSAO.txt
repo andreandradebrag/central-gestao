@@ -1,0 +1,1 @@
+SheetJS 0.20.3 (cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js) sha512-AXreDm/maQt99+BKeuV5VUY8x0xBAZPX6OYenHRlRwG/C35PKcZ7GQXITTR8Zf3cLHeTfwVDLEMBBPf7laKtAA==
