@@ -982,6 +982,33 @@ observações) passa. Recusa: erro 409, registrada na auditoria como `MEDICAO_AC
 **O que fazer:** subir `gestao/demanda161.js` (novo), `regras.js`, `Dockerfile`, `perfis.json` e `public/index.html` e
 **reconstruir** a imagem do serviço `gestao`. Nada a configurar; nada muda no banco.
 
+## Importar medições de PDF com IA (v162)
+
+Detalhes em `relatorios/feito_v162.md`. Usa a IA que o servidor já tem (`ANTHROPIC_API_KEY`); **nenhuma chave nova**. O
+modelo usado é o "complex" (`ANTHROPIC_MODEL_COMPLEX`, padrão `claude-opus-5-5`).
+
+**No navegador** (página `public/index.html`):
+- **Importar medições de PDF**: no rodapé do detalhe do contrato e em Obras › Medições ao cliente (escolha o contrato no
+  filtro). Escolha um ou vários PDFs do mesmo contrato (um boletim por arquivo, até 20 MB e 50 páginas cada);
+- cada PDF vira uma medição em **rascunho**, com o PDF anexado. Nada é aprovado sozinho; enquanto a importação não for
+  revisada, a medição não tem itens (não conta no medido nem no teto) e não pode ser enviada para aprovação;
+- **Revisar importação**: o PDF ao lado das linhas lidas. Alertas: item fora do contrato, preço diferente do contrato,
+  quantidade acima do contratado (quantidade fixa) ou do teto (sob demanda, v161), total ≠ quantidade × preço. Dá para
+  trocar o item do contrato, corrigir a quantidade e remover a linha. Aviso quando já existe medição com o mesmo número ou
+  o mesmo período;
+- **Aprovar e criar medição** grava os itens com o preço do contrato; a medição continua em rascunho e segue o fluxo de
+  sempre (Enviar para aprovação → Comercial aprova). **Descartar** apaga o rascunho e o PDF.
+
+**No servidor**:
+- arquivo novo `iamed162.js` (rota `POST /api/ia/medicao-pdf`), ligado em `server.js` e `regras.js` (`v162/ed_v162.py`);
+- vai para a IA **só o PDF e a lista de itens do contrato** (código, descrição, unidade, preço). Uma chamada por PDF, no
+  mesmo limite por hora da `/api/ia`. Sem a chave, o sistema avisa que a IA não está configurada;
+- quem pode: quem cria medição no contrato. Auditoria: `IA_USO` (como antes, sem conteúdo), `MEDICAO_PDF_IA` (contrato,
+  anexo, páginas, tamanho) e `MEDICAO_PDF_APROVADA`; quem importou e quem aprovou ficam carimbados na medição (`imp162`).
+
+**Para subir**: copie `gestao/iamed162.js` (novo), `server.js`, `regras.js`, `Dockerfile` e `public/index.html` e reconstrua a
+imagem do serviço `gestao`. O banco não muda.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

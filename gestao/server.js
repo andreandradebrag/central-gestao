@@ -514,14 +514,16 @@ function zipEntradas(arq) {
 }
 
 /* ---------------- IA (opcional) ---------------- */
-async function ia(corpo) {
+async function ia(corpo, opc) { /* v162: opc só vem do servidor (iamed162.js): docs = PDFs em base64 (blocos "document"), tier = modelo fixo */
+  opc = opc || {};
   if (!AI_KEY) throw { st: 503, msg: 'IA não configurada no servidor.' };
   let msgs = Array.isArray(corpo.input) ? corpo.input.map(m => ({ role: m.role, content: String(m.content) })) : [{ role: 'user', content: String(corpo.input || '') }];
   if (Array.isArray(corpo.images) && corpo.images.length) {
     const ult = msgs[msgs.length - 1];
     ult.content = corpo.images.slice(0, 8).map(im => ({ type: 'image', source: { type: 'base64', media_type: im.type || 'image/png', data: im.data } })).concat([{ type: 'text', text: ult.content }]);
   }
-  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' }, process.env.ANTHROPIC_WORKSPACE_ID ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID } : {}), body: JSON.stringify({ model: AI_MODELS[corpo.nivel < NIV.admin && corpo.modelTier === 'complex' ? 'default' : corpo.modelTier] || AI_MODELS.default, max_tokens: 16000, messages: msgs }) });
+  if (Array.isArray(opc.docs) && opc.docs.length) { const ult = msgs[msgs.length - 1]; ult.content = opc.docs.map(d => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d } })).concat(Array.isArray(ult.content) ? ult.content : [{ type: 'text', text: ult.content }]); } /* v162 */
+  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' }, process.env.ANTHROPIC_WORKSPACE_ID ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID } : {}), body: JSON.stringify({ model: (opc.tier && AI_MODELS[opc.tier]) || AI_MODELS[corpo.nivel < NIV.admin && corpo.modelTier === 'complex' ? 'default' : corpo.modelTier] || AI_MODELS.default, max_tokens: 16000, messages: msgs }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw { st: r.status === 429 ? 429 : 502, msg: (j.error && j.error.message) || 'Falha na IA.', code: r.status === 429 ? 'rate_limited' : 'upstream_error' };
   return { text: (j.content || []).filter(c => c.type === 'text').map(c => c.text).join(''), truncated: j.stop_reason === 'max_tokens' };
@@ -969,7 +971,7 @@ async function rotear(req, res) {
       res.writeHead(st, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(st === 502 ? JSON.stringify({ erro: 'Consulta indisponível (' + r.status + ').' }) : corpo);
     } catch (e) { return json(res, 502, { erro: 'Consulta indisponível agora.' }); }
   }
-  if (p === '/api/ia' && m === 'POST') {
+  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf') && m === 'POST') { /* v162: a leitura de PDF de medição conta no mesmo limite */
     if (NIV[conta.nivel] < NIV.interact) return json(res, 403, { code: 'not_granted', erro: 'Sem permissão para usar a IA.' });
     const ui0 = usoIa.get(conta.id) || { n: 0, ini: Date.now() }; if (Date.now() - ui0.ini > 3600e3) { ui0.n = 0; ui0.ini = Date.now(); } ui0.n++; usoIa.set(conta.id, ui0);
     if (ui0.n > (NIV[conta.nivel] >= NIV.admin ? 120 : 30)) return json(res, 429, { code: 'rate_limited', erro: 'Limite de uso da IA nesta hora atingido.' });
@@ -977,6 +979,7 @@ async function rotear(req, res) {
   if (p === '/api/ia' && m === 'POST') { /* v112 (B9): o uso fica na auditoria (quem, quando, função, tamanho), sem o conteúdo */
     let corpo = {}; try { corpo = await lerJson(req); const r = await ia(Object.assign({}, corpo, { nivel: NIV[conta.nivel] })); REG.auditarIa(conta, req, corpo, true); return json(res, 200, r); }
     catch (e) { REG.auditarIa(conta, req, corpo, false, e.msg || e.message); return json(res, e.st || 500, { code: e.code || (e.st === 503 ? 'capability_disabled' : 'upstream_error'), erro: e.msg || 'Falha na IA.' }); } }
+  if (p === '/api/ia/medicao-pdf' && m === 'POST') return C162.rota(conta, req, res); /* v162: medição lida de PDF (iamed162.js) */
   /* v114: perfil personalizado usa as integrações pelo módulo: ponto (com dados de RH), contas bancárias (com dados bancários), notas fiscais */
   const dcu = defConta(conta), cu = dcu && dcu.custom ? dcu : null, cuW = g => !!cu && cu.w.includes(g), cuR = g => !!cu && (cu.w.includes(g) || cu.r.includes(g));
   if (p.startsWith('/api/solides/') && !perfilEm(conta, ['admin', 'rh']) && !(cuW('ponto') && cu.sensRh)) return json(res, 403, { code: 'not_granted', erro: 'Seu perfil não permite usar a integração de ponto.' });
@@ -1075,6 +1078,7 @@ const bancosRota = require('./bancos.js')({ q, db, avisarDoc, json, lerJson, NIV
 const ARQF = require('./arquivofiscal.js')({ db, q, json, lerCorpo, avisarDoc, perfilDe, papelDe, PERM, END, DATA, uid, FISCAL_URL, FISCAL_TOKEN, auditar: (...a) => REG.auditar(...a) });
 /* ===== fim v129 ===== */
 /* ===== v130: leitura da caixa nfe@ (Microsoft 365 / Graph): NF-e anexadas vão para o arquivo fiscal (origem "email") ===== */
+const C162 = require('./iamed162.js')({ fn: () => ({ ia, json, lerJson, REG, q, DATA, pode, perfilPermite, gravacaoPermitida, MODO_GRAV, podeVer }) }); /* v162: medições lidas de PDF pela IA */
 S160 = require('./sinc160.js')({ db, q, perfilDe: c => perfilDe(c), PERM, podeVer, redigir }); /* v160: revisão por gravação, marcas de exclusão e época por pessoa */
 const CAIXA = require('./caixanfe.js')({ db, json, lerCorpo, perfilDe, papelDe, uid, ARQF, auditar: (...a) => REG.auditar(...a) });
 /* ===== fim v130 ===== */

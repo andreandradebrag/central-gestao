@@ -31962,9 +31962,201 @@ function v161Painel(c){const t=v161Teto(c),os=v161OsDe(c.id),ed=mayW('ctr'),top=
   S.ctr.filter(v161Demanda).forEach(c=>{const t=v161Teto(c),k='<b>'+esc(c.numero)+'</b><div class="sub v132-cl2">';const i=h.indexOf(k);if(i<0)return;
     h=h.slice(0,i)+'<b>'+esc(c.numero)+'</b> '+pill('Sob demanda','acc')+' <span class="sub">'+(t.pct==null?'':pctV(t.pct)+' do teto')+'</span><div class="sub v132-cl2">'+h.slice(i+k.length);});}catch(e){}return h;};}
 
+/* ===== v162: importar medições de PDF com IA (relatorios/feito_v162.md) =====
+   - "Importar medições de PDF" no detalhe do contrato e em Obras › Medições ao cliente (com o contrato escolhido no filtro).
+     Um ou vários PDFs do mesmo contrato; cada PDF vai guardado como anexo (armazenamento de sempre) e é lido pela IA do
+     servidor (POST /api/ia/medicao-pdf, deploy/gestao/iamed162.js: uma chamada por PDF, modelo "complex"; vai só o PDF e a
+     lista de itens do contrato). Limites: 20 MB e 50 páginas por PDF (conferidos aqui e no servidor).
+   - Cada PDF vira uma medição em RASCUNHO (campo imp162, st 'revisar'), com o PDF anexado e as linhas lidas guardadas em
+     imp162.linhas; os itens da medição ficam vazios até a revisão, então nada conta no medido nem no teto antes disso.
+   - Revisão: o PDF ao lado das linhas lidas. Cada linha é marcada quando o item não está no contrato, o preço lido difere do
+     contrato, a quantidade passa do contratado (quantidade fixa) ou do teto (sob demanda, regras da v161) e quando o total
+     lido não bate com quantidade × preço. Corrige-se a quantidade, troca-se o item do contrato, remove-se a linha; "Aprovar e
+     criar medição" grava os itens (valor = quantidade × preço do contrato) e a medição continua em rascunho, no fluxo de
+     sempre (enviar para aprovação → Comercial aprova). "Descartar" apaga o rascunho e o PDF. Aviso de medição repetida
+     (mesmo número ou mesmo período). Quem importou e quem aprovou a importação: carimbados pelo servidor.
+   Prefixos: v162*, V162*. */
+const V162={MAX_MB:20,MAX_PAG:50,rev:null,ocup:false,
+  FL:{item:['item fora do contrato','neg'],preco:['preço diferente do contrato','warn'],acima:['passa do contratado','neg'],teto:['passa do teto','neg'],total:['total ≠ qtd × preço','warn']}};
+const v162Imp=m=>m&&m.imp162&&typeof m.imp162==='object'?m.imp162:null;
+const v162Pend=m=>{const i=v162Imp(m);return !!i&&i.st!=='aprovada'&&(m.status||'rascunho')==='rascunho';};
+/* páginas do PDF (mesma conta do servidor): objetos /Type /Page e o maior /Count */
+function v162Paginas(u8){let s='';for(let i=0;i<u8.length;i+=32768)s+=String.fromCharCode.apply(null,u8.subarray(i,Math.min(u8.length,i+32768)));
+  const a=(s.match(/\/Type\s*\/Page(?![A-Za-z])/g)||[]).length;let b=0;const re=/\/Count\s+(\d+)/g;let m;while((m=re.exec(s)))b=Math.max(b,+m[1]);return Math.max(a,b);}
+const v162Norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const v162Cod=s=>String(s==null?'':s).trim().toLowerCase().replace(/^item\s*/,'').replace(/\.+$/,'').replace(/(^|\.)0+(?=\d)/g,'$1');
+/* item do contrato da linha lida: pelo código (o que a IA indicou) ou pela descrição mais parecida */
+function v162Mapa(c,x){const it=ctrItens(c);if(!it.length)return -1;
+  const k=v162Cod(x.item);if(k){const i=it.findIndex(y=>v162Cod(y.item)===k);if(i>=0)return i;}
+  const pal=s=>new Set(v162Norm(s).split(' ').filter(w=>w.length>2)),a=pal(x.desc);if(!a.size)return -1;
+  let best=-1,bs=0;it.forEach((y,i)=>{const b=pal(y.desc);if(!b.size)return;let n=0;a.forEach(w=>{if(b.has(w))n++;});const s=n/(a.size+b.size-n);if(s>bs){bs=s;best=i;}});
+  return bs>=0.5?best:-1;}
+const v162Num=v=>v===''||v==null||!isFinite(+v)?null:+v;
+function v162Linhas(c,d){return (d&&Array.isArray(d.itens)?d.itens:[]).map((x,i)=>{const l={k:'l'+i,item:String(x.item||''),desc:String(x.descricao||''),un:String(x.un||''),qtd:v162Num(x.qtd),pu:v162Num(x.pu),total:v162Num(x.total)};l.idx=v162Mapa(c,l);return l;});}
+/* marcas de cada linha, valor da medição e o que impede aprovar */
+function v162Avalia(c,m,ls){
+  const it=ctrItens(c),tem=it.length>0,dem=typeof v161Demanda==='function'&&v161Demanda(c),outras=medsDe(c.id).filter(x=>x.id!==m.id&&x.status!=='rascunho');
+  const ant=i=>sum(outras,x=>sum((x.itens||[]).filter(y=>+y.idx===i),y=>+y.qtd||0)),acum={},t0=dem?v161Teto(c,0,m.id):null;let run=0;
+  const linhas=(ls||[]).map(l0=>{const l=Object.assign({},l0,{fl:[]}),q=+l.qtd||0,y=tem&&l.idx>=0?it[l.idx]:null,puL=v162Num(l.pu);
+    if(tem&&!y)l.fl.push('item');
+    if(y&&puL!=null&&Math.abs(puL-(+y.pu||0))>0.005)l.fl.push('preco');
+    const puT=puL!=null?puL:(y?(+y.pu||0):null);
+    if(v162Num(l.total)!=null&&puT!=null&&Math.abs(+l.total-r2(q*puT))>Math.max(0.02,Math.abs(+l.total)*0.0005))l.fl.push('total');
+    l.valor=y?r2(q*(+y.pu||0)):tem?0:(v162Num(l.total)!=null?r2(+l.total):r2(q*(puL||0)));
+    if(y&&!dem){acum[l.idx]=(acum[l.idx]||0)+q;const qc=+y.qtd||0;if(qc&&ant(l.idx)+acum[l.idx]>qc*1.0001)l.fl.push('acima');}
+    run=r2(run+l.valor);
+    if(dem&&t0&&l.valor>0&&r2(t0.med+run)>t0.lim+0.01)l.fl.push('teto');
+    return l;});
+  const valor=r2(run),bloq=[];
+  if(!tem&&!dem&&ctrAtual(c)>0&&r2(ctrMedido(c)+valor)>r2(ctrAtual(c))+0.01)bloq.push('O valor ('+money(valor)+') passa do saldo do contrato ('+money(r2(ctrAtual(c)-ctrMedido(c)))+'). Faça um aditivo antes.');
+  if(linhas.some(l=>l.fl.includes('item')&&(+l.qtd||0)>0))bloq.push('Há linhas sem item do contrato: escolha o item ou remova a linha.');
+  if(linhas.some(l=>(+l.qtd||0)<0))bloq.push('Há quantidade negativa.');
+  if(linhas.some(l=>l.fl.includes('acima')))bloq.push('Há itens que passariam de 100% do contratado. Corrija a quantidade ou faça um aditivo antes.');
+  if(linhas.some(l=>l.fl.includes('teto')))bloq.push('Com estas quantidades o medido passa do '+(t0&&t0.acr25?'limite de 125% do teto':'teto')+' do contrato ('+money(t0?t0.lim:0)+'). Reduza a medição ou faça um aditivo de valor.');
+  if(!(valor>0))bloq.push('A medição está sem valor.');
+  return {linhas,valor,bloq,teto:dem?v161Teto(c,valor,m.id):null};}
+/* medição repetida: mesmo número ou mesmo período, no mesmo contrato */
+function v162Dups(c,m){const o=[];medsDe(c.id).filter(x=>x.id!==m.id&&!x.ex).forEach(x=>{
+  if(String(x.numero)===String(m.numero))o.push('Já existe a medição nº '+x.numero+' neste contrato ('+fmtDate(x.ini)+' a '+fmtDate(x.fim)+').');
+  else if(x.ini&&x.fim&&x.ini===m.ini&&x.fim===m.fim)o.push('A medição nº '+x.numero+' já cobre o mesmo período ('+fmtDate(x.ini)+' a '+fmtDate(x.fim)+').');});return o;}
+/* rascunho montado com o que a IA leu */
+function v162MontaMed(c,d,up,nome,pags){const ms=medsDe(c.id),u=ms.filter(x=>+x.numero).sort((a,b)=>(+a.numero)-(+b.numero)).pop(),p=(d&&d.periodo)||{};
+  const ok=s=>/^\d{4}-\d{2}-\d{2}$/.test(String(s||''));
+  const num=/^\d{1,6}$/.test(String(d&&d.numero||'').trim())?+String(d.numero).trim():(u?+u.numero||0:0)+1;
+  const ini=ok(p.ini)?p.ini:(u&&u.fim?addDays(u.fim,1):(c.vigIni||todayStr())),fim=ok(p.fim)&&p.fim>=ini?p.fim:(ini>todayStr()?ini:todayStr());
+  const duv=(d&&Array.isArray(d.duvidas)?d.duvidas:[]).slice();if(!ok(p.ini)||!ok(p.fim))duv.push('Período não lido no PDF: confira o início e o fim.');
+  if(!/^\d{1,6}$/.test(String(d&&d.numero||'').trim()))duv.push('Número da medição não lido no PDF: foi usado o próximo número ('+num+').');
+  return {id:uid(),ctrId:c.id,numero:num,ini,fim,reajPct:'',valor:'',itens:[],status:'rascunho',obs:'Importada do PDF '+String(nome||'').slice(0,100),
+    anexos:[{id:up.id,nome:String(nome||'medicao.pdf').slice(0,120),tipo:'medicao',tam:up.sizeBytes,ct:up.contentType||'application/pdf',por:actorId(),em:Date.now()}],
+    imp162:{st:'revisar',arq:{id:up.id,nome:String(nome||'medicao.pdf').slice(0,120),paginas:pags||null},porImp:actorId(),emImp:Date.now(),
+      ia:{numero:String(d&&d.numero||''),periodo:String(p.texto||''),data:String(d&&d.data||''),total:v162Num(d&&d.total),duvidas:duv.slice(0,30)},linhas:v162Linhas(c,d)}};}
+/* gravação com a resposta do servidor (para mostrar a recusa, por exemplo o teto); sem servidor próprio, put de sempre */
+async function v162Grava(rec){
+  if(!(typeof SEGA_SRV==='function'&&SEGA_SRV())){put('med',rec);return rec;}
+  stamp('med',rec);if(!rec.ts)rec.ts=Date.now();
+  let r,j={};try{r=await fetch('/api/db/doc?path='+encodeURIComponent('med/'+rec.id),{method:'PUT',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({data:rec})});j=await r.json().catch(()=>({}));}
+  catch(e){throw new Error('Sem conexão com o servidor.');}
+  if(!r.ok)throw new Error(j.erro||('Não foi possível gravar a medição ('+r.status+').'));
+  const g=await fetch('/api/db/doc?path='+encodeURIComponent('med/'+rec.id),{credentials:'same-origin'}).then(x=>x.json()).catch(()=>null);
+  const fin=g&&g.exists&&g.data?Object.assign({},g.data,{id:rec.id}):rec;segaLocal('med',fin);return fin;}
+async function v162Ia(ctrId,arqId){let r,j={};
+  try{r=await fetch('/api/ia/medicao-pdf',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({ctrId,arqId})});j=await r.json().catch(()=>({}));}
+  catch(e){return {erro:'Sem conexão com o servidor.'};}
+  if(r.ok&&j&&j.dados)return j;
+  const c=j&&j.code;
+  return {erro:c==='capability_disabled'?(j.erro||'A IA não está configurada no servidor. Peça ao administrador.'):c==='rate_limited'?(j.erro||'Limite de uso da IA atingido. Tente de novo mais tarde.')+' Nenhuma medição foi criada com este PDF.':(j&&j.erro)||('A leitura falhou ('+(r&&r.status)+').'),code:c};}
+/* um PDF: confere, guarda como anexo, lê com a IA e cria o rascunho */
+async function v162UmPdf(c,f){const nome=String(f&&f.name||'medicao.pdf');
+  if(!(/pdf/i.test(f.type||'')||/\.pdf$/i.test(nome)))return {nome,erro:'Não é um PDF.'};
+  if((+f.size||0)>V162.MAX_MB*1048576)return {nome,erro:'Passa de '+V162.MAX_MB+' MB ('+fmtBytes(f.size)+'). Divida o arquivo.'};
+  let u8;try{u8=new Uint8Array(await f.arrayBuffer());}catch(e){return {nome,erro:'Não foi possível ler o arquivo.'};}
+  if(String.fromCharCode.apply(null,u8.subarray(0,1024)).indexOf('%PDF-')<0)return {nome,erro:'O arquivo não é um PDF válido.'};
+  const pg=v162Paginas(u8);if(pg>V162.MAX_PAG)return {nome,erro:'Tem '+pg+' páginas; o limite é '+V162.MAX_PAG+'. Separe as medições em arquivos menores.'};
+  const as=await getAssets();if(!as)return {nome,erro:'Seu acesso não permite enviar arquivos.'};
+  let up;try{up=await as.upload(f,{type:'application/pdf'});}catch(e){return {nome,erro:anxErr(e)};}
+  const r=await v162Ia(c.id,up.id);
+  if(r.erro){try{await as.delete(up.id);}catch(e){}return {nome,erro:r.erro,code:r.code};}
+  const m=v162MontaMed(c,r.dados,up,nome,r.paginas);
+  try{const g=await v162Grava(m);return {nome,med:g,dups:v162Dups(c,g)};}
+  catch(e){try{await as.delete(up.id);}catch(x){}return {nome,erro:e.message||'Não foi possível criar a medição.'};}}
+/* ---------- janela de importação ---------- */
+A.v162Imp=d=>{d=d||{};
+  if(!(typeof SEGA_SRV==='function'&&SEGA_SRV())){msgModal('Importar medições de PDF',['A leitura do PDF usa a IA do servidor próprio da empresa. Abra o sistema pelo endereço da empresa para usar.']);return;}
+  const cs=S.ctr.filter(c=>c.status==='vigente').sort((a,b)=>String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true})),c0=d.c||d.id||ui.med.ctr||'';
+  if(!cs.length){toast('Nenhum contrato vigente.','neg');return;}
+  modal({title:'Importar medições de PDF',nofocus:true,saveLabel:'Ler os PDFs',
+    body:'<div class="fg"><label class="f full"><span>Contrato *</span><select id="v162Ctr">'+opt(cs.map(c=>[c.id,c.numero+' · '+parcNome(c.parcId)]),c0,'Escolha')+'</select></label>'+
+      '<label class="f full"><span>PDFs das medições *</span><input type="file" id="v162Arq" accept="application/pdf,.pdf" multiple></label></div>'+
+      '<p class="sub" style="margin:8px 0 0">Cada PDF vira uma medição em <b>rascunho</b> para você revisar ao lado do PDF; nada é aprovado sozinho. Até '+V162.MAX_MB+' MB e '+V162.MAX_PAG+' páginas por PDF (um boletim por arquivo). A IA recebe só o PDF e a lista de itens do contrato.</p><div id="v162Prog" class="sub" style="margin-top:8px"></div>',
+    save:()=>{if(V162.ocup)return false;const cid=($('#v162Ctr')||{}).value,c=get('ctr',cid),fs=Array.from((($('#v162Arq')||{}).files)||[]);
+      if(!c){toast('Escolha o contrato.','neg');return false;}if(!fs.length){toast('Escolha um ou mais PDFs.','neg');return false;}
+      v162Processa(c,fs);return false;}});};
+async function v162Processa(c,fs){V162.ocup=true;const res=[];
+  try{for(let i=0;i<fs.length;i++){const p=$('#v162Prog');if(p)p.textContent='Lendo '+(i+1)+' de '+fs.length+': '+(fs[i].name||'')+'… (pode levar um minuto)';
+      res.push(await v162UmPdf(c,fs[i]));
+      if(res[res.length-1].code==='capability_disabled'||res[res.length-1].code==='rate_limited'){for(let k=i+1;k<fs.length;k++)res.push({nome:fs[k].name||'',erro:'Não lido: '+res[i].erro});break;}}}
+  finally{V162.ocup=false;}
+  V162.ult=res;const okc=res.filter(r=>r.med);
+  if(res.length===1&&okc.length===1){toast('Medição criada em rascunho. Revise as linhas ao lado do PDF.','pos');A.v162Rev({id:okc[0].med.id});return res;}
+  modal({title:'Importação de PDFs · contrato '+c.numero,nofocus:true,foot:'<button class="btn pri" data-act="closeModal">Fechar</button>',
+    body:'<p style="margin:0 0 8px">'+okc.length+' de '+res.length+' PDF(s) lido(s). As medições ficam em rascunho até a revisão.</p><div class="list">'+res.map(r=>'<div class="li"><div><div class="t">'+esc(r.nome)+'</div><div class="sub">'+(r.med?'Medição nº '+esc(r.med.numero)+' · '+fmtDate(r.med.ini)+' a '+fmtDate(r.med.fim)+' · '+(v162Imp(r.med).linhas||[]).length+' linha(s) lida(s)'+(r.dups&&r.dups.length?' · <b class="neg">'+esc(r.dups.join(' '))+'</b>':''):'<span class="neg">'+esc(r.erro)+'</span>')+'</div></div>'+(r.med?'<button class="btn sm pri" data-act="v162Rev" data-id="'+r.med.id+'">Revisar</button>':pill('não importado','neg'))+'</div>').join('')+'</div>'});
+  render();return res;}
+/* ---------- revisão ---------- */
+A.v162Rev=d=>{const m=get('med',d.id),c=m&&get('ctr',m.ctrId);if(!m||!c)return;const im=v162Imp(m);if(!im){A.medEdit(d);return;}
+  if(!v162Pend(m)){toast('Esta importação já foi revisada.','neg');return;}
+  V162.rev={id:m.id,numero:m.numero,ini:m.ini,fim:m.fim,linhas:(im.linhas||[]).map(l=>Object.assign({},l))};
+  const a=im.arq||{},url='/_blob/'+encodeURIComponent(a.id||'');
+  modal({title:'Revisar medição importada · contrato '+c.numero,wide:true,nofocus:true,
+    body:'<style>.v162g{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:14px;align-items:start}.v162g iframe{width:100%;height:72vh;border:1px solid var(--line);border-radius:6px;background:#fff}.v162fl .pill{margin:1px 2px 1px 0}.v162q{width:100%}.v162sel{max-width:160px}.v162t{table-layout:fixed;width:100%}.v162t td,.v162t th{padding-left:6px;padding-right:6px;white-space:normal;overflow-wrap:anywhere}.v162t select{width:100%}.v162fl{margin-top:4px}@media(max-width:900px){.v162g{grid-template-columns:minmax(0,1fr)}.v162g iframe{height:55vh}}</style>'+
+      '<div class="v162g"><div><iframe title="'+esc(a.nome||'PDF')+'" src="'+esc(url)+'"></iframe><p class="sub" style="margin:4px 0 0">'+esc(a.nome||'')+(a.paginas?' · '+a.paginas+' página(s)':'')+' · importado por '+esc(nameOf(im.porImp))+' em '+fmtDT(im.emImp)+' · <a href="'+esc(url)+'" target="_blank" rel="noopener">Abrir em nova aba</a></p></div>'+
+      '<div id="v162Lado">'+v162Lado()+'</div></div>',
+    foot:'<button class="btn dng" data-act="v162Descartar" data-id="'+m.id+'">Descartar</button><button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="v162Salvar">Salvar revisão</button><button class="btn pri" data-act="v162Aprovar">Aprovar e criar medição</button>'});};
+function v162RecRev(){const R=V162.rev,m=R&&get('med',R.id);if(!m)return null;return Object.assign(cl(m),{numero:R.numero,ini:R.ini,fim:R.fim});}
+function v162Lado(){const R=V162.rev,m=v162RecRev(),c=m&&get('ctr',m.ctrId);if(!m||!c)return '';const im=v162Imp(m)||{},ia=im.ia||{},it=ctrItens(c),av=v162Avalia(c,m,R.linhas),dups=v162Dups(c,m);
+  const inp=(k,t,v,l)=>'<label class="f"><span>'+l+'</span><input class="v162in" data-h="'+k+'" type="'+t+'" value="'+esc(v==null?'':v)+'"></label>';
+  const nf=av.linhas.reduce((s,l)=>s+(l.fl.length?1:0),0),totL=v162Num(ia.total);
+  return '<div class="fg">'+inp('numero','number',R.numero,'Nº da medição *')+inp('ini','date',R.ini,'Início do período *')+inp('fim','date',R.fim,'Fim do período *')+'</div>'+
+    (dups.length?'<div class="note" style="border-color:var(--neg)"><b class="neg">Medição repetida?</b> '+esc(dups.join(' '))+'</div>':'')+
+    (ia.duvidas&&ia.duvidas.length?'<div class="note"><b>Dúvidas da leitura:</b><ul style="margin:4px 0 0;padding-left:18px">'+ia.duvidas.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>':'')+
+    (av.teto?v161TetoHtml(av.teto,av.valor):'')+
+    '<div class="sect">Linhas lidas no PDF'+(nf?' · <span class="neg">'+nf+' com alerta</span>':'')+'</div>'+
+    '<div class="tw"><table class="v162t" style="min-width:560px"><colgroup><col style="width:150px"><col><col style="width:78px"><col style="width:86px"><col style="width:96px"><col style="width:44px"></colgroup><thead><tr><th>Item do contrato</th><th>Lido no PDF</th><th class="num">Qtd.</th><th class="num">Lido: preço / total</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+
+    (av.linhas.length?av.linhas.map((l,i)=>{const y=l.idx>=0?it[l.idx]:null;
+      return '<tr><td>'+(it.length?'<select class="v162in v162sel" data-i="'+i+'" data-k="idx">'+'<option value="-1"'+(l.idx<0?' selected':'')+'>— escolha o item —</option>'+it.map((x,k)=>'<option value="'+k+'"'+(k===l.idx?' selected':'')+'>'+esc((x.item||String(k+1))+' · '+String(x.desc||'').slice(0,60))+'</option>').join('')+'</select>'+(y?'<div class="sub">'+esc(y.un||'')+' · '+money(y.pu)+'</div>':''):'<span class="sub">sem planilha</span>')+'</td>'+
+        '<td>'+esc(l.desc||'—')+'<div class="sub">'+esc([l.item?'item '+l.item:'',l.un].filter(Boolean).join(' · '))+'</div><div class="v162fl">'+(l.fl.length?l.fl.map(f=>pill(V162.FL[f][0],V162.FL[f][1])).join(''):pill('ok','pos'))+'</div></td>'+
+        '<td class="num"><input class="v162in v162q" data-i="'+i+'" data-k="qtd" type="number" step="any" value="'+esc(l.qtd==null?'':l.qtd)+'"></td><td class="num">'+(l.pu==null?'—':nf2(l.pu))+'<div class="sub">'+(l.total==null?'—':nf2(l.total))+'</div></td><td class="num">'+money(l.valor)+'</td>'+
+        '<td class="act"><button class="btn sm" data-act="v162Tira" data-i="'+i+'" title="Remover a linha" aria-label="Remover a linha">✕</button></td></tr>';}).join(''):emptyRow(6,'Nenhuma linha lida. Descarte ou lance a medição à mão.'))+
+    '</tbody></table></div>'+
+    '<p style="margin:8px 0 0">Valor da medição (preços do contrato): <b>'+money(av.valor)+'</b>'+(totL!=null?' · total lido no PDF: '+money(totL)+(Math.abs(totL-av.valor)>0.01?' <span class="pill warn">diferente</span>':''):'')+'</p>'+
+    (av.bloq.length?'<div class="note" style="margin-top:8px"><b>Para aprovar:</b><ul style="margin:4px 0 0;padding-left:18px">'+av.bloq.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>':'<p class="sub" style="margin:6px 0 0">Aprovar cria a medição em rascunho com estes itens; depois ela segue o fluxo de sempre (enviar para aprovação do Comercial).</p>');}
+function v162Redesenha(){const e=$('#v162Lado');if(e)e.innerHTML=v162Lado();}
+function v162Muda(i,k,v){const R=V162.rev;if(!R)return;
+  if(i==null||i===''){if(k==='numero')R.numero=v===''?'':+v;else if(k==='ini'||k==='fim')R[k]=v;}
+  else{const l=R.linhas[+i];if(!l)return;if(k==='qtd')l.qtd=v===''?null:+v;else if(k==='idx')l.idx=+v;}
+  v162Redesenha();}
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.classList||!t.classList.contains('v162in'))return;const ds=t.dataset||{};v162Muda(ds.h?null:ds.i,ds.h||ds.k,t.value);});
+A.v162Tira=d=>{const R=V162.rev;if(!R)return;R.linhas.splice(+d.i,1);v162Redesenha();};
+A.v162Salvar=async()=>{const m=v162RecRev();if(!m)return;m.imp162=Object.assign({},m.imp162,{linhas:V162.rev.linhas.map(l=>{const x=Object.assign({},l);delete x.fl;delete x.valor;return x;})});
+  try{await v162Grava(m);toast('Revisão salva. A medição continua em rascunho, aguardando a aprovação da importação.','pos');closeModal();render();}catch(e){toast(e.message,'neg');}};
+A.v162Aprovar=d=>{const m=v162RecRev();if(!m)return;const c=get('ctr',m.ctrId);if(!c)return;const R=V162.rev,av=v162Avalia(c,m,R.linhas);
+  if(!/^\d+$/.test(String(m.numero))||+m.numero<1){toast('Informe o número da medição.','neg');return;}
+  if(!m.ini||!m.fim||m.fim<m.ini){toast('Informe o período da medição.','neg');return;}
+  if(av.bloq.length){msgModal('A medição ainda não pode ser criada',av.bloq.concat(['Volte em "Revisar importação" (Editar) para corrigir.']));return;}
+  const it=ctrItens(c),ag={};av.linhas.forEach(l=>{if(l.idx>=0&&(+l.qtd||0)>0)ag[l.idx]=Math.round(((ag[l.idx]||0)+(+l.qtd||0))*1e6)/1e6;});
+  m.itens=Object.keys(ag).map(Number).sort((a,b)=>a-b).map(i=>({idx:i,item:it[i].item,desc:it[i].desc,un:it[i].un,qtd:ag[i]}));
+  if(!it.length)m.valor=av.valor;
+  m.imp162=Object.assign({},m.imp162,{st:'aprovada',aprovPor:actorId(),aprovEm:Date.now(),valorLido:v162Num((m.imp162.ia||{}).total),linhas:R.linhas.map(l=>{const x=Object.assign({},l);delete x.fl;delete x.valor;return x;})});
+  const vai=async()=>{try{await v162Grava(m);V162.rev=null;closeModal();toast('Medição nº '+m.numero+' criada em rascunho ('+money(av.valor)+'). Confira o boletim e envie para aprovação.','pos');render();}
+    catch(e){toast(e.message,'neg');setTimeout(()=>{if(get('med',m.id))A.v162Rev({id:m.id});},0);}};
+  const dups=v162Dups(c,m);
+  if(dups.length){confirmBox(esc(dups.join(' '))+' Criar a medição nº '+esc(m.numero)+' mesmo assim?',vai,'Criar mesmo assim');return;}
+  return vai();};
+A.v162Descartar=d=>{const m=get('med',d.id);if(!m||!v162Pend(m))return;const im=v162Imp(m);
+  confirmBox('Descartar a medição importada nº '+esc(m.numero)+'? O rascunho e o PDF anexado são apagados.',async()=>{del('med',m.id);V162.rev=null;
+    try{const as=await getAssets();if(as&&im.arq&&im.arq.id)await as.delete(im.arq.id);}catch(e){}toast('Importação descartada.','pos');},'Descartar',true);};
+Object.assign(ACT_GROUP,{v162Imp:'ctr',v162Rev:'ctr',v162Tira:'ctr',v162Salvar:'ctr',v162Aprovar:'ctr',v162Descartar:'ctr'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v162Imp:'Lê um ou vários PDFs de medição com IA e cria cada medição em rascunho para revisar.',v162Rev:'Mostra o PDF ao lado das linhas lidas para corrigir e aprovar a importação.',v162Aprovar:'Grava os itens revisados; a medição continua em rascunho e segue o fluxo de sempre.'});
+/* ---------- ligações nas telas de sempre ---------- */
+{const e0=A.medEdit;A.medEdit=d=>{const m=get('med',d.id);if(v162Pend(m))return A.v162Rev(d);return e0(d);};}
+{const e0=A.p6MedEnviar;A.p6MedEnviar=d=>{const m=get('med',d.id);if(v162Pend(m)){toast('Medição importada de PDF ainda em revisão: use "Revisar importação" e "Aprovar e criar medição" antes de enviar.','neg');return;}return e0(d);};}
+{const e0=A.medAprovar;A.medAprovar=d=>{const m=get('med',d.id);if(v162Pend(m)){toast('Medição importada de PDF ainda em revisão.','neg');return;}return e0(d);};}
+/* situação: marca da importação (e o PDF) */
+{const s0=p6SitCel;p6SitCel=function(m){let h=s0.apply(this,arguments);const im=v162Imp(m);if(im)h+='<span class="p6tag" title="Importada de PDF por '+esc(nameOf(im.porImp))+' em '+esc(fmtDT(im.emImp))+(im.aprovPor?'; importação aprovada por '+esc(nameOf(im.aprovPor)):'')+'">'+(v162Pend(m)?'<b>importada de PDF: revisar</b>':'importada de PDF')+(im.arq&&im.arq.id?' · <a href="/_blob/'+esc(im.arq.id)+'" target="_blank" rel="noopener">PDF</a>':'')+'</span>';return h;};}
+/* Medições ao cliente: botão com o contrato escolhido no filtro; rascunho importado mostra "Revisar importação" no lugar de Editar/Enviar */
+{const v0=V.med;V.med=function(){let h=v0.apply(this,arguments);try{
+  S.med.forEach(m=>{if(!v162Pend(m))return;
+    h=h.replace('<button class="btn sm" data-act="medEdit" data-id="'+m.id+'">Editar</button>','<button class="btn sm pri" data-act="v162Rev" data-id="'+m.id+'">Revisar importação</button>');
+    h=h.replace(new RegExp('<button class="btn sm pri" data-act="p6MedEnviar" data-id="'+m.id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'">[^<]*</button>'),'');});
+  const c=ui.med&&ui.med.ctr&&get('ctr',ui.med.ctr);
+  if(c&&c.status==='vigente'&&mayW('ctr'))h=h.replace('<div class="stack">','<div class="stack"><div class="acts v162acts"><button class="btn" data-act="v162Imp" data-c="'+c.id+'">Importar medições de PDF</button><span class="sub" style="align-self:center">contrato '+esc(c.numero)+': cada PDF vira uma medição em rascunho para revisar</span></div>');
+}catch(e){}return h;};}
+/* detalhe do contrato: botão no rodapé */
+{const v0=A.ctrVer;A.ctrVer=function(d){const r=v0.apply(this,arguments);try{const c=get('ctr',d&&d.id),mf=$('#mf');if(c&&c.status==='vigente'&&mayW('ctr')&&mf&&mf.insertAdjacentHTML)mf.insertAdjacentHTML('afterbegin','<button class="btn" data-act="v162Imp" data-c="'+c.id+'">Importar medições de PDF</button>');}catch(e){}return r;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='161',APP_DATA='2026-11-06';
+const APP_VER='162',APP_DATA='2026-11-06';
 const CHANGELOG=[
+  ['162','2026-11-06',['Medições: novo botão "Importar medições de PDF" no detalhe do contrato e em Medições ao cliente (com o contrato escolhido no filtro). Escolha um ou vários PDFs do mesmo contrato.', 'A IA do servidor lê cada PDF (também escaneado) e devolve o período, o número, a data, os itens, o total e as dúvidas. Vai para a IA só o PDF e a lista de itens do contrato.', 'Cada PDF vira uma medição em rascunho, com o PDF anexado. Nada é aprovado sozinho.', 'Na revisão o PDF fica ao lado das linhas lidas. A linha ganha um alerta quando o item não está no contrato, o preço é diferente, a quantidade passa do contratado ou do teto, ou o total não bate com quantidade × preço.', 'Você corrige a quantidade, escolhe o item do contrato ou remove a linha. "Aprovar e criar medição" grava os itens com o preço do contrato; depois a medição segue o caminho de sempre (enviar para aprovação). "Descartar" apaga o rascunho e o PDF.', 'O sistema avisa quando já existe medição com o mesmo número ou o mesmo período no contrato.', 'Limites: 20 MB e 50 páginas por PDF, uma leitura por PDF. Mensagem clara quando a IA não está ligada ou o limite de uso foi atingido. Quem importou e quem aprovou ficam registrados.']],
   ['161','2026-11-06',['EAP: botão Duplicar em cada etapa. Copia a etapa com materiais, mão de obra, ferramentas e subitens, com o % executado zerado, e abre a cópia para você trocar o nome (ou o local) e as datas.', 'EAP: marque várias etapas e use "Duplicar selecionadas para outro local". Informe o texto a trocar nos nomes (por exemplo Aeroporto por Guarulhos) e quantos dias deslocar as datas.', 'EAP: "Modelo" guarda uma etapa (com as linhas e os subitens) e "Inserir de modelo" coloca essa etapa na EAP de qualquer obra. Os valores ficam os gravados; "Atualizar valores" traz os de hoje.', 'Com linha de base congelada, a etapa duplicada ou inserida de modelo pede o motivo da revisão, igual a uma etapa nova.', 'Contratos: novo tipo "Sob demanda (valor teto)", com teto, vigência e a opção de acréscimo de até 25% sobre o teto. A planilha vira tabela de preços, com quantidade opcional.', 'Medição de contrato sob demanda pode passar da quantidade do item. O limite é o total medido: avisa em 80% e 100% do teto e não deixa passar do teto (ou de 125%, com a opção ligada). O servidor confere o mesmo limite.', 'Ordens de serviço dos contratos sob demanda (Comercial): cada chamado vira uma OS com os itens da tabela de preços, aberta, executada ou medida. A medição puxa as OS executadas do período. Custo e margem por OS quando o custo é informado.', 'Detalhe do contrato sob demanda: teto, medido, saldo, % usado, itens de maior valor e as OS por situação.', 'Contrato existente vira sob demanda pelo botão "Mudar para sob demanda" no detalhe do contrato: as medições ficam e o teto começa com o valor atual.']],
   ['160','2026-11-06',['Listas grandes em páginas de 50: Solicitações de compra, Pedidos de compra, Notas fiscais, Abastecimentos, Saídas e Manutenção de veículos e o histórico de envio de equipamentos. A busca, os filtros e os totais continuam valendo para todos os registros.', 'Abrir e salvar nessas telas ficou muito mais rápido com muitos registros.', 'O sistema baixa só o que mudou desde a última leitura, ao abrir de novo, ao reconectar e nas atualizações automáticas. Se não der, baixa tudo, como antes.', 'Neste navegador fica uma cópia cifrada das listas de compras, estoque, obras e frota, para abrir mais rápido. Ela só abre com a sua conta e é apagada ao clicar em Sair. RH, ponto, folha, saúde e financeiro não ficam guardados.', 'Obras aparecem da mais nova para a mais antiga (P490, P488...) nas caixas de escolha de obra.', 'Responsável pela obra: a lista mostra o nome das pessoas (ou o e-mail) e só quem pode ser responsável: administração, diretoria, gestão de projetos e encarregados.', 'Materiais da etapa na EAP: digite para buscar em todo o estoque (código, descrição ou família), com filtro de família. Material que não está no estoque pode ser digitado e fica marcado como não cadastrado.', 'Contratos com clientes: novo filtro por projeto ou obra (com busca, da obra mais nova para a mais antiga), junto com a busca e a situação.', 'Produto da família EPI: em vez de "Com variações", cadastre um produto por tamanho. O botão Criar tamanhos faz isso de uma vez (P, M, G, GG ou 38–44), com o mesmo CA, vida útil, NCM e unidade. EPI já cadastrado com variações mostra um aviso com o botão que transforma cada variação em produto.']],
   ['159','2026-11-05',['Troca de tela e gravação muito mais rápidas. As telas eram preparadas de novo a cada redesenho e ficavam mais lentas ao longo do dia; isso acabou.', 'A tela não é mais redesenhada quando nada mudou: as leituras periódicas e o retorno do servidor depois de salvar não travam mais a página. Salvar faz um redesenho só.', 'Quando outra pessoa grava algo que a tela aberta não mostra, a sua tela não é redesenhada. Várias mudanças seguidas viram um redesenho só.', 'Painel, Painel da diretoria, espelho de ponto e custo de mão de obra por obra calculam o ponto bem mais rápido, com o mesmo resultado.', 'A página chega comprimida (cerca de 4 vezes menor) e, ao recarregar, o navegador só confere se mudou, sem baixar de novo. As listas grandes do servidor também chegam comprimidas.', 'A sincronização da Sólides não regrava mais os meses em que nenhuma marcação mudou.', 'A tela Mapa de cotação não fica mais em branco quando uma cotação está sem a tabela de preços.']],
