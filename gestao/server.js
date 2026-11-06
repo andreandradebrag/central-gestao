@@ -188,6 +188,7 @@ const veFuncCompleto = conta => !conta || conta.nivel === 'owner' || NIV[conta.n
 function redigir(conta, p, data) {
   data = REG.redigir(conta, p, data);
   data = VAL.redigir(conta, p, data); /* v146: sem a ação "Ver valores gerenciais", sai sem os campos de valor de obra, contrato, medição e frota */
+  { const s = p.split('/'); if (data && s.length === 2 && s[0] !== 'func' && FN.LEMIN_OK[s[0]] && conta && conta.nivel !== 'owner') { const l = FN.leMinCampos(PERM.perfis[perfilDe(conta)], s[0], PERM); if (l) { const o = {}; l.forEach(k => { if (data[k] !== undefined) o[k] = data[k]; }); o._restrito = true; o._min = true; return o; } } } /* v164: leitura mínima de outras coleções (veic do Almoxarife: só o que o romaneio precisa) */
   if (!data || !ehDocFunc(p) || veFuncCompleto(conta)) return data;
   { const l = FN.leMinCampos(PERM.perfis[perfilDe(conta)], 'func', PERM); if (l) { const o = {}; l.forEach(k => { if (data[k] !== undefined) o[k] = data[k]; }); o._restrito = true; o._min = true; return o; } } /* v148: leitura mínima (Almoxarife) */
   const o = {}; for (const k of Object.keys(data)) if (!FUNC_SENS.test(k)) o[k] = data[k]; o._restrito = true; return o;

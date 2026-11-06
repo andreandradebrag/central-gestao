@@ -145,7 +145,7 @@ function aplicar(p, fn, acoes, o) {
    recebe só estes campos (Almoxarife: colaboradores para EPI, envio/retorno de ferramentas e romaneio; nada de salário,
    CPF, banco/PIX, endereço, contato ou dado sensível). Só vale para as coleções e os campos de LEMIN_OK; quem já lê o
    módulo (RH, Frota...) continua com a regra de sempre. */
-const LEMIN_OK = { func: ['id', 'nome', 'matricula', 'funcao', 'cargo', 'projId', 'status', 'ts', 'ex'] };
+const LEMIN_OK = { func: ['id', 'nome', 'matricula', 'funcao', 'cargo', 'projId', 'status', 'ts', 'ex'], veic: ['id', 'placa', 'modelo', 'marca', 'tipo', 'status', 'cidade', 'base', 'local', 'capacidade', 'capKg', 'capM3', 'lotacao', 'ts', 'ex'] }; /* v164: veic mínimo para o romaneio (Almoxarife) */
 function leMinCampos(pr, c0, PERM) {
   if (!pr || pr.w === '*' || pr.r === '*' || !pr.leMin || typeof pr.leMin !== 'object') return null;
   const l = pr.leMin[c0], ok = LEMIN_OK[c0]; if (!Array.isArray(l) || !ok) return null;

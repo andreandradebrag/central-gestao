@@ -1052,6 +1052,36 @@ transferência de EPI), criada sozinha.
 `perfis.json` e `public/index.html` e reconstrua a imagem do serviço `gestao`. Depois: preencha o aprovador de compras nas
 obras que quiserem; confira a cidade dos almoxarifados (São Paulo e Tuiuti, com o principal marcado) e dos colaboradores.
 
+## Aviso de SC recebida, lote e validade, entrega na obra, material na obra, romaneio, devolução e guarda (v164)
+
+Arquivos novos no serviço `gestao`: `ajuste164.js`, `lote164.js` e `obra164.js` (os dois últimos rodam também no navegador,
+para as contas darem igual). Alterados: `regras.js`, `est155.js`, `aceite.js`, `permfn.js`, `server.js`, `Dockerfile`,
+`perfis.json` e `public/index.html`. **Reconstrua a imagem** do serviço `gestao`. Coleções novas no banco: `rec164`
+(recebimento na obra e romaneio de retirada), `pend164` (pendências com fornecedor), `mob164` (movimento de material da obra)
+e `gua164` (transferência de guarda). Nenhum dado antigo muda.
+
+- **SC recebida**: o servidor avisa quem pediu quando o recebimento é gravado (chat "Central de Gestão" e e-mail, se o envio de
+  e-mail está configurado). "Recebi / retirei" no Início e na SC; o almoxarife também registra. Lembrete depois de 3 dias
+  (a cada hora no servidor; o Administrador pode forçar em `POST /api/sc164/lembretes`).
+- **Lote e validade** (produto com "Controle de lote"): Estoque › Lotes e validades. O saldo antigo aparece no lote SEM-LOTE;
+  identifique no inventário por lote. Lote vencido só sai como perda ou descarte.
+- **Entrega do pedido**: no almoxarifado (como sempre), direto na obra ou retirada com veículo próprio. Quem recebe na obra é o
+  encarregado alocado (colaborador ligado ao usuário com o projeto atual = a obra) ou o responsável pela obra. Confira se os
+  encarregados têm o colaborador ligado ao usuário e a obra certa no cadastro.
+- **Material na obra** (Obras): saldo por obra, devolução pelo saldo, transferência entre obras, consumo declarado,
+  ferramentas na obra e transferência de guarda. O painel "Devoluções e quarentena" tem o prazo de material parado
+  (padrão 60 dias).
+- **Romaneio novo**: ferramenta só por Envio de ferramentas (o servidor recusa ferramenta sem envio); romaneios antigos
+  continuam como estavam.
+- **Encerrar a obra** com saldo de material ou de ferramentas é recusado pelo servidor; o Administrador libera com
+  justificativa (fica na auditoria: `OBRA_ENCERRADA_COM_SALDO_164`).
+- **Correção**: Almoxarife e Almoxarife e fábrica leem os veículos com o mínimo (placa, modelo, tipo, situação, base e
+  capacidade), para o romaneio. Não alteram veículos nem saídas; a saída do veículo do romaneio é criada pelo servidor.
+
+Auditoria nova: `SC_RECEBIDA_AVISO`, `SC_RETIRADA`, `LOTE_IDENTIFICADO`, `REC_OBRA_164`, `PED_RETIRADA_164`,
+`PEND_164_RESOLVIDA`, `OBRA_MOV_164`, `OBRA_DEVOL_164`, `ROM_RECEBIDO_OBRA_164`, `ROM_RETORNO_164`,
+`GUARDA_TRANSFERIDA_164`, `OBRA_ENCERRAMENTO_RECUSADO_164`.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

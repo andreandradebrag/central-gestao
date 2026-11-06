@@ -32,7 +32,7 @@ module.exports = function (X) {
   const admin = c => ehDono(c) || perfilEm(c, ['admin']);
 
   /* ---------- movimentos ---------- */
-  const LINK = ['notaId', 'sepId', 'romId', 'epiId', 'higId', 'higienizado', 'invajId', 'balanco', 'devObraId', 'devObra', 'osId', 'osfId', 'recProv', 'pedId', 'devFor', 'devolObra', 'devolucao', 'impLote', 'estornoDe'];
+  const LINK = ['notaId', 'sepId', 'romId', 'epiId', 'higId', 'higienizado', 'invajId', 'balanco', 'devObraId', 'devObra', 'osId', 'osfId', 'recProv', 'pedId', 'devFor', 'devolObra', 'devolucao', 'impLote', 'estornoDe', 'rec164', 'mob164', 'lote164', 'quar164', 'gua164']; /* v164: recebimento na obra, movimento da obra, lote identificado, quarentena (ajuste164.js confere) */
   const tem = v => !(v === undefined || v === null || v === '' || v === false);
   const automatico = m => m.ex === true || LINK.some(k => tem(m[k]));
   const MOT = {

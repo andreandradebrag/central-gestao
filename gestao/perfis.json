@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-06T17:59:07.706Z",
+ "gerado": "2026-11-06T19:52:47.361Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -55,7 +55,11 @@
     "fman",
     "obrcal",
     "obrextr",
-    "obralug"
+    "obralug",
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "nome": "Financeiro"
   },
@@ -126,7 +130,11 @@
     "rmes",
     "ctremp",
     "medemp",
-    "retemp"
+    "retemp",
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "leFora": {
     "proj": [
@@ -172,6 +180,9 @@
     "plano",
     "meu",
     "ajuda"
+   ],
+   "telasFora": [
+    "v164pendf"
    ],
    "nome": "Gestor de projetos"
   },
@@ -281,7 +292,11 @@
     "integ",
     "treinm",
     "rda",
-    "amb"
+    "amb",
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "itensFora": [
     "sstq:tterc"
@@ -292,6 +307,12 @@
   "pendente": {
    "w": [],
    "r": [],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
+   ],
    "nome": "Sem acesso liberado"
   },
   "colaborador": {
@@ -311,7 +332,11 @@
     "hextra",
     "pfonte",
     "pfarq",
-    "pajuste"
+    "pajuste",
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "itensFora": [
     "pess:ponto"
@@ -324,12 +349,24 @@
    "r": [
     "ajuda"
    ],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
+   ],
    "nome": "Liberado, falta permissão na página"
   },
   "semid": {
    "w": [],
    "r": [
     "ajuda"
+   ],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "nome": "Identificação pendente"
   },
@@ -423,7 +460,9 @@
     "vcond",
     "frloc",
     "multa",
-    "vanal"
+    "vanal",
+    "v164val",
+    "v164pendf"
    ],
    "valNao": true,
    "nome": "Encarregado / campo"
@@ -462,7 +501,11 @@
     "nc",
     "pobra",
     "proj",
-    "rmes"
+    "rmes",
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "nome": "Comercial"
   },
@@ -714,6 +757,23 @@
      "status",
      "ts",
      "ex"
+    ],
+    "veic": [
+     "id",
+     "placa",
+     "modelo",
+     "marca",
+     "tipo",
+     "status",
+     "cidade",
+     "base",
+     "local",
+     "capacidade",
+     "capKg",
+     "capM3",
+     "lotacao",
+     "ts",
+     "ex"
     ]
    },
    "camposProprio": {
@@ -780,6 +840,12 @@
     "rproj",
     "rs",
     "rsind"
+   ],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
    ],
    "sensRh": true,
    "valNao": true,
@@ -879,6 +945,12 @@
     "rs",
     "rsind"
    ],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
+   ],
    "aptLibDia": true,
    "rhdocNr": true,
    "valNao": true,
@@ -956,6 +1028,12 @@
     "rs",
     "rsind"
    ],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
+   ],
    "sensRh": true,
    "antigo": true,
    "valNao": true,
@@ -983,6 +1061,11 @@
      "prod"
     ]
    },
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164pendf"
+   ],
    "valNao": true,
    "nome": "Fábrica (encarregado)"
   },
@@ -1166,6 +1249,23 @@
      "status",
      "ts",
      "ex"
+    ],
+    "veic": [
+     "id",
+     "placa",
+     "modelo",
+     "marca",
+     "tipo",
+     "status",
+     "cidade",
+     "base",
+     "local",
+     "capacidade",
+     "capKg",
+     "capM3",
+     "lotacao",
+     "ts",
+     "ex"
     ]
    },
    "camposProprio": {
@@ -1242,6 +1342,8 @@
     "comp": {
      "sc": "a",
      "cot": "n",
+     "pend164": "n",
+     "rec164": "n",
      "notas": "n",
      "acordo": "n",
      "invaj": "n",
@@ -1278,6 +1380,10 @@
     "treinm",
     "rda",
     "amb",
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf",
     "pnSup",
     "cot",
     "ped",
@@ -1342,6 +1448,8 @@
     "comp": {
      "sc": "a",
      "cot": "n",
+     "pend164": "n",
+     "rec164": "n",
      "notas": "n",
      "acordo": "n",
      "invaj": "n",
@@ -1364,11 +1472,15 @@
     "avforn",
     "acordo",
     "arqf",
+    "v164pendf",
     "rom",
     "devobra",
     "invaj",
     "prodinat",
-    "vcond"
+    "vcond",
+    "v164val",
+    "v164mat",
+    "v164recobra"
    ],
    "leFora": {
     "comp": [
@@ -1853,6 +1965,17 @@
   ],
   "ctros": [
    "ctr"
+  ],
+  "rec164": [
+   "proj",
+   "comp"
+  ],
+  "pend164": [
+   "proj",
+   "comp"
+  ],
+  "mob164": [
+   "proj"
   ],
   "ctremp": [
    "proj",
@@ -2340,6 +2463,17 @@
   "ctros": [
    "ctr"
   ],
+  "rec164": [
+   "proj",
+   "comp"
+  ],
+  "pend164": [
+   "proj",
+   "comp"
+  ],
+  "mob164": [
+   "proj"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -2725,6 +2859,13 @@
     "sc",
     "acordo"
    ],
+   "pend164": [
+    "pend164",
+    "rec164"
+   ],
+   "rec164": [
+    "rec164"
+   ],
    "notas": [
     "notas",
     "parc",
@@ -2855,6 +2996,16 @@
     "notas",
     "ped",
     "proj"
+   ],
+   "mob164": [
+    "mob164"
+   ],
+   "pend164": [
+    "pend164"
+   ],
+   "rec164": [
+    "rec164",
+    "pend164"
    ],
    "rmesf": [
     "rmesf"
