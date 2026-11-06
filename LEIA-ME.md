@@ -945,6 +945,43 @@ Permissões e regras de gravação **não mudaram**. Detalhes e medidas de antes
 `public/shim.js` e **reconstruir** a imagem do serviço `gestao`. Nada a configurar. Faça uma cópia de segurança antes (a
 primeira subida altera a tabela `docs`).
 
+## Duplicar etapas da EAP, modelos de etapa e contratos sob demanda (v161)
+
+Detalhes em `relatorios/feito_v161.md`. As regras de quem grava o quê **não mudaram**: as duas coleções novas ficam no
+módulo de Contratos (quem grava a EAP e os contratos grava também os modelos e as ordens de serviço).
+
+**No navegador** (página `public/index.html`):
+- EAP e cronograma: em cada etapa, **Duplicar** copia a etapa com materiais, mão de obra, ferramentas e subitens (o %
+  executado volta a 0) e abre a cópia no formulário para trocar o nome (ou o local) e as datas; os subitens andam junto com
+  a data de início. Nada é gravado até salvar. As dependências entre as linhas copiadas passam a ligar as cópias;
+- marque várias etapas (caixas ao lado de Editar) e use **Duplicar selecionadas para outro local**: informe o texto a trocar
+  nos nomes (por exemplo "Aeroporto" por "Guarulhos") e quantos dias deslocar as datas. Cada cópia fica abaixo da original;
+- **Modelo** (na linha) guarda a etapa com as linhas e os subitens; **Inserir de modelo** (no topo) põe o modelo no fim da
+  EAP de qualquer obra, abrindo no formulário. Os valores são os gravados no modelo; "Atualizar valores" traz os de hoje;
+- com a linha de base congelada, a etapa duplicada, as duplicadas para outro local e a inserida de modelo pedem o motivo da
+  revisão, como uma etapa nova digitada;
+- Contratos: novo tipo **Sob demanda (valor teto)**, com valor teto, vigência e a opção "Permitir acréscimo de até 25% sobre
+  o teto" (limite de 125%). A planilha vira tabela de preços (quantidade opcional ou estimada) e o valor do contrato é o teto
+  (mais os aditivos assinados, como sempre);
+- medição de contrato sob demanda pode passar da quantidade do item; o limite é o total medido. Avisa em 80% e 100% do teto,
+  mostra "usando acréscimo" e a margem restante acima de 100% (com a opção ligada) e não deixa passar do limite;
+- Comercial › **Ordens de serviço (sob demanda)**: cada chamado vira uma OS (número, data, local, descrição e itens da
+  tabela de preços), aberta, executada ou medida, com custo e margem quando o custo é informado; 50 por página. A medição
+  mostra as OS executadas do período: marcar uma OS soma os itens dela na medição; ao salvar, a OS fica "medida" (volta a
+  "executada" se a medição for excluída);
+- detalhe do contrato sob demanda: teto, medido, saldo, % usado, itens de maior valor e as OS por situação;
+- contrato existente vira sob demanda pelo botão **Mudar para sob demanda** no detalhe do contrato: as medições ficam e o
+  teto começa com o valor atual do contrato. Nada é convertido sozinho (os contratos 402, 439, 472, 485 e 486 mostram só um
+  aviso sugerindo a mudança).
+
+**No servidor** (`gestao/demanda161.js`, novo, ligado por `v161/ed_v161.py` no `regras.js` e no `Dockerfile`): cada gravação
+de medição ao cliente de contrato sob demanda é conferida: o total medido (as outras medições aprovadas ou faturadas mais esta)
+não passa do teto, ou de 125% dele com o acréscimo ligado. A gravação que não aumenta o medido (só a situação ou as
+observações) passa. Recusa: erro 409, registrada na auditoria como `MEDICAO_ACIMA_TETO`.
+
+**O que fazer:** subir `gestao/demanda161.js` (novo), `regras.js`, `Dockerfile`, `perfis.json` e `public/index.html` e
+**reconstruir** a imagem do serviço `gestao`. Nada a configurar; nada muda no banco.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

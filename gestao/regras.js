@@ -2120,6 +2120,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C158 = require('./ajuste158.js')({ erro, ehDono, perfilDe, PERM, igual, auditar: (...a) => auditar(...a) }); /* v158: perfis Recursos humanos e compras e Administrador de frota (ajuste158.js) */
   const C156 = require('./fam156.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, papelConta, cfgEmp, lerJson, json, antesGravar: (...a) => antesGravar(...a) }); /* v156: Famílias de produto (fam156.js) */
   const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson, json, famEpi: f => C156.ehFamEpi(f), famEpiNome: () => C156.nomeEpi(), antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
+  const C161 = require('./demanda161.js')({ col, doc, erro, auditar: (...a) => auditar(...a) }); /* v161: teto do contrato sob demanda (demanda161.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
@@ -2172,6 +2173,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'func') { e = regraAptFunc(velho, novo) || regraDeslFunc(velho, novo); if (e) return e; }
       if (c0 === 'desl') { e = regraDeslAuto(velho, novo); if (e) return e; }
       if (c0 === 'med') { e = regraMedCli(conta, req, velho, novo) || MEDF(conta, req, velho, novo); if (e) return e; } /* v143: MEDF = medapr.js */
+      if (c0 === 'med') { e = C161.antesMed(conta, req, s[1], velho, novo); if (e) return e; } /* v161: contrato sob demanda, total medido até o teto (ou 125%) */
       if (c0 === 'fzpedfech') { e = regraPedFech(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'opp') { e = regraGo(conta, req, velho, novo); if (e) return e; }
       if (c0 === 'osf') { e = regraOsf(conta, s[1], velho, novo); if (e) return e; } /* v125 */

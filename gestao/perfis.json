@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-06T15:33:41.603Z",
+ "gerado": "2026-11-06T16:14:44.088Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1672,6 +1672,9 @@
   "eap": [
    "ctr"
   ],
+  "eapmod": [
+   "ctr"
+  ],
   "idxbal": [
    "fluxo"
   ],
@@ -1844,6 +1847,9 @@
   ],
   "epihig": [
    "sst"
+  ],
+  "ctros": [
+   "ctr"
   ],
   "ctremp": [
    "proj",
@@ -2153,6 +2159,9 @@
   "eap": [
    "ctr"
   ],
+  "eapmod": [
+   "ctr"
+  ],
   "idxbal": [
    "fluxo"
   ],
@@ -2321,6 +2330,9 @@
   ],
   "epihig": [
    "sst"
+  ],
+  "ctros": [
+   "ctr"
   ],
   "ctremp": [
    "proj",
@@ -3205,6 +3217,9 @@
    "ctr": [
     "ctr"
    ],
+   "ctros": [
+    "ctros"
+   ],
    "med": [
     "med",
     "ctr",
@@ -3213,7 +3228,11 @@
     "nfse"
    ],
    "eap": [
-    "eap"
+    "eap",
+    "eapmod"
+   ],
+   "eapmod": [
+    "eapmod"
    ],
    "acervo": [
     "acervo"

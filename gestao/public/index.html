@@ -6430,7 +6430,7 @@ const CTR_IDX=[['','Sem reajuste'],['INCC-DI','INCC-DI'],['IPCA','IPCA'],['IGP-M
 GRIDS.ctrIt={f:'itens',minw:820,paste:true,cols:[['item','Item','text'],['desc','Descrição do serviço','text'],['un','Un.','text'],['qtd','Quantidade','number'],['pu','Preço unitário (com BDI)','number'],['tot','Total','calc',r=>nf2((+r.qtd||0)*(+r.pu||0))]],blank:()=>({item:'',desc:'',un:'un',qtd:'',pu:''})};
 GRIDS.ctrAd={f:'aditivos',minw:860,cols:[['num','Nº','text'],['data','Data (AAAA-MM-DD)','text'],['tipo','Tipo','select',[['acrescimo','Acréscimo de valor'],['supressao','Supressão de valor'],['prazo','Prorrogação de prazo'],['reajuste','Reajuste']]],['assinado','Assinado','select',[['sim','Sim'],['nao','Não (em negociação)']]],['valor','Valor (R$)','number'],['novoFim','Nova vigência (AAAA-MM-DD)','text'],['obs','Justificativa','text']],blank:()=>({num:'',data:todayStr(),tipo:'acrescimo',assinado:'sim',valor:'',novoFim:'',obs:''})};
 const ctrItens=c=>(c.itens||[]).filter(i=>i.desc||+i.qtd);
-const ctrIni=c=>ctrItens(c).length?r2(sum(ctrItens(c),i=>(+i.qtd||0)*(+i.pu||0))):(+c.valor||0);
+const ctrIni=c=>c&&c.tipoCtr==='demanda'?r2(+c.teto||0):ctrItens(c).length?r2(sum(ctrItens(c),i=>(+i.qtd||0)*(+i.pu||0))):(+c.valor||0); /* v161: sob demanda = teto */
 const ctrAdOk=a=>!(a&&a.assinado==='nao');
 const ctrAcr=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='acrescimo'&&ctrAdOk(a)),a=>a.valor));
 const ctrSup=c=>r2(sum((c.aditivos||[]).filter(a=>a.tipo==='supressao'&&ctrAdOk(a)),a=>a.valor));
@@ -6516,7 +6516,7 @@ function medForm(m){
     after:r=>{const up=()=>{edRead();const t=medTot(EDC.rec,c),e=$('#medTot');if(e)e.innerHTML='A faturar: <b>'+money(t.fat)+'</b> (serviços '+money(t.bruto)+(t.reaj?' + reajuste '+money(t.reaj):'')+')'+(t.ret?' · retenção contratual '+money(t.ret)+' · líquido '+money(t.liq):'');};
       $$('#mb input').forEach(i=>i.addEventListener('change',up));up();$$('#mb [data-act=gAdd],#mb [data-act=gDel]').forEach(b=>b.remove());},
     save:r=>{if(!r.ini||!r.fim||r.fim<r.ini){toast('Informe o período da medição.','neg');return false;}
-      for(const x of r.itens||[]){const q=+(it[+x.idx]||{}).qtd||0,ac=medAcumAnt(r,c,+x.idx)+(+x.qtd||0);if(+x.qtd<0){toast('Quantidade negativa no item '+x.item+'.','neg');return false;}if(q&&ac>q*1.0001){toast('O item '+(x.item||'')+' passaria de 100% do contratado. Faça um aditivo antes.','neg');return false;}}
+      for(const x of r.itens||[]){const q=+(it[+x.idx]||{}).qtd||0,ac=medAcumAnt(r,c,+x.idx)+(+x.qtd||0);if(+x.qtd<0){toast('Quantidade negativa no item '+x.item+'.','neg');return false;}if(q&&ac>q*1.0001&&c.tipoCtr!=='demanda'){toast('O item '+(x.item||'')+' passaria de 100% do contratado. Faça um aditivo antes.','neg');return false;}}
       if(medTot(r,c).fat<=0){toast('A medição está sem valor.','neg');return false;}
       r.itens=(r.itens||[]).filter(x=>+x.qtd);put('med',cl(r));toast('Medição salva.','pos');}});
 }
@@ -31639,9 +31639,333 @@ A.v160EpiSemVar=()=>{const c=document.getElementById('f_comVar');if(c){c.checked
 Object.assign(ACT_GROUP,{v160EpiTam:'est',v160EpiConv:'est',v160EpiSemVar:'est'});
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v160EpiTam:'Cria um produto para cada tamanho digitado.',v160EpiConv:'Cria um produto para cada variação (o original fica).',v160EpiSemVar:'Desmarca "Com variações" neste cadastro.'});
 
+/* ===== v161: Obras (EAP: duplicar etapas e modelos de etapa) e contratos sob demanda (relatorios/feito_v161.md) =====
+   1. EAP e cronograma:
+      - "Duplicar" em cada etapa: copia a etapa com materiais, mão de obra, ferramentas e subitens; % executado volta a 0 e os
+        dados de execução saem; a cópia abre no formulário (troque o nome/local e as datas: os subitens andam junto com a data
+        de início). Dependências dentro do bloco copiado passam a apontar para as cópias. Nada é gravado até salvar.
+      - Caixas de seleção nas linhas e "Duplicar selecionadas para outro local": troca de texto nos nomes (de → para, por
+        exemplo "Aeroporto" → "Guarulhos") e deslocamento das datas em dias. Cada cópia fica logo abaixo do bloco original.
+      - Modelos de etapa (coleção eapmod): "Salvar como modelo" guarda a etapa com as linhas e os subitens; "Inserir de modelo"
+        põe o modelo na EAP de qualquer obra (no fim), abrindo no formulário. Quem grava a EAP (módulo Contratos) grava os
+        modelos. Os valores ficam os gravados; "Atualizar valores" atualiza, como sempre.
+      - Tudo grava pelo eapSalvar/put('eap') de sempre: com linha de base congelada, o sistema pede o motivo (v111) do mesmo
+        jeito que numa etapa nova digitada.
+   2. Contratos sob demanda (valor teto), ao lado do contrato de quantidade fixa:
+      - Campos tipoCtr 'demanda', teto (R$) e acr25 ("Permitir acréscimo de até 25% sobre o teto": limite = 125% do teto).
+        A vigência é a de sempre (início/fim). Valor do contrato = teto (+ aditivos assinados, como antes).
+      - A planilha vira tabela de preços (quantidade opcional/estimada). A medição pode passar a quantidade do item; o
+        bloqueio é no total medido: não passa do teto (ou de 125%). Avisos em 80% e 100%; acima de 100% com a opção ligada,
+        "usando acréscimo" e a margem restante. O servidor confere o mesmo limite (deploy/gestao/demanda161.js).
+      - Ordens de serviço do contrato (coleção ctros): número, data, local, descrição e itens da tabela de preços; situações
+        aberta / executada / medida. A medição puxa as OS executadas do período (cada item entra na medição). Custo e margem
+        por OS quando o custo é informado.
+      - Painel do contrato: teto, medido, saldo, % usado, itens de maior valor e as OS por situação.
+      - Contrato existente vira sob demanda pelo botão "Mudar para sob demanda" (as medições ficam; o teto começa com o valor
+        atual do contrato). Nada é convertido sozinho.
+   Prefixos: v161*, V161*. */
+const V161={sel:{eap:'',ids:new Set()},tipos:[['fixo','Quantidade fixa (planilha orçamentária)'],['demanda','Sob demanda (valor teto)']],
+  sugere:['402','439','472','485','486'],OS_ST:{aberta:['Aberta','warn'],executada:['Executada','acc'],medida:['Medida','pos']}};
+['eapmod','ctros'].forEach(c=>{if(!COLS.includes(c)){COLS.push(c);S[c]=S[c]||[];IDX[c]=new Map();}});
+/* OS mudam de situação com várias pessoas na tela: ao vivo; modelos quase não mudam: consulta periódica (só o que mudou, v160) */
+if(typeof LIVE_COLS!=='undefined'&&!LIVE_COLS.includes('ctros'))LIVE_COLS.push('ctros');
+Object.assign(COL_NOME,{eapmod:'Modelo de etapa da EAP',ctros:'Ordem de serviço do contrato'});
+try{Object.assign(PFN_NOME,{eapmod:'Modelos de etapa (EAP)',ctros:'Ordens de serviço dos contratos sob demanda'});}catch(e){}
+/* modelos: gravados por quem grava a EAP (módulo ctr); OS: pelo módulo de contratos (perfis.json, gen_perm) */
+if(TAB_COLS.eap&&!TAB_COLS.eap.includes('eapmod'))TAB_COLS.eap.push('eapmod');
+if(typeof DBW_TABCOLS!=='undefined'){const ad=(t,cs)=>{DBW_TABCOLS[t]=[...new Set((DBW_TABCOLS[t]||[]).concat(cs))];};
+  ad('eap',['eapmod']);ad('ctr',['ctros','med']);ad('med',['ctros']);ad('ctros',['ctros','ctr','med','proj','parc']);}
+
+/* ---------- 1. EAP: duplicar etapas ---------- */
+/* dados de execução que não vão para a cópia */
+const V161_EXEC=['pct','pctEm','pctPor','real','mspUid','predUid','conclusao','concluidoEm','concl','exec','execTerc','fis','etapaId'];
+function v161Limpa(x){const o=cl(x);V161_EXEC.forEach(k=>delete o[k]);o.pct=0;return o;}
+const v161NovoId=()=>'ei'+uid().slice(0,12);
+/* copia as linhas its[a..b) com ids novos; mapa id antigo → id novo (para as dependências) */
+function v161CopiaLinhas(ls,mapa){return ls.map(x=>{const o=v161Limpa(x);o.id=v161NovoId();mapa.set(x.id,o.id);return o;});}
+/* dependências: o que aponta para uma linha copiada passa a apontar para a cópia (o que aponta para fora fica igual) */
+function v161Remapeia(ls,mapa){ls.forEach(o=>{if(o.pred&&mapa.has(o.pred))o.pred=mapa.get(o.pred);});return ls;}
+const v161Desloca=(d,n)=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&n?addDays(d,n):d;
+function v161DeslocaLinhas(ls,n){if(!n)return ls;ls.forEach(o=>{o.ini=v161Desloca(o.ini,n);o.fim=v161Desloca(o.fim,n);});return ls;}
+const v161ReEsc=s=>String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+function v161Troca(nome,de,para){nome=String(nome||'');if(!de)return nome;return nome.replace(new RegExp(v161ReEsc(de),'gi'),String(para==null?'':para)).slice(0,160);}
+/* data de referência de um bloco: a do primeiro item, ou a menor dos subitens */
+function v161RefIni(ls){if(!ls.length)return '';if(ls[0].ini)return ls[0].ini;return ls.map(x=>x.ini).filter(Boolean).sort()[0]||'';}
+/* bloco da etapa i duplicado logo abaixo dele (sem gravar): devolve a EAP nova e a posição da cópia */
+function v161DupUma(e,i){const its=eapItens(e);if(!its[i])return null;const j=eapBloco(its,i),mapa=new Map();
+  const cp=v161Remapeia(v161CopiaLinhas(its.slice(i,j),mapa),mapa);
+  const n=cl(e),b=eapItens(n);n.itens=b.slice(0,j).concat(cp,b.slice(j));return {e:n,pos:j,n:cp.length};}
+/* várias etapas: cada bloco copiado logo abaixo do original; nomes com troca de texto; datas deslocadas */
+function v161DupVarias(e,ids,de,para,dias){const its=eapItens(e);dias=Math.round(+dias||0);
+  let idx=its.map((x,i)=>ids.includes(x.id)?i:-1).filter(i=>i>=0);
+  /* etapa que já está dentro de outro bloco escolhido vai junto com ele */
+  const blocos=[];idx.forEach(i=>{if(blocos.some(b=>i>=b[0]&&i<b[1]))return;blocos.push([i,eapBloco(its,i)]);});
+  const mapa=new Map(),copias=blocos.map(b=>v161CopiaLinhas(its.slice(b[0],b[1]),mapa));
+  let nomes=0;copias.forEach(ls=>ls.forEach(o=>{const t=v161Troca(o.nome,de,para);if(t!==o.nome)nomes++;o.nome=t||o.nome;}));
+  copias.forEach(ls=>{v161Remapeia(ls,mapa);v161DeslocaLinhas(ls,dias);if(!de)ls[0].nome=String(ls[0].nome||'').slice(0,150)+' (cópia)';});
+  const n=cl(e),out=eapItens(n).slice();for(let k=blocos.length-1;k>=0;k--)out.splice(blocos[k][1],0,...copias[k]);
+  n.itens=out;return {e:n,blocos:blocos.length,linhas:sum(copias,c=>c.length),nomes};}
+/* formulário de uma etapa que ainda não foi gravada (cópia ou modelo): o eapItemForm de sempre sobre a EAP nova; salvar grava
+   tudo (a etapa e os subitens), cancelar não grava nada. Mudou a data de início: os subitens andam junto. */
+function v161FormCopia(c,eNovo,pos,nota,titulo){
+  const k=S.eap.findIndex(x=>x.ctrId===c.id),orig=k>=0?S.eap[k]:null,its=eapItens(eNovo),fimB=eapBloco(its,pos),ref=v161RefIni(its.slice(pos,fimB)),nSub=fimB-pos-1;
+  const g0=eapGarante,m0=modal;
+  eapGarante=()=>cl(eNovo);if(k>=0)S.eap[k]=eNovo;else S.eap.push(eNovo); /* o formulário e as fontes dos valores (Atualizar valores) leem a EAP nova */
+  modal=function(op){try{if(op&&typeof op.body==='string'&&op.body.indexOf('eapR_mat')>=0){op=Object.assign({},op);
+      op.title=String(op.title||'').replace(/^Editar: /,titulo+': ');
+      op.body=op.body.replace('<div class="fg">','<div class="note v161nota" style="grid-column:1/-1;margin:0 0 8px">'+nota+(nSub>0?' Os '+nSub+' subitem(ns) andam junto com a data de início.':'')+'</div><div class="fg">');
+      const s0=op.save;if(s0)op.save=function(root){const p0=put;
+        put=function(col,rec){try{if(col==='eap'&&rec&&Array.isArray(rec.itens)&&rec.itens[pos]&&nSub>0){const ni=rec.itens[pos].ini||'',d=ref&&ni?dpDias(ref,ni):0;
+            if(d)v161DeslocaLinhas(rec.itens.slice(pos+1,pos+1+nSub),d);}}catch(e){}return p0.apply(this,arguments);};
+        try{return s0.apply(this,arguments);}finally{put=p0;}};}}catch(e){}
+    return m0.call(this,op);};
+  try{return eapItemForm(c,pos);}finally{eapGarante=g0;modal=m0;if(k>=0)S.eap[k]=orig;else{const i=S.eap.indexOf(eNovo);if(i>=0)S.eap.splice(i,1);}}}
+A.v161Dup=d=>{const c=eapCur(),e=c&&eapDe(c.id);if(!e)return;const i=+d.i,its=eapItens(e);if(!its[i])return;
+  const r=v161DupUma(e,i);if(!r)return;r.e.itens[r.pos].nome=String(its[i].nome||'').slice(0,150)+' (cópia)';
+  v161FormCopia(c,r.e,r.pos,'Cópia de <b>'+esc(its[i].nome)+'</b>'+(r.n>1?' com '+(r.n-1)+' subitem(ns)':'')+'. Troque o nome (ou o local) e as datas. O % executado começa em 0; materiais, mão de obra e ferramentas vêm com os valores gravados.','Duplicar');};
+/* seleção nas linhas (sem redesenhar a tela) */
+function v161SelDe(e){if(!e)return new Set();if(V161.sel.eap!==e.id){V161.sel.eap=e.id;V161.sel.ids=new Set();}const ok=new Set(eapItens(e).map(x=>x.id));[...V161.sel.ids].forEach(id=>{if(!ok.has(id))V161.sel.ids.delete(id);});return V161.sel.ids;}
+const v161SelTx=n=>'Duplicar selecionadas para outro local'+(n?' ('+n+')':'');
+A.v161Sel=(d,el)=>{const c=eapCur(),e=c&&eapDe(c.id);if(!e)return;const s=v161SelDe(e),on=el&&typeof el.checked==='boolean'?el.checked:!s.has(d.id);
+  if(on)s.add(d.id);else s.delete(d.id);try{const b=document.querySelector('[data-act="v161DupSel"]');if(b)b.textContent=v161SelTx(s.size);}catch(err){}};
+A.v161DupSel=()=>{const c=eapCur(),e=c&&eapDe(c.id);if(!e)return;const s=[...v161SelDe(e)];
+  if(!s.length){toast('Marque as etapas que vão para o outro local (caixas à esquerda de Editar).','neg');return;}
+  const its=eapItens(e),es=its.filter(x=>s.includes(x.id));
+  modal({title:'Duplicar etapas para outro local',saveLabel:'Duplicar',
+    body:'<p style="margin:0 0 8px">'+es.length+' etapa(s) marcada(s), cada uma com os subitens: '+es.slice(0,8).map(x=>'<b>'+esc(x.nome)+'</b>').join(', ')+(es.length>8?'…':'')+'.</p>'+
+      '<div class="fg">'+field('Trocar nos nomes o texto','v161de','text','',{ph:'Ex.: Aeroporto'})+field('por','v161para','text','',{ph:'Ex.: Guarulhos'})+field('Deslocar as datas em (dias)','v161dias','number','0')+'</div>'+
+      '<p class="sub" style="margin:8px 0 0">Cada cópia fica logo abaixo da etapa original, com % executado em 0 e os materiais, a mão de obra e as ferramentas com os valores gravados. Sem texto para trocar, o nome ganha "(cópia)". Dependências entre as etapas copiadas passam a ligar as cópias.</p>',
+    save:root=>{const v=readForm(root),de=String(v.v161de||'').trim(),para=String(v.v161para||'').trim();
+      const r=v161DupVarias(e,s,de,para,v.v161dias);
+      if(de&&!r.nomes){toast('O texto "'+de+'" não aparece no nome das etapas marcadas (nem dos subitens). Confira o texto.','neg');return false;}
+      if(JSON.stringify(r.e).length>240000){toast('A EAP ficaria grande demais para um contrato (limite de 240 mil caracteres). Duplique menos etapas por vez.','neg');return false;}
+      V161.sel.ids=new Set();eapSalvar(r.e);toast(r.blocos+' etapa(s) duplicada(s) ('+r.linhas+' linha(s) com os subitens).','pos');}});};
+
+/* ---------- 1. EAP: modelos de etapa ---------- */
+const v161Mods=()=>(S.eapmod||[]).slice().sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'));
+/* linhas do modelo: o bloco sem execução, nível a partir de 1 (ids ficam; trocados ao inserir) */
+function v161ModLinhas(its,i){const j=eapBloco(its,i),n0=Math.max(1,+its[i].niv||1)-1;return its.slice(i,j).map(x=>{const o=v161Limpa(x);o.niv=Math.max(1,(+x.niv||1)-n0);return o;});}
+A.v161ModSalvar=d=>{const c=eapCur(),e=c&&eapDe(c.id);if(!e)return;const its=eapItens(e),i=+d.i;if(!its[i])return;const ls=v161ModLinhas(its,i);
+  modal({title:'Salvar etapa como modelo',saveLabel:'Salvar modelo',
+    body:'<p style="margin:0 0 8px"><b>'+esc(its[i].nome)+'</b>'+(ls.length>1?' com '+(ls.length-1)+' subitem(ns)':'')+': as linhas de materiais, mão de obra e ferramentas vão com os valores gravados. O % executado não vai.</p><div class="fg">'+
+      field('Nome do modelo *','v161mn','text',String(its[i].nome||'').slice(0,120),{full:true})+field('Observação','v161mo','text','',{full:true})+'</div>',
+    save:root=>{const v=readForm(root),nome=String(v.v161mn||'').trim().slice(0,120);if(!nome){toast('Dê um nome ao modelo.','neg');return false;}
+      const rec={id:'em'+uid(),nome,obs:String(v.v161mo||'').slice(0,300),itens:ls,origem:(c.numero||'')+' · '+String(its[i].nome||'').slice(0,80),criadoPor:actorId(),criadoEm:Date.now()};
+      if(JSON.stringify(rec).length>240000){toast('Esta etapa tem linhas demais para um modelo.','neg');return false;}
+      if(v161Mods().some(m=>gsNorm(m.nome)===gsNorm(nome))){toast('Já existe um modelo com este nome. Use outro nome (ou exclua o antigo em Inserir de modelo).','neg');return false;}
+      put('eapmod',rec);toast('Modelo "'+nome+'" salvo. Use "Inserir de modelo" na EAP de qualquer obra.','pos');}});};
+/* insere o modelo no fim da EAP (nível 1), com ids novos e as datas começando na data escolhida */
+function v161ModInserir(e,m,ini){const mapa=new Map(),ls=v161Remapeia(v161CopiaLinhas(m.itens||[],mapa),mapa),ref=v161RefIni(ls);
+  if(ini&&ref)v161DeslocaLinhas(ls,dpDias(ref,ini));else if(ini&&ls[0]&&!ls[0].ini){ls[0].ini=ini;}
+  const n=cl(e);const pos=eapItens(n).length;n.itens=eapItens(n).concat(ls);return {e:n,pos,n:ls.length};}
+function v161ModLista(q){const qq=gsNorm(q),ls=v161Mods().filter(m=>!qq||gsNorm([m.nome,m.obs,m.origem].join(' ')).includes(qq)),ed=mayW('ctr');
+  return (ls.length?'<div class="tw"><table><thead><tr><th>Modelo</th><th class="num">Linhas</th><th>Origem</th><th></th></tr></thead><tbody>'+ls.slice(0,50).map(m=>'<tr><td><b>'+esc(m.nome)+'</b>'+(m.obs?'<div class="sub">'+esc(m.obs)+'</div>':'')+'</td><td class="num">'+(m.itens||[]).length+'</td><td class="sub">'+esc(m.origem||'')+'</td><td class="act">'+
+    (ed?'<button class="btn sm pri" data-act="v161ModUsar" data-id="'+esc(m.id)+'">Inserir</button><button class="btn sm dng" data-act="v161ModDel" data-id="'+esc(m.id)+'" aria-label="Excluir modelo">×</button>':'')+'</td></tr>').join('')+'</tbody></table></div>'+(ls.length>50?'<p class="sub">Mostrando 50 de '+ls.length+'. Digite para filtrar.</p>':''):
+    '<div class="note">'+(S.eapmod.length?'Nenhum modelo com este texto.':'Nenhum modelo salvo ainda. Use "Modelo" na linha de uma etapa para salvar.')+'</div>');}
+A.v161ModIns=()=>{const c=eapCur();if(!c){toast('Escolha o contrato.','neg');return;}
+  modal({title:'Inserir de modelo · '+(c.numero||''),wide:true,nofocus:false,
+    body:'<div class="fg">'+field('Buscar modelo','v161mq','text','',{ph:'Nome, observação ou origem'})+field('Início das etapas inseridas','v161mi','date',todayStr())+'</div><div id="v161ModL" style="margin-top:8px">'+v161ModLista('')+'</div>'+
+      '<p class="sub" style="margin:8px 0 0">O modelo entra no fim da EAP e abre no formulário: troque o nome e as datas antes de salvar. Os valores são os gravados no modelo; use "Atualizar valores" para trazer os de hoje.</p>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'});};
+A.v161ModUsar=d=>{const c=eapCur(),m=get('eapmod',d.id);if(!c||!m)return;const e=eapGarante(c);let ini=todayStr();try{const el=document.querySelector('#f_v161mi');if(el&&/^\d{4}-\d{2}-\d{2}$/.test(el.value||''))ini=el.value;}catch(err){}
+  const r=v161ModInserir(e,m,ini);if(!r.n){toast('O modelo está vazio.','neg');return;}
+  v161FormCopia(c,r.e,r.pos,'Do modelo <b>'+esc(m.nome)+'</b>'+(r.n>1?' com '+(r.n-1)+' subitem(ns)':'')+'. Troque o nome (ou o local) e as datas. Valores como gravados no modelo.','Inserir do modelo');};
+A.v161ModDel=d=>{const m=get('eapmod',d.id);if(!m)return;confirmBox('Excluir o modelo "'+esc(m.nome)+'"? As EAP onde ele já foi inserido não mudam.',()=>{del('eapmod',m.id);toast('Modelo excluído.','pos');},'Excluir',true);};
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('input',ev=>{const t=ev.target;if(t&&t.id==='f_v161mq'){const l=document.querySelector('#v161ModL');if(l)l.innerHTML=v161ModLista(t.value);}});
+Object.assign(ACT_GROUP,{v161Dup:'ctr',v161Sel:null,v161DupSel:'ctr',v161ModSalvar:'ctr',v161ModIns:'ctr',v161ModUsar:'ctr',v161ModDel:'ctr'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v161Dup:'Copia a etapa com as linhas e os subitens e abre a cópia para trocar o nome e as datas.',v161DupSel:'Copia as etapas marcadas para outro local, trocando um texto nos nomes e deslocando as datas.',v161ModSalvar:'Guarda esta etapa (com as linhas e os subitens) como modelo para outras obras.',v161ModIns:'Põe na EAP uma etapa guardada como modelo.'});
+/* tela da EAP: caixa de seleção e Duplicar/Modelo nas linhas; botões no topo */
+{const v0=V.eap;V.eap=function(){let h=v0.apply(this,arguments);try{const c=eapCur(),e=c&&eapDe(c.id);if(!c||!mayW('ctr'))return h;const its=eapItens(e),s=v161SelDe(e);
+  const topo=(its.length?'<button class="btn" data-act="v161DupSel">'+v161SelTx(s.size)+'</button>':'')+'<button class="btn" data-act="v161ModIns">Inserir de modelo</button>';
+  h=h.replace('<button class="btn pri" data-act="eapAdd">Nova etapa</button>',topo+'<button class="btn pri" data-act="eapAdd">Nova etapa</button>');
+  if(!its.length)h=h.replace('<button class="meu-at" data-act="eapAdd">','<button class="meu-at" data-act="v161ModIns"><span style="font-size:22px">📑</span><b>Inserir de modelo</b><span class="sub">Etapa salva de outra obra</span></button><button class="meu-at" data-act="eapAdd">');
+  h=h.replace(/<td class="act" style="white-space:nowrap"><button class="btn sm" data-act="eapEdit" data-i="(\d+)">Editar<\/button>/g,(m,i)=>{const it=its[+i];if(!it)return m;
+    return '<td class="act" style="white-space:nowrap"><input type="checkbox" data-act="v161Sel" data-id="'+esc(it.id)+'"'+(s.has(it.id)?' checked':'')+' aria-label="Marcar '+esc(it.nome)+' para duplicar" style="vertical-align:middle;margin-right:6px"><button class="btn sm" data-act="eapEdit" data-i="'+i+'">Editar</button><button class="btn sm" data-act="v161Dup" data-i="'+i+'" title="Duplicar com os subitens">Duplicar</button><button class="btn sm" data-act="v161ModSalvar" data-i="'+i+'" title="Salvar como modelo">Modelo</button>';});
+  h=h.replace('"→" transforma a linha em subitem da linha de cima.</p>','"→" transforma a linha em subitem da linha de cima. "Duplicar" copia a etapa com os subitens; marque várias para duplicá-las para outro local; "Modelo" guarda a etapa para outras obras.</p>');
+}catch(err){}return h;};}
+
+/* ---------- 2. contratos sob demanda: teto ---------- */
+const v161Demanda=c=>!!c&&c.tipoCtr==='demanda';
+/* teto permitido (com a opção de 25%); o teto do contrato é o valor atual (teto + aditivos assinados, como o valor de sempre) */
+function v161Teto(c,extra,semMed){const teto=r2(ctrAtual(c)),lim=r2(teto*(c&&c.acr25?1.25:1));
+  const med=r2(sum(medsDe(c.id).filter(m=>m.status!=='rascunho'&&m.id!==semMed),m=>medTot(m,c).fat)),tot=r2(med+(+extra||0));
+  const pct=teto>0?tot/teto:null;let nivel='ok';
+  if(tot>lim+0.01)nivel='acima';else if(teto>0&&tot>teto+0.01)nivel='acr';else if(teto>0&&tot>=teto-0.01)nivel='100';else if(pct!=null&&pct>=0.8)nivel='80';
+  return {teto,lim,med,tot,pct,saldo:r2(teto-tot),margem:r2(lim-tot),nivel,acr25:!!(c&&c.acr25)};}
+function v161TetoHtml(t,esta){const p=t.pct==null?'—':pctV(t.pct);
+  const base=(esta!=null?'Com esta medição, o medido no contrato vai a ':'Medido no contrato: ')+'<b>'+money(t.tot)+'</b> de '+money(t.teto)+' de teto ('+p+')';
+  if(t.nivel==='acima')return '<div class="note v161teto" style="border-color:var(--neg)"><b class="neg">'+base+'. Passa do limite de '+money(t.lim)+(t.acr25?' (teto + 25%)':' (teto)')+' em '+money(-t.margem)+'.</b> Reduza a medição ou faça um aditivo de valor.</div>';
+  if(t.nivel==='acr')return '<div class="note v161teto">'+base+'. '+pill('usando acréscimo','warn')+' Margem restante: <b>'+money(t.margem)+'</b> (limite '+money(t.lim)+', teto + 25%).</div>';
+  if(t.nivel==='100')return '<div class="note v161teto">'+base+'. <b>Teto atingido (100%).</b> '+(t.acr25?'Acima disso usa o acréscimo de até 25% (margem '+money(t.margem)+').':'Não cabe mais medição sem aditivo.')+'</div>';
+  if(t.nivel==='80')return '<div class="note v161teto">'+base+'. <b>Atenção: passou de 80% do teto.</b> Saldo: '+money(t.saldo)+'.</div>';
+  return '<p class="sub v161teto" style="margin:6px 0 0">'+base+'. Saldo: '+money(t.saldo)+'.</p>';}
+{const ca=ctrAlertas;ctrAlertas=function(c){let a=ca.apply(this,arguments);if(!v161Demanda(c)||!c||c.status!=='vigente')return a;
+  a=a.filter(x=>x[1]!=='Medido acima do valor do contrato');const t=v161Teto(c);
+  if(t.nivel==='acima')a.push(['neg','Medido acima do '+(t.acr25?'limite de 125% do teto':'teto')]);
+  else if(t.nivel==='acr')a.push(['warn','Usando acréscimo: margem '+money(t.margem)]);
+  else if(t.nivel==='100')a.push([t.acr25?'warn':'neg','Teto atingido (100%)']);
+  else if(t.nivel==='80')a.push(['warn','Medido em '+pctV(t.pct)+' do teto']);
+  return a;};}
+/* contrato que o dono indicou como sob demanda e ainda não foi mudado (só sugere; não muda nada) */
+const v161Sugerido=c=>!!c&&!v161Demanda(c)&&V161.sugere.some(n=>{const s=String(c.numero||'').trim();return s===n||new RegExp('^0*'+n+'(\\D|$)').test(s);});
+
+/* ---------- 2. formulário do contrato: tipo, teto e tabela de preços ---------- */
+const v161ValorFixo=r=>{const it=ctrItens(r);return it.length?r2(sum(it,i=>(+i.qtd||0)*(+i.pu||0))):(+r.valor||0);};
+function v161CtrBody(h,r){const dem=r.tipoCtr==='demanda';
+  let ex=field('Tipo de contrato','tipoCtr','select',dem?'demanda':'fixo',{opts:V161.tipos});
+  if(dem)ex+=field('Valor teto (R$) *','teto','number',r.teto==null?'':r.teto)+field('Permitir acréscimo de até 25% sobre o teto','acr25','checkbox',!!r.acr25)+
+    '<p class="sub" style="grid-column:1/-1;margin:0">Sob demanda: o cliente chama, cada chamado vira uma ordem de serviço com os itens da tabela de preços e a medição soma as OS executadas. A quantidade dos itens é opcional (estimada); o limite é o total medido: '+money(+r.teto||0)+(r.acr25?' + 25% = '+money(r2((+r.teto||0)*1.25)):'')+(r.id&&get('ctr',r.id)&&(ctrAcr(r)||ctrSup(r)||ctrReaj(r))?', mais os aditivos assinados':'')+'. Vigência: início e fim abaixo.</p>';
+  h=h.replace('<div class="fg">','<div class="fg">'+ex);
+  if(dem){h=h.replace('<div class="sect">Planilha orçamentária</div>','<div class="sect">Tabela de preços (preço unitário; quantidade opcional ou estimada)</div>').replace('<th class="num">Quantidade</th>','<th class="num">Qtd. estimada (opcional)</th>')
+    .replace('Total da planilha: <b>','Total pelas quantidades estimadas: <b>').replace('Itens com medição não devem ser removidos.','Itens com medição não devem ser removidos. A medição pode passar da quantidade estimada; o limite é o teto.').replace('Valor (se não usar a planilha)','Valor (não usado no sob demanda)');}
+  return h;}
+{const cf0=ctrForm;ctrForm=function(c){cf0.apply(this,arguments);if(!EDC||EDC.rec!==c)return;const b0=EDC.body,s0=EDC.save;EDC.v161=true;
+  EDC.body=r=>v161CtrBody(b0(r),r);
+  EDC.save=r=>{if(r.tipoCtr==='demanda'){if(!(+r.teto>0)){toast('Contrato sob demanda: informe o valor teto.','neg');return false;}r.teto=r2(+r.teto);r.acr25=!!r.acr25;}
+    else{delete r.tipoCtr;delete r.teto;delete r.acr25;}
+    return s0(r);};
+  edRender();};}
+/* trocar o tipo no formulário redesenha (rótulos da tabela de preços); o teto começa com o valor da planilha */
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('change',ev=>{const t=ev.target;if(!t||t.id!=='f_tipoCtr'||!EDC||!EDC.v161)return;
+  try{edRead();}catch(e){}const r=EDC.rec;if(r.tipoCtr==='demanda'&&!(+r.teto>0))r.teto=v161ValorFixo(r)||'';edRender();});
+
+/* ---------- 2. contrato existente → sob demanda ---------- */
+A.v161CtrDemanda=d=>{const c=get('ctr',d.id);if(!c)return;if(v161Demanda(c)){toast('Este contrato já é sob demanda.','neg');return;}
+  const at=ctrAtual(c),ini=ctrIni(c),ms=medsDe(c.id).length;
+  confirmBox('Mudar o contrato <b>'+esc(c.numero)+'</b> para <b>sob demanda (valor teto)</b>?<br><br>O teto começa com o valor atual do contrato, <b>'+money(at)+'</b>'+(r2(at-ini)?' ('+money(ini)+' + aditivos)':'')+'. A planilha passa a valer como tabela de preços (as quantidades ficam como estimadas). '+(ms?'As '+ms+' medição(ões) já lançadas ficam como estão. ':'')+'Depois, em Editar, você ajusta o teto e a opção de acréscimo de 25%.',()=>{
+    const n=Object.assign(cl(c),{tipoCtr:'demanda',teto:r2(ini),acr25:false});n.demandaHist=(Array.isArray(c.demandaHist)?c.demandaHist.slice(-9):[]).concat([{em:Date.now(),por:actorId(),valorAntes:r2(at)}]);
+    put('ctr',n);toast('Contrato '+c.numero+' agora é sob demanda (teto '+money(at)+').','pos');},'Mudar para sob demanda');};
+ACT_GROUP.v161CtrDemanda='ctr';
+
+/* ---------- 2. ordens de serviço do contrato ---------- */
+const v161OsDe=cid=>(S.ctros||[]).filter(o=>o.ctrId===cid);
+const v161OsMed=o=>o&&o.medId?get('med',o.medId):null;
+/* situação efetiva: "medida" só enquanto a medição existe */
+const v161OsSt=o=>!o?'aberta':o.status==='medida'?(v161OsMed(o)?'medida':'executada'):(o.status==='executada'?'executada':'aberta');
+function v161OsVal(o,c){c=c||get('ctr',o.ctrId)||{};const it=ctrItens(c);const v=r2(sum(o.itens||[],x=>(+x.qtd||0)*(+((it[+x.idx]||{}).pu)||0)));
+  const temC=(o.itens||[]).some(x=>x.custo!==''&&x.custo!=null)||+o.outrosCustos>0;
+  const cu=temC?r2(sum(o.itens||[],x=>(+x.qtd||0)*(+x.custo||0))+(+o.outrosCustos||0)):null;
+  return {valor:v,custo:cu,margem:cu==null?null:r2(v-cu),pct:cu==null||!v?null:(v-cu)/v};}
+const v161OsData=o=>String(o.dataExec||o.data||'').slice(0,10);
+ui.ctros=Object.assign({ctr:'',st:'',q:''},ui.ctros||{});
+novaTab('ctros','Ordens de serviço (sob demanda)','Comercial','ctr','comer','ctr');TAB_COLS.ctros=['ctros'];
+const v161CtrDem=()=>S.ctr.filter(v161Demanda).sort((a,b)=>String(b.assinatura||'').localeCompare(String(a.assinatura||'')));
+V.ctros=()=>{const f=ui.ctros,q=gsNorm(f.q),ds=v161CtrDem(),ed=mayW('ctr');
+  const rows=(S.ctros||[]).filter(o=>(!f.ctr||o.ctrId===f.ctr)&&(!f.st||v161OsSt(o)===f.st)&&(!q||gsNorm([o.numero,o.local,o.desc,(get('ctr',o.ctrId)||{}).numero].join(' ')).includes(q)))
+    .sort((a,b)=>String(b.data||'').localeCompare(String(a.data||''))||(+b.numero||0)-(+a.numero||0));
+  const cont=k=>rows.filter(o=>v161OsSt(o)===k).length,vt=k=>money(sum(rows.filter(o=>v161OsSt(o)===k),o=>v161OsVal(o).valor));
+  const pg=v160Pag('ctros',rows);
+  return pageHead('Ordens de serviço dos contratos sob demanda','Cada chamado do cliente vira uma OS com os itens da tabela de preços do contrato. A OS executada entra na medição do período; depois de medida, não muda.',ed&&ds.length?'<button class="btn pri" data-act="v161OsNova" data-c="'+esc(f.ctr||'')+'">Nova OS</button>':'')+
+  '<div class="stack">'+(ds.length?'':'<div class="note">Nenhum contrato sob demanda. Em Contratos, edite o contrato e escolha o tipo "Sob demanda (valor teto)", ou use "Mudar para sob demanda" no detalhe do contrato.</div>')+
+  '<div class="kpis">'+kpi('Abertas',String(cont('aberta')),vt('aberta'),cont('aberta')?'warn':'')+kpi('Executadas sem medição',String(cont('executada')),vt('executada'))+kpi('Medidas',String(cont('medida')),vt('medida'),'pos')+'</div>'+
+  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_ctros" data-filter="ctros.q" value="'+esc(f.q)+'" placeholder="Nº, local, descrição ou contrato"></label><label class="f"><span>Contrato</span><select id="s_ctros_ctr" data-filter="ctros.ctr">'+opt(ds.map(c=>[c.id,c.numero+' · '+parcNome(c.parcId)]),f.ctr,'Todos')+'</select></label><label class="f"><span>Situação</span><select id="s_ctros_st" data-filter="ctros.st">'+opt(Object.keys(V161.OS_ST).map(k=>[k,V161.OS_ST[k][0]]),f.st,'Todas')+'</select></label></div>'+
+  '<div class="tw"><table style="min-width:1080px"><thead><tr><th>OS</th><th>Data</th><th>Contrato</th><th>Local / descrição</th><th class="num">Valor</th><th class="num">Custo</th><th class="num">Margem</th><th>Situação</th><th></th></tr></thead><tbody>'+
+  (pg.length?pg.map(o=>{const c=get('ctr',o.ctrId)||{},v=v161OsVal(o,c),st=v161OsSt(o),md=v161OsMed(o);
+    const acts='<button class="btn sm" data-act="v161OsVer" data-id="'+esc(o.id)+'">'+(st==='medida'||!ed?'Ver':'Editar')+'</button>'+(ed&&st==='aberta'?'<button class="btn sm pri" data-act="v161OsExec" data-id="'+esc(o.id)+'">Executada</button>':'')+(ed&&st==='executada'?'<button class="btn sm" data-act="v161OsReabre" data-id="'+esc(o.id)+'">Reabrir</button>':'')+(ed&&st!=='medida'?'<button class="btn sm dng" data-act="v161OsDel" data-id="'+esc(o.id)+'" aria-label="Excluir OS">×</button>':'');
+    return '<tr><td><b>'+esc(o.numero)+'</b></td><td class="mono">'+fmtDate(o.data)+(o.dataExec?'<div class="sub">exec. '+fmtDate(o.dataExec)+'</div>':'')+'</td><td>'+esc(c.numero||'—')+'<div class="sub">'+esc(parcNome(c.parcId))+'</div></td><td>'+esc(o.local||'')+'<div class="sub">'+esc(String(o.desc||'').slice(0,90))+'</div></td><td class="num">'+money(v.valor)+'</td><td class="num">'+(v.custo==null?'<span class="sub">—</span>':money(v.custo))+'</td><td class="num'+(v.margem!=null&&v.margem<0?' neg':'')+'">'+(v.margem==null?'<span class="sub">sem custo</span>':money(v.margem)+'<div class="sub">'+pctV(v.pct)+'</div>')+'</td><td>'+pill(V161.OS_ST[st][0],V161.OS_ST[st][1])+(md?'<div class="sub">medição nº '+esc(md.numero)+'</div>':'')+'</td><td class="act">'+acts+'</td></tr>';}).join(''):emptyRow(9,'Nenhuma ordem de serviço neste filtro.'))+
+  '</tbody></table></div>'+v160PagBar('ctros')+'</div>';};
+function v161OsGrid(c){const it=ctrItens(c),ops=it.map((x,i)=>[String(i),(x.item?x.item+' · ':'')+String(x.desc||'').slice(0,70)+' · '+money(x.pu)+'/'+(x.un||'un')]);
+  GRIDS.v161OsIt={f:'itens',minw:860,cols:[['idx','Item da tabela de preços','select',ops],['qtd','Quantidade','number'],['custo','Custo unit. (opcional)','number'],['v','Valor','calc',r=>nf2((+r.qtd||0)*(+((it[+r.idx]||{}).pu)||0))]],blank:()=>({idx:'',qtd:'',custo:''})};}
+function v161OsForm(o){const c=get('ctr',o.ctrId);if(!c)return;v161OsGrid(c);const ro=v161OsSt(o)==='medida'||!mayW('ctr'),it=ctrItens(c);
+  edOpen({rec:o,title:r=>'OS nº '+r.numero+' · contrato '+c.numero,saveLabel:'Salvar OS',
+    body:r=>'<div class="fg">'+field('Nº da OS *','numero','text',r.numero,{dis:ro})+field('Data do chamado *','data','date',r.data,{dis:ro})+field('Local *','local','text',r.local,{dis:ro})+field('Situação','status','select',r.status==='medida'?'executada':(r.status||'aberta'),{opts:[['aberta','Aberta'],['executada','Executada']],dis:ro})+field('Data de execução','dataExec','date',r.dataExec||'',{dis:ro})+field('Outros custos da OS (R$)','outrosCustos','number',r.outrosCustos==null?'':r.outrosCustos,{dis:ro})+field('Descrição do chamado *','desc','textarea',r.desc||'',{full:true,dis:ro})+'</div>'+
+      (it.length?'<div class="sect">Itens da tabela de preços</div>'+gridEd('v161OsIt',r.itens||[],{ro}):'<div class="note">O contrato não tem tabela de preços. Cadastre os itens em Contratos › Editar.</div>')+
+      (ro&&v161OsMed(r)?'<p class="sub">Medida na medição nº '+esc(v161OsMed(r).numero)+': não muda mais.</p>':'')+'<p class="sub" style="margin:6px 0 0">Valor = quantidade × preço da tabela. Custo e margem aparecem quando o custo é informado.</p>',
+    foot:ro?()=>'<button class="btn" data-act="closeModal">Fechar</button>':undefined,
+    save:r=>{if(ro)return;r.numero=String(r.numero||'').trim();r.local=String(r.local||'').trim();r.desc=String(r.desc||'').trim();
+      if(!r.numero||!r.data||!r.local||!r.desc){toast('Preencha número, data, local e descrição.','neg');return false;}
+      if(v161OsDe(c.id).some(x=>x.id!==r.id&&String(x.numero)===r.numero)){toast('Já existe a OS nº '+r.numero+' neste contrato.','neg');return false;}
+      r.itens=(r.itens||[]).filter(x=>x&&x.idx!==''&&x.idx!=null&&+x.qtd).map(x=>({idx:+x.idx,qtd:+x.qtd,custo:x.custo===''||x.custo==null?'':+x.custo}));
+      if(r.itens.some(x=>!it[x.idx])){toast('Escolha o item da tabela de preços em cada linha.','neg');return false;}
+      if(r.itens.some(x=>x.qtd<0||(x.custo!==''&&x.custo<0))){toast('Quantidade e custo não podem ser negativos.','neg');return false;}
+      if(r.status==='executada'){if(!r.itens.length){toast('OS executada precisa ter ao menos um item com quantidade.','neg');return false;}if(!r.dataExec)r.dataExec=todayStr();}
+      if(r.outrosCustos===''||r.outrosCustos==null)delete r.outrosCustos;else r.outrosCustos=r2(+r.outrosCustos);
+      put('ctros',cl(r));toast('OS '+r.numero+' salva.','pos');}});}
+const v161OsProx=cid=>String(Math.max(0,...v161OsDe(cid).map(o=>parseInt(o.numero,10)||0))+1);
+A.v161OsNova=d=>{let c=d&&d.c?get('ctr',d.c):null;if(!c){const ds=v161CtrDem().filter(x=>x.status==='vigente');if(ds.length===1)c=ds[0];}
+  if(!c){const ds=v161CtrDem().filter(x=>x.status==='vigente');if(!ds.length){toast('Nenhum contrato sob demanda vigente.','neg');return;}
+    modal({title:'Nova OS: escolha o contrato',body:'<div class="list">'+ds.map(x=>'<div class="li"><div><div class="t">'+esc(x.numero)+'</div><div class="sub">'+esc(parcNome(x.parcId))+' · '+esc(String(x.objeto||'').slice(0,80))+'</div></div><button class="btn sm pri" data-act="v161OsNova" data-c="'+esc(x.id)+'">Escolher</button></div>').join('')+'</div>',foot:'<button class="btn" data-act="closeModal">Fechar</button>'});return;}
+  if(!v161Demanda(c)){toast('O contrato '+c.numero+' não é sob demanda.','neg');return;}
+  if(c.status!=='vigente'){toast('O contrato não está vigente.','neg');return;}
+  v161OsForm({id:uid(),ctrId:c.id,numero:v161OsProx(c.id),data:todayStr(),local:'',desc:'',status:'aberta',dataExec:'',itens:[{idx:'',qtd:'',custo:''}],medId:''});};
+A.v161OsVer=d=>{const o=get('ctros',d.id);if(o)v161OsForm(cl(o));};
+A.v161OsExec=d=>{const o=get('ctros',d.id);if(!o||v161OsSt(o)!=='aberta')return;if(!(o.itens||[]).some(x=>+x.qtd)){toast('Informe os itens executados (Editar) antes de marcar como executada.','neg');v161OsForm(Object.assign(cl(o),{status:'executada'}));return;}
+  confirmBox('Marcar a OS nº '+esc(o.numero)+' como executada hoje ('+fmtDate(todayStr())+')? Ela passa a aparecer na medição do período.',()=>{put('ctros',Object.assign(cl(o),{status:'executada',dataExec:o.dataExec||todayStr(),execPor:actorId()}));toast('OS executada.','pos');},'Executada');};
+A.v161OsReabre=d=>{const o=get('ctros',d.id);if(!o||v161OsSt(o)!=='executada')return;put('ctros',Object.assign(cl(o),{status:'aberta',medId:''}));toast('OS reaberta.','pos');};
+A.v161OsDel=d=>{const o=get('ctros',d.id);if(!o)return;if(v161OsSt(o)==='medida'){toast('OS medida não se exclui.','neg');return;}confirmBox('Excluir a OS nº '+esc(o.numero)+'?',()=>del('ctros',o.id),'Excluir',true);};
+A.v161OsLista=d=>{ui.ctros.ctr=d.c||'';ui.ctros.st=d.st||'';ui.ctros.pg=0;closeModal();ui.tab='ctros';ui.mod='comer';render();};
+Object.assign(ACT_GROUP,{v161OsNova:'ctr',v161OsVer:null,v161OsExec:'ctr',v161OsReabre:'ctr',v161OsDel:'ctr',v161OsLista:null});
+
+/* ---------- 2. medição do contrato sob demanda: OS do período e teto ---------- */
+/* OS executadas que entram nesta medição: do período (data de execução), sem outra medição */
+function v161OsDoPeriodo(m){const ini=m.ini||'',fim=m.fim||'';return v161OsDe(m.ctrId).filter(o=>{const st=v161OsSt(o);if(st==='aberta')return false;
+  if(st==='medida'&&o.medId!==m.id)return false;const d=v161OsData(o);return (m.osIds||[]).includes(o.id)||(!ini||d>=ini)&&(!fim||d<=fim);}).sort((a,b)=>v161OsData(a).localeCompare(v161OsData(b))||(+a.numero||0)-(+b.numero||0));}
+/* soma (ou tira) as quantidades da OS nos itens da medição */
+function v161MedSomaOs(m,o,sinal,c){const it=ctrItens(c);m.itens=m.itens||[];
+  (o.itens||[]).forEach(x=>{const i=+x.idx;if(!it[i])return;let r=m.itens.find(y=>+y.idx===i);if(!r){r={idx:i,item:it[i].item,desc:it[i].desc,un:it[i].un,qtd:''};m.itens.push(r);m.itens.sort((a,b)=>+a.idx-+b.idx);}
+    const q=Math.max(0,Math.round(((+r.qtd||0)+sinal*(+x.qtd||0))*10000)/10000);r.qtd=q||'';});return m;}
+A.v161MedOs=(d,el)=>{if(!EDC||!EDC.v161med)return;try{edRead();}catch(e){}const m=EDC.rec,c=get('ctr',m.ctrId),o=get('ctros',d.id);if(!c||!o)return;
+  m.osIds=Array.isArray(m.osIds)?m.osIds.slice():[];const tem=m.osIds.includes(o.id),on=el&&typeof el.checked==='boolean'?el.checked:!tem;
+  if(on&&!tem){m.osIds.push(o.id);v161MedSomaOs(m,o,1,c);}else if(!on&&tem){m.osIds=m.osIds.filter(x=>x!==o.id);v161MedSomaOs(m,o,-1,c);}
+  edRender();};
+A.v161MedOsTodas=()=>{if(!EDC||!EDC.v161med)return;try{edRead();}catch(e){}const m=EDC.rec,c=get('ctr',m.ctrId);if(!c)return;m.osIds=Array.isArray(m.osIds)?m.osIds.slice():[];let n=0;
+  v161OsDoPeriodo(m).forEach(o=>{if(!m.osIds.includes(o.id)){m.osIds.push(o.id);v161MedSomaOs(m,o,1,c);n++;}});if(!n)toast('Nenhuma OS executada nova no período.','neg');edRender();};
+ACT_GROUP.v161MedOs=null;ACT_GROUP.v161MedOsTodas=null;
+function v161MedOsHtml(m,c){const ls=v161OsDoPeriodo(m),sel=new Set(m.osIds||[]),fora=v161OsDe(c.id).filter(o=>v161OsSt(o)==='executada'&&!ls.includes(o)).length;
+  return '<div class="sect">Ordens de serviço executadas no período</div>'+(ls.length?'<div class="tw"><table style="min-width:640px"><thead><tr><th></th><th>OS</th><th>Execução</th><th>Local / descrição</th><th class="num">Valor</th></tr></thead><tbody>'+
+    ls.map(o=>'<tr><td><input type="checkbox" data-act="v161MedOs" data-id="'+esc(o.id)+'"'+(sel.has(o.id)?' checked':'')+' aria-label="Incluir a OS '+esc(o.numero)+'"></td><td><b>'+esc(o.numero)+'</b></td><td class="mono">'+fmtDate(v161OsData(o))+'</td><td>'+esc(o.local||'')+'<div class="sub">'+esc(String(o.desc||'').slice(0,80))+'</div></td><td class="num">'+money(v161OsVal(o,c).valor)+'</td></tr>').join('')+'</tbody></table></div>'+
+    '<div class="acts" style="margin-top:6px;justify-content:flex-start"><button type="button" class="btn sm" data-act="v161MedOsTodas">Incluir todas as OS do período</button></div>':'<p class="sub" style="margin:0">Nenhuma OS executada entre '+fmtDate(m.ini)+' e '+fmtDate(m.fim)+'.</p>')+
+    (fora?'<p class="sub" style="margin:4px 0 0">'+fora+' OS executada(s) fora deste período (mude as datas da medição para vê-las).</p>':'')+'<p class="sub" style="margin:4px 0 0">Marcar uma OS soma os itens dela nas quantidades abaixo; desmarcar tira. As quantidades podem passar da estimada na tabela; o limite é o teto do contrato.</p>';}
+{const f0=medForm;medForm=function(m){const r=f0.apply(this,arguments);const c=get('ctr',m.ctrId);if(!v161Demanda(c)||!EDC||EDC.rec!==m)return r;
+  const e=EDC,b0=e.body,s0=e.save,a0=e.after,comTab=ctrItens(c).length>0;e.v161med=true;
+  if(comTab)e.body=rec=>{let h=b0(rec);const os=v161MedOsHtml(rec,c),k=h.indexOf('<div class="sect">Itens medidos</div>');h=k>=0?h.slice(0,k)+os+h.slice(k):h+os;
+    return h.replace('<p style="margin:10px 0 0" id="medTot"></p>','<p style="margin:10px 0 0" id="medTot"></p><div id="v161MedTeto"></div>');};
+  if(comTab)e.after=rec=>{if(a0)a0(rec);const up=()=>{let v=0;try{edRead();v=medTot(EDC.rec,c).fat;}catch(err){}const el=$('#v161MedTeto');if(el)el.innerHTML=v161TetoHtml(v161Teto(c,v,EDC.rec.id),v);};
+    try{$$('#mb input').forEach(i=>i.addEventListener('change',up));}catch(err){}up();};
+  e.save=rec=>{const t=v161Teto(c,(()=>{try{return medTot(rec,c).fat;}catch(err){return 0;}})(),rec.id);
+    if(t.nivel==='acima'){toast('A medição passa do '+(t.acr25?'limite de 125% do teto':'teto')+' do contrato: o medido iria a '+money(t.tot)+' (limite '+money(t.lim)+'). Reduza '+money(-t.margem)+' ou faça um aditivo.','neg');return false;}
+    const osAntes=v161OsDe(c.id).filter(o=>o.medId===rec.id).map(o=>o.id),osIds=(rec.osIds||[]).filter(id=>get('ctros',id));rec.osIds=osIds;
+    const res=s0(rec);if(res===false)return res;
+    osIds.forEach(id=>{const o=get('ctros',id);if(o&&(o.status!=='medida'||o.medId!==rec.id))put('ctros',Object.assign(cl(o),{status:'medida',medId:rec.id}));});
+    osAntes.filter(id=>!osIds.includes(id)).forEach(id=>{const o=get('ctros',id);if(o)put('ctros',Object.assign(cl(o),{status:'executada',medId:''}));});
+    if(t.nivel==='acr')toast('Medição dentro do acréscimo de 25%: margem restante '+money(t.margem)+'.','pos');else if(t.nivel==='100'||t.nivel==='80')toast('Atenção: o medido chega a '+pctV(t.pct)+' do teto.','pos');
+    return res;};
+  if(comTab)edRender();
+  else{try{const mt=$('#medTot');if(mt&&mt.insertAdjacentHTML)mt.insertAdjacentHTML('afterend','<div id="v161MedTeto"></div>');const up=()=>{let v=0;try{edRead();v=medTot(EDC.rec,c).fat;}catch(err){}const el=$('#v161MedTeto');if(el)el.innerHTML=v161TetoHtml(v161Teto(c,v,EDC.rec.id),v);};
+    $$('#mb input').forEach(i=>i.addEventListener('change',up));up();}catch(err){}}
+  return r;};}
+/* medição excluída: as OS dela voltam para "executada" */
+{const d0=del;del=function(col,id){const r=d0.apply(this,arguments);if(col==='med'&&id){try{v161OsSoltar(id);}catch(e){}}return r;};}
+function v161OsSoltar(medId){(S.ctros||[]).filter(o=>o.medId===medId&&o.status==='medida').forEach(o=>put('ctros',Object.assign(cl(o),{status:'executada',medId:''})));}
+
+/* ---------- 2. painel do contrato ---------- */
+function v161TopItens(c,n){const it=ctrItens(c),m=new Map();medsDe(c.id).filter(x=>x.status!=='rascunho').forEach(x=>(x.itens||[]).forEach(y=>{const i=+y.idx,p=it[i];if(!p)return;const a=m.get(i)||{i,p,q:0,v:0};a.q+=+y.qtd||0;a.v+=(+y.qtd||0)*(+p.pu||0);m.set(i,a);}));
+  return [...m.values()].sort((a,b)=>b.v-a.v).slice(0,n||5);}
+function v161Painel(c){const t=v161Teto(c),os=v161OsDe(c.id),ed=mayW('ctr'),top=v161TopItens(c,5),rasc=medsDe(c.id).filter(m=>m.status==='rascunho');
+  const st=k=>os.filter(o=>v161OsSt(o)===k),pend=st('aberta').concat(st('executada')).sort((a,b)=>v161OsData(b).localeCompare(v161OsData(a))).slice(0,8);
+  return '<div class="sect">Contrato sob demanda (valor teto)'+(t.acr25?' · acréscimo de até 25% permitido':'')+'</div><div class="kpis">'+kpi('Teto',money(t.teto),t.acr25?'limite '+money(t.lim):'sem acréscimo')+kpi('Medido até agora',money(t.med),rasc.length?'+ '+money(sum(rasc,m=>medTot(m,c).fat))+' em rascunho':'aprovado ou faturado')+kpi('Saldo do teto',money(t.saldo),t.saldo<0?'acima do teto':'',t.saldo<0?'neg':'')+kpi('% usado',t.pct==null?'—':pctV(t.pct),t.nivel==='acr'?'usando acréscimo · margem '+money(t.margem):t.nivel==='acima'?'acima do limite':t.nivel==='80'?'passou de 80%':'',t.nivel==='acima'||t.nivel==='100'&&!t.acr25?'neg':t.nivel==='ok'?'':'warn')+'</div>'+
+    (t.nivel==='acr'?'<p style="margin:6px 0 0">'+pill('usando acréscimo','warn')+' margem restante <b>'+money(t.margem)+'</b></p>':'')+
+    '<div class="g2" style="margin-top:8px"><div class="card"><h2>Itens de maior valor medido</h2>'+(top.length?'<div class="tw" style="border:0"><table style="min-width:0;width:100%"><thead><tr><th>Item</th><th class="num">Quantidade</th><th class="num">Valor</th></tr></thead><tbody>'+top.map(a=>'<tr><td>'+esc((a.p.item?a.p.item+' · ':'')+String(a.p.desc||'').slice(0,60))+'</td><td class="num">'+qtdTx(a.q)+' '+esc(a.p.un||'')+(+a.p.qtd?'<div class="sub">estimada '+qtdTx(a.p.qtd)+'</div>':'')+'</td><td class="num">'+money(a.v)+'<div class="sub">'+pctV(t.med?a.v/t.med:null)+'</div></td></tr>').join('')+'</tbody></table></div>':'<p class="sub" style="margin:0">Nenhuma medição aprovada ainda.</p>')+'</div>'+
+    '<div class="card"><h2>Ordens de serviço</h2><p style="margin:0 0 6px">'+Object.keys(V161.OS_ST).map(k=>'<button class="btn sm" data-act="v161OsLista" data-c="'+esc(c.id)+'" data-st="'+k+'">'+V161.OS_ST[k][0]+': '+st(k).length+'</button>').join(' ')+'</p>'+
+      (pend.length?'<div class="list">'+pend.map(o=>{const v=v161OsVal(o,c),s=v161OsSt(o);return '<div class="li"><div><div class="t">OS '+esc(o.numero)+' · '+esc(o.local||'')+'</div><div class="sub">'+fmtDate(v161OsData(o))+' · '+money(v.valor)+(v.margem!=null?' · margem '+money(v.margem):'')+'</div></div>'+pill(V161.OS_ST[s][0],V161.OS_ST[s][1])+'</div>';}).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma OS aberta ou executada sem medição.</p>')+
+      '<div class="acts" style="margin-top:8px;justify-content:flex-start">'+(ed&&c.status==='vigente'?'<button class="btn sm pri" data-act="v161OsNova" data-c="'+esc(c.id)+'">Nova OS</button>':'')+'<button class="btn sm" data-act="v161OsLista" data-c="'+esc(c.id)+'">Todas as OS</button></div></div></div>';}
+{const v0=A.ctrVer;A.ctrVer=function(d){const c=get('ctr',d&&d.id);if(!c)return v0.apply(this,arguments);const m0=modal;
+  modal=function(o){if(o&&typeof o.body==='string'&&/^Contrato /.test(o.title||'')){o=Object.assign({},o);
+      if(v161Demanda(c)){const k=o.body.indexOf('<div class="sect">Aditivos</div>'),p=v161Painel(c);o.body=k>=0?o.body.slice(0,k)+p+o.body.slice(k):o.body+p;
+        o.title=o.title+' · sob demanda';}
+      else if(mayW('ctr')&&typeof o.foot==='string'){o.foot='<button class="btn" data-act="v161CtrDemanda" data-id="'+esc(c.id)+'">Mudar para sob demanda</button>'+o.foot;
+        if(v161Sugerido(c))o.body='<div class="note">Este contrato foi indicado como <b>sob demanda</b> (valor teto). Use "Mudar para sob demanda": as medições ficam e o teto começa com o valor atual. Nada muda sem o clique.</div>'+o.body;}}
+    return m0.apply(this,[o].concat([].slice.call(arguments,1)));};
+  try{return v0.apply(this,arguments);}finally{modal=m0;}};ACT_GROUP.ctrVer=null;}
+/* lista de contratos: marca do tipo e % do teto */
+{const v0=V.ctr;V.ctr=function(){let h=v0.apply(this,arguments);try{if(ui.fzv&&ui.fzv.ctr==='reeq')return h;
+  S.ctr.filter(v161Demanda).forEach(c=>{const t=v161Teto(c),k='<b>'+esc(c.numero)+'</b><div class="sub v132-cl2">';const i=h.indexOf(k);if(i<0)return;
+    h=h.slice(0,i)+'<b>'+esc(c.numero)+'</b> '+pill('Sob demanda','acc')+' <span class="sub">'+(t.pct==null?'':pctV(t.pct)+' do teto')+'</span><div class="sub v132-cl2">'+h.slice(i+k.length);});}catch(e){}return h;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='160',APP_DATA='2026-11-06';
+const APP_VER='161',APP_DATA='2026-11-06';
 const CHANGELOG=[
+  ['161','2026-11-06',['EAP: botão Duplicar em cada etapa. Copia a etapa com materiais, mão de obra, ferramentas e subitens, com o % executado zerado, e abre a cópia para você trocar o nome (ou o local) e as datas.', 'EAP: marque várias etapas e use "Duplicar selecionadas para outro local". Informe o texto a trocar nos nomes (por exemplo Aeroporto por Guarulhos) e quantos dias deslocar as datas.', 'EAP: "Modelo" guarda uma etapa (com as linhas e os subitens) e "Inserir de modelo" coloca essa etapa na EAP de qualquer obra. Os valores ficam os gravados; "Atualizar valores" traz os de hoje.', 'Com linha de base congelada, a etapa duplicada ou inserida de modelo pede o motivo da revisão, igual a uma etapa nova.', 'Contratos: novo tipo "Sob demanda (valor teto)", com teto, vigência e a opção de acréscimo de até 25% sobre o teto. A planilha vira tabela de preços, com quantidade opcional.', 'Medição de contrato sob demanda pode passar da quantidade do item. O limite é o total medido: avisa em 80% e 100% do teto e não deixa passar do teto (ou de 125%, com a opção ligada). O servidor confere o mesmo limite.', 'Ordens de serviço dos contratos sob demanda (Comercial): cada chamado vira uma OS com os itens da tabela de preços, aberta, executada ou medida. A medição puxa as OS executadas do período. Custo e margem por OS quando o custo é informado.', 'Detalhe do contrato sob demanda: teto, medido, saldo, % usado, itens de maior valor e as OS por situação.', 'Contrato existente vira sob demanda pelo botão "Mudar para sob demanda" no detalhe do contrato: as medições ficam e o teto começa com o valor atual.']],
   ['160','2026-11-06',['Listas grandes em páginas de 50: Solicitações de compra, Pedidos de compra, Notas fiscais, Abastecimentos, Saídas e Manutenção de veículos e o histórico de envio de equipamentos. A busca, os filtros e os totais continuam valendo para todos os registros.', 'Abrir e salvar nessas telas ficou muito mais rápido com muitos registros.', 'O sistema baixa só o que mudou desde a última leitura, ao abrir de novo, ao reconectar e nas atualizações automáticas. Se não der, baixa tudo, como antes.', 'Neste navegador fica uma cópia cifrada das listas de compras, estoque, obras e frota, para abrir mais rápido. Ela só abre com a sua conta e é apagada ao clicar em Sair. RH, ponto, folha, saúde e financeiro não ficam guardados.', 'Obras aparecem da mais nova para a mais antiga (P490, P488...) nas caixas de escolha de obra.', 'Responsável pela obra: a lista mostra o nome das pessoas (ou o e-mail) e só quem pode ser responsável: administração, diretoria, gestão de projetos e encarregados.', 'Materiais da etapa na EAP: digite para buscar em todo o estoque (código, descrição ou família), com filtro de família. Material que não está no estoque pode ser digitado e fica marcado como não cadastrado.', 'Contratos com clientes: novo filtro por projeto ou obra (com busca, da obra mais nova para a mais antiga), junto com a busca e a situação.', 'Produto da família EPI: em vez de "Com variações", cadastre um produto por tamanho. O botão Criar tamanhos faz isso de uma vez (P, M, G, GG ou 38–44), com o mesmo CA, vida útil, NCM e unidade. EPI já cadastrado com variações mostra um aviso com o botão que transforma cada variação em produto.']],
   ['159','2026-11-05',['Troca de tela e gravação muito mais rápidas. As telas eram preparadas de novo a cada redesenho e ficavam mais lentas ao longo do dia; isso acabou.', 'A tela não é mais redesenhada quando nada mudou: as leituras periódicas e o retorno do servidor depois de salvar não travam mais a página. Salvar faz um redesenho só.', 'Quando outra pessoa grava algo que a tela aberta não mostra, a sua tela não é redesenhada. Várias mudanças seguidas viram um redesenho só.', 'Painel, Painel da diretoria, espelho de ponto e custo de mão de obra por obra calculam o ponto bem mais rápido, com o mesmo resultado.', 'A página chega comprimida (cerca de 4 vezes menor) e, ao recarregar, o navegador só confere se mudou, sem baixar de novo. As listas grandes do servidor também chegam comprimidas.', 'A sincronização da Sólides não regrava mais os meses em que nenhuma marcação mudou.', 'A tela Mapa de cotação não fica mais em branco quando uma cotação está sem a tabela de preços.']],
   ['158','2026-11-05',['Perfil novo Recursos humanos e compras: tudo o que o RH faz e, em Suprimentos, cria solicitação de compra dos tipos RH (EPI, uniforme, material de treinamento, exames) e Administrativa. Vê só as próprias solicitações, com a situação, quem precisa aprovar, Pedir aprovação e Corrigir e reenviar. Não vê cotações, pedidos de compra nem preços negociados. Entra no Painel de Pessoal.', 'Perfil novo Administrador de frota: cuida da frota inteira, de todos os locais, com os valores da frota. Não exclui registros da frota; abastecimento e manutenção se corrigem com o motivo, que fica no histórico de correções do registro. Entra no Painel da Frota.', 'Frota › Condutores (Administrador de frota): nome, função e CNH dos colaboradores para escolher o condutor, com o CPF mascarado. Salário, documentos do RH, ASO e folha não aparecem.', 'O Administrador de frota consulta fornecedores e clientes e o saldo e o local das peças no estoque (sem custo) e cria solicitação de compra dos tipos Frota (peças, pneus, serviço de oficina, com o veículo) e Administrativa.', 'Leitura de planilhas (SheetJS): se a cópia do próprio servidor faltar, a reserva passa a ser a versão 0.20.3, do site oficial da SheetJS, que corrige falhas de segurança da versão antiga (0.18.5).', 'Os dois perfis aparecem em Sistema › Usuários e em Sistema › Perfis de acesso, onde o administrador pode ajustar as funções. O servidor confere tudo: o que o perfil não pode ver não é entregue, e o que não pode gravar ou excluir é recusado.']],
