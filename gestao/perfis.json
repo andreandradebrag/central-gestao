@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-06T16:49:43.412Z",
+ "gerado": "2026-11-06T17:59:07.706Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1462,6 +1462,9 @@
   "epi": [
    "sst"
   ],
+  "epitr": [
+   "sst"
+  ],
   "veic": [
    "frota"
   ],
@@ -1946,6 +1949,9 @@
    "sst"
   ],
   "epi": [
+   "sst"
+  ],
+  "epitr": [
    "sst"
   ],
   "veic": [
@@ -3071,8 +3077,12 @@
    ],
    "epi": [
     "epi",
+    "epitr",
     "func",
     "prod"
+   ],
+   "epitr": [
+    "epitr"
    ],
    "epihig": [
     "epihig"
@@ -3217,15 +3227,15 @@
    "ctr": [
     "ctr"
    ],
-   "ctros": [
-    "ctros"
-   ],
    "med": [
     "med",
     "ctr",
     "proj",
     "parc",
     "nfse"
+   ],
+   "ctros": [
+    "ctros"
    ],
    "eap": [
     "eap",

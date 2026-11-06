@@ -240,7 +240,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (velho && igual(v.aprovMat, a)) return null;
       if (a.auto === 'limite') { const lim = +((cfgEmp().matFluxo || {}).autoAte) || 0; if (!(lim > 0 && a.valorEst != null && +a.valorEst <= lim + 0.009)) return erro('O valor estimado passa do limite de aprovação automática: a solicitação precisa de aprovação.', 409); }
       else if (acaoNeg(conta, 'aprovar')) return erro('Seu perfil não aprova (a ação "Aprovar" está desligada em Sistema › Perfis de acesso). Envie para aprovação.'); /* v142 */
-      else if (!ehAprovMat(conta)) return erro('Só um aprovador de material aprova a solicitação de compra. Envie para aprovação.');
+      else if (!C163.podeAprovSc(conta, velho, novo, ehAprovMat)) return erro(C163.msgSc(velho, novo) || 'Só um aprovador de material aprova a solicitação de compra. Envie para aprovação.'); /* v163: obra com aprovador de compras */
       else if (!a.auto && (v.solUid || novo.solUid) === conta.id && !ehDono(conta)) return erro('Quem pediu não aprova a própria solicitação.');
       novo.aprovMat = Object.assign({}, a, { por: conta.id, em: Date.now(), srv: 1 }); return null;
     }
@@ -501,7 +501,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     /* itens para o aviso diário das aprovações (pendenciasAprovacao) */
     function pendencias(lim, desde, add) {
       const c = cfgEmp(), mf = c.matFluxo || {};
-      for (const s of col('sc')) if (s.status === 'aprovacao') add(s.aprovUid ? [s.aprovUid] : (Array.isArray(mf.aprov) && mf.aprov.length ? mf.aprov : todosAprovadores()), 'Solicitação de compra', 'Solicitação nº ' + (s.numero || s.id), s.valorEst == null ? null : +s.valorEst, +s.aprovPedidoEm || desde(s, 'sc/' + s.id), [s.solUid, s.crBy]);
+      for (const s of col('sc')) if (s.status === 'aprovacao') add(C163.quemSc(s) || (s.aprovUid ? [s.aprovUid] : (Array.isArray(mf.aprov) && mf.aprov.length ? mf.aprov : todosAprovadores())), 'Solicitação de compra', 'Solicitação nº ' + (s.numero || s.id), s.valorEst == null ? null : +s.valorEst, +s.aprovPedidoEm || desde(s, 'sc/' + s.id), [s.solUid, s.crBy]);
       for (const n of col('notas')) { if (n.status !== 'rascunho' || n.tipo !== 'entrada') continue; const pq = P2.pequena(n, c, n.cr, n.pequenaAprov); if (pq && !pq.aprov && !pq.falta.length && !(n.pequenaAprov && n.pequenaAprov.dec === 'nao')) add(quemAprova(1), 'Compra pequena sem pedido', 'NF ' + (n.numero || 's/n'), pq.valor, desde(n, 'notas/' + n.id), [n.crBy], true); }
     }
     /* ---------- rotas ---------- */
@@ -2114,14 +2114,15 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const NEGF = require('./negoc.js')({ doc, erro, igual, auditar: (...a) => auditar(...a) }); /* v149: histórico de negociação do mapa de cotação (negoc.js) */
   const ACEITE = require('./aceite.js')({ db, q, doc, salvar, erro, ehDono, gravaCol, pode, perfilPermite, gravacaoPermitida, cfgEmp, ipDe, json, html: X.html, pag, lerJson, lerCorpo: X.lerCorpo, APP_URL, SEG, avisarDoc, auditar: (...a) => auditar(...a), pedAprovado: p => C157.pedAprovado(p) }); /* v150: código de verificação e aceite do fornecedor (aceite.js); v157: só com o pedido aprovado */
   const TREINO = require('./treino.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaGrupo, PERM, NIV }); /* v151: treinamentos dentro do sistema (treino.js) */
-  const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual }); /* v152: compras (compras152.js) */
+  const C152 = require('./compras152.js')({ q, db, json, lerJson, avisarDoc, auditar: (...a) => auditar(...a), salvar, ehDono, perfilEm, perfilDe, cfgEmp, col, doc, erro, nomeConta, gravaCol, PERM, EMAIL, APP_URL, podeVer, aprovadoresDe, quemAprova, todosAprovadores, nivelDe, pedTotal, alcadas, antesDaAlcada: P2N.antesDaAlcada, leModulo, igual, aprovObra163: r => C163.aprovObra(r) }); /* v152: compras (compras152.js) */
   const C153 = require('./almox153.js')({ q, db, col, doc, erro, PERM, papelDe, defDe, igual }); /* v153: almoxarifados por cidade com responsável (almox153.js) */
   const C157 = require('./ajuste157.js')({ doc, erro, ehDono, papelConta, auditar: (...a) => auditar(...a), alcadas: () => alcadas(), pedTotal: p => pedTotal(p), antesDaAlcada: (...a) => P2N.antesDaAlcada(...a) }); /* v157: SC em rascunho, aceite com aprovação, família do produto (ajuste157.js) */
   const C158 = require('./ajuste158.js')({ erro, ehDono, perfilDe, PERM, igual, auditar: (...a) => auditar(...a) }); /* v158: perfis Recursos humanos e compras e Administrador de frota (ajuste158.js) */
   const C156 = require('./fam156.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, papelConta, cfgEmp, lerJson, json, antesGravar: (...a) => antesGravar(...a) }); /* v156: Famílias de produto (fam156.js) */
-  const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson, json, famEpi: f => C156.ehFamEpi(f), famEpiNome: () => C156.nomeEpi(), antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
+  const C154 = require('./epi154.js')({ db, q, col, doc, erro, avisarDoc, auditar: (...a) => auditar(...a), depois: (...a) => depois(...a), pode, perfilPermite, gravacaoPermitida, gravaCol, ehDono, perfilEm, cfgEmp, ipDe, C153, lerJson: r => (r && r.__corpo163 !== undefined ? Promise.resolve(r.__corpo163) : lerJson(r)) /* v163: corpo já lido por ajuste163.js */, json, famEpi: f => C156.ehFamEpi(f), famEpiNome: () => C156.nomeEpi(), antesGravar: (...a) => antesGravar(...a) }); /* v154: EPI pelo cadastro de produtos, devolução e higienização (epi154.js) */
   const C161 = require('./demanda161.js')({ col, doc, erro, auditar: (...a) => auditar(...a) }); /* v161: teto do contrato sob demanda (demanda161.js) */
   const C162 = require('./iamed162.js')({ fn: () => ({}) }); /* v162: medição importada de PDF (iamed162.js) */
+  const C163 = require('./ajuste163.js')({ col, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, cfgEmp, notaTotais: n => P2.notaTotais(n), lerJson, json, gravaCol, C154: () => C154, leSst: c => leModulo(c, 'epi') }); /* v163: manutenção sem contas a pagar, aprovador de compras da obra, entrega de EPI (ajuste163.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
@@ -2160,6 +2161,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'sc' || c0 === 'ped') { e = C152.antes(conta, c0, s[1], velho, novo, ctx); if (e) return e; } /* v152: lembrete só pela rota; SC reenviada e tipo */
       if (c0 === 'sc') { e = C158.antesSc(conta, req, s[1], velho, novo); if (e) return e; } /* v158: só as próprias SC */
       if (c0 === 'vabas' || c0 === 'vman') { e = C158.antesFrota(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v158: correção com motivo e histórico */
+      if (c0 === 'vman' || c0 === 'fman' || c0 === 'lanc' || c0 === 'epi' || c0 === 'epitr') { e = C163.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v163: manutenção sem conta a pagar (custo pela nota), quem entrega EPI, pedido de transferência de EPI só pelas rotas */
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
       if (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig') { e = C154.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v154: EPI com baixa e higienização só pelas rotas */
       if (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat') { e = C155.antes(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v155: estorno, motivo da entrada/saída manual, campos fiscais do produto */
@@ -2221,6 +2223,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (!velho) return null;
     if (s.length === 2 && (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat')) { const e = C155.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v155: movimento não se exclui (estorno); produto só Administrador e sem histórico */
     if (s.length === 2 && (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig')) { const e = C154.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v154 */
+    if (s.length === 2 && c0 === 'epitr') { const e = C163.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v163 */
     if (s.length === 2 && c0 === 'prodfam') { const e = C156.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v156: família só sai sem produtos; Almoxarife não exclui */
     if (s.length === 2) { const e = (c0 === 'sc' ? C158.antesExcluirSc(conta, req, s[1], velho) : null) || C158.antesExcluirFrota(conta, req, c0, s[1], velho); if (e) return e; } /* v158: SC só as próprias; o Administrador de frota não exclui registros da frota */
     if (s.length === 2 && c0 === 'sc') { const e = C157.antesExcluirSc(conta, req, s[1], velho); if (e) return e; } /* v157: o Almoxarife não exclui SC em rascunho (usa Cancelar) */
@@ -2260,6 +2263,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
+    if (await C163.rota(p, m, req, res, conta)) return true; /* v163: /api/epi163/*; quem entrega EPI e CA vencido nas rotas da v154 */
     if (await C154.rota(p, m, req, res, conta)) return true; /* v154: /api/epi/entrega, /api/epi/devolucao, /api/epihig, /api/epi/migrar */
     if (await C156.rota(p, m, req, res, conta)) return true; /* v156: /api/prodfam/renomear, /api/prodfam/juntar, /api/prodfam/migrar */
     if (m === 'POST' && p === '/api/med/reabrir') { const b = await lerJson(req), r = MEDR(conta, req, b); json(res, r.erro ? (r.st || 403) : 200, r.erro ? { code: r.st === 400 ? 'invalid_argument' : r.st === 404 ? 'not_found' : r.st === 409 ? 'conflict' : 'not_granted', erro: r.erro } : r); return true; } /* v144 */

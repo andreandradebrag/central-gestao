@@ -28,7 +28,7 @@ const PERFIS_158 = new Set(['rhcompras', 'frotaadm']);
 const SC_ST_OK = new Set(['rascunho', 'aprovacao', 'enviada', 'atendida', 'cancelada']);
 const FUNC_MOT = ['id', 'nome', 'matricula', 'funcao', 'cargo', 'projId', 'status', 'ts', 'ex', 'cnhNum', 'cnhCat', 'cnhEmissao', 'cnhValidade'];
 const CUSTO = { prod: /^(preco\w*|custo\w*|valor\w*|ult(Preco|Custo)\w*|pmc|cm)$/, prodinat: /^(preco\w*|custo\w*|valor\w*|ult(Preco|Custo)\w*|pmc|cm)$/, mov: /^(custo\w*|valor\w*|preco\w*|total\w*)$/ };
-const IGNORA = new Set(['id', 'ts', 'cr', 'crBy', 'ed', 'edBy', 'hist', 'v', 'lancId', 'correcoes', 'corrMotivo', '_valOculto', '_restrito']);
+const IGNORA = new Set(['id', 'ts', 'cr', 'crBy', 'ed', 'edBy', 'hist', 'v', 'lancId', 'correcoes', 'corrMotivo', '_valOculto', '_restrito', 'notas163', 'v163']); /* v163: nota ligada à manutenção não é correção */
 const NOME_COL = { veic: 'veículo', vsai: 'saída de veículo', vrota: 'viagem da rota diária', vabas: 'abastecimento', vman: 'manutenção', vfrete: 'entrega com frete', multa: 'multa' };
 
 /* CPF mascarado (LGPD): mostra só os 6 do meio */
@@ -78,7 +78,7 @@ module.exports = function (X) {
     auditar(conta, req, 'FROTA_EXCLUSAO_RECUSADA', c0 + '/' + id, null, null);
     return erro('O Administrador de frota não exclui ' + (NOME_COL[c0] || 'registro da frota') + '. Corrija o registro' + (CORR_COLS.has(c0) ? ' (com o motivo da correção)' : '') + ' ou peça ao Administrador.', 403);
   }
-  function mudou(velho, novo) { return [...new Set(Object.keys(velho || {}).concat(Object.keys(novo || {})))].filter(k => !IGNORA.has(k) && !igual((velho || {})[k], (novo || {})[k])); }
+  function mudou(velho, novo) { return [...new Set(Object.keys(velho || {}).concat(Object.keys(novo || {})))].filter(k => !IGNORA.has(k) && !(k === 'valor' && (velho || {}).v163) && !igual((velho || {})[k], (novo || {})[k])); } /* v163: o valor da manutenção nova vem das notas */
   function antesFrota(conta, req, c0, id, velho, novo) {
     if (!CORR_COLS.has(c0)) return null;
     const mot = String(novo.corrMotivo == null ? '' : novo.corrMotivo).trim(); delete novo.corrMotivo;

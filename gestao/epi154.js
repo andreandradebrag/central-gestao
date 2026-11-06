@@ -282,7 +282,7 @@ module.exports = function (X) {
     if (!podeEpi(conta, 'novo')) return erro('Seu perfil não registra entrega de EPI.');
     const als = col('almox').filter(a => a && a.ativo !== false).map(a => ({ id: a.id, nome: a.nome || '', cidade: a.cidade || '', uf: a.uf || '', principal: a.principal === true, respUid: a.respUid || '', substUid: a.substUid || '', ativo: true }));
     const prods = col('prod').filter(ehEpi).map(p => { const sd = {}; if (als.length) als.forEach(a => { const q = saldo(p.id, a.id); if (Math.abs(q) > 1e-9) sd[a.id] = q; }); else sd[''] = saldo(p.id);
-      return { id: p.id, nome: p.nome || '', sku: p.sku || '', un: p.un || '', familia: p.familia || '', epi: p.epi === true, ca: p.ca || '', caVal: p.caVal || '', tam: p.tam || '', vidaEpi: p.vidaEpi || '', minimo: +p.minimo || 0, saldos: sd }; });
+      return { id: p.id, nome: p.nome || '', sku: p.sku || '', un: p.un || '', familia: p.familia || '', epi: p.epi === true, ca: p.ca || '', caVal: p.caVal || '', tam: p.tam || '', vidaEpi: p.vidaEpi || '', minimo: +p.minimo || 0, minAlm: p.minAlm && typeof p.minAlm === 'object' && !Array.isArray(p.minAlm) ? p.minAlm : {}, almoxId: p.almoxId || '', saldos: sd }; }); /* v163: mínimo por almoxarifado (painel de EPI) */
     return { ok: true, fam: famCfg(), almHig: almHig(), almox: als, prods };
   }
   async function rota(p, m, req, res, conta) {
@@ -296,5 +296,5 @@ module.exports = function (X) {
     if (p === '/api/epi/migrar') { await R(() => rotaMigrar(conta, req)); return true; }
     return false;
   }
-  return { rota, antes, antesExcluir, eventos, saldo, almHig, ehEpi, plano };
+  return { rota, antes, antesExcluir, eventos, saldo, almHig, ehEpi, plano, montaEntrega, gravar }; /* v163: montaEntrega e gravar para as rotas de ajuste163.js */
 };

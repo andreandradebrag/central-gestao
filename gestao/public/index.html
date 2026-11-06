@@ -309,7 +309,7 @@ const digits=s=>String(s||'').replace(/\D/g,'');
 
 const CATS_REC=['Venda de produtos','Prestação de serviços','Contratos recorrentes','Outras receitas'];
 const CATS_DESP=['Compra de mercadorias e insumos','Folha e encargos','Aluguel e condomínio','Impostos e taxas','Energia, água e internet','Serviços de terceiros','Frete e logística','Marketing e vendas','Despesas bancárias','Outras despesas'];
-const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano','cat','recor','extrato','ped','psv','sc','sep','cot','etapa','func','rhdoc','epi','veic','vsai','vabas','vman','ferr','fmov','fman','almox','nfse','ctbfech','jornada','feriado','ponto','pajuste','cipa','cipam','cipar','cipaa','acid','proc','procp','riscoia','usrreq','lgpdreq','lgpdinc','lgpdc','lixo','reun','rdo','rmesf','ctr','med','opp','hab','eqc','pmoc','os','multa','fvs','nc','trec','gar','pgr','pte','obrig','fechm','arq','transp','implog','ferias','fpag','afast','adm','dpmov','desl','esoc','psicamp','psr','rel','dpsol','rsreq','vaga','cand','cap','rom','intra','eap','idxbal','sstv','bhlanc','hht','trein','treinc','epica','fapac','vrota','vfrete','rda','integ','pgrdoc','sstdoc','ppp','insp','ambdoc','ambres','ambforn','ambind','isochk','procd','procl','pa','epihig','prodfam'];
+const COLS=['cfg','parc','conta','proj','prod','mov','lanc','notas','usr','plano','cat','recor','extrato','ped','psv','sc','sep','cot','etapa','func','rhdoc','epi','veic','vsai','vabas','vman','ferr','fmov','fman','almox','nfse','ctbfech','jornada','feriado','ponto','pajuste','cipa','cipam','cipar','cipaa','acid','proc','procp','riscoia','usrreq','lgpdreq','lgpdinc','lgpdc','lixo','reun','rdo','rmesf','ctr','med','opp','hab','eqc','pmoc','os','multa','fvs','nc','trec','gar','pgr','pte','obrig','fechm','arq','transp','implog','ferias','fpag','afast','adm','dpmov','desl','esoc','psicamp','psr','rel','dpsol','rsreq','vaga','cand','cap','rom','intra','eap','idxbal','sstv','bhlanc','hht','trein','treinc','epica','fapac','vrota','vfrete','rda','integ','pgrdoc','sstdoc','ppp','insp','ambdoc','ambres','ambforn','ambind','isochk','procd','procl','pa','epihig','prodfam','epitr'];
 
 /* ===== estado e persistência ===== */
 const S={},IDX={};COLS.forEach(c=>{S[c]=[];IDX[c]=new Map();});
@@ -2701,9 +2701,9 @@ V.sc=()=>{
   '<div class="tw"><table><thead><tr><th>Número</th><th>Data</th><th>Projeto e solicitante</th><th>Necessidade</th><th class="num">Separar</th><th class="num">Comprar</th><th>Status</th><th></th></tr></thead><tbody>'+
   (rows.length?v160Pag('sc',rows).map(s=>{
     const st=SC_ST[s.status]||SC_ST.rascunho,env=s.status!=='rascunho'&&s.status!=='cancelada';
-    const ns=env?s.itens.filter(i=>(+i.qSep||0)>0).length:'—',nc=env?s.itens.filter(i=>(+i.qCom||0)>0).length:'—';
+    const al163=v163ScLive(s)&&s.status!=='cancelada'?v163Split(s):null,ns=al163?al163.ns:env?s.itens.filter(i=>(+i.qSep||0)>0).length:'—',nc=al163?al163.nc:env?s.itens.filter(i=>(+i.qCom||0)>0).length:'—'; /* v163 */
     const b=(a,l,c)=>'<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+s.id+'">'+l+'</button>';
-    const acts=s.status==='rascunho'?b('scEnviar','Enviar ao comprador','pri')+b('scEdit','Editar')+b('scDel','Excluir','dng'):s.status==='enviada'?b('scCotar','Abrir cotação','pri')+b('scVer','Detalhes')+b('scEmail','E-mail')+b('scCancel','Cancelar','dng'):s.status==='cotacao'?b('scCotar','Ver cotação','pri')+b('scVer','Detalhes')+b('scEmail','E-mail')+b('scCancel','Cancelar','dng'):s.status==='cancelada'?b('scVer','Detalhes')+b('scDel','Excluir','dng'):b('scVer','Detalhes')+b('scEmail','E-mail');
+    const acts=s.status==='rascunho'?b('scEnviar',v163EnvLbl(s),'pri')+b('scEdit','Editar')+b('scDel','Excluir','dng'):s.status==='enviada'?b('scCotar','Abrir cotação','pri')+b('scVer','Detalhes')+b('scEmail','E-mail')+b('scCancel','Cancelar','dng'):s.status==='cotacao'?b('scCotar','Ver cotação','pri')+b('scVer','Detalhes')+b('scEmail','E-mail')+b('scCancel','Cancelar','dng'):s.status==='cancelada'?b('scVer','Detalhes')+b('scDel','Excluir','dng'):b('scVer','Detalhes')+b('scEmail','E-mail');
     return '<tr><td class="mono">'+esc(s.numero)+'</td><td class="mono">'+fmtDate(s.data)+'</td><td>'+(s.projId?esc(projNome(s.projId)):'<span class="mut">Sem projeto</span>')+'<div class="sub">'+esc(s.solicitante||'—')+' · '+s.itens.length+' item(ns)</div></td><td class="mono">'+fmtDate(s.necessidade)+(['enviada','cotacao'].includes(s.status)&&s.necessidade<hoje?' '+pill('atrasada','neg'):'')+'</td><td class="num">'+ns+'</td><td class="num">'+nc+'</td><td>'+pill(st[0],st[1])+'</td><td class="act">'+acts+'</td></tr>';
   }).join(''):emptyRow(8,'Nenhuma solicitação neste filtro.'))+'</tbody></table></div>'+v160PagBar('sc')+'</div>';
 };
@@ -12179,7 +12179,7 @@ function rdoMatSync(r){if(!r)return;const it=(r.matsol||[]).filter(x=>x.desc&&+x
   put('sc',base);
   if(novo){const ms=base.aprovUid?[base.aprovUid]:matCfg().aprov;ms.forEach(u=>avisoChat(u,'Solicitação de material nº '+base.numero+' da obra '+projNome(base.projId)+' ('+it.length+' item(ns), precisa até '+fmtDate(base.necessidade)+') aguarda a sua aprovação em Financeiro › Aprovações.'));toast('Pedido de material nº '+base.numero+' enviado para aprovação.','pos');}}
 {const s0=A.rdoSalvar;A.rdoSalvar=()=>{rdoLer();if(rdoCur){rdoCur.matsol=(rdoCur.matsol||[]).filter(x=>x.desc&&+x.qtd>0);if(rdoCur.matsol.length&&!rdoCur.scId)rdoCur.scId=uid();}const id=rdoCur&&rdoCur.id;const res=s0();if(res===false)return false;try{rdoMatSync(get('rdo',id));}catch(e){}return res;};}
-const podeAprovarMat=sc=>{if(store.mode!=='db'||me.owner)return true;if(typeof pfnAcaoOk==='function'&&!pfnAcaoOk('aprovar'))return false;const u=actorId(),m=matCfg();if(sc&&sc.solUid===u)return false;return (sc&&sc.aprovUid===u)||m.aprov.includes(u)||(typeof podeAprovar==='function'&&podeAprovar());};
+let podeAprovarMat=sc=>{ /* v163: let (new_v163.js troca pela regra do aprovador da obra) */if(store.mode!=='db'||me.owner)return true;if(typeof pfnAcaoOk==='function'&&!pfnAcaoOk('aprovar'))return false;const u=actorId(),m=matCfg();if(sc&&sc.solUid===u)return false;return (sc&&sc.aprovUid===u)||m.aprov.includes(u)||(typeof podeAprovar==='function'&&podeAprovar());};
 const matPend=()=>S.sc.filter(s=>s.status==='aprovacao').sort((a,b)=>String(a.necessidade).localeCompare(String(b.necessidade)));
 A.matAprovar=d=>{const sc=get('sc',d.id);if(!sc||sc.status!=='aprovacao')return;if(!podeAprovarMat(sc)){toast(sc.solUid===actorId()?'Quem pediu não aprova o próprio pedido.':'Você não está entre os aprovadores de material.','neg');return;}
   const nao=d.dec==='nao',al=scAloca(sc);
@@ -26850,7 +26850,7 @@ const scrScReab=c=>{const sc=c&&c.scId?get('sc',c.scId):null;return sc&&sc.statu
     if(['enviada','cotacao'].includes(s.status)&&scPodeReabrir(s))h=h.replace(det,det+'<button class="btn sm" data-act="scReabrir" data-id="'+s.id+'">Reabrir para editar</button>');
     else if(['comprada','atendida'].includes(s.status))h=h.replace(det,det+'<button class="btn sm" data-act="scCompl" data-id="'+s.id+'">Criar SC complementar</button>');
     else if(s.status==='rascunho'&&s.reab){
-      h=h.replace('<button class="btn sm pri" data-act="scEnviar" data-id="'+s.id+'">Enviar ao comprador</button>','<button class="btn sm pri" data-act="scEnviar" data-id="'+s.id+'" title="Reaberta em '+esc(fmtDT(s.reab.em))+'">Reenviar ao comprador</button>');
+      h=h.replace('<button class="btn sm pri" data-act="scEnviar" data-id="'+s.id+'">'+v163EnvLbl(s)+'</button>','<button class="btn sm pri" data-act="scEnviar" data-id="'+s.id+'" title="Reaberta em '+esc(fmtDT(s.reab.em))+'">'+v163EnvLbl(s)+'</button>'); /* v163: rótulo com a divisão */
       h=h.replace('<button class="btn sm dng" data-act="scDel" data-id="'+s.id+'">Excluir</button>','<button class="btn sm dng" data-act="scCancel" data-id="'+s.id+'">Cancelar</button>');
     }
   });return h;};}
@@ -28023,7 +28023,7 @@ function p6SitCel(m){const st=p6MedSt(m),n=m.nfseId&&get('nfse',m.nfseId);let h=
 function p6EmpBtns(m){try{if(m.status!=='rascunho')return '';const c=get('ctr',m.ctrId),x=fzMedEmp(m,c);if(!x||!x.acima||fzMedLibOk(m,x.dep))return '';
   return fzDiretor()?'<button class="btn sm" data-act="fzMedLib" data-id="'+m.id+'">Liberar acima do empenho</button>':(m.empLibReq?'<span class="p6nota">liberação pedida à diretoria</span>':'<button class="btn sm" data-act="fzMedLibPedir" data-id="'+m.id+'">Pedir liberação</button>');}catch(e){return '';}}
 function p6MedFiltra(f){return S.med.filter(m=>(!f.ctr||m.ctrId===f.ctr)&&(!f.proj||p6MedPid(m)===f.proj)&&(!f.st||p6MedK(m)===f.st)).sort((a,b)=>String(b.fim).localeCompare(String(a.fim)));}
-/* Obras › Medições ao cliente: lançar, enviar e acompanhar (sem Aprovar) */
+/* Comercial › Medições ao cliente: lançar, enviar e acompanhar (sem Aprovar) */
 V.med=()=>{const f=ui.med,rows=p6MedFiltra(f);
   const pend=p6MedPend().length,dev=S.med.filter(m=>p6MedK(m)==='devolvida'||p6MedK(m)==='reaberta').length;
   return pageHead('Medições','Boletins de medição por contrato: quantidade de cada item no período, acumulado, reajuste e retenção. A obra prepara e envia para aprovação; o Comercial aprova ou devolve com o motivo. Depois de aprovada, ao faturar, a NFS-e é criada em rascunho.')+
@@ -28071,7 +28071,7 @@ A.p6MedAprovar=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'||m.aprov
 /* o dono que lançou passa pela segregação só quando confirmou o aviso acima (o servidor também só aceita o dono) */
 {const f0=fzMedAprovErro;fzMedAprovErro=function(m,c){const e=f0.apply(this,arguments);if(e&&e.autor&&P6.donoOk&&me.owner)return f0(Object.assign({},m,{lancPor:'',crBy:''}),c);return e;};}
 /* a aprovação só sai de uma medição enviada; de qualquer lugar que chame */
-{const a0=A.medAprovar;A.medAprovar=d=>{const m=get('med',d.id);if(m&&m.status==='rascunho'&&m.aprovSt!=='enviada'){P6.fatDepois='';msgModal('Esta medição ainda não foi enviada para aprovação',['A obra usa "Enviar para aprovação" em Obras › Medições ao cliente; depois o Comercial aprova em Comercial › Medições para aprovar.']);return;}return a0(d);};}
+{const a0=A.medAprovar;A.medAprovar=d=>{const m=get('med',d.id);if(m&&m.status==='rascunho'&&m.aprovSt!=='enviada'){P6.fatDepois='';msgModal('Esta medição ainda não foi enviada para aprovação',['A obra usa "Enviar para aprovação" em Comercial › Medições ao cliente; depois o Comercial aprova em Comercial › Medições para aprovar.']);return;}return a0(d);};}
 /* devolver com motivo (Comercial) */
 A.p6MedDevolver=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'||m.aprovSt!=='enviada'){toast('Esta medição não está aguardando aprovação.','neg');return;}
   if(!p6PodeAprovMed()){toast('Seu perfil não devolve medição ao cliente.','neg');return;}
@@ -28080,7 +28080,7 @@ A.p6MedDevolver=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'||m.apro
   modal({title:'Devolver a medição nº '+m.numero,body:'<p style="margin:0 0 8px">Contrato '+esc(c.numero||'—')+' · '+esc(parcNome(c.parcId))+' · '+money(medTot(m,c).fat)+'</p><label class="f full"><span>Motivo da devolução *</span><textarea id="p6DevMot" rows="3" maxlength="500" placeholder="O que a obra precisa corrigir"></textarea></label><p class="sub" style="margin:8px 0 0">O motivo fica no histórico da medição e vai para quem lançou pelo chat interno.</p>',
     saveLabel:'Devolver',save:()=>{const mot=String(($('#p6DevMot')||{}).value||'').trim();if(mot.length<5){toast('Escreva o motivo da devolução (pelo menos 5 caracteres).','neg');return false;}
       const atual=get('med',m.id)||m;put('med',Object.assign(cl(atual),{aprovSt:'devolvida',devPor:actorId(),devEm:Date.now(),devMotivo:mot.slice(0,500),fluxoHist:p6Hist(atual,'devolvida',mot.slice(0,500))}));
-      const txt='Medição nº '+m.numero+' do contrato '+(c.numero||'')+' foi devolvida pelo Comercial ('+nameOf(actorId())+'). Motivo: '+mot.slice(0,300)+'. Corrija em Obras › Medições ao cliente e envie de novo.';
+      const txt='Medição nº '+m.numero+' do contrato '+(c.numero||'')+' foi devolvida pelo Comercial ('+nameOf(actorId())+'). Motivo: '+mot.slice(0,300)+'. Corrija em Comercial › Medições ao cliente e envie de novo.';
       [...new Set([fzMedAutor(atual),atual.envPor].filter(Boolean))].forEach(u=>{try{P6.aviso(u,txt);}catch(e){}});
       toast('Medição devolvida para a obra.','pos');}});};
 /* carimbo da aprovação no fluxo e aviso a quem lançou; logo depois, o faturamento de sempre (NFS-e em rascunho) */
@@ -28088,7 +28088,7 @@ A.p6MedDevolver=d=>{const m=get('med',d.id);if(!m||m.status!=='rascunho'||m.apro
     if(ex&&ex!==rec&&ex.status==='rascunho'){rec.aprovSt='aprovada';rec.fluxoHist=p6Hist(ex,'aprovada');
       const r=p0.apply(this,arguments);const id=rec.id;
       try{const c=get('ctr',rec.ctrId)||{},txt='Medição nº '+rec.numero+' do contrato '+(c.numero||'')+' foi aprovada pelo Comercial ('+nameOf(actorId())+').';[...new Set([fzMedAutor(ex),ex.envPor].filter(Boolean))].forEach(u=>{try{P6.aviso(u,txt);}catch(e){}});}catch(e){}
-      if(P6.fatDepois===id){P6.fatDepois='';setTimeout(()=>{const x=get('med',id);if(!x||x.status!=='aprovada')return;if(p6PodeFaturar(x))A.medFaturar({id});else toast('Medição aprovada. A NFS-e em rascunho é criada em Faturar (Obras › Medições ao cliente) por quem emite notas: Fiscal com Contratos ou administrador.','pos');},60);}
+      if(P6.fatDepois===id){P6.fatDepois='';setTimeout(()=>{const x=get('med',id);if(!x||x.status!=='aprovada')return;if(p6PodeFaturar(x))A.medFaturar({id});else toast('Medição aprovada. A NFS-e em rascunho é criada em Faturar (Comercial › Medições ao cliente) por quem emite notas: Fiscal com Contratos ou administrador.','pos');},60);}
       return r;}}
   return p0.apply(this,arguments);};}
 /* faturar cria a NFS-e (módulo Notas) e, com retenção, a conta a receber (Financeiro): sem essas permissões o servidor
@@ -28184,7 +28184,7 @@ function rmdPodeFat(o,m){if(store.mode!=='db'||me.owner)return '';
   if(o.ret&&!pfnAcaoOk('cancelar'))return 'cancelar';
   return '';}
 function rmdAvisa(m,mot,txtFat){const c=get('ctr',m.ctrId)||{};
-  const txt='Medição nº '+m.numero+' do contrato '+(c.numero||'')+' foi reaberta por '+nameOf(actorId())+'. Motivo: '+String(mot).slice(0,300)+'.'+(txtFat?' '+txtFat:'')+' Corrija em Obras › Medições ao cliente e envie de novo para aprovação.';
+  const txt='Medição nº '+m.numero+' do contrato '+(c.numero||'')+' foi reaberta por '+nameOf(actorId())+'. Motivo: '+String(mot).slice(0,300)+'.'+(txtFat?' '+txtFat:'')+' Corrija em Comercial › Medições ao cliente e envie de novo para aprovação.';
   [...new Set([fzMedAutor(m),m.envPor].filter(Boolean))].forEach(u=>{try{P6.aviso(u,txt);}catch(e){}});}
 /* sem servidor próprio: grava na ordem segura (a medição por último) */
 function rmdLocal(m,o,mot){const agora=Date.now(),ev={motivo:mot,de:m.status};
@@ -31206,8 +31206,8 @@ if(typeof v152Resumo==='function'){const r0=v152Resumo;v152Resumo=function(c,r){
   try{if(col==='sc'&&v158ScProprias()&&velho&&!v158MinhaSc(velho))return V158_SC_ALHEIA;
     if(v158FrotaAdm()&&V158_FROTA_COLS.includes(col)&&exclui&&velho)return V158_FROTA_DEL;
     if(v158FrotaAdm()&&V158_CORR_COLS.includes(col)&&!exclui&&velho&&novo&&v158PedeMotivo(col,velho,novo)&&String(novo.corrMotivo||'').trim().length<3)return V158_CORR_MSG;}catch(e){}return m;};}
-const V158_IGNORA=new Set(['id','ts','cr','crBy','ed','edBy','hist','v','lancId','correcoes','corrMotivo','_valOculto','_restrito']);
-function v158Mudou(velho,novo){return [...new Set(Object.keys(velho||{}).concat(Object.keys(novo||{})))].filter(k=>!V158_IGNORA.has(k)&&!p2Igual((velho||{})[k],(novo||{})[k]));}
+const V158_IGNORA=new Set(['id','ts','cr','crBy','ed','edBy','hist','v','lancId','correcoes','corrMotivo','_valOculto','_restrito','notas163','v163']); /* v163 */
+function v158Mudou(velho,novo){return [...new Set(Object.keys(velho||{}).concat(Object.keys(novo||{})))].filter(k=>!V158_IGNORA.has(k)&&!(k==='valor'&&(velho||{}).v163)&&!p2Igual((velho||{})[k],(novo||{})[k]));}
 /* abastecimento sempre; manutenção só depois de concluída (concluir a agendada não é correção) */
 function v158PedeMotivo(col,velho,novo){if(!velho||!V158_CORR_COLS.includes(col))return false;if(col==='vman'&&(velho.status||'concluida')==='agendada')return false;return v158Mudou(velho,novo).length>0;}
 
@@ -31963,7 +31963,7 @@ function v161Painel(c){const t=v161Teto(c),os=v161OsDe(c.id),ed=mayW('ctr'),top=
     h=h.slice(0,i)+'<b>'+esc(c.numero)+'</b> '+pill('Sob demanda','acc')+' <span class="sub">'+(t.pct==null?'':pctV(t.pct)+' do teto')+'</span><div class="sub v132-cl2">'+h.slice(i+k.length);});}catch(e){}return h;};}
 
 /* ===== v162: importar medições de PDF com IA (relatorios/feito_v162.md) =====
-   - "Importar medições de PDF" no detalhe do contrato e em Obras › Medições ao cliente (com o contrato escolhido no filtro).
+   - "Importar medições de PDF" no detalhe do contrato e em Comercial › Medições ao cliente (com o contrato escolhido no filtro).
      Um ou vários PDFs do mesmo contrato; cada PDF vai guardado como anexo (armazenamento de sempre) e é lido pela IA do
      servidor (POST /api/ia/medicao-pdf, deploy/gestao/iamed162.js: uma chamada por PDF, modelo "complex"; vai só o PDF e a
      lista de itens do contrato). Limites: 20 MB e 50 páginas por PDF (conferidos aqui e no servidor).
@@ -32153,9 +32153,393 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v162Imp:'Lê um ou vário
 /* detalhe do contrato: botão no rodapé */
 {const v0=A.ctrVer;A.ctrVer=function(d){const r=v0.apply(this,arguments);try{const c=get('ctr',d&&d.id),mf=$('#mf');if(c&&c.status==='vigente'&&mayW('ctr')&&mf&&mf.insertAdjacentHTML)mf.insertAdjacentHTML('afterbegin','<button class="btn" data-act="v162Imp" data-c="'+c.id+'">Importar medições de PDF</button>');}catch(e){}return r;};}
 
+/* ===== v163: Medições ao cliente no Comercial, manutenção com custo pela nota, aprovador de compras da obra, entrega de EPI
+   integrada ao estoque e ao romaneio, e a SC mostrando o que será separado e o que será comprado (relatorios/feito_v163.md) =====
+   1. Comercial › Medições ao cliente (antes em Obras): mesma tela e mesmas permissões; o endereço antigo (#med com o módulo
+      Obras) cai no Comercial; favoritos, busca, painéis e textos apontam para o lugar novo.
+   2. Manutenção de veículos e de equipamentos: sem "Lançar em contas a pagar". O custo vem da nota fiscal de entrada (NFS-e
+      da oficina ou compra de peças) ligada à manutenção, inteira ou por linha, pela manutenção ou pela própria nota (Ver nota ›
+      Ligar a veículo ou equipamento). O valor da manutenção é a soma das notas ligadas; os relatórios de custo da frota e dos
+      equipamentos leem esse valor. Manutenção antiga com conta a pagar fica como está (mostrada só para consulta).
+      Servidor: ajuste163.js (gravação e POST /api/man163/ligar).
+   3. Obra: "Aprovador de compras (nível 1)" e "Substituto". A SC da obra vai para ele (ou para o substituto quando ele está
+      ausente pela Matriz de aprovadores); "Aguardando aprovação de <nome>" na lista. Sem aprovador: a regra de sempre.
+   4. EPI: só RH, Segurança do trabalho e Administrador entregam. Almoxarifado pelo colaborador (São Paulo ou Tuiuti, ou o
+      "Almoxarifado de EPI" do cadastro). Nova entrega: EPI em uso, trocas próximas e último tamanho; EPI escolhido do
+      estoque (família EPI, tamanho, CA, validade e saldo por almoxarifado; CA vencido bloqueia); com saldo no almoxarifado do
+      colaborador: entrega + baixa + ficha; só em Tuiuti para quem é de São Paulo: romaneio de transferência e a entrega
+      aguarda; sem estoque: SC de RH. Entrega em lote (kit de admissão), painel de EPI, troca abre a próxima entrega.
+   5. SC em rascunho (e aguardando aprovação): cada item mostra se será separado ou comprado, e por quê; o botão diz quantos
+      vão para separação e quantos para compra; item livre pode ser ligado a um produto do estoque; a lista e o documento
+      usam a conta do momento (a mesma do formulário). Prefixos v163*, V163*. */
+const V163={epi:{pend:{},pendEm:0,ent:null,q:'',fam:''},mn:null,nl:null,sc:{q:{},fam:''}};
+const v163N=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const v163Srv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV();
+const v163Admin=()=>store.mode!=='db'||me.owner||!!(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+const v163Papel=()=>{const d=PERFIS[me.perfil];return (d&&!d.custom&&d.papel)||me.perfil||'';};
+const v163Br=d=>d?fmtDate(d):'—';
+
+/* ---------- 1. Medições ao cliente no Comercial ---------- */
+{const ob=MENU.find(m=>m[0]==='obras'),co=MENU.find(m=>m[0]==='comer');
+  if(co){let it=['med','Medições ao cliente'];if(ob){const i=ob[2].findIndex(x=>x[0]==='med');if(i>=0)it=ob[2].splice(i,1)[0];}
+    if(!co[2].some(x=>x[0]==='med')){const k=co[2].findIndex(x=>x[0]==='ctr');co[2].splice(k>=0?k+1:co[2].length,0,[it[0],it[1]]);}}
+  const n=NAV.find(x=>x[0]==='med');if(n)n[2]=(co&&co[1])||'Comercial';
+  const d=PN2_DEF.find(x=>x.id==='pnObr');if(d&&Array.isArray(d.extras)&&!d.extras.includes('med'))d.extras.push('med');
+  GS_SIN.med=String(GS_SIN.med||'medicao boletim')+' comercial obras';}
+/* endereço antigo: Medições ao cliente aberta com o módulo Obras vai para o Comercial */
+RH_PRE.push(()=>{if(ui.tab==='med'&&ui.mod!=='comer'&&MENU.some(m=>m[0]==='comer'&&m[2].some(i=>i[0]==='med')))ui.mod='comer';});
+
+/* ---------- 2. manutenção: custo pela nota fiscal ---------- */
+const V163_MAN={vman:{alvo:'veicId',nome:'veículo',grupo:'frota',data:'data'},fman:{alvo:'ferrId',nome:'equipamento',grupo:'ferr',data:'abertura'}};
+const V163_FIN=['gerarLanc','lancId','venc','pago','contaId','comum'];
+const v163Vt=i=>(+i.qtd||0)*(+i.vUnit||0);
+function v163ValLink(n,l){if(!n)return 0;const t=notaTotais(n),its=n.itens||[];if(!Array.isArray(l))return r2(t.vNF);
+  const vp=its.reduce((s,i)=>s+v163Vt(i),0),vl=l.reduce((s,k)=>s+(its[k]?v163Vt(its[k]):0),0);return vp>0?r2(t.vNF*vl/vp):0;}
+const v163NfNome=x=>(x.modelo==='nfse'?'NFS-e ':'NF ')+(x.num||'s/n');
+const v163AlvoNome=(col,id)=>col==='vman'?veicNome(id):ferrNome(id);
+/* liga (ou atualiza) uma nota no registro de manutenção, com o mesmo cálculo do servidor */
+function v163Link(n,l,old){const p=n.parcId?get('parc',n.parcId):null;return {notaId:n.id,l:Array.isArray(l)?[...new Set(l.map(Number))].sort((a,b)=>a-b):null,num:String(n.numero||''),serie:String(n.serie||''),modelo:n.modelo==='nfse'?'nfse':'nfe',parcId:n.parcId||'',forn:p?String(p.nome||p.fantasia||''):'',emissao:n.emissao||'',projId:n.projId||'',valor:v163ValLink(n,l),em:(old&&old.em)||Date.now(),por:(old&&old.por)||actorId()};}
+const v163Sobrepoe=(a,b)=>!Array.isArray(a)||!Array.isArray(b)||a.some(k=>b.includes(k));
+/* outra manutenção já usa a nota (ou as mesmas linhas) */
+function v163NotaUsada(notaId,l,col,id){for(const c of ['vman','fman'])for(const r of S[c]||[]){if(c===col&&r.id===id)continue;for(const o of r.notas163||[])if(o.notaId===notaId&&v163Sobrepoe(o.l,l))return {c,r};}return null;}
+function v163ManPrep(col,r,isNew){if(!r)return r;if(r.lancId)return r;
+  V163_FIN.forEach(k=>delete r[k]);if(isNew||!get(col,r.id))r.v163=1;
+  const ls=Array.isArray(r.notas163)?r.notas163:[];
+  if(ls.length)r.valor=r2(ls.reduce((s,o)=>s+(+o.valor||0),0));else if(r.v163)r.valor='';
+  return r;}
+['vman','fman'].forEach(col=>{const d=MODS2[col];if(!d)return;
+  const b0=d.blank;d.blank=function(){const o=b0.apply(this,arguments);V163_FIN.concat(['valor','projId']).forEach(k=>delete o[k]);o.v163=1;return o;};
+  const f0=d.fields;d.fields=function(r){return f0.apply(this,arguments).filter(f=>!f||!['valor','gerarLanc','venc','pago','contaId','projId','comum'].includes(f.k));};
+  /* os dados de exemplo (ex) continuam como antes, com a conta a pagar, para mostrar o custo de manutenção antigo */
+  const p0=d.pre,a0=d.after;d.pre=function(r,isNew){if(p0)p0.apply(this,arguments);if(r&&r.ex&&r.gerarLanc)return;v163ManPrep(col,r,isNew);};
+  d.after=function(r){if(r&&r.ex&&r.gerarLanc&&a0)return a0.apply(this,arguments);};d.onDel=function(){}; /* nada de conta a pagar: nem criar, nem mudar, nem apagar a antiga */
+  d.fnote=(col==='vman'?'Para uma manutenção agendada, use a data prevista. ':'')+'O custo vem da nota fiscal (NFS-e da oficina ou compra de peças), lançada pelo Fiscal: depois de salvar, ligue a nota aqui (Editar › Ligar nota fiscal) ou na própria nota (Ver nota › Ligar a veículo ou equipamento).';
+  d.cols=d.cols.map(c=>c[0]==='Valor'?['Valor',r=>c[1](r)+((r.notas163||[]).length?'<div class="sub">'+esc(r.notas163.map(v163NfNome).join(', '))+'</div>':''),c[2]]:c);});
+FLABEL.notas163='Notas fiscais (custo)';
+/* bloco no formulário: notas ligadas, conta antiga só para consulta, botão para ligar */
+function v163ManBloco(col,rec){const ls=rec.notas163||[],ant=rec.id?get(col,rec.id):null,lc=rec.lancId?get('lanc',rec.lancId):null;
+  let h='<div class="card v163man" style="margin:12px 0 0"><h2>Custo da manutenção <small>'+money(ls.length?sum(ls,o=>+o.valor||0):(+rec.valor||0))+'</small></h2>';
+  if(rec.lancId)h+='<p class="sub" style="margin:0 0 6px">Conta a pagar criada antes da v163 (fica como está, só para consulta): '+(lc?esc(lc.desc)+' · '+money(lc.valor)+' · vence '+fmtDate(lc.venc)+' · '+(lc.pago?'paga':'em aberto'):'conta '+esc(rec.lancId)+' (sem acesso ou excluída)')+'.</p>';
+  h+=ls.length?'<div class="list">'+ls.map(o=>'<div class="li"><div><div class="t">'+esc(v163NfNome(o))+' · '+esc(o.forn||'—')+'</div><div class="sub">emissão '+v163Br(o.emissao)+(Array.isArray(o.l)?' · linha(s) '+o.l.map(k=>k+1).join(', '):' · nota inteira')+(o.projId?' · obra '+esc(projNome(o.projId)):'')+'</div></div><div class="mono">'+money(o.valor)+'</div></div>').join('')+'</div>':(rec.lancId?'':'<p class="sub" style="margin:0">Nenhuma nota ligada ainda. O custo aparece quando a nota fiscal for ligada.</p>');
+  if(ant&&!rec.lancId&&v163PodeMan(col))h+='<div class="acts" style="margin-top:8px"><button class="btn sm" data-act="v163ManNotas" data-col="'+col+'" data-id="'+esc(rec.id)+'">Ligar nota fiscal</button></div>';
+  else if(!ant&&!rec.lancId)h+='<p class="sub" style="margin:6px 0 0">Salve a manutenção para ligar a nota.</p>';
+  return h+'</div>';}
+const v163PodeMan=col=>store.mode!=='db'||me.owner||mayW(V163_MAN[col].grupo);
+{const f0=formMod;formMod=function(d,rec){const r=f0.apply(this,arguments);try{if(d&&V163_MAN[d.col]&&rec){const mb=$('#mb');if(mb&&mb.insertAdjacentHTML)mb.insertAdjacentHTML('beforeend',v163ManBloco(d.col,rec));}}catch(e){}return r;};}
+/* pela manutenção: escolher a nota (do fornecedor, por padrão) e as linhas */
+function v163NotasCand(q,parcId){const t=v163N(q);return (S.notas||[]).filter(n=>n.tipo==='entrada'&&n.status!=='cancelada'&&(!parcId||n.parcId===parcId||t)&&(!t||v163N([n.numero,parcNome(n.parcId),(n.itens||[]).map(i=>i.desc).join(' ')].join(' ')).includes(t))).sort((a,b)=>String(b.emissao||'').localeCompare(String(a.emissao||''))).slice(0,40);}
+function v163MnBody(){const M=V163.mn,rec=get(M.col,M.id);if(!rec)return '<p>Registro não encontrado.</p>';const ls=rec.notas163||[];
+  let h='<p style="margin:0 0 8px"><b>'+esc(v163AlvoNome(M.col,rec[V163_MAN[M.col].alvo]))+'</b> · '+esc(rec.tipo||'')+' · '+v163Br(rec[V163_MAN[M.col].data])+(rec.parcId?' · '+esc(parcNome(rec.parcId)):'')+'</p>';
+  if(ls.length)h+='<div class="sect">Notas ligadas</div><div class="list">'+ls.map(o=>'<div class="li"><div>'+esc(v163NfNome(o))+' · '+esc(o.forn||'')+'<div class="sub">'+(Array.isArray(o.l)?'linha(s) '+o.l.map(k=>k+1).join(', '):'nota inteira')+'</div></div><div class="mono">'+money(o.valor)+' <button class="btn sm dng" data-act="v163ManDesl" data-n="'+esc(o.notaId)+'" aria-label="Tirar a nota">&times;</button></div></div>').join('')+'</div>';
+  if(!(S.notas||[]).length&&store.mode==='db'&&!mayR('nf')&&!mayR('comp'))return h+'<div class="note" style="margin-top:10px">Seu perfil não consulta as notas fiscais. Quem lança a nota (Fiscal) liga pela própria nota: Notas fiscais › Ver › <b>Ligar a veículo ou equipamento</b>.</div>';
+  const cs=v163NotasCand(M.q,M.todos?'':rec.parcId||'');
+  h+='<div class="sect">Ligar nota de entrada</div><div class="bar"><label class="f grow"><span>Buscar nota (número, fornecedor ou item)</span><input id="v163NfQ" value="'+esc(M.q||'')+'" autocomplete="off"></label>'+(rec.parcId?'<label class="f"><span>&nbsp;</span><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="v163NfTodos"'+(M.todos?' checked':'')+'> outros fornecedores</label></label>':'')+'</div>';
+  h+='<div class="list" style="max-height:260px;overflow:auto">'+(cs.length?cs.map(n=>{const u=v163NotaUsada(n.id,null,M.col,M.id),on=M.notaId===n.id;return '<div class="li'+(on?' on':'')+'"><div style="min-width:0;flex:1"><div class="t">'+(n.modelo==='nfse'?'NFS-e ':'NF ')+esc(n.numero||'s/n')+' · '+esc(parcNome(n.parcId))+'</div><div class="sub">'+v163Br(n.emissao)+' · '+(n.itens||[]).length+' linha(s)'+(n.projId?' · obra '+esc(projNome(n.projId)):'')+(u?' · <span class="neg">já ligada a outra manutenção</span>':'')+'</div></div><div class="mono" style="flex-shrink:0">'+money(notaTotais(n).vNF)+' <button class="btn sm'+(on?' pri':'')+'" data-act="v163ManEsc" data-n="'+esc(n.id)+'">Escolher</button></div></div>';}).join(''):'<p class="sub" style="margin:6px 0">Nenhuma nota de entrada'+(rec.parcId&&!M.todos?' deste fornecedor':'')+'.</p>')+'</div>';
+  const n=M.notaId?get('notas',M.notaId):null;
+  if(n)h+='<div class="sect">Linhas da nota '+esc(n.numero||'')+'</div>'+v163LinhasHtml(n,M.l);
+  return h;}
+function v163LinhasHtml(n,l){return '<label style="display:flex;gap:6px;align-items:center;margin:0 0 6px"><input type="checkbox" data-v163lt="1"'+(l?'':' checked')+'> <b>Nota inteira</b> ('+money(notaTotais(n).vNF)+')</label>'+
+  (n.itens||[]).map((i,k)=>'<label style="display:flex;gap:6px;align-items:center;margin:0 0 4px;padding-left:18px"><input type="checkbox" data-v163l="'+k+'"'+(l&&l.includes(k)?' checked':'')+'> '+esc(i.desc||'')+' · '+fmtQ(i.qtd)+' '+esc(i.un||'')+' · '+money(v163Vt(i))+'</label>').join('');}
+function v163LeLinhas(root){const r=root||$('#mb');if(!r||!r.querySelector)return null;const t=r.querySelector('[data-v163lt]');if(t&&t.checked)return null;
+  const l=[...r.querySelectorAll('[data-v163l]')].filter(x=>x.checked).map(x=>+x.dataset.v163l);return l.length?l:null;}
+function v163MnRender(){const b=$('#mb');if(b)b.innerHTML=v163MnBody();}
+A.v163ManNotas=d=>{const col=d.col,rec=get(col,d.id);if(!rec||!V163_MAN[col])return;if(rec.lancId){toast('Esta manutenção tem conta a pagar antiga: fica como está.','neg');return;}
+  if(!v163PodeMan(col)){toast('Seu perfil não altera esta manutenção. O Fiscal liga pela própria nota (Ver nota › Ligar a veículo ou equipamento).','neg');return;}
+  V163.mn={col,id:rec.id,q:'',notaId:'',l:null,todos:false};
+  modal({title:'Notas fiscais da manutenção',wide:true,nofocus:true,body:v163MnBody(),saveLabel:'Ligar a nota escolhida',save:root=>{const M=V163.mn,n=M&&M.notaId?get('notas',M.notaId):null;if(!n){toast('Escolha a nota.','neg');return false;}
+      const l=v163LeLinhas(root);const r=v163LigarLocal(M.col,M.id,n,l);if(typeof r==='string'){toast(r,'neg');return false;}toast('Nota ligada: custo '+money(r.valor)+'.','pos');}});};
+A.v163ManEsc=d=>{if(!V163.mn)return;V163.mn.notaId=d.n;V163.mn.l=null;v163MnRender();};
+A.v163ManDesl=d=>{const M=V163.mn;if(!M)return;const rec=get(M.col,M.id);if(!rec)return;const n=Object.assign(cl(rec),{notas163:(rec.notas163||[]).filter(o=>o.notaId!==d.n)});v163ManPrep(M.col,n,false);put(M.col,n);toast('Nota tirada da manutenção.','pos');v163MnRender();};
+Object.assign(ACT_GROUP,{v163ManNotas:null,v163ManEsc:null,v163ManDesl:null});
+document.addEventListener('input',e=>{const t=e.target;if(!t||!V163.mn||!$('#v163NfQ'))return;if(t.id==='v163NfQ'){V163.mn.q=t.value;clearTimeout(V163.mnT);V163.mnT=setTimeout(()=>{const b=$('#mb');if(!b)return;const pos=t.selectionStart;v163MnRender();const i=$('#v163NfQ');if(i&&i.focus){i.focus();try{i.setSelectionRange(pos,pos);}catch(er){}}},250);}});
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset)return;
+  if(t.id==='v163NfTodos'&&V163.mn){V163.mn.todos=!!t.checked;v163MnRender();return;}
+  if(t.dataset.v163lt&&t.checked){const r=$('#mb');if(r&&r.querySelectorAll)r.querySelectorAll('[data-v163l]').forEach(x=>{x.checked=false;});}
+  if(t.dataset.v163l&&t.checked){const a=$('#mb [data-v163lt]');if(a)a.checked=false;}});
+/* grava a ligação na manutenção (gravação comum; o servidor confere e recalcula) */
+function v163LigarLocal(col,id,n,l){const rec=get(col,id);if(!rec)return 'Manutenção não encontrada.';if(rec.lancId)return 'Esta manutenção tem conta a pagar antiga e fica como está.';
+  if(!n||n.tipo!=='entrada'||n.status==='cancelada')return 'Escolha uma nota de entrada que não esteja cancelada.';
+  const u=v163NotaUsada(n.id,l,col,id);if(u)return 'A nota nº '+(n.numero||'')+' já está ligada a outra manutenção ('+v163AlvoNome(u.c,u.r[V163_MAN[u.c].alvo])+'). O custo seria contado duas vezes.';
+  const ls=(rec.notas163||[]).filter(o=>o.notaId!==n.id);ls.push(v163Link(n,l,(rec.notas163||[]).find(o=>o.notaId===n.id)));
+  const novo=Object.assign(cl(rec),{notas163:ls});if(!novo.parcId&&n.parcId)novo.parcId=n.parcId;v163ManPrep(col,novo,false);put(col,novo);return ls[ls.length-1];}
+/* pela nota: Ver nota › Ligar a veículo ou equipamento (o Fiscal não grava a manutenção: vai pela rota do servidor) */
+function v163NotaLigs(nid){const out=[];['vman','fman'].forEach(c=>(S[c]||[]).forEach(r=>(r.notas163||[]).forEach(o=>{if(o.notaId===nid)out.push({c,r,o});})));return out;}
+const v163PodeLigarNota=()=>store.mode!=='db'||me.owner||mayW('nf')||mayW('comp')||mayW('frota')||mayW('ferr');
+{const v0=A.verNota;A.verNota=d=>{const r=v0(d);try{const n=get('notas',d&&d.id);if(!n||n.tipo!=='entrada')return r;const ls=v163NotaLigs(n.id),b=$('#mb');
+  if(b&&b.insertAdjacentHTML&&ls.length)b.insertAdjacentHTML('beforeend','<div class="sect">Veículo ou equipamento (custo de manutenção)</div>'+ls.map(x=>'<div class="li"><div>'+esc(v163AlvoNome(x.c,x.r[V163_MAN[x.c].alvo]))+' · manutenção '+esc(x.r.tipo||'')+' de '+v163Br(x.r[V163_MAN[x.c].data])+'<div class="sub">'+(Array.isArray(x.o.l)?'linha(s) '+x.o.l.map(k=>k+1).join(', '):'nota inteira')+'</div></div><div class="mono">'+money(x.o.valor)+'</div></div>').join(''));
+  if(n.status!=='cancelada'&&v163PodeLigarNota()){const f=$('#mf');if(f&&f.insertAdjacentHTML)f.insertAdjacentHTML('afterbegin','<button class="btn" data-act="v163NfLigar" data-id="'+esc(n.id)+'">Ligar a veículo ou equipamento</button>');}}catch(e){}return r;};}
+function v163NlManOpts(col,alvo){return (S[col]||[]).filter(r=>r[V163_MAN[col].alvo]===alvo&&!r.lancId).sort((a,b)=>String(b[V163_MAN[col].data]||'').localeCompare(String(a[V163_MAN[col].data]||''))).slice(0,30).map(r=>[r.id,v163Br(r[V163_MAN[col].data])+' · '+(r.tipo||'')+(r.desc?' · '+String(r.desc).slice(0,40):'')+((r.notas163||[]).length?' · '+r.notas163.length+' nota(s)':'')]);}
+const v163FerrOpts=()=>(S.ferr||[]).filter(f=>f.status!=='baixado').map(f=>[f.id,ferrNome(f.id)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+function v163NlBody(){const N=V163.nl,n=get('notas',N.notaId);if(!n)return '';const col=N.col,ao=col==='vman'?veicOpts():v163FerrOpts();
+  return '<p style="margin:0 0 8px">'+(n.modelo==='nfse'?'NFS-e ':'NF ')+esc(n.numero||'s/n')+' · '+esc(parcNome(n.parcId))+' · '+money(notaTotais(n).vNF)+'</p><div class="fg">'+
+    field('Ligar a','v163col','select',col,{opts:[['vman','Veículo (manutenção de veículos)'],['fman','Equipamento ou ferramenta (manutenção de equipamentos)']]})+
+    field(col==='vman'?'Veículo *':'Equipamento *','v163alvo','select',N.alvo||'',{opts:ao,blank:'Selecione…'})+
+    field('Manutenção','v163man','select',N.man||'novo',{opts:[['novo','Nova manutenção concluída com esta nota']].concat(N.alvo?v163NlManOpts(col,N.alvo):[]),full:true})+'</div>'+
+    '<p class="sub" style="margin:6px 0 8px">Projeto: '+(n.projId?'<b>'+esc(projNome(n.projId))+'</b>':'sem projeto')+'. O custo na obra vem do projeto (ou do rateio) da própria nota; aqui a nota passa a ser o custo do '+(col==='vman'?'veículo':'equipamento')+'.</p>'+
+    '<div class="sect">O que é desta manutenção</div>'+v163LinhasHtml(n,N.l);}
+A.v163NfLigar=d=>{const n=get('notas',d.id);if(!n)return;if(!v163PodeLigarNota()){toast('Seu perfil não liga notas a veículos ou equipamentos.','neg');return;}
+  V163.nl={notaId:n.id,col:'vman',alvo:'',man:'novo',l:null};
+  modal({title:'Ligar a nota a veículo ou equipamento',wide:true,nofocus:true,body:v163NlBody(),saveLabel:'Ligar',save:root=>{const N=V163.nl,v=readForm(root);N.col=v.v163col||N.col;N.alvo=v.v163alvo||'';N.man=v.v163man||'novo';N.l=v163LeLinhas(root);
+      if(!N.alvo){toast('Escolha o '+(N.col==='vman'?'veículo':'equipamento')+'.','neg');return false;}
+      v163LigarNota(N).then(r=>{if(r&&r.ok!==false)toast('Nota ligada à manutenção do '+v163AlvoNome(N.col,N.alvo)+'.','pos');},er=>msgModal('A nota não foi ligada',[er.message]));}});};
+document.addEventListener('change',e=>{const t=e.target;if(!t||!V163.nl||!$('#mb [data-f="v163col"]'))return;
+  if(t.dataset&&(t.dataset.f==='v163col'||t.dataset.f==='v163alvo')){const N=V163.nl,v=readForm($('#mb'));if(t.dataset.f==='v163col'){N.col=v.v163col;N.alvo='';}else N.alvo=v.v163alvo;N.man='novo';N.l=v163LeLinhas();const b=$('#mb');if(b)b.innerHTML=v163NlBody();}});
+Object.assign(ACT_GROUP,{v163NfLigar:null});
+/* monta a manutenção nova ou atualizada; no servidor próprio vai pela rota (o Fiscal não grava manutenção) */
+function v163NlMonta(N){const n=get('notas',N.notaId),col=N.col,k=V163_MAN[col].alvo;if(!n)throw new Error('Nota não encontrada.');
+  const u=v163NotaUsada(n.id,N.l,col,N.man==='novo'?'':N.man);if(u)throw new Error('A nota nº '+(n.numero||'')+' já está ligada a outra manutenção ('+v163AlvoNome(u.c,u.r[V163_MAN[u.c].alvo])+').');
+  let rec;if(N.man&&N.man!=='novo'){const o=get(col,N.man);if(!o)throw new Error('Manutenção não encontrada.');if(o.lancId)throw new Error('Esta manutenção tem conta a pagar antiga e fica como está.');rec=cl(o);}
+  else{const desc=(n.modelo==='nfse'?'Serviço pela NFS-e nº ':'Peças/serviço pela NF nº ')+(n.numero||'s/n')+' ('+parcNome(n.parcId)+')';
+    rec=col==='vman'?Object.assign(MODS2.vman.blank(),{veicId:N.alvo,data:n.emissao||todayStr(),tipo:'Outro',status:'concluida',parcId:n.parcId||'',desc}):Object.assign(MODS2.fman.blank(),{ferrId:N.alvo,abertura:n.emissao||todayStr(),conclusao:n.emissao||todayStr(),tipo:'Corretiva',parcId:n.parcId||'',desc});}
+  if(rec[k]!==N.alvo)throw new Error('A manutenção escolhida é de outro '+V163_MAN[col].nome+'.');
+  const ls=(rec.notas163||[]).filter(o=>o.notaId!==n.id);ls.push(v163Link(n,N.l,(rec.notas163||[]).find(o=>o.notaId===n.id)));rec.notas163=ls;v163ManPrep(col,rec,!get(col,rec.id));return {col,rec};}
+async function v163LigarNota(N){const x=v163NlMonta(N);
+  if(v163Srv()){const j=await segaPost('/api/man163/ligar',{col:x.col,rec:x.rec});(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));render();return j;}
+  put(x.col,x.rec);render();return {ok:true};}
+
+/* ---------- 3. aprovador de compras (nível 1) da obra ---------- */
+FLABEL.aprovC163='Aprovador de compras (nível 1)';FLABEL.aprovS163='Substituto do aprovador de compras';
+const V163_SEM_APROV=new Set(['colaborador','pendente','semnivel','semid','leitura']);
+function v163AprovOpts(cur){const us=(S.usr||[]).filter(u=>u&&u.uid&&u.ativo!==false&&!V163_SEM_APROV.has(u.perfil||''));const l=us.map(u=>[u.uid,v160NomeUsr(u.uid)]);
+  [].concat(cur||[]).forEach(c=>{if(c&&!l.some(x=>x[0]===c))l.push([c,v160NomeUsr(c)]);});return l.sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt-BR'));}
+{const f0=projForm;projForm=function(p){f0.apply(this,arguments);try{const mb=$('#mb');if(!mb||!mb.querySelector)return;const fg=mb.querySelector('.fg');if(!fg||!fg.insertAdjacentHTML)return;
+  const a=p&&p.aprovC163||'',s=p&&p.aprovS163||'',us=v163AprovOpts([a,s]);v160CarregaNomes(us.map(u=>u[0]),()=>{v160AtualizaOpts('#f_aprovC163');v160AtualizaOpts('#f_aprovS163');});
+  fg.insertAdjacentHTML('beforeend','<div class="sect" style="grid-column:1/-1">Aprovação de compras (nível 1)</div>'+field('Aprovador de compras (nível 1)','aprovC163','select',a,{opts:us,blank:'Regra geral (aprovadores de material)'})+field('Substituto (quando o aprovador estiver ausente)','aprovS163','select',s,{opts:us,blank:'Sem substituto'})+'<p class="sub" style="grid-column:1/-1;margin:0">As solicitações de compra desta obra vão para este aprovador. Ausência: período cadastrado em Início › Matriz de aprovadores (substitutos); aí aprova o substituto. Pode ser outra pessoa que não o responsável pela obra. Os níveis acima (alçada por valor e diretoria) não mudam.</p>');
+  const s0=mSave;if(!s0)return;mSave=root=>{const v=readForm(root);if(v.aprovS163&&!v.aprovC163){toast('Escolha o aprovador de compras antes do substituto.','neg');return false;}if(v.aprovS163&&v.aprovS163===v.aprovC163){toast('O substituto precisa ser outra pessoa.','neg');return false;}return s0(root);};}catch(e){}};}
+const v163Ausente=u=>!!u&&aprovSubstAtivos().some(s=>s.de===u);
+/* igual a ajuste163.js › aprovObra: null = a obra não tem aprovador (regra de sempre) */
+function v163AprovObra(sc){const p=sc&&sc.projId?get('proj',sc.projId):null;if(!p||!p.aprovC163)return null;
+  const a=String(p.aprovC163),s=p.aprovS163?String(p.aprovS163):'',fora=[sc.solUid].filter(Boolean),paras=aprovSubstAtivos().filter(x=>x.de===a).map(x=>String(x.para)),aus=v163Ausente(a);
+  let pri=aus?(s?[s]:(paras.length?paras:[a])):[a];pri=[...new Set(pri)].filter(u=>u&&!fora.includes(u));
+  if(!pri.length)pri=[...new Set(s?[s]:paras)].filter(u=>u&&!fora.includes(u));if(!pri.length)return null;return {pri,aprov:a,subst:s,aus};}
+{const q0=v152Quem;v152Quem=function(c,r){if(c==='sc'&&v152Pend(c,r)){const ob=v163AprovObra(r);if(ob)return {pend:true,col:'sc',principais:ob.pri,alternativos:[],fallback:false,obra163:ob,desde:+r.aprovPedidoEm||+r.cr||0};}return q0.apply(this,arguments);};}
+{const a0=podeAprovarMat;podeAprovarMat=sc=>{const ob=v163AprovObra(sc);if(!ob||store.mode!=='db'||me.owner)return a0(sc);if(typeof pfnAcaoOk==='function'&&!pfnAcaoOk('aprovar'))return false;if(v163Admin())return true;return ob.pri.includes(actorId());};}
+{const p0=p2nScPrecisa;p2nScPrecisa=function(sc){const ob=v163AprovObra(sc);if(!ob)return p0.apply(this,arguments);const est=p2nScValor(sc);
+  if(store.mode!=='db'||me.owner||v163Admin()||ob.pri.includes(actorId()))return {vai:false,est,por:'aprovador'};
+  const a=sc.aprovMat;if(sc.reab&&a&&a.ok&&est.conhecido&&a.valorEst!=null&&est.valor<=(+a.valorEst||0)+0.009)return {vai:false,est,por:'mantida'};
+  const lim=p2nScAuto();if(lim>0&&est.conhecido&&est.valor<=lim)return {vai:false,est,por:'limite'};return {vai:true,est,obra163:ob};};}
+/* SC da obra enviada para aprovação: o aprovador da obra (ou o substituto) recebe o aviso */
+{const p0=put;put=function(col,rec){if(col==='sc'&&rec&&rec.status==='aprovacao'){const o=rec.id?get('sc',rec.id):null;if(!o||o.status!=='aprovacao'){const ob=v163AprovObra(rec);if(ob)rec.aprovUid=ob.pri[0];}}
+  if(col==='sc'&&rec&&(rec.status==='rascunho'||rec.status==='aprovacao')&&Array.isArray(rec.itens)&&rec.itens.some(i=>i&&('qSep' in i||'qCom' in i||'disp' in i))){
+    rec=Object.assign({},rec,{itens:rec.itens.map(i=>{if(!i)return i;const n=Object.assign({},i);delete n.qSep;delete n.qCom;delete n.disp;return n;})});} /* 5: rascunho não guarda separar/comprar antigos */
+  return p0.call(this,col,rec);};}
+function v163QuemNome(sc){const ob=v163AprovObra(sc);if(!ob)return '';v152Nomes(ob.pri);return ob.pri.map(u=>nameOf(u)).join(' ou ')+(ob.aus?' (substituto: '+nameOf(ob.aprov)+' está ausente)':'');}
+
+/* ---------- 5. SC: o que será separado e o que será comprado ---------- */
+const v163ScLive=s=>!!s&&(s.status==='rascunho'||s.status==='aprovacao'||!s.status);
+const v163Aloca=s=>{try{return scAloca(s);}catch(e){return (s.itens||[]).map(i=>({sep:0,com:+i.qtd||0,disp:0}));}};
+function v163Split(s){const al=v163Aloca(s);return {ns:al.filter(a=>a.sep>0).length,nc:al.filter(a=>a.com>0).length,al};}
+const v163SplitTxt=x=>x.ns+' para separação · '+x.nc+' para compra';
+function v163EnvLbl(s){const x=v163Split(s);let ap=false;try{ap=!!p2nScPrecisa(s).vai;}catch(e){}
+  return (ap?(s.reab?'Reenviar':'Enviar')+' para aprovação':(s.reab?'Reenviar ao comprador':'Enviar'))+' ('+v163SplitTxt(x)+')';}
+/* quem reservou o saldo (separações abertas de outras SC) */
+function v163Reservas(pid,scId){const out=[];S.sep.forEach(sp=>{if(!SEP_ABERTA(sp)||(scId&&sp.scId===scId))return;const q=(sp.itens||[]).filter(i=>i.prodId===pid).reduce((a,i)=>a+(+i.qtd||0),0);if(q>0){const o=sp.scId?get('sc',sp.scId):null;out.push({sc:o?o.numero:'',sep:sp.numero,q});}});return out;}
+function v163Dup(pid){const p=get('prod',pid);if(!p)return null;const k=v163N(p.nome);if(!k)return null;const st=stockAll();
+  return S.prod.find(x=>x.id!==pid&&v163N(x.nome)===k&&st.of(x.id).saldo>1e-9)||null;}
+function v163Motivo(sc,i,a,k,al){if(a.sep>0)return '';if(!i.prodId)return 'item não ligado a produto do estoque';
+  if(sc.tipo==='repos')return 'tipo Reposição sempre vai para compra';
+  const st=stockAll().of(i.prodId).saldo,dp=v163Dup(i.prodId),dt=dp?' (há saldo em outro produto com o mesmo nome: '+(dp.sku?dp.sku+' · ':'')+dp.nome+'; ligue o item a ele)':'';
+  if(!(st>1e-9))return 'saldo zero'+dt;
+  const rs=v163Reservas(i.prodId,sc.id);if(rs.length&&a.disp<=1e-9&&!(al||[]).slice(0,k).some((b,j)=>sc.itens[j]&&sc.itens[j].prodId===i.prodId&&b.sep>0))return 'saldo reservado pela '+rs.slice(0,3).map(r=>r.sc?'SC nº '+r.sc:'separação nº '+r.sep).join(', ')+dt;
+  if((al||[]).slice(0,k).some((b,j)=>sc.itens[j]&&sc.itens[j].prodId===i.prodId&&b.sep>0))return 'o saldo já vai para a linha de cima com o mesmo produto';
+  return 'saldo zero'+dt;}
+function v163AlocTxt(sc,i,a,k,al){const un=i.un?' '+i.un:'';let alm='';try{const x=typeof v153AlmoxSc==='function'?v153AlmoxSc(sc):'';if(x&&a.sep>0)alm=' ('+almNome(x)+')';}catch(e){}
+  if(a.sep>0&&a.com>0)return {t:'Parcial: '+fmtQ(a.sep)+un+' separado'+alm+', '+fmtQ(a.com)+un+' para compra',k:'warn'};
+  if(a.sep>0)return {t:'Em estoque: '+fmtQ(a.sep)+un+' — será separado'+alm,k:'pos'};
+  return {t:'Sem estoque — vai para compra',k:'neg',m:v163Motivo(sc,i,a,k,al)};}
+function v163AlocHtml(sc){const al=v163Aloca(sc);return '<ul style="margin:6px 0 0;padding-left:18px">'+(sc.itens||[]).map((i,k)=>{const x=v163AlocTxt(sc,i,al[k],k,al);return '<li>'+esc(i.desc||'')+': <span class="'+x.k+'">'+esc(x.t)+'</span>'+(x.m?' <span class="sub">('+esc(x.m)+')</span>':'')+'</li>';}).join('')+'</ul>';}
+/* formulário: linha de explicação embaixo de cada item; item livre ganha "Ligar a um produto do estoque" */
+{const r0=scItemRow;scItemRow=function(it,i){const h=r0.apply(this,arguments);try{if(!scd)return h;
+  const busca=!it.prodId&&V163.sc.q[i]!==undefined;
+  return h+'<tr class="v163al" data-v163al="'+i+'"><td colspan="8" style="padding-top:0;border-top:0"><div class="sub" id="scal163_'+i+'"></div>'+(!it.prodId?'<div class="v163lig" style="margin:2px 0 4px">'+(busca?v163LigBusca(i):'<button class="btn sm" data-act="v163ScLigAbre" data-i="'+i+'">Ligar a um produto do estoque</button>')+'</div>':'')+'</td></tr>';}catch(e){return h;}};}
+function v163LigBusca(i){const q=V163.sc.q[i]||'',fam=V163.sc.fam||'',l=typeof v160MatBusca==='function'?v160MatBusca(q,fam).slice(0,15):[];
+  return '<div class="bar" style="margin:4px 0"><label class="f grow"><span>Buscar produto do estoque (código, descrição, família)</span><input data-v163lq="'+i+'" value="'+esc(q)+'" autocomplete="off" placeholder="'+esc(V160_MAT_PH)+'"></label><label class="f"><span>Família</span><select data-v163lf="'+i+'">'+opt(v160Fams().map(f=>[f,f]),fam,'Todas')+'</select></label></div>'+
+    '<div class="list" style="max-height:200px;overflow:auto">'+(q||fam?(l.length?l.map(x=>'<div class="li"><div>'+esc((x.p.sku?x.p.sku+' · ':'')+x.p.nome)+(x.p.familia?' <span class="sub">· '+esc(x.p.familia)+'</span>':'')+'</div><div>'+(typeof lbEst==='function'?lbEst(x.p.id):'')+' <button class="btn sm pri" data-act="v163ScLigar" data-i="'+i+'" data-p="'+esc(x.p.id)+'">Ligar</button></div></div>').join(''):'<p class="sub" style="margin:4px 0">Nenhum produto com esse texto.</p>'):'<p class="sub" style="margin:4px 0">Digite para buscar.</p>')+'</div><button class="btn sm ghost" data-act="v163ScLigFecha" data-i="'+i+'">Fechar a busca</button>';}
+A.v163ScLigAbre=d=>{if(!scd)return;const it=scd.itens[+d.i];if(!it)return;V163.sc.q[+d.i]=String(it.desc||'').trim().split(/\s+/)[0]||'';scRenderItens();const x=$('[data-v163lq="'+d.i+'"]');if(x&&x.focus)x.focus();};
+A.v163ScLigFecha=d=>{delete V163.sc.q[+d.i];scRenderItens();};
+A.v163ScLigar=d=>{if(!scd)return;const it=scd.itens[+d.i],p=get('prod',d.p);if(!it||!p)return;it.prodId=p.id;it.desc=p.nome;it.un=p.un||it.un;delete V163.sc.q[+d.i];scRenderItens();toast('Item ligado a '+(p.sku?p.sku+' · ':'')+p.nome+'.','pos');};
+Object.assign(ACT_GROUP,{v163ScLigAbre:null,v163ScLigFecha:null,v163ScLigar:null});
+document.addEventListener('input',e=>{const t=e.target;if(!t||!t.dataset||t.dataset.v163lq===undefined||!scd)return;const i=+t.dataset.v163lq;V163.sc.q[i]=t.value;clearTimeout(V163.scT);V163.scT=setTimeout(()=>{const pos=t.selectionStart;scRenderItens();const x=$('[data-v163lq="'+i+'"]');if(x&&x.focus){x.focus();try{x.setSelectionRange(pos,pos);}catch(er){}}},250);});
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||t.dataset.v163lf===undefined||!scd)return;V163.sc.fam=t.value;scRenderItens();});
+{const t0=scTotals;scTotals=function(){const r=t0.apply(this,arguments);try{if(!scd)return r;const al=v163Aloca(scd),x={ns:al.filter(a=>a.sep>0).length,nc:al.filter(a=>a.com>0).length};
+  (scd.itens||[]).forEach((it,i)=>{const el=$('#scal163_'+i);if(!el)return;if(!(+it.qtd>0)&&!it.desc){el.innerHTML='';return;}const a=v163AlocTxt(scd,it,al[i],i,al);el.innerHTML='<span class="'+a.k+'">'+esc(a.t)+'</span>'+(a.m?' · '+esc(a.m):'');});
+  const el=$('#scTot');if(el&&el.insertAdjacentHTML)el.insertAdjacentHTML('beforeend','<div><span>Ao enviar</span><b>'+esc(v163SplitTxt(x))+'</b></div>');}catch(e){}return r;};}
+/* documento (Visualizar/PDF): rascunho e aguardando aprovação usam a conta do momento, a mesma do formulário */
+{const d0=scDoc;scDoc=function(sc){if(v163ScLive(sc)){const al=v163Aloca(sc);sc=Object.assign({},sc,{itens:(sc.itens||[]).map((i,k)=>Object.assign({},i,{qSep:al[k].sep,qCom:al[k].com,disp:al[k].disp}))});
+    const o=d0.call(this,sc);try{if(o&&o.meta)o.meta.push(['Separar / comprar','calculado com o estoque de '+fmtDT(Date.now())+' (ainda não enviada)']);}catch(e){}return o;}return d0.apply(this,arguments);};}
+/* enviar: o rótulo e a confirmação mostram a divisão */
+{const s0=A.scEnviar;A.scEnviar=d=>{const sc=get('sc',d.id);if(!sc||sc.status!=='rascunho')return s0(d);const x=v163Split(sc),c0=confirmBox;
+  confirmBox=function(msg,fn,label,danger){if(/^(Enviar|Reenviar)/.test(String(label||'')))label=String(label)+' ('+v163SplitTxt(x)+')';
+    let m=String(msg||'')+'<div class="sub" style="margin-top:8px">Cada item:'+v163AlocHtml(sc)+'</div>';const qn=v163QuemNome(sc);if(qn&&/aprova/i.test(String(label)))m+='<p style="margin:8px 0 0">Aguardando aprovação de <b>'+esc(qn)+'</b> (aprovador de compras da obra).</p>';
+    return c0.call(this,m,fn,label,danger);};
+  try{return s0(d);}finally{confirmBox=c0;}};}
+
+/* ---------- 4. EPI ---------- */
+const V163_PODE_EPI=new Set(['admin','rh','sst','ssttec']);
+const v163PodeEntregar=()=>store.mode!=='db'||me.owner||v163Admin()||V163_PODE_EPI.has(v163Papel());
+const V163_MSG_EPI='Entrega de EPI é registrada pelo RH ou pela Segurança do trabalho (gestor ou técnico). O almoxarife separa e transfere o material.';
+FLABEL.almoxEpi163='Almoxarifado de EPI';
+const v163Als=()=>{try{return (typeof v154Als==='function'?v154Als():v153AlmAtivos())||[];}catch(e){return [];}};
+const v163AlmNm=id=>id?(typeof v154AlmNm==='function'?v154AlmNm(id):almNome(id))||'—':'—';
+function v163AlmCid(c){const k=v163N(c),as=v163Als().filter(a=>a&&a.ativo!==false&&v163N(a.cidade)===k);return as.find(a=>a.principal===true)||as[0]||null;}
+const v163AlmSP=()=>v163AlmCid('São Paulo'),v163AlmTU=()=>v163AlmCid('Tuiuti');
+/* almoxarifado que atende o colaborador: o do cadastro (Almoxarifado de EPI); senão São Paulo para quem é de São Paulo (cidade
+   ou lotação); senão Tuiuti */
+function v163AlmFunc(fid){const f=fid?get('func',fid):null;if(!f)return {alm:'',base:'',origem:''};const als=v163Als();
+  if(f.almoxEpi163&&als.some(a=>a.id===f.almoxEpi163))return {alm:f.almoxEpi163,base:v163AlmSP()&&v163AlmSP().id===f.almoxEpi163?'sp':'outro',origem:'cadastro'};
+  const lot=v163N(f.lotacao||f.lotacao163||''),sp=lot.includes('sao paulo')||(!lot&&v163N(f.cidade)==='sao paulo');
+  const s=v163AlmSP(),t=v163AlmTU();
+  if(sp&&s)return {alm:s.id,base:'sp',origem:lot?'lotação':'cidade'};
+  if(t)return {alm:t.id,base:sp?'sp':'tu',origem:sp?'sem almoxarifado em São Paulo':'padrão (Tuiuti)'};
+  const p=typeof v154AlmPadrao==='function'?v154AlmPadrao(fid):'';return {alm:p||(als[0]||{}).id||'',base:'',origem:'padrão'};}
+const v163Saldo=(pid,alm)=>{try{return v154Saldo(pid,alm);}catch(e){return 0;}};
+const v163CaVenc=(p,d)=>!!(p&&p.caVal&&p.caVal<(d||todayStr()));
+/* caminho de um EPI: local (sai do almoxarifado do colaborador), transf (Tuiuti → São Paulo) ou sc (sem estoque) */
+function v163Plano(fid,pid,qtd){const A0=v163AlmFunc(fid),q=+qtd||1,alm=A0.alm,sd=v163Saldo(pid,alm);
+  if(alm&&sd-q>-1e-9)return {modo:'local',alm,sd};
+  if(!v163Als().length&&stockAll().of(pid).saldo-q>-1e-9)return {modo:'local',alm:'',sd:stockAll().of(pid).saldo};
+  const t=v163AlmTU(),s=v163AlmSP();
+  if(s&&alm===s.id&&t&&t.id!==alm){const st=v163Saldo(pid,t.id);if(st-q>-1e-9)return {modo:'transf',alm,orig:t.id,sd,st};}
+  return {modo:'sc',alm,sd};}
+const V163_MODO={local:['Sai do estoque','pos'],transf:['Transferência de Tuiuti','warn'],sc:['Sem estoque: SC de RH','neg']};
+/* cadastro do colaborador: Almoxarifado de EPI (opcional) */
+if(MODS2.func){const f0=MODS2.func.fields;MODS2.func.fields=function(r){const fs=f0.apply(this,arguments);try{const i=fs.findIndex(f=>f&&f.k==='uf');const cur=r&&r.almoxEpi163||'';
+  const fld=F('almoxEpi163','Almoxarifado de EPI (opcional)','select',{o:()=>{const l=v163Als().map(a=>[a.id,a.nome]);if(cur&&!l.some(x=>x[0]===cur))l.push([cur,v163AlmNm(cur)]);return l;},blank:'Automático (São Paulo para quem é de São Paulo, senão Tuiuti)'});
+  fs.splice(i>=0?i+1:fs.length,0,fld);}catch(e){}return fs;};}
+/* EPI do colaborador: em uso, trocas próximas e último tamanho */
+function v163FuncEpis(fid){const es=S.epi.filter(e=>e.funcId===fid).sort((a,b)=>String(b.entrega).localeCompare(String(a.entrega)));
+  const uso=es.filter(e=>!e.devolucao),troca=uso.filter(e=>(e.troca&&dTo(e.troca)<=15)||(e.caVal&&dTo(e.caVal)<0)),tam=new Map();
+  es.forEach(e=>{if(!e.tam)return;const k=v163N(String(e.item||'').replace(/\s*·\s*tam\..*$/i,''));if(k&&!tam.has(k))tam.set(k,{item:String(e.item||'').replace(/\s*·\s*tam\..*$/i,''),tam:e.tam,em:e.entrega});});
+  return {uso,troca,tam:[...tam.values()]};}
+/* EPI do estoque para a busca: família EPI, tamanho, CA, validade e saldo por almoxarifado */
+function v163EpiBusca(q,lim){const ts=v163N(q).split(' ').filter(Boolean);return v154EpiProds().filter(p=>{const t=v163N([p.sku,p.nome,p.tam,p.ca].filter(Boolean).join(' '));return ts.every(x=>t.includes(x));}).slice(0,lim||40);}
+function v163SaldosTxt(p){const s=v163AlmSP(),t=v163AlmTU(),out=[];if(s)out.push('São Paulo '+fmtQ(v163Saldo(p.id,s.id)));if(t)out.push('Tuiuti '+fmtQ(v163Saldo(p.id,t.id)));
+  v163Als().filter(a=>a&&(!s||a.id!==s.id)&&(!t||a.id!==t.id)).forEach(a=>{const q=v163Saldo(p.id,a.id);if(q>1e-9)out.push(a.nome+' '+fmtQ(q));});
+  if(!v163Als().length)out.push('saldo '+fmtQ(stockAll().of(p.id).saldo));return out.join(' · ');}
+function v163EntBody(){const E=V163.epi.ent,f=E.funcId?get('func',E.funcId):null;let h='';
+  h+='<div class="fg">'+field('Colaborador *','v163func','select',E.funcId||'',{opts:funcOpts().filter(o=>{const x=get('func',o[0]);return !x||x.status!=='desligado';}),blank:'Selecione…',full:true})+field('Data da entrega','v163data','date',E.data||todayStr())+'</div>';
+  if(f){const A0=v163AlmFunc(f.id),X=v163FuncEpis(f.id);
+    h+='<div class="note" style="margin:8px 0">Almoxarifado que atende: <b>'+esc(v163AlmNm(A0.alm))+'</b> <span class="sub">('+esc(A0.origem==='cadastro'?'Almoxarifado de EPI do cadastro':A0.origem==='cidade'?'pela cidade: '+(f.cidade||''):A0.origem==='lotação'?'pela lotação':A0.origem+(f.cidade?' · cidade '+f.cidade:''))+')</span>'+(E.trocaDe?'<br>Troca da entrega de '+esc((get('epi',E.trocaDe)||{}).item||'EPI')+(E.motivo?' · motivo: '+esc(E.motivo):''):'')+'</div>';
+    h+='<div class="sect">EPI em uso ('+X.uso.length+')</div>'+(X.uso.length?'<div class="list" style="max-height:150px;overflow:auto">'+X.uso.slice(0,20).map(e=>'<div class="li"><div style="min-width:0;flex:1">'+esc(e.item)+(e.tam?' · tam. '+esc(e.tam):'')+(e.ca?' · CA '+esc(e.ca):'')+'<div class="sub">entregue '+v163Br(e.entrega)+(e.prodId?'':' · sem vínculo com estoque')+(e.troca?' · troca '+v163Br(e.troca):'')+'</div></div><div style="flex-shrink:0">'+(e.troca&&dTo(e.troca)<0?pill('troca vencida','neg'):e.troca&&dTo(e.troca)<=15?pill('troca em '+dTo(e.troca)+' dia(s)','warn'):'')+(e.caVal&&dTo(e.caVal)<0?' '+pill('CA vencido','neg'):'')+'</div></div>').join('')+'</div>':'<p class="sub" style="margin:0">Nenhum EPI em uso.</p>');
+    if(X.troca.length)h+='<p class="sub" style="margin:4px 0 0"><b>'+X.troca.length+'</b> troca(s) vencida(s) ou nos próximos 15 dias.</p>';
+    if(X.tam.length)h+='<p class="sub" style="margin:4px 0 0">Último tamanho usado: '+X.tam.slice(0,8).map(x=>esc(x.item)+' <b>'+esc(x.tam)+'</b>').join(' · ')+'</p>';}
+  const cand=v163EpiBusca(V163.epi.q,30);
+  h+='<div class="sect">Escolher o EPI do estoque (família '+esc(v154Fam())+')</div><div class="bar"><label class="f grow"><span>Buscar EPI (nome, tamanho, CA, código)</span><input id="v163EpiQ" value="'+esc(V163.epi.q||'')+'" autocomplete="off" placeholder="Ex.: luva G, botina 42"></label></div>';
+  h+='<div class="list" style="max-height:220px;overflow:auto">'+(cand.length?cand.map(p=>{const vc=v163CaVenc(p,E.data);return '<div class="li"><div style="min-width:0;flex:1"><div class="t">'+esc(p.nome)+(p.tam&&!/tam\./i.test(p.nome)?' · tam. '+esc(p.tam):'')+'</div><div class="sub">'+(p.ca?'CA '+esc(p.ca)+(p.caVal?' · validade '+v163Br(p.caVal):''):'sem CA')+(vc?' · <span class="neg">CA VENCIDO</span>':'')+' · '+esc(v163SaldosTxt(p))+'</div></div><div style="flex-shrink:0">'+(vc?'<span class="sub">bloqueado</span>':'<button class="btn sm" data-act="v163EntAdd" data-p="'+esc(p.id)+'"'+(f?'':' disabled')+'>Escolher</button>')+'</div></div>';}).join(''):'<p class="sub" style="margin:6px 0">Nenhum produto da família '+esc(v154Fam())+(V163.epi.q?' com esse texto':'')+'.</p>')+'</div>';
+  if(E.itens.length){h+='<div class="sect">A entregar ('+E.itens.length+')</div><div class="tw"><table style="min-width:620px"><thead><tr><th>EPI</th><th class="num">Qtd</th><th>Caminho</th><th></th></tr></thead><tbody>'+E.itens.map((it,k)=>{const p=v154Prod(it.prodId)||{},pl=f?v163Plano(f.id,it.prodId,it.qtd):{modo:'sc'},m=V163_MODO[pl.modo];
+      return '<tr><td>'+esc(p.nome||'')+(p.tam&&!/tam\./i.test(p.nome||'')?' · tam. '+esc(p.tam):'')+'<div class="sub">'+(p.ca?'CA '+esc(p.ca):'sem CA')+(p.caVal?' · validade '+v163Br(p.caVal):'')+'</div></td><td style="width:90px"><input type="number" min="1" step="1" data-v163q="'+k+'" value="'+esc(it.qtd)+'" aria-label="Quantidade"></td><td>'+pill(m[0],m[1])+'<div class="sub">'+(pl.modo==='local'?esc(v163AlmNm(pl.alm))+' · saldo '+fmtQ(pl.sd):pl.modo==='transf'?'romaneio '+esc(v163AlmNm(pl.orig))+' → '+esc(v163AlmNm(pl.alm))+'; a entrega aguarda a chegada':'nem '+esc(v163AlmNm(pl.alm))+' nem Tuiuti têm saldo')+'</div></td><td><button class="btn sm dng" data-act="v163EntDel" data-k="'+k+'" aria-label="Tirar">&times;</button></td></tr>';}).join('')+'</tbody></table></div>';}
+  h+='<div class="fg" style="margin-top:8px">'+field('Observação','v163obs','text',E.obs||'',{full:true})+'</div><p class="sub" style="margin:8px 0 0">Com saldo no almoxarifado do colaborador: entrega, baixa no estoque e ficha de EPI (recibo) na hora; o colaborador confirma na Minha área. Só em Tuiuti para quem é de São Paulo: o romaneio de transferência é criado e a entrega aguarda a chegada. Sem estoque: crie a SC de RH.</p>';
+  return h;}
+function v163EntFoot(){const E=V163.epi.ent,f=E.funcId,ps=E.itens.map(it=>f?v163Plano(f,it.prodId,it.qtd).modo:'sc'),nl=ps.filter(x=>x!=='sc').length,ns=ps.filter(x=>x==='sc').length;
+  return '<button class="btn" data-act="closeModal">Cancelar</button>'+(ns?'<button class="btn" data-act="v163EntSc">Criar SC de RH ('+ns+')</button>':'')+'<button class="btn pri" data-act="v163EntOk"'+(nl?'':' disabled')+'>'+(ps.includes('transf')&&!ps.includes('local')?'Pedir transferência':'Confirmar entrega')+(nl>1?' ('+nl+')':'')+'</button>';}
+function v163EntRender(foco){const b=$('#mb'),f=$('#mf');if(b)b.innerHTML=v163EntBody();if(f)f.innerHTML=v163EntFoot();if(foco){const i=$(foco);if(i&&i.focus){i.focus();try{const n=String(i.value||'').length;i.setSelectionRange(n,n);}catch(e){}}}}
+function v163EntAbrir(pre){if(!v163PodeEntregar()){msgModal('Entrega de EPI',[V163_MSG_EPI]);return;}
+  V163.epi.ent=Object.assign({funcId:'',data:todayStr(),obs:'',itens:[]},pre||{});V163.epi.q='';
+  (V163.epi.ent.itens||[]).forEach(it=>{it.qtd=+it.qtd||1;});
+  modal({title:'Nova entrega de EPI',wide:true,nofocus:true,body:v163EntBody(),foot:v163EntFoot()});}
+A.epiNovo=()=>v154Garante(()=>v163EntAbrir());
+A.epiNovoPara=x=>v154Garante(()=>v163EntAbrir({funcId:x&&x.id||''}));
+A.v163EntAdd=d=>{const E=V163.epi.ent;if(!E)return;const p=v154Prod(d.p);if(!p)return;if(v163CaVenc(p,E.data)){toast('O CA de '+p.nome+' está vencido: entrega bloqueada.','neg');return;}
+  const x=E.itens.find(i=>i.prodId===p.id);if(x)x.qtd=(+x.qtd||1)+1;else E.itens.push({prodId:p.id,qtd:1});v163EntRender();};
+A.v163EntDel=d=>{const E=V163.epi.ent;if(!E)return;E.itens.splice(+d.k,1);v163EntRender();};
+Object.assign(ACT_GROUP,{v163EntAdd:null,v163EntDel:null,v163EntOk:null,v163EntSc:null,v163Concluir:null,v163TrCancel:null});
+document.addEventListener('input',e=>{const t=e.target;if(!t||!V163.epi.ent||!$('#v163EpiQ'))return;
+  if(t.id==='v163EpiQ'){V163.epi.q=t.value;clearTimeout(V163.epiT);V163.epiT=setTimeout(()=>v163EntRender('#v163EpiQ'),250);return;}
+  if(t.dataset&&t.dataset.v163q!==undefined){const it=V163.epi.ent.itens[+t.dataset.v163q];if(it){it.qtd=Math.max(1,Math.round(+t.value||1));clearTimeout(V163.epiT);V163.epiT=setTimeout(()=>v163EntRender(),400);}}});
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||!V163.epi.ent||!$('#v163EpiQ'))return;const E=V163.epi.ent;
+  if(t.dataset.f==='v163func'){E.funcId=t.value;v163EntRender();}else if(t.dataset.f==='v163data'){E.data=t.value||todayStr();v163EntRender();}else if(t.dataset.f==='v163obs')E.obs=t.value;});
+/* monta os EPI (mesmos campos da entrega da v154) */
+function v163EpiRec(E,it,pl){const p=v154Prod(it.prodId)||{},id=uid(),vida=p.vidaEpi||'',d=E.data||todayStr();
+  const r=Object.assign(MODS2.epi.blank(),{id,funcId:E.funcId,prodId:p.id,item:p.nome||'',tam:p.tam||'',ca:p.ca||'',caVal:p.caVal||'',entrega:d,qtd:+it.qtd||1,vida,troca:+vida>0?addDays(d,Math.round(+vida)):'',almoxId:pl.alm||'',assinado:false,obs:E.obs||''});
+  if(E.trocaDe){r.trocaDe=E.trocaDe;if(E.motivo)r.trocaMotivo=E.motivo;}
+  if(pl.modo==='transf'){r.modo163='transf';r.almoxOrig163=pl.orig;}else r.movId='epimv_'+id;return r;}
+A.v163EntOk=async()=>{const E=V163.epi.ent;if(!E)return;if(!E.funcId){toast('Escolha o colaborador.','neg');return;}if(!E.itens.length){toast('Escolha o EPI.','neg');return;}
+  const ls=E.itens.map(it=>({it,pl:v163Plano(E.funcId,it.prodId,it.qtd)})).filter(x=>x.pl.modo!=='sc');if(!ls.length){toast('Sem estoque: use Criar SC de RH.','neg');return;}
+  for(const x of ls){const p=v154Prod(x.it.prodId);if(v163CaVenc(p,E.data)){toast('O CA de '+(p?p.nome:'EPI')+' está vencido: entrega bloqueada.','neg');return;}}
+  const epis=ls.map(x=>v163EpiRec(E,x.it,x.pl)),tem=epis.some(e=>e.modo163==='transf'),romId=tem?uid():'',fid=E.funcId,data=E.data,sobra=E.itens.length-ls.length;
+  try{const r=await v163Entregar(epis,romId);closeModal();V163.epi.ent=null;
+    const nl=epis.filter(e=>e.modo163!=='transf').length,nt=epis.length-nl;
+    toast((nl?nl+' EPI entregue(s) com baixa no estoque. ':'')+(nt?nt+' aguardando a transferência de Tuiuti (romaneio criado). ':'')+(sobra?sobra+' sem estoque ficaram de fora (SC de RH).':''),'pos');
+    if(nl){const f=get('func',fid);setTimeout(()=>{try{showDoc(epiFichaDoc(fid,data,data),slug('ficha-epi-'+(f?f.nome:'')));}catch(e){}},60);}
+    render();}
+  catch(er){msgModal('A entrega de EPI não foi registrada',[er.message,'Nada foi gravado: a ficha e o estoque continuam como estavam.']);}};
+/* grava: no servidor próprio numa transação (POST /api/epi163/entregas); sem ele, aqui mesmo */
+async function v163Entregar(epis,romId){
+  if(v163Srv()){const j=await segaPost('/api/epi163/entregas',{epis,rom:romId?{id:romId}:null});(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));if(typeof v154Carrega==='function'&&!v154LeProd())await v154Carrega(true);V163.epi.pendEm=0;return j;}
+  const tr=epis.filter(e=>e.modo163==='transf'),out=[];
+  epis.filter(e=>e.modo163!=='transf').forEach(e=>{const f=get('func',e.funcId);out.push(['epi',e]);out.push(['mov',{id:e.movId,data:e.entrega,prodId:e.prodId,tipo:'saida',qtd:+e.qtd||1,custoUnit:0,projId:f&&f.projId||'',almoxId:e.almoxId||'',epiId:e.id,funcId:e.funcId,obs:'Entrega de EPI a '+(f?f.nome:'')}]);});
+  if(tr.length){const f=get('func',tr[0].funcId)||{},o=tr[0].almoxOrig163,d=tr[0].almoxId,ad=get('almox',d)||{};
+    const rom=Object.assign(romBlank(),{id:romId,almoxId:o,destTipo:'almox',destAlmoxId:d,destNome:ad.nome||'',cidade:ad.cidade||'',uf:ad.uf||'',obs:'Transferência de EPI para entrega a '+(f.nome||'colaborador')+' (pedida por RH/SST). Ao receber em '+(ad.nome||'destino')+', o RH ou a Segurança do trabalho registra a entrega e a baixa.',
+      itens:tr.map(e=>{const p=get('prod',e.prodId)||{};return {origem:'prod',prodId:e.prodId,desc:e.item+(e.tam&&!/tam\./i.test(e.item)?' · tam. '+e.tam:''),cod:p.sku||'',un:p.un||'UN',qtd:+e.qtd||1,vol:'',peso:'',obs:'EPI de '+(f.nome||''),solic:f.nome||''};}),epiTr163:tr.map(e=>e.id),avisar163:[actorId()]});
+    out.push(['rom',rom]);tr.forEach(e=>out.push(['epitr',{id:e.id,funcId:e.funcId,prodId:e.prodId,item:e.item,tam:e.tam,ca:e.ca,caVal:e.caVal,vida:e.vida,qtd:+e.qtd||1,almoxId:d,almoxOrig:o,obs:e.obs||'',st:'transf',romId,cr:Date.now(),crBy:actorId()}]));}
+  out.forEach(([c,r])=>put(c,r));return {ok:true};}
+A.v163EntSc=()=>{const E=V163.epi.ent;if(!E)return;const f=get('func',E.funcId);const its=E.itens.filter(it=>!E.funcId||v163Plano(E.funcId,it.prodId,it.qtd).modo==='sc').map(it=>{const p=v154Prod(it.prodId)||{};return {prodId:p.id||'',desc:p.nome||'',un:p.un||'UN',qtd:+it.qtd||1,k:uid()};});
+  if(!its.length)return;if(store.mode==='db'&&!me.owner&&!(typeof v152GravaCol==='function'?v152GravaCol('sc'):mayW('comp'))){msgModal('SC de RH',['Seu perfil não cria solicitação de compra. Peça ao comprador ou a quem tem o perfil "Recursos humanos e compras": '+its.map(i=>fmtQ(i.qtd)+' × '+i.desc).join('; ')+'.']);return;}
+  closeModal();V163.epi.ent=null;openSc({id:uid(),numero:nextNum('sc'),data:todayStr(),necessidade:addDays(todayStr(),7),solicitante:me.nome||nameOf(actorId())||'',solUid:actorId(),tipo:'rh',categoria:'EPI',projId:'',etapaId:'',localEntrega:'',obs:'EPI para '+(f?f.nome:'colaborador')+' (sem estoque em nenhum almoxarifado).',status:'rascunho',itens:its});};
+/* pedidos de transferência: situação do romaneio (no servidor próprio, o RH não lê romaneios: GET /api/epi163/pend) */
+async function v163PendCarrega(forca){if(!v163Srv()||(!forca&&Date.now()-V163.epi.pendEm<60000))return;V163.epi.pendEm=Date.now();try{const j=await segaPost('/api/epi163/pend',null,'GET');const m={};(j.pend||[]).forEach(x=>{m[x.id]=x;});V163.epi.pend=m;render();}catch(e){}}
+function v163TrSit(t){const ro=t.romId?get('rom',t.romId):null;if(ro)return {romNum:ro.numero,romSt:ro.status,pronta:['entregue','divergencia'].includes(ro.status)};const x=V163.epi.pend[t.id];return x?{romNum:x.romNum,romSt:x.romSt,pronta:!!x.pronta}:{romNum:'',romSt:'',pronta:false};}
+const V163_ROMST={rascunho:'em montagem no almoxarifado',conferido:'conferido',transito:'em trânsito',entregue:'recebido',divergencia:'recebido com divergência',cancelado:'cancelado'};
+const v163TrPend=()=>(S.epitr||[]).filter(t=>t.st==='transf');
+A.v163Concluir=d=>{const t=(S.epitr||[]).find(x=>x.id===d.id);if(!t)return;if(!v163PodeEntregar()){toast(V163_MSG_EPI,'neg');return;}const s=v163TrSit(t);
+  if(!s.pronta&&!v163Srv()){toast('O romaneio nº '+(s.romNum||'')+' ainda não foi recebido ('+(V163_ROMST[s.romSt]||s.romSt||'—')+').','neg');return;}
+  confirmBox('Registrar a entrega de '+fmtQ(t.qtd)+' × '+esc(t.item)+' a <b>'+esc(funcNome(t.funcId))+'</b>, com baixa no '+esc(v163AlmNm(t.almoxId))+'? A ficha de EPI (recibo) abre em seguida.',async()=>{
+    try{await v163ConcluirCore(t);toast('Entrega registrada e baixa no estoque.','pos');setTimeout(()=>{try{const f=get('func',t.funcId);showDoc(epiFichaDoc(t.funcId,todayStr(),todayStr()),slug('ficha-epi-'+(f?f.nome:'')));}catch(e){}},60);render();}
+    catch(er){msgModal('A entrega não foi registrada',[er.message]);}},'Entregar e gerar recibo');};
+async function v163ConcluirCore(t){if(v163Srv()){const j=await segaPost('/api/epi163/concluir',{id:t.id});(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));V163.epi.pendEm=0;return j;}
+  const ro=t.romId?get('rom',t.romId):null;if(!ro||!['entregue','divergencia'].includes(ro.status))throw new Error('O romaneio ainda não foi recebido.');
+  const p=get('prod',t.prodId);if(v163CaVenc(p))throw new Error('O CA de '+(p?p.nome:'EPI')+' venceu. Entrega bloqueada.');
+  const sd=v163Saldo(t.prodId,t.almoxId);if(sd-(+t.qtd||1)<-1e-9)throw new Error('Sem saldo no '+v163AlmNm(t.almoxId)+' (saldo '+fmtQ(sd)+').');
+  const f=get('func',t.funcId),d=todayStr(),e=Object.assign(MODS2.epi.blank(),{id:t.id,funcId:t.funcId,prodId:t.prodId,item:t.item,tam:t.tam,ca:t.ca,caVal:t.caVal,vida:t.vida,troca:+t.vida>0?addDays(d,Math.round(+t.vida)):'',qtd:+t.qtd||1,almoxId:t.almoxId,entrega:d,assinado:false,movId:'epimv_'+t.id,obs:[t.obs,'Recebido pelo romaneio nº '+(ro.numero||'')].filter(Boolean).join(' · '),trf163:{romId:t.romId,romNum:ro.numero||'',de:t.almoxOrig}});
+  put('epi',e);put('mov',{id:e.movId,data:d,prodId:e.prodId,tipo:'saida',qtd:+e.qtd||1,custoUnit:0,projId:f&&f.projId||'',almoxId:e.almoxId,epiId:e.id,funcId:e.funcId,obs:'Entrega de EPI a '+(f?f.nome:'')});
+  put('epitr',Object.assign(cl(t),{st:'entregue',epiId:e.id,concEm:Date.now(),concPor:actorId()}));return {ok:true};}
+A.v163TrCancel=d=>{const t=(S.epitr||[]).find(x=>x.id===d.id);if(!t)return;
+  modal({title:'Cancelar o pedido de transferência',body:'<p style="margin:0 0 8px">'+fmtQ(t.qtd)+' × '+esc(t.item)+' para '+esc(funcNome(t.funcId))+'.</p><label class="f full"><span>Motivo *</span><input id="v163TrMot"></label><p class="sub" style="margin:8px 0 0">O romaneio ainda em montagem é cancelado junto. Se já saiu, o material fica no destino.</p>',saveLabel:'Cancelar pedido',save:()=>{const mot=String(($('#v163TrMot')||{}).value||'').trim();if(mot.length<3){toast('Informe o motivo.','neg');return false;}
+    if(v163Srv()){segaPost('/api/epi163/cancelar',{id:t.id,motivo:mot}).then(j=>{(j.docs||[]).forEach(x=>segaLocal(x.col,Object.assign({},x.data,{id:x.id})));toast('Pedido cancelado.','pos');render();},er=>msgModal('Não foi cancelado',[er.message]));return;}
+    put('epitr',Object.assign(cl(t),{st:'cancelada',cancEm:Date.now(),cancPor:actorId(),cancMotivo:mot}));const ro=t.romId?get('rom',t.romId):null;if(ro&&ro.status==='rascunho')put('rom',Object.assign(cl(ro),{status:'cancelado'}));toast('Pedido cancelado.','pos');}});};
+/* romaneio com EPI recebido: aviso a quem pediu (RH/SST) */
+{const p0=put;put=function(col,rec){const old=col==='rom'&&rec&&rec.id?get('rom',rec.id):null;const r=p0.apply(this,arguments);
+  try{if(col==='rom'&&rec&&Array.isArray(rec.epiTr163)&&rec.epiTr163.length&&['entregue','divergencia'].includes(rec.status)&&!(old&&['entregue','divergencia'].includes(old.status)))
+    (rec.avisar163||[]).forEach(u=>{if(u&&u!==actorId())avisoChat(u,'Chegou o EPI do romaneio nº '+rec.numero+' em '+v163AlmNm(rec.destAlmoxId)+'. Registre a entrega em Controle de EPI › Aguardando transferência (Entregar e gerar recibo).');});}catch(e){}return r;};}
+/* painel de EPI no Controle de EPI */
+function v163Painel(){const ps=v154EpiProds(),uso=S.epi.filter(e=>!e.devolucao&&funcAtivo(e.funcId)),tv=uso.filter(e=>e.troca&&dTo(e.troca)<0),t15=uso.filter(e=>e.troca&&dTo(e.troca)>=0&&dTo(e.troca)<=15);
+  const caV=ps.filter(p=>p.caVal&&dTo(p.caVal)<=30),als=v163Als(),baixo=[];
+  ps.forEach(p=>{const mins=p.minAlm&&typeof p.minAlm==='object'?p.minAlm:{};als.forEach(a=>{let mn=mins[a.id]!=null&&mins[a.id]!==''?+mins[a.id]||0:(!Object.keys(mins).length&&(p.almoxId||'')===a.id?+p.minimo||0:0);if(mn>0){const q=v163Saldo(p.id,a.id);if(q<mn-1e-9)baixo.push({p,a,q,mn});}});
+    if(!als.length&&(+p.minimo||0)>0&&stockAll().of(p.id).saldo<+p.minimo)baixo.push({p,a:null,q:stockAll().of(p.id).saldo,mn:+p.minimo});});
+  const tr=v163TrPend(),pode=v163PodeEntregar();if(tr.length&&v163Srv())v163PendCarrega();
+  const li=(t,s,r)=>'<div class="li"><div style="min-width:0;flex:1">'+t+'<div class="sub">'+s+'</div></div>'+(r?'<div style="flex-shrink:0">'+r+'</div>':'')+'</div>';
+  let h='<div class="card v163painel" style="margin:0 0 10px"><h2>Painel de EPI</h2><div class="kpis">'+kpi('Trocas vencidas',String(tv.length),t15.length+' nos próximos 15 dias',tv.length?'neg':'')+kpi('CA vencido ou vencendo',String(caV.length),'produtos em até 30 dias',caV.length?'warn':'')+kpi('Abaixo do mínimo',String(baixo.length),'por almoxarifado',baixo.length?'neg':'')+kpi('Aguardando transferência',String(tr.length),'romaneio Tuiuti → São Paulo',tr.length?'warn':'')+'</div>';
+  if(tr.length)h+='<div class="sect">Aguardando transferência</div><div class="list">'+tr.map(t=>{const s=v163TrSit(t);return li(esc(funcNome(t.funcId))+' · '+fmtQ(t.qtd)+' × '+esc(t.item),'romaneio nº '+esc(s.romNum||'—')+' · '+esc(v163AlmNm(t.almoxOrig))+' → '+esc(v163AlmNm(t.almoxId))+' · '+(s.pronta?'<b class="pos">recebido: pronta para entregar</b>':esc(V163_ROMST[s.romSt]||s.romSt||'aguardando')),pode?'<div class="acts">'+(s.pronta||v163Srv()?'<button class="btn sm pri" data-act="v163Concluir" data-id="'+esc(t.id)+'">Entregar e gerar recibo</button>':'')+'<button class="btn sm" data-act="v163TrCancel" data-id="'+esc(t.id)+'">Cancelar</button></div>':'');}).join('')+'</div>';
+  if(tv.length||t15.length)h+='<div class="sect">Trocas</div><div class="list">'+tv.concat(t15).slice(0,10).map(e=>li(esc(funcNome(e.funcId))+' · '+esc(e.item)+(e.tam?' · tam. '+esc(e.tam):''),'troca '+v163Br(e.troca),pode?'<button class="btn sm" data-act="epiDev" data-id="'+esc(e.id)+'">Devolução / troca</button>':'')).join('')+'</div>';
+  if(caV.length)h+='<div class="sect">CA vencido ou vencendo</div><div class="list">'+caV.slice(0,10).map(p=>li(esc(p.nome),'CA '+esc(p.ca||'—')+' · validade '+v163Br(p.caVal),dTo(p.caVal)<0?pill('vencido: entrega bloqueada','neg'):pill('vence em '+dTo(p.caVal)+' dia(s)','warn'))).join('')+'</div>';
+  if(baixo.length)h+='<div class="sect">Estoque abaixo do mínimo</div><div class="list">'+baixo.slice(0,12).map(x=>li(esc(x.p.nome),(x.a?esc(x.a.nome):'estoque')+' · saldo '+fmtQ(x.q)+' · mínimo '+fmtQ(x.mn))).join('')+'</div>';
+  return h+'</div>';}
+{const v0=V.epi;V.epi=function(){let h=v0.apply(this,arguments);try{const k='<div class="stack">',i=h.indexOf(k);if(i>=0)h=h.slice(0,i+k.length)+v163Painel()+h.slice(i+k.length);
+  if(!v163PodeEntregar())h=h.replace(/<button class="btn pri" data-act="epiNovo">[^<]*<\/button>/,'<span class="sub" title="'+esc(V163_MSG_EPI)+'">Entrega: RH ou Segurança do trabalho</span>');}catch(e){}return h;};}
+/* entregas antigas, com o EPI digitado (sem produto do estoque): ficam como estão, marcadas */
+if(MODS2.epi)MODS2.epi.cols=MODS2.epi.cols.map(c=>c[0]==='EPI'?['EPI',r=>c[1](r)+(r&&!r.prodId?'<div class="sub">sem vínculo com estoque</div>':''),c[2]]:c);
+TAB_COLS.epi=[...new Set((TAB_COLS.epi||['epi']).concat(['epitr']))];if(typeof DBW_TABCOLS!=='undefined')DBW_TABCOLS.epi=[...new Set((DBW_TABCOLS.epi||['epi']).concat(['epitr','rom','almox','prod','mov']))];
+COL_NOME.epitr='Pedido de transferência de EPI';
+/* devolução: "volta ao estoque" (pela higienização) ou descarte com motivo; troca abre a próxima entrega já preenchida */
+{const d0=A.epiDev;A.epiDev=x=>{const m0=modal;modal=function(o){try{if(o&&o.title==='Devolução ou troca de EPI'&&typeof o.body==='string'){let b=o.body;
+      const i=b.indexOf('<div id="v154Troca"'),j=b.indexOf('data-f="obs"');if(i>=0&&j>i){const k=b.lastIndexOf('<label',j);if(k>i)b=b.slice(0,i)+b.slice(k);}
+      b=b.replace('Troca: entregar outro EPI agora (no mesmo ato)','Troca: depois de registrar a devolução, abrir a próxima entrega já preenchida').replace('Em condição de uso (vai para a higienização em','Volta ao estoque (em condição de uso: passa pela higienização em');
+      o=Object.assign({},o,{body:b,save:root=>v163DevSave(root,x.id)});}}catch(e){}return m0.call(this,o);};
+  try{return d0(x);}finally{modal=m0;}};}
+function v163DevSave(root,id){const e=get('epi',id);if(!e)return;const v=readForm(root);if(!v.data){toast('Informe a data.','neg');return false;}if(v.data<e.entrega){toast('A devolução não pode ser anterior à entrega.','neg');return false;}
+  if(v.cond==='descarte'&&!v.descMotivo){toast('Informe o motivo do descarte.','neg');return false;}
+  const b={id:e.id,data:v.data,cond:v.cond,motivo:v154MotNome(v.motivo),descMotivo:v.cond==='descarte'?(V154_DESC.find(x=>x[0]===v.descMotivo)||[0,v.descMotivo])[1]:'',almoxDev:v.almoxDev||'',prodId:v.prodIdDev||'',obs:v.obs||'',troca:null};
+  const troca=!!v.troca;Promise.resolve(v154Devolver(b)).then(()=>{const x=get('epi',id);if(troca&&x&&x.devolucao&&v163PodeEntregar())v163EntAbrir({funcId:e.funcId,itens:e.prodId?[{prodId:e.prodId,qtd:+e.qtd||1}]:[],trocaDe:e.id,motivo:b.motivo});});}
+/* gravação do navegador: entrega nova só por quem pode (o servidor confere o mesmo) */
+{const p0=put;put=function(col,rec){if(col==='epi'&&rec&&rec.id&&!get('epi',rec.id)&&store.mode==='db'&&!v163PodeEntregar()){toast(V163_MSG_EPI,'neg');return rec;}return p0.apply(this,arguments);};}
+{const v0=V.func;if(v0)V.func=function(){if(typeof v154Carrega==='function'&&!v154LeProd()&&!V154.est&&!V154.estP)v154Carrega().then(x=>{if(x)render();});return v0.apply(this,arguments);};}
+{const v0=V.epi;V.epi=function(){if(typeof v154Carrega==='function'&&!v154LeProd()&&!V154.est&&!V154.estP)v154Carrega().then(x=>{if(x)render();});return v0.apply(this,arguments);};}
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v163ManNotas:'Liga a nota fiscal (inteira ou linhas) a esta manutenção: o custo vem da nota.',v163NfLigar:'Liga esta nota (inteira ou linhas) à manutenção de um veículo ou equipamento.',v163ScLigAbre:'Procura o produto no estoque para o item ser separado quando houver saldo.',v163EntOk:'Registra a entrega com baixa no estoque (ou pede a transferência de Tuiuti).',v163EntSc:'Abre uma solicitação de compra do tipo RH com os EPI sem estoque.',v163Concluir:'O romaneio chegou: registra a entrega, a baixa e abre a ficha de EPI.',v163TrCancel:'Cancela o pedido de transferência (o romaneio ainda em montagem é cancelado junto).'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='162',APP_DATA='2026-11-06';
+const APP_VER='163',APP_DATA='2026-11-06';
 const CHANGELOG=[
+  ['163','2026-11-06',['Medições ao cliente passou para o menu Comercial (Comercial › Medições ao cliente). A tela e as permissões são as mesmas; favoritos e links antigos continuam funcionando.', 'Manutenção de veículos e de equipamentos não lança mais conta a pagar. O custo vem da nota fiscal da oficina ou da compra de peças, ligada à manutenção (a nota inteira ou só algumas linhas).', 'A ligação pode ser feita na manutenção (Editar › Ligar nota fiscal) ou na própria nota (Ver nota › Ligar a veículo ou equipamento). A manutenção mostra o número, o fornecedor e o valor de cada nota; manutenção antiga com conta a pagar fica como está.', 'Cadastro da obra: novo campo Aprovador de compras (nível 1) e o Substituto. A SC da obra vai para esse aprovador; quando ele está ausente (Matriz de aprovadores), vai para o substituto. A lista mostra "Aguardando aprovação de" com o nome.', 'EPI: só o RH e a Segurança do trabalho registram a entrega. O sistema escolhe o almoxarifado do colaborador (São Paulo ou Tuiuti, ou o Almoxarifado de EPI do cadastro) e mostra os EPI em uso, as trocas próximas e o último tamanho.', 'Nova entrega de EPI: o EPI vem do estoque, com tamanho, CA, validade e saldo por almoxarifado; CA vencido bloqueia. Com saldo, a baixa e a ficha saem na hora. Só em Tuiuti para quem é de São Paulo: o romaneio de transferência é criado e a entrega aguarda a chegada. Sem estoque: SC de RH.', 'Entrega de vários EPI de uma vez (kit de admissão) e painel de EPI: trocas, CA vencendo, estoque abaixo do mínimo e entregas aguardando transferência. A troca abre a próxima entrega já preenchida.', 'Solicitação de compra em rascunho: cada item mostra se será separado ou comprado e o motivo (item sem produto, tipo Reposição, saldo reservado por outra SC, saldo zero). Item livre pode ser ligado a um produto do estoque.', 'O botão mostra a divisão, por exemplo "Enviar (1 para separação · 0 para compra)". Corrigido: a lista e o documento da SC em rascunho mostravam números diferentes do formulário; agora todos usam o estoque do momento.']],
   ['162','2026-11-06',['Medições: novo botão "Importar medições de PDF" no detalhe do contrato e em Medições ao cliente (com o contrato escolhido no filtro). Escolha um ou vários PDFs do mesmo contrato.', 'A IA do servidor lê cada PDF (também escaneado) e devolve o período, o número, a data, os itens, o total e as dúvidas. Vai para a IA só o PDF e a lista de itens do contrato.', 'Cada PDF vira uma medição em rascunho, com o PDF anexado. Nada é aprovado sozinho.', 'Na revisão o PDF fica ao lado das linhas lidas. A linha ganha um alerta quando o item não está no contrato, o preço é diferente, a quantidade passa do contratado ou do teto, ou o total não bate com quantidade × preço.', 'Você corrige a quantidade, escolhe o item do contrato ou remove a linha. "Aprovar e criar medição" grava os itens com o preço do contrato; depois a medição segue o caminho de sempre (enviar para aprovação). "Descartar" apaga o rascunho e o PDF.', 'O sistema avisa quando já existe medição com o mesmo número ou o mesmo período no contrato.', 'Limites: 20 MB e 50 páginas por PDF, uma leitura por PDF. Mensagem clara quando a IA não está ligada ou o limite de uso foi atingido. Quem importou e quem aprovou ficam registrados.']],
   ['161','2026-11-06',['EAP: botão Duplicar em cada etapa. Copia a etapa com materiais, mão de obra, ferramentas e subitens, com o % executado zerado, e abre a cópia para você trocar o nome (ou o local) e as datas.', 'EAP: marque várias etapas e use "Duplicar selecionadas para outro local". Informe o texto a trocar nos nomes (por exemplo Aeroporto por Guarulhos) e quantos dias deslocar as datas.', 'EAP: "Modelo" guarda uma etapa (com as linhas e os subitens) e "Inserir de modelo" coloca essa etapa na EAP de qualquer obra. Os valores ficam os gravados; "Atualizar valores" traz os de hoje.', 'Com linha de base congelada, a etapa duplicada ou inserida de modelo pede o motivo da revisão, igual a uma etapa nova.', 'Contratos: novo tipo "Sob demanda (valor teto)", com teto, vigência e a opção de acréscimo de até 25% sobre o teto. A planilha vira tabela de preços, com quantidade opcional.', 'Medição de contrato sob demanda pode passar da quantidade do item. O limite é o total medido: avisa em 80% e 100% do teto e não deixa passar do teto (ou de 125%, com a opção ligada). O servidor confere o mesmo limite.', 'Ordens de serviço dos contratos sob demanda (Comercial): cada chamado vira uma OS com os itens da tabela de preços, aberta, executada ou medida. A medição puxa as OS executadas do período. Custo e margem por OS quando o custo é informado.', 'Detalhe do contrato sob demanda: teto, medido, saldo, % usado, itens de maior valor e as OS por situação.', 'Contrato existente vira sob demanda pelo botão "Mudar para sob demanda" no detalhe do contrato: as medições ficam e o teto começa com o valor atual.']],
   ['160','2026-11-06',['Listas grandes em páginas de 50: Solicitações de compra, Pedidos de compra, Notas fiscais, Abastecimentos, Saídas e Manutenção de veículos e o histórico de envio de equipamentos. A busca, os filtros e os totais continuam valendo para todos os registros.', 'Abrir e salvar nessas telas ficou muito mais rápido com muitos registros.', 'O sistema baixa só o que mudou desde a última leitura, ao abrir de novo, ao reconectar e nas atualizações automáticas. Se não der, baixa tudo, como antes.', 'Neste navegador fica uma cópia cifrada das listas de compras, estoque, obras e frota, para abrir mais rápido. Ela só abre com a sua conta e é apagada ao clicar em Sair. RH, ponto, folha, saúde e financeiro não ficam guardados.', 'Obras aparecem da mais nova para a mais antiga (P490, P488...) nas caixas de escolha de obra.', 'Responsável pela obra: a lista mostra o nome das pessoas (ou o e-mail) e só quem pode ser responsável: administração, diretoria, gestão de projetos e encarregados.', 'Materiais da etapa na EAP: digite para buscar em todo o estoque (código, descrição ou família), com filtro de família. Material que não está no estoque pode ser digitado e fica marcado como não cadastrado.', 'Contratos com clientes: novo filtro por projeto ou obra (com busca, da obra mais nova para a mais antiga), junto com a busca e a situação.', 'Produto da família EPI: em vez de "Com variações", cadastre um produto por tamanho. O botão Criar tamanhos faz isso de uma vez (P, M, G, GG ou 38–44), com o mesmo CA, vida útil, NCM e unidade. EPI já cadastrado com variações mostra um aviso com o botão que transforma cada variação em produto.']],
@@ -32348,7 +32732,7 @@ const TUT=[
   {id:'eqp',t:'Equipamentos',g:'ferr',ver:'28',p:['Envio e retorno: use Envio para mandar itens à obra ou à oficina e Retorno para trazer de volta, informando o estado de cada item.','Fotos: no cadastro do item use Tirar foto ou Escolher arquivo; a miniatura aparece na lista e abre ampliada ao clicar.','Ferramentas e equipamentos com código, número de série e responsável.','Envios para obras com responsável, previsão de retorno e devolução.','Manutenção de equipamentos com histórico e custo.']},
   {id:'ctb',t:'Contabilidade, tributos e assessorias',g:'ctb',ver:'50',p:['Reforma tributária (IBS/CBS): veja o que o sistema já atende e o que fazer, o cronograma até 2033, a apuração estimada do mês e o simulador de contratos. Em Parâmetros cadastre o NBS, a cClassTrib e a redução da atividade.','Tributos: retenções do mês, CNO das obras e calendário de obrigações.','Assessorias: checklist de fechamento e pacote de dados para contabilidade, medicina do trabalho e jurídico.','Confira as pendências do mês antes de fechar.','Gere o pacote ZIP com os arquivos para a assessoria contábil.','O relatório de fechamento registra quem fechou e quando.']},
   {id:'sis',t:'Sistema e privacidade',g:'cfg',ver:'114',p:['Sistema › Perfis de acesso: use Duplicar a partir do perfil mais parecido e ajuste módulo a módulo; depois escolha o perfil da pessoa em Sistema › Usuários.','Sistema › Temporalidade e descarte: prazos de guarda e rotina anual que lista o que venceu para você aprovar (nada é apagado sozinho).','Novo aviso de privacidade: preencha o encarregado e o canal de contato; os colaboradores darão ciência de novo.','Perfis novos em Usuários: Encarregado, Comprador/almoxarife, SST, Comercial e Diretoria. Confira o perfil de cada pessoa depois da versão 111.','Segurança (versão 110): quem é da equipe e grava precisa ligar a verificação em duas etapas no primeiro acesso (aplicativo autenticador no celular). Guarde os códigos de recuperação.','Ações sensíveis, como mexer em contas de acesso, baixar cópia de segurança ou exportar dados, pedem a senha de novo se a última confirmação tiver mais de 15 minutos.','Troca de dados bancários de fornecedor ou colaborador fica pendente até outra pessoa com permissão confirmar.','Senha esquecida: na tela de login clique em Esqueci minha senha e digite o e-mail; chega um link para criar uma senha nova. O administrador também pode mandar o link em Usuários › Editar › Enviar link de senha por e-mail.','Novo usuário (sistema na VPS): em Sistema › Usuários clique em Novo usuário, informe nome, e-mail, perfil e, se for o caso, o colaborador. A senha provisória já vem sugerida: anote e passe à pessoa. Para tirar o acesso de alguém, use Suspender em Usuários ou Excluir em Contas de acesso.','Importar do Omie: em Importar cadastros, use Importar contas a pagar, Importar contas a receber ou Importar serviços e escolha o CSV exportado do Omie. Confira a prévia (novos, mudaram no Omie, editados no sistema) e clique em Importar. Pode repetir sempre que exportar de novo: só o que mudou é gravado.','Migrar para servidor próprio: em Configurações, Gerar pacote de migração baixa um ZIP com tudo. No servidor, entre como dono, abra Importar pacote de migração e envie o ZIP; depois, em Contas de acesso, defina e-mail e senha de cada pessoa.','Importar cadastros: escolha o tipo (Clientes e fornecedores, ou Ferramentas e equipamentos), depois o PDF, Excel ou CSV, confira a prévia, ajuste as opções e importe; a importação pode ser desfeita.','Arquivo de meses antigos: deixa o sistema leve tirando marcações de ponto antigas do banco ativo.','Usuários: libere pedidos de acesso e defina o perfil de cada pessoa.','Configurações: dados da empresa, logo, certificado, ponto e backup com senha.','Privacidade (LGPD): aviso aos colaboradores, direitos do titular, pedidos e incidentes.','Lixeira: restaure o que foi excluído por engano em até 30 dias.']},
-  {id:'ctr2',t:'Comercial e contratos',g:'ctr',ver:'49',p:['EAP e cronograma: monte as etapas com materiais, mão de obra e ferramentas, ou importe do MS Project (Salvar como XML); envie as etapas para o projeto.','Indicadores: conversão por etapa do funil, POC, prazo médio de recebimento e inadimplência.','Oportunidade ganha: marque Resultado = Ganhamos e use Gerar contrato; no contrato, Gerar projeto cria a obra. Habilitação: anexe o PDF de cada certidão e baixe o pacote ZIP.','Oportunidades e licitações: funil com etapa, valor, chance, sessão e motivo de perda.','Habilitação: certidões com alerta de vencimento.','Contratos: planilha orçamentária, BDI, aditivos com limite legal, reajuste, garantia e retenção.','Medições: boletim por item com acumulado; ao faturar, a NFS-e é criada em rascunho.']},
+  {id:'ctr2',t:'Comercial e contratos',g:'ctr',ver:'49',p:['EAP e cronograma: monte as etapas com materiais, mão de obra e ferramentas, ou importe do MS Project (Salvar como XML); envie as etapas para o projeto.','Indicadores: conversão por etapa do funil, POC, prazo médio de recebimento e inadimplência.','Oportunidade ganha: marque Resultado = Ganhamos e use Gerar contrato; no contrato, Gerar projeto cria a obra. Habilitação: anexe o PDF de cada certidão e baixe o pacote ZIP.','Oportunidades e licitações: funil com etapa, valor, chance, sessão e motivo de perda.','Habilitação: certidões com alerta de vencimento.','Contratos: planilha orçamentária, BDI, aditivos com limite legal, reajuste, garantia e retenção.','Medições ao cliente (Comercial › Medições ao cliente; antes ficava em Obras): boletim por item com acumulado; ao faturar, a NFS-e é criada em rascunho.']},
   {id:'srv',t:'Serviços (PMOC e OS)',g:'serv',ver:'15',p:['Cadastre os equipamentos de cada cliente.','Contrato PMOC com responsável técnico, periodicidade e cobrança mensal; gere as preventivas do mês.','Ordem de serviço com checklist, materiais, fotos e assinatura do cliente no celular; ao concluir, baixa o estoque e cria a conta a receber.']},
   {id:'qld',t:'Qualidade',g:'qual',ver:'15',p:['Fichas de verificação de serviço com modelos prontos.','Reprovação vira não conformidade com causa, ação e eficácia.','Termos de recebimento provisório e definitivo e chamados de garantia.']},
   {id:'sgi',t:'SGI: planos e ações e procedimentos',g:'qual',ver:'56',p:['Planos e ações: todas as ações da empresa num só lugar, venham de inspeções, auditorias, desvios do RDA, acidentes, não conformidades ou do checklist ISO 14001.','Cada plano segue o PDCA: P (análise de causa com 5 porquês, Ishikawa ou TASC), D (plano 5W2H), C (verificação de eficácia) e A (padronizar). Use Quadro PDCA para ver as fases.','A matriz GUT (gravidade × urgência × tendência) define a prioridade. O botão Sugerir com IA propõe causas e ações para você revisar.','Procedimentos: crie, envie para aprovação e aprove (quem elabora não aprova). Para mudar um vigente, abra Nova revisão: o anterior vale até a aprovação.','Marque Exige confirmação de leitura: cada colaborador confirma na Minha área. Para quem leu no DDS, use Registrar leitura presencial.','Cópia controlada registra quem recebeu a impressão; quando sai revisão nova, o sistema avisa quais cópias recolher. A lista mestra sai em PDF.']},

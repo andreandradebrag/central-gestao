@@ -48,6 +48,8 @@ module.exports = function (X) {
   function quem(c, r) {
     if (!pendente(c, r)) return { pend: false };
     if (c === 'sc') {
+      const ob = X.aprovObra163 ? X.aprovObra163(r) : null; /* v163: obra com aprovador de compras (ajuste163.js) */
+      if (ob) return { pend: true, col: c, principais: ob.pri, alternativos: [], fallback: false, obra163: { aprov: ob.aprov, subst: ob.subst, ausente: ob.aus }, desde: +r.aprovPedidoEm || +r.cr || 0 };
       const fora = [r.solUid].filter(Boolean), tira = l => uniq(l).filter(u => !fora.includes(u));
       let pri, alt = [];
       if (r.aprovUid) { pri = tira([r.aprovUid]); alt = tira(aprovMat()).filter(u => !pri.includes(u)); }

@@ -322,7 +322,7 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 ## 6.7. Medição ao cliente aprovada pelo Comercial, CIPA em abas e Ambiental no SST (v143)
 
 **Medição ao cliente: quem faz o quê.**
-- **Obra** (Obras › Medições ao cliente): lança o boletim, confere e usa **Enviar para aprovação**. Enquanto a medição aguarda, ela não pode ser alterada nem excluída. A tela não tem mais o botão Aprovar; fica para lançar, enviar e acompanhar. Tem a coluna **Projeto** (código, ex.: P412) e o filtro por projeto.
+- **Obra** (Comercial › Medições ao cliente): lança o boletim, confere e usa **Enviar para aprovação**. Enquanto a medição aguarda, ela não pode ser alterada nem excluída. A tela não tem mais o botão Aprovar; fica para lançar, enviar e acompanhar. Tem a coluna **Projeto** (código, ex.: P412) e o filtro por projeto.
 - **Comercial** (Comercial › **Medições para aprovar**, com contador no menu): confere o boletim e **aprova** ou **devolve com o motivo**. O motivo fica no histórico da medição e vai para quem lançou pelo chat interno. A aprovação também avisa quem lançou.
 - **Segregação:** quem lançou ou enviou a medição não a aprova nem a devolve. O dono da página pode, depois de um aviso; é a mesma exceção que o servidor já tinha.
 - **Faturamento:** não mudou. Só depois de aprovada, **Faturar** cria a NFS-e em rascunho e, se houver retenção, a conta a receber da retenção.
@@ -347,7 +347,7 @@ Regras da SEFAZ que o conector respeita: no máximo uma consulta por hora quando
 
 **Para que serve.** Corrigir uma medição que já foi aprovada (ou até faturada) sem apagar nada: ela volta para rascunho, com o motivo, e a obra corrige e envia de novo para aprovação.
 
-**Quem reabre.** Quem aprova: quem grava em Contratos (Comercial) ou a diretoria, com a ação **Aprovar** ligada no perfil (Sistema › Perfis de acesso). O dono sempre pode. O botão **Reabrir** fica em Obras › Medições ao cliente (nas aprovadas e faturadas) e no novo quadro **Aprovadas e faturadas** de Comercial › Medições para aprovar. O motivo é obrigatório (pelo menos 5 letras).
+**Quem reabre.** Quem aprova: quem grava em Contratos (Comercial) ou a diretoria, com a ação **Aprovar** ligada no perfil (Sistema › Perfis de acesso). O dono sempre pode. O botão **Reabrir** fica em Comercial › Medições ao cliente (nas aprovadas e faturadas) e no novo quadro **Aprovadas e faturadas** de Comercial › Medições para aprovar. O motivo é obrigatório (pelo menos 5 letras).
 
 **O que acontece, conforme a situação.**
 - **Aprovada (ainda não faturada):** volta para rascunho com a situação **Reaberta**. A aprovação anterior deixa de valer (quem aprovou e quando saem da medição e ficam no histórico).
@@ -988,7 +988,7 @@ Detalhes em `relatorios/feito_v162.md`. Usa a IA que o servidor já tem (`ANTHRO
 modelo usado é o "complex" (`ANTHROPIC_MODEL_COMPLEX`, padrão `claude-opus-5-5`).
 
 **No navegador** (página `public/index.html`):
-- **Importar medições de PDF**: no rodapé do detalhe do contrato e em Obras › Medições ao cliente (escolha o contrato no
+- **Importar medições de PDF**: no rodapé do detalhe do contrato e em Comercial › Medições ao cliente (escolha o contrato no
   filtro). Escolha um ou vários PDFs do mesmo contrato (um boletim por arquivo, até 20 MB e 50 páginas cada);
 - cada PDF vira uma medição em **rascunho**, com o PDF anexado. Nada é aprovado sozinho; enquanto a importação não for
   revisada, a medição não tem itens (não conta no medido nem no teto) e não pode ser enviada para aprovação;
@@ -1008,6 +1008,49 @@ modelo usado é o "complex" (`ANTHROPIC_MODEL_COMPLEX`, padrão `claude-opus-5-5
 
 **Para subir**: copie `gestao/iamed162.js` (novo), `server.js`, `regras.js`, `Dockerfile` e `public/index.html` e reconstrua a
 imagem do serviço `gestao`. O banco não muda.
+
+## Medições no Comercial, manutenção pela nota, aprovador de compras da obra, entrega de EPI e separar/comprar na SC (v163)
+
+Detalhes em `relatorios/feito_v163.md`. Nada a configurar no servidor; o banco ganha só a coleção `epitr` (pedidos de
+transferência de EPI), criada sozinha.
+
+**No navegador** (página `public/index.html`):
+- **Comercial › Medições ao cliente** (antes em Obras): mesma tela e mesmas permissões. Favoritos, a busca, os painéis e o
+  endereço antigo continuam funcionando.
+- **Manutenção de veículos e de equipamentos**: saiu "Lançar em contas a pagar" e o valor digitado. O custo vem da **nota
+  fiscal de entrada** (NFS-e da oficina ou compra de peças), lançada pelo Fiscal como sempre e ligada à manutenção — a nota
+  inteira ou só algumas linhas. Ligue na manutenção (**Editar › Ligar nota fiscal**) ou na nota (**Ver nota › Ligar a
+  veículo ou equipamento**, que também cria a manutenção concluída). O valor da manutenção é a soma das notas ligadas e é
+  esse valor que os relatórios da frota e dos equipamentos usam. A mesma nota (ou a mesma linha) não entra em duas
+  manutenções. Manutenção antiga com conta a pagar fica como está (aparece só para consulta).
+- **Obra › Aprovação de compras (nível 1)**: aprovador e substituto. A SC da obra vai para o aprovador; quando ele estiver
+  ausente (período cadastrado em Início › Matriz de aprovadores, como substituto), vai para o substituto da obra. Quem
+  pediu não aprova a própria. O Administrador continua aprovando. Obra sem aprovador: a regra de sempre.
+- **Controle de EPI**: só **RH e Segurança do trabalho** (gestor e técnico) e o Administrador registram entrega; o
+  Almoxarife transfere e despacha. Cada colaborador é atendido pelo almoxarifado de **São Paulo** (quem é de São Paulo,
+  pela cidade) ou de **Tuiuti** (os demais); o cadastro do colaborador tem o campo opcional **Almoxarifado de EPI**.
+  Nova entrega: EPI em uso, trocas próximas e último tamanho; o EPI é escolhido do estoque (família EPI, com tamanho, CA,
+  validade do CA e saldo por almoxarifado; **CA vencido bloqueia**). Com saldo: entrega, baixa e ficha (recibo) na hora.
+  Só em Tuiuti para quem é de São Paulo: o sistema cria o **romaneio de transferência** Tuiuti → São Paulo e a entrega fica
+  **aguardando**; quando o romaneio é recebido em São Paulo, o RH/SST usa **Entregar e gerar recibo**. Sem estoque:
+  **Criar SC de RH**. Vários EPI de uma vez (kit de admissão), **Painel de EPI** e troca que abre a próxima entrega.
+- **Solicitação de compra em rascunho**: cada item diz se será separado ou comprado e por quê; o botão mostra a divisão
+  ("Enviar (1 para separação · 0 para compra)"); item livre tem **Ligar a um produto do estoque**. A lista e o documento
+  (Visualizar/PDF) usam a mesma conta do formulário, com o estoque do momento.
+
+**No servidor**:
+- arquivo novo `ajuste163.js`, ligado em `regras.js` (`v163/ed_v163.py`); pequenas mudanças em `compras152.js` (quem
+  aprova a SC da obra), `epi154.js` (exporta a montagem da entrega; mínimo por almoxarifado no estoque de EPI) e
+  `ajuste158.js` (nota ligada não é "correção" do Administrador de frota);
+- recusa: conta a pagar criada pela manutenção, manutenção ligada a conta, nota repetida, aprovação da SC da obra por quem
+  não é o aprovador (ou o substituto, com ele ausente), entrega de EPI por quem não é RH/SST/Administrador e entrega com CA
+  vencido. Rotas novas: `POST /api/man163/ligar`, `POST /api/epi163/entregas`, `/api/epi163/concluir`,
+  `/api/epi163/cancelar` e `GET /api/epi163/pend`. Auditoria: `MAN_NOTA_163`, `EPI_ENTREGA_163`,
+  `EPI_ENTREGA_163_TRANSF`, `EPI_TRANSF_163_CANCELADA`, `EPI_ENTREGA_NEGADA`.
+
+**Para subir**: copie `gestao/ajuste163.js` (novo), `regras.js`, `compras152.js`, `epi154.js`, `ajuste158.js`, `Dockerfile`,
+`perfis.json` e `public/index.html` e reconstrua a imagem do serviço `gestao`. Depois: preencha o aprovador de compras nas
+obras que quiserem; confira a cidade dos almoxarifados (São Paulo e Tuiuti, com o principal marcado) e dos colaboradores.
 
 ## Verificação em duas etapas e sessões
 
