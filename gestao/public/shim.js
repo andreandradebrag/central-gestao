@@ -19,7 +19,7 @@
       });
     }, function () { throw erro('unavailable', 'Sem conexão com o servidor.'); });
   }
-  function eu() { if (!euP) euP = api('GET', '/api/eu').then(function (j) { EU = j; return j; }); return euP; }
+  function eu() { if (!euP) euP = api('GET', '/api/eu').then(function (j) { EU = j; persIniciar(j); return j; }); return euP; }
   var clone = function (o) { return o == null ? o : JSON.parse(JSON.stringify(o)); };
   var META = { fromCache: false, hasPendingWrites: false };
   function docSnap(id, data) { return { id: id, exists: data != null, data: function () { return data == null ? undefined : clone(data); }, metadata: META }; }
@@ -34,7 +34,7 @@
   }
   function aplicar(ev) {
     var s = docSubs.get(ev.path); if (s) { s.data = ev.op === 'del' ? null : ev.data; s.fns.forEach(function (f) { try { f(docSnap(ev.id, s.data)); } catch (x) { } }); }
-    var cs = colSubs.get(ev.parent); if (cs) cs.forEach(function (sub) { if (!sub.map) return; if (ev.op === 'del') sub.map.delete(ev.id); else sub.map.set(ev.id, ev.data); if (sub.mud !== false) { if (!sub.mud) sub.mud = new Map(); sub.mud.set(ev.id, ev.op === 'del' ? null : ev.data); } emitir(sub); });
+    var cs = colSubs.get(ev.parent); if (cs) cs.forEach(function (sub) { if (sub.voo) sub.voo.set(ev.id, { rev: ev.rev, data: ev.op === 'del' ? null : ev.data }); /* v160 */ if (!sub.map) return; if (ev.op === 'del') sub.map.delete(ev.id); else sub.map.set(ev.id, ev.data); if (sub.mud !== false) { if (!sub.mud) sub.mud = new Map(); sub.mud.set(ev.id, ev.op === 'del' ? null : ev.data); } emitir(sub); });
   }
   function ressinc() {
     docSubs.forEach(function (s, p) { api('GET', '/api/db/doc?path=' + encodeURIComponent(p)).then(function (j) { s.data = j.exists ? j.data : null; s.fns.forEach(function (f) { f(docSnap(p.split('/').pop(), s.data)); }); }, function (e) { s.errs.forEach(function (f) { f(e); }); }); });
@@ -61,13 +61,121 @@
     var tudo = function () { if (!sn0) { var rows = []; m.forEach(function (d, id) { rows.push({ id: id, data: d }); }); sn0 = montar(sub.q, rows); } return sn0; };
     var sn = { get docs() { return tudo().docs; }, get size() { return tudo().size; }, get empty() { return tudo().empty; }, docChanges: function () { return []; }, metadata: META, mud: mud ? Array.from(mud) : null };
     sub.fns.forEach(function (f) { try { f(sn); } catch (x) { } }); }, 30); }
-  function carregar(sub) { return api('GET', '/api/db/col?path=' + encodeURIComponent(sub.q.path)).then(function (j) { sub.map = new Map(j.docs.map(function (d) { return [d.id, d.data]; })); sub.mud = false; emitir(sub); }, function (e) { sub.errs.forEach(function (f) { f(e); }); }); }
+  /* ---------- v160: leitura incremental e cópia local ----------
+     Cada coleção lida guarda a revisão que o servidor mandou (rev) e a época (ep). A leitura seguinte (ao vivo, ao
+     reconectar ou na consulta periódica) pede só o que mudou desde essa revisão (desde=rev&ep=ep); o servidor responde a
+     coleção inteira quando não dá (servidor reiniciado, permissão mudou, marca de exclusão já apagada) ou quando é antigo.
+     Cópia local (IndexedDB), só das coleções de operação abaixo: cifrada com AES-GCM com a chave da conta (vem de /api/eu,
+     só para quem entrou), apagada ao sair, depois de 14 dias sem uso, quando outra conta entra no mesmo navegador ou
+     quando passa do limite de espaço. Só serve para baixar menos: nada da cópia aparece na tela antes de o servidor
+     confirmar a leitura. Não guarda RH, folha, ponto, saúde, financeiro, parceiros (dados bancários), usuários nem chat. */
+  var CC = new Map(); /* caminho -> { map, rev, ep, fila, v } */
+  var PERS = { ok: false, ck: null, dono: null, chave: null, db: null, tam: new Map(), t: new Map() };
+  var PERS_COLS = { prod: 1, mov: 1, sc: 1, ped: 1, cot: 1, notas: 1, sep: 1, rom: 1, almox: 1, proj: 1, etapa: 1, veic: 1, vabas: 1, vman: 1, vsai: 1, ferr: 1, fmov: 1, fman: 1, os: 1 };
+  var PERS_MAX = 12 * 1024 * 1024, PERS_TOTAL = 48 * 1024 * 1024, PERS_DIAS = 14, PERS_BD = 'cg-sinc160';
+  function idb() {
+    if (PERS.db) return PERS.db;
+    PERS.db = new Promise(function (ok) {
+      if (!PERS.ok || typeof indexedDB === 'undefined' || typeof crypto === 'undefined' || !crypto.subtle) return ok(null);
+      var r; try { r = indexedDB.open(PERS_BD, 1); } catch (e) { return ok(null); }
+      r.onupgradeneeded = function () { try { r.result.createObjectStore('col'); } catch (e) { } };
+      r.onsuccess = function () { ok(r.result); }; r.onerror = function () { ok(null); }; r.onblocked = function () { ok(null); };
+    });
+    return PERS.db;
+  }
+  function pedido(r) { return new Promise(function (ok, er) { r.onsuccess = function () { ok(r.result); }; r.onerror = function () { er(r.error); }; }); }
+  function loja(modo, fn) { return idb().then(function (d) { if (!d) return null; var s; try { s = d.transaction('col', modo).objectStore('col'); } catch (e) { return null; } return fn(s); }); }
+  function b64u(s) { s = String(s).replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+  function chave() { if (!PERS.chave) PERS.chave = crypto.subtle.importKey('raw', b64u(PERS.ck), 'AES-GCM', false, ['encrypt', 'decrypt']); return PERS.chave; }
+  function persIniciar(j) {
+    if (!j || !j.ck || !(j.sinc >= 160) || !j.id) return;
+    PERS.ok = true; PERS.ck = j.ck; PERS.dono = j.id;
+    /* outra conta neste navegador ou cópia velha: apaga */
+    loja('readwrite', function (s) { var r = s.openCursor(); r.onsuccess = function () { var c = r.result; if (!c) return; var v = c.value || {}; if (v.dono !== PERS.dono || !(Date.now() - (v.em || 0) < PERS_DIAS * 864e5)) c.delete(); c.continue(); }; }).catch(function () { });
+  }
+  function persApagar(p) { PERS.tam.delete(p); loja('readwrite', function (s) { return pedido(s.delete(p)); }).catch(function () { }); }
+  /* apaga a cópia local inteira (ao sair, ao estourar o espaço) */
+  function persLimpar() {
+    PERS.ok = false; PERS.t.forEach(function (t) { clearTimeout(t); }); PERS.t.clear(); PERS.tam.clear();
+    var d0 = PERS.db; PERS.db = Promise.resolve(null);
+    return Promise.resolve(d0).then(function (d) { try { if (d) d.close(); } catch (e) { } }).then(function () {
+      return new Promise(function (ok) { if (typeof indexedDB === 'undefined') return ok(); var t = setTimeout(ok, 1500); try { var r = indexedDB.deleteDatabase(PERS_BD); r.onsuccess = r.onerror = r.onblocked = function () { clearTimeout(t); ok(); }; } catch (e) { clearTimeout(t); ok(); } });
+    }).then(function () { PERS.db = null; PERS.chave = null; });
+  }
+  function persLer(p, c) {
+    if (!PERS.ok || !PERS_COLS[p]) return Promise.resolve();
+    return loja('readonly', function (s) { return pedido(s.get(p)); }).then(function (v) {
+      if (!v) return;
+      if (v.dono !== PERS.dono || !(Date.now() - (v.em || 0) < PERS_DIAS * 864e5) || !v.ep || typeof v.rev !== 'number') { persApagar(p); return; }
+      return chave().then(function (k) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: v.iv }, k, v.ct); }).then(function (buf) {
+        if (c.map) return; var l = JSON.parse(new TextDecoder().decode(buf)); if (!Array.isArray(l)) return;
+        c.map = new Map(l); c.rev = v.rev; c.ep = v.ep; PERS.tam.set(p, v.n || 0);
+      });
+    }).catch(function () { persApagar(p); });
+  }
+  function persGravar(p, c) {
+    if (!PERS.ok || !PERS_COLS[p]) return;
+    clearTimeout(PERS.t.get(p));
+    PERS.t.set(p, setTimeout(function () {
+      PERS.t.delete(p); if (!PERS.ok || !c.map || typeof c.rev !== 'number' || !c.ep) return;
+      var txt; try { txt = JSON.stringify(Array.from(c.map)); } catch (e) { return; }
+      var tot = txt.length; PERS.tam.forEach(function (n, k) { if (k !== p) tot += n; });
+      if (txt.length > PERS_MAX || tot > PERS_TOTAL) { persApagar(p); return; }
+      var rev = c.rev, ep = c.ep, iv = crypto.getRandomValues(new Uint8Array(12));
+      chave().then(function (k) { return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, k, new TextEncoder().encode(txt)); })
+        .then(function (ct) { return loja('readwrite', function (s) { return pedido(s.put({ dono: PERS.dono, rev: rev, ep: ep, em: Date.now(), n: txt.length, iv: iv, ct: ct }, p)); }); })
+        .then(function () { PERS.tam.set(p, txt.length); }, function () { persLimpar(); }); /* sem espaço (quota) ou erro: desliga a cópia local */
+    }, 4000));
+  }
+  /* lê a coleção (uma leitura por vez por caminho): incremental quando já há revisão; devolve o mapa completo e, quando foi
+     incremental, o que mudou (docs, del) e a revisão de onde partiu (desde) */
+  function buscar(p) {
+    var c = CC.get(p); if (!c) { c = { map: null, rev: null, ep: null, fila: null, v: 0 }; CC.set(p, c); }
+    var run = function () {
+      return (c.map ? Promise.resolve() : persLer(p, c)).then(function () {
+        var inc = !!(c.map && typeof c.rev === 'number' && c.ep), desde = c.rev;
+        return api('GET', '/api/db/col?path=' + encodeURIComponent(p) + (inc ? '&desde=' + c.rev + '&ep=' + encodeURIComponent(c.ep) : '')).then(function (j) {
+          var r = { full: true, docs: null, del: null, desde: desde };
+          if (j && j.inc && inc) {
+            r.full = false; r.docs = j.docs || []; r.del = j.del || [];
+            r.docs.forEach(function (d) { c.map.set(d.id, d.data); }); r.del.forEach(function (id) { c.map.delete(id); });
+          } else c.map = new Map(((j && j.docs) || []).map(function (d) { return [d.id, d.data]; }));
+          var mudou = r.full || r.docs.length > 0 || r.del.length > 0;
+          c.rev = j && typeof j.rev === 'number' ? j.rev : null; c.ep = j && j.ep ? String(j.ep) : null;
+          if (mudou) { c.v++; persGravar(p, c); }
+          r.rev = c.rev; r.map = c.map; return r;
+        });
+      }).catch(function (e) { if (e && e.code === 'not_granted') { CC.delete(p); persApagar(p); } throw e; });
+    };
+    var f = (c.fila || Promise.resolve()).then(run, run);
+    c.fila = f.catch(function () { });
+    return f;
+  }
+  function carregar(sub) {
+    sub.voo = new Map(); /* avisos ao vivo que chegarem durante a leitura */
+    return buscar(sub.q.path).then(function (r) {
+      var voo = sub.voo; sub.voo = null;
+      if (sub.map && !r.full && typeof sub.rev === 'number' && sub.rev === r.desde) {
+        if (sub.mud !== false && !sub.mud) sub.mud = new Map();
+        r.docs.forEach(function (d) { sub.map.set(d.id, d.data); if (sub.mud) sub.mud.set(d.id, d.data); });
+        r.del.forEach(function (id) { if (sub.map.has(id)) { sub.map.delete(id); if (sub.mud) sub.mud.set(id, null); } });
+      } else { sub.map = new Map(r.map); sub.mud = false; }
+      sub.rev = r.rev;
+      /* o aviso ao vivo mais novo que a leitura vale (a resposta pode chegar depois dele) */
+      if (voo && typeof r.rev === 'number') voo.forEach(function (x, id) { if (typeof x.rev === 'number' && x.rev > r.rev) { if (x.data === null) sub.map.delete(id); else sub.map.set(id, x.data); if (sub.mud) sub.mud.set(id, x.data); } });
+      emitir(sub);
+    }, function (e) { sub.voo = null; sub.errs.forEach(function (f) { f(e); }); });
+  }
+  /* sair: apaga a cópia local antes de encerrar a sessão; recarregar tudo: esquece as revisões e lê de novo do zero */
+  window.__cgSair = function () { return persLimpar().catch(function () { }); };
+  window.__cgRecarregarDados = function () { CC.clear(); colSubs.forEach(function (set) { set.forEach(function (sub) { sub.rev = null; }); }); return persLimpar().then(function () { if (EU) persIniciar(EU); ressinc(); }); };
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('click', function (e) { var a = e.target && e.target.closest && e.target.closest('a[href="/sair"]'); if (!a) return; e.preventDefault(); window.__cgSair().then(function () { location.href = '/sair'; }); }, true);
   function query(q) {
     var o = {
       where: function (f, op, v) { return query(Object.assign({}, q, { where: q.where.concat([[f, op, v]]) })); },
       orderBy: function (f, dir) { return query(Object.assign({}, q, { order: q.order.concat([[f, dir || 'asc']]) })); },
       limit: function (n) { return query(Object.assign({}, q, { lim: n })); },
-      get: function () { return api('GET', '/api/db/col?path=' + encodeURIComponent(q.path)).then(function (j) { return montar(q, j.docs); }); },
+      get: function () { return buscar(q.path).then(function (r) { var rows = []; r.map.forEach(function (d, id) { rows.push({ id: id, data: d }); }); return montar(q, rows); }); }, /* v160: só o que mudou vem do servidor */
       onSnapshot: function (next, err) {
         abrir(); var sub = { q: q, fns: [next], errs: err ? [err] : [], map: null };
         if (!colSubs.has(q.path)) colSubs.set(q.path, new Set()); colSubs.get(q.path).add(sub); carregar(sub);

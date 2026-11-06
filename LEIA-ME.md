@@ -907,6 +907,44 @@ Só desempenho: o que cada tela mostra, as permissões e as regras de gravação
 Nada a configurar. Se houver um proxy na frente que já comprima, não há conflito: o serviço responde já comprimido e o proxy
 repassa.
 
+## Listas em páginas e sincronização só do que mudou (v160)
+
+Permissões e regras de gravação **não mudaram**. Detalhes e medidas de antes e depois em `relatorios/feito_v160.md`.
+
+**No navegador** (página `public/index.html`):
+- Solicitações de compra, Pedidos de compra, Notas fiscais, Abastecimentos, Saídas e Manutenção de veículos e o histórico de
+  Envio e retorno de equipamentos mostram **50 registros por página**, com o total, o seletor de página e os botões
+  Anterior/Próxima. A busca e os filtros procuram em todos os registros (e voltam à página 1); indicadores e totais usam
+  todos os registros filtrados. Lista que cabe em uma página fica como antes, sem a barra;
+- Obras aparecem da mais nova para a mais antiga (P490, P488...) em todas as caixas de escolha de obra;
+- Responsável pela obra (e os outros seletores de usuário): nome da pessoa, ou o e-mail, nunca o código interno; a lista
+  mostra só Administrador, Diretoria, Gestor de projetos, Encarregado e perfis personalizados que gravam em Projetos (o
+  responsável atual continua na lista);
+- EAP, materiais da etapa: "Digite para buscar no estoque" procura em todos os produtos (código, descrição e família), com
+  filtro de família ao lado. Material que não está no estoque pode ser digitado: fica marcado "não cadastrado";
+- Comercial › Contratos com clientes: filtro por projeto/obra (caixa com busca, da obra mais nova para a mais antiga, e
+  "Sem projeto"), que vale junto com a busca e a situação;
+- Cadastro de produto da família EPI: "Com variações" não aparece; no lugar, a orientação "Para EPI, cadastre um produto
+  por tamanho" e o botão **Criar tamanhos** (P, M, G, GG ou 38–44): um produto por tamanho, com o nome + " · Tam. X", a mesma
+  família, CA, validade do CA, vida útil, NCM e unidade, e o código com o tamanho no fim; tamanho que já existe é pulado.
+  EPI já cadastrado "Com variações" mostra um aviso com o botão que transforma cada variação em produto (o original fica;
+  nada é convertido sozinho). O Almoxarife vê a orientação, mas não cria produtos nem muda a família (v157).
+
+**No servidor** (`gestao/sinc160.js`, novo, ligado por `v160/ed_v160.py` no `server.js`, `shim.js` e no `Dockerfile`):
+- cada gravação no banco ganha um número de revisão e cada exclusão deixa uma marca (guardada 45 dias). Na primeira subida o
+  servidor acrescenta a coluna `rev`, um índice e três gatilhos na tabela `docs` (leva poucos segundos; nada é apagado);
+- o navegador guarda a revisão de cada coleção e, ao abrir de novo, ao reconectar e nas atualizações automáticas, pede só o
+  que mudou. Quando não dá (servidor reiniciado, permissão da pessoa mudou, marca antiga já apagada), recebe tudo, como antes.
+  Página antiga (aberta antes da atualização) continua funcionando: recebe a lista inteira;
+- cópia local no navegador (IndexedDB) só das listas de compras, estoque, obras e frota, **cifrada** com uma chave que o
+  servidor só entrega a quem entrou com a conta, apagada ao clicar em Sair, depois de 14 dias sem uso e quando outra conta
+  entra no mesmo navegador. Não ficam guardados: colaboradores, RH, folha, ponto, saúde, financeiro, parceiros (dados
+  bancários), usuários e chat. Nada da cópia aparece na tela antes de o servidor confirmar.
+
+**O que fazer:** subir `gestao/sinc160.js` (novo), `server.js`, `shim.js`, `Dockerfile`, `perfis.json`, `public/index.html` e
+`public/shim.js` e **reconstruir** a imagem do serviço `gestao`. Nada a configurar. Faça uma cópia de segurança antes (a
+primeira subida altera a tabela `docs`).
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

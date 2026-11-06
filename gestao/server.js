@@ -33,6 +33,7 @@ process.removeAllListeners('warning');
 const db = new DatabaseSync(path.join(DATA, 'gestao.db'));
 const BACKUP = require('./backup.js').criar(db, DATA);
 const SEG = require('./seguranca.js'), QR = require('./qr.js');
+let S160 = null; /* v160: leitura incremental (sinc160.js), ligada depois das regras */
 const C159 = require('./comprime159.js'); C159.aquecer(path.join(PUB, 'index.html')); /* v159: compressão, ETag e 304 dos arquivos de texto; JSON grande em gzip */
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
 CREATE TABLE IF NOT EXISTS docs(path TEXT PRIMARY KEY, parent TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL);
@@ -350,9 +351,10 @@ function avisarDoc(op, p, data, ts) {
   if (p.startsWith('usr/')) perfilMapa = null;
   if (p.startsWith('perfc/')) perfcRecarregar(); /* v114 */
   const parent = p.split('/').slice(0, -1).join('/'), id = p.split('/').pop();
+  const rev160 = S160 ? S160.revDe(op, p) : undefined; /* v160: revisão desta gravação (a ponte não deixa uma leitura mais antiga desfazer o aviso) */
   for (const [cid, c] of CONEX) {
     const ca = q.contaPorId.get(c.conta.id); if (!ca || !ca.ativo) { CONEX.delete(cid); try { c.res.end(); } catch (e) { } continue; }
-    c.conta = ca; if (podeVer(ca, p, data || (op === 'del' ? null : {}), null) || (op === 'del' && pode(ca, p, 'r') && perfilPermite(ca, p, 'r'))) { sse(c.res, 'doc', { op, path: p, parent, id, data: redigir(ca, p, data), ts }); if (op !== 'del' && parent.indexOf('/') < 0 && REG.ehSaude(parent)) REG.registrarLeitura(ca, null, parent, [id], 'ao vivo'); }
+    c.conta = ca; if (podeVer(ca, p, data || (op === 'del' ? null : {}), null) || (op === 'del' && pode(ca, p, 'r') && perfilPermite(ca, p, 'r'))) { sse(c.res, 'doc', { op, path: p, parent, id, data: redigir(ca, p, data), ts, rev: rev160 }); if (op !== 'del' && parent.indexOf('/') < 0 && REG.ehSaude(parent)) REG.registrarLeitura(ca, null, parent, [id], 'ao vivo'); }
   }
 }
 function pares() {
@@ -892,7 +894,7 @@ async function rotear(req, res) {
     }
   }
   /* ---- API do runtime ---- */
-  if (p === '/api/eu') return json(res, 200, Object.assign(perfilPub(conta), { isOwner: conta.nivel === 'owner', canEdit: NIV[conta.nivel] >= NIV.admin, nivel: conta.nivel, ia: !!AI_KEY, fiscal: !!FISCAL_URL }));
+  if (p === '/api/eu') return json(res, 200, Object.assign(perfilPub(conta), S160 ? { sinc: 160, ck: S160.chave(conta) } : {}, { /* v160: chave da cópia local (só da própria conta) */ isOwner: conta.nivel === 'owner', canEdit: NIV[conta.nivel] >= NIV.admin, nivel: conta.nivel, ia: !!AI_KEY, fiscal: !!FISCAL_URL }));
   if (p === '/api/perfis') { const ids = String(u.searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 500), o = {}; ids.forEach(i => { const c = q.contaPorId.get(i); if (c) o[i] = Object.assign(perfilPub(c), { isMe: c.id === conta.id }); }); return json(res, 200, o); }
   if (p === '/api/busca-pessoas') { const t = String(u.searchParams.get('q') || '').toLowerCase(); return json(res, 200, q.contas.all().filter(c => c.ativo && (!t || (c.nome + ' ' + c.email).toLowerCase().includes(t))).slice(0, 30).map(c => Object.assign(perfilPub(c), { isMe: c.id === conta.id }))); }
   if (p === '/api/db/doc') {
@@ -927,9 +929,13 @@ async function rotear(req, res) {
   }
   if (p === '/api/db/col' && m === 'GET') {
     const cp = String(u.searchParams.get('path') || ''); if (!validPath(cp, false)) return json(res, 400, { code: 'invalid_argument', erro: 'Caminho inválido.' });
+    /* v160: só o que mudou desde a revisão que o navegador já tem (coleções de saúde sempre inteiras: registro de leitura da LGPD) */
+    const ds160 = u.searchParams.get('desde'), saude160 = REG.ehSaude(cp.split('/')[0]);
+    if (S160 && ds160 !== null && /^\d{1,15}$/.test(ds160) && !saude160) { const r = S160.incremental(conta, cp, +ds160, String(u.searchParams.get('ep') || '')); if (r) return json(res, 200, r); }
+    const rev160 = S160 ? S160.seq() : undefined;
     const memo = new Map(), rows = q.colGet.all(cp).map(r => ({ id: r.id, data: JSON.parse(r.data), ts: r.ts })).filter(r => podeVer(conta, cp + '/' + r.id, r.data, memo)).map(r => Object.assign(r, { data: redigir(conta, cp + '/' + r.id, r.data) }));
     if (rows.length && REG.ehSaude(cp)) REG.registrarLeitura(conta, req, cp, rows.map(r => r.id), 'lista'); /* v112: leitura de dados de saúde (uma linha por pessoa, coleção e dia) */
-    return json(res, 200, { docs: rows });
+    return json(res, 200, { docs: rows, rev: rev160, ep: S160 && !saude160 ? S160.epoca(conta, cp) : undefined, inc: 0 }); /* v160: rev e ep para a próxima leitura pedir só o que mudou */
   }
   if (p === '/api/stream' && m === 'GET') {
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
@@ -1069,6 +1075,7 @@ const bancosRota = require('./bancos.js')({ q, db, avisarDoc, json, lerJson, NIV
 const ARQF = require('./arquivofiscal.js')({ db, q, json, lerCorpo, avisarDoc, perfilDe, papelDe, PERM, END, DATA, uid, FISCAL_URL, FISCAL_TOKEN, auditar: (...a) => REG.auditar(...a) });
 /* ===== fim v129 ===== */
 /* ===== v130: leitura da caixa nfe@ (Microsoft 365 / Graph): NF-e anexadas vão para o arquivo fiscal (origem "email") ===== */
+S160 = require('./sinc160.js')({ db, q, perfilDe: c => perfilDe(c), PERM, podeVer, redigir }); /* v160: revisão por gravação, marcas de exclusão e época por pessoa */
 const CAIXA = require('./caixanfe.js')({ db, json, lerCorpo, perfilDe, papelDe, uid, ARQF, auditar: (...a) => REG.auditar(...a) });
 /* ===== fim v130 ===== */
 const srv = http.createServer((req, res) => { rotear(req, res).catch(e => { if (!res.headersSent) json(res, e.st || 500, { erro: e.msg || 'Erro interno.' }); else try { res.end(); } catch (x) { } if (!e.st) console.error(e); }); });

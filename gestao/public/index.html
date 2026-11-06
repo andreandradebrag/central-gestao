@@ -1246,8 +1246,8 @@ V.nf=()=>{
   '<label class="f"><span>Tipo</span><select id="s_nftipo" data-filter="nf.tipo">'+opt([['entrada','Entrada'],['saida','Saída']],f.tipo,'Todas')+'</select></label>'+
   '<label class="f"><span>Status</span><select id="s_nfst" data-filter="nf.st">'+opt([['rascunho','Rascunho'],['lancada','Lançada'],['cancelada','Cancelada']],f.st,'Todos')+'</select></label></div>'+
   '<div class="tw"><table><thead><tr><th>Tipo</th><th>Número</th><th>Emissão</th><th>Parceiro</th><th>Projeto</th><th class="num">Total</th><th>Status</th><th></th></tr></thead><tbody>'+
-  (rows.length?rows.map(n=>{const t=notaTotais(n);return '<tr><td>'+pill(n.tipo==='entrada'?'Entrada':'Saída',n.tipo==='entrada'?'acc':'')+'</td><td class="mono">'+esc(n.numero||'s/n')+'/'+esc(n.serie||'1')+'</td><td class="mono">'+fmtDate(n.emissao)+'</td><td>'+filNomeH(n.parcId)+'</td><td>'+(n.projId?esc(projNome(n.projId)):'<span class="mut">—</span>')+'</td><td class="num">'+money(t.vNF)+'</td><td>'+notaPill(n)+'</td><td class="act">'+
-    (n.status==='rascunho'?'<button class="btn sm" data-act="efetivarNota" data-id="'+n.id+'">Lançar</button><button class="btn sm" data-act="editNota" data-id="'+n.id+'">Editar</button><button class="btn sm dng" data-act="delNota" data-id="'+n.id+'">Excluir</button>':'<button class="btn sm" data-act="verNota" data-id="'+n.id+'">Abrir</button>')+'</td></tr>';}).join(''):emptyRow(8,'Nenhuma nota neste filtro. Use os botões acima para lançar ou importar.'))+'</tbody></table></div></div>';
+  (rows.length?v160Pag('nf',rows).map(n=>{const t=notaTotais(n);return '<tr><td>'+pill(n.tipo==='entrada'?'Entrada':'Saída',n.tipo==='entrada'?'acc':'')+'</td><td class="mono">'+esc(n.numero||'s/n')+'/'+esc(n.serie||'1')+'</td><td class="mono">'+fmtDate(n.emissao)+'</td><td>'+filNomeH(n.parcId)+'</td><td>'+(n.projId?esc(projNome(n.projId)):'<span class="mut">—</span>')+'</td><td class="num">'+money(t.vNF)+'</td><td>'+notaPill(n)+'</td><td class="act">'+
+    (n.status==='rascunho'?'<button class="btn sm" data-act="efetivarNota" data-id="'+n.id+'">Lançar</button><button class="btn sm" data-act="editNota" data-id="'+n.id+'">Editar</button><button class="btn sm dng" data-act="delNota" data-id="'+n.id+'">Excluir</button>':'<button class="btn sm" data-act="verNota" data-id="'+n.id+'">Abrir</button>')+'</td></tr>';}).join(''):emptyRow(8,'Nenhuma nota neste filtro. Use os botões acima para lançar ou importar.'))+'</tbody></table></div>'+v160PagBar('nf')+'</div>';
 };
 
 let nfd=null,nfActive=false;
@@ -1847,8 +1847,8 @@ V.ped=()=>{
   '<div class="stack"><div class="kpis">'+kpi('Pedidos em aberto',String(open.length),'abertos ou enviados')+kpi('Valor em aberto',money(sum(open,pedTotal)),'a receber do fornecedor')+kpi('Recebidos no total',String(S.ped.filter(p=>p.status==='recebido').length),'viraram nota de entrada')+'</div>'+
   '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_ped" data-filter="ped.q" value="'+esc(f.q)+'" placeholder="Número ou fornecedor"></label><label class="f"><span>Status</span><select id="s_pedst" data-filter="ped.st">'+opt(Object.keys(PED_ST).map(k=>[k,PED_ST[k][0]]),f.st,'Todos')+'</select></label></div>'+
   '<div class="tw"><table><thead><tr><th>Número</th><th>Data</th><th>Fornecedor</th><th>Previsão</th><th>Necessidade</th><th>Pagamento e entrega</th><th class="num">Itens</th><th class="num">Total</th><th>Status</th><th></th></tr></thead><tbody>'+
-  (rows.length?rows.map(p=>{const s=PED_ST[p.status]||PED_ST.aberto,openP=p.status==='aberto'||p.status==='enviado';return '<tr data-rid="'+p.id+'"><td class="mono">'+esc(p.numero)+'</td><td class="mono">'+fmtDate(p.data)+'</td><td>'+filNomeH(p.parcId)+(p.projId?'<div class="sub">'+esc(projNome(p.projId))+'</div>':'')+'</td><td class="mono">'+fmtDate(p.previsao)+(openP&&p.previsao&&p.previsao<todayStr()?' '+pill('atrasado','neg'):'')+'</td><td class="mono">'+fmtDate(p.necessidade)+'</td><td>'+esc(pgtoTxt(p))+((p.localEntrega||pedEndTxt(p))?'<div class="sub">'+esc(p.localEntrega||pedEndTxt(p))+'</div>':'')+(p.transpId&&get('transp',p.transpId)?'<div class="sub">'+esc((p.modFrete?p.modFrete+' · ':'')+(get('transp',p.transpId).fantasia||get('transp',p.transpId).nome))+'</div>':'')+'</td><td class="num">'+(p.itens||[]).length+'</td><td class="num">'+money(pedTotal(p))+'</td><td>'+pill(s[0],s[1])+'</td><td class="act">'+
-    (openP?(p.status==='aberto'?'<button class="btn sm" data-act="pedEnviado" data-id="'+p.id+'">Marcar enviado</button>':'')+'<button class="btn sm pri" data-act="pedReceber" data-id="'+p.id+'">Receber</button><button class="btn sm" data-act="pedEmail" data-id="'+p.id+'">E-mail</button><button class="btn sm" data-act="pedEdit" data-id="'+p.id+'">Editar</button><button class="btn sm dng" data-act="pedCancel" data-id="'+p.id+'">Cancelar</button>':(p.status==='cancelado'?'<button class="btn sm dng" data-act="pedDel" data-id="'+p.id+'">Excluir</button>':'<button class="btn sm" data-act="verNota" data-id="'+(p.notaId||'')+'">Ver nota</button>'))+'</td></tr>';}).join(''):emptyRow(10,'Nenhum pedido cadastrado.'))+'</tbody></table></div></div>';
+  (rows.length?v160Pag('ped',rows).map(p=>{const s=PED_ST[p.status]||PED_ST.aberto,openP=p.status==='aberto'||p.status==='enviado';return '<tr data-rid="'+p.id+'"><td class="mono">'+esc(p.numero)+'</td><td class="mono">'+fmtDate(p.data)+'</td><td>'+filNomeH(p.parcId)+(p.projId?'<div class="sub">'+esc(projNome(p.projId))+'</div>':'')+'</td><td class="mono">'+fmtDate(p.previsao)+(openP&&p.previsao&&p.previsao<todayStr()?' '+pill('atrasado','neg'):'')+'</td><td class="mono">'+fmtDate(p.necessidade)+'</td><td>'+esc(pgtoTxt(p))+((p.localEntrega||pedEndTxt(p))?'<div class="sub">'+esc(p.localEntrega||pedEndTxt(p))+'</div>':'')+(p.transpId&&get('transp',p.transpId)?'<div class="sub">'+esc((p.modFrete?p.modFrete+' · ':'')+(get('transp',p.transpId).fantasia||get('transp',p.transpId).nome))+'</div>':'')+'</td><td class="num">'+(p.itens||[]).length+'</td><td class="num">'+money(pedTotal(p))+'</td><td>'+pill(s[0],s[1])+'</td><td class="act">'+
+    (openP?(p.status==='aberto'?'<button class="btn sm" data-act="pedEnviado" data-id="'+p.id+'">Marcar enviado</button>':'')+'<button class="btn sm pri" data-act="pedReceber" data-id="'+p.id+'">Receber</button><button class="btn sm" data-act="pedEmail" data-id="'+p.id+'">E-mail</button><button class="btn sm" data-act="pedEdit" data-id="'+p.id+'">Editar</button><button class="btn sm dng" data-act="pedCancel" data-id="'+p.id+'">Cancelar</button>':(p.status==='cancelado'?'<button class="btn sm dng" data-act="pedDel" data-id="'+p.id+'">Excluir</button>':'<button class="btn sm" data-act="verNota" data-id="'+(p.notaId||'')+'">Ver nota</button>'))+'</td></tr>';}).join(''):emptyRow(10,'Nenhum pedido cadastrado.'))+'</tbody></table></div>'+v160PagBar('ped')+'</div>';
 };
 /* ===== v21: pedido de compra com código, NCM, desconto, IPI, ICMS-ST, endereço de entrega e transportadora ===== */
 const PED_MODFRETE=[['CIF','CIF: frete por conta do fornecedor'],['FOB','FOB: frete por nossa conta'],['TER','Por conta de terceiros'],['SEM','Sem frete (retiramos)']];
@@ -2065,9 +2065,9 @@ function listView(d){
   const bar='<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_'+d.tab+'" data-filter="'+d.tab+'.q" value="'+esc(f.q)+'" placeholder="'+esc(d.ph||'Buscar')+'"></label>'+
     (d.filters||[]).map(fl=>'<label class="f"><span>'+esc(fl.l)+'</span><select id="s_'+d.tab+'_'+fl.k+'" data-filter="'+d.tab+'.'+fl.k+'">'+opt(fl.opts(),f[fl.k],'Todos')+'</select></label>').join('')+'</div>';
   const head=d.cols.map(c=>'<th'+(c[2]?' class="'+c[2]+'"':'')+'>'+esc(c[0])+'</th>').join('')+'<th></th>';
-  const body=rows.length?rows.map(r=>'<tr>'+d.cols.map(c=>'<td'+(c[2]?' class="'+c[2]+'"':'')+'>'+c[1](r)+'</td>').join('')+'<td class="act">'+(d.rowActs?d.rowActs(r):'')+'<button class="btn sm" data-act="'+d.tab+'Edit" data-id="'+r.id+'">Editar</button><button class="btn sm dng" data-act="'+d.tab+'Del" data-id="'+r.id+'">Excluir</button></td></tr>').join(''):emptyRow(d.cols.length+1,d.empty||'Nada cadastrado ainda.');
+  const body=rows.length?v160PagL(d.tab,rows).map(r=>'<tr>'+d.cols.map(c=>'<td'+(c[2]?' class="'+c[2]+'"':'')+'>'+c[1](r)+'</td>').join('')+'<td class="act">'+(d.rowActs?d.rowActs(r):'')+'<button class="btn sm" data-act="'+d.tab+'Edit" data-id="'+r.id+'">Editar</button><button class="btn sm dng" data-act="'+d.tab+'Del" data-id="'+r.id+'">Excluir</button></td></tr>').join(''):emptyRow(d.cols.length+1,d.empty||'Nada cadastrado ainda.');
   return pageHead(d.title,d.sub,(d.headActs||'')+'<button class="btn pri" data-act="'+d.tab+'Novo">'+esc(d.novo)+'</button>')+
-    '<div class="stack">'+(d.kpis?'<div class="kpis">'+d.kpis((f.q||(d.filters||[]).some(fl=>f[fl.k]))?rows:S[d.col])+'</div>'+((f.q||(d.filters||[]).some(fl=>f[fl.k]))?'<p class="sub" style="margin:-4px 0 0">Indicadores calculados só com o que está filtrado ('+rows.length+' de '+S[d.col].length+').</p>':''):'')+(d.note?'<div class="note">'+d.note+'</div>':'')+(d.top?d.top():'')+bar+'<div class="tw"><table style="min-width:'+(d.minw||760)+'px"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div></div>';
+    '<div class="stack">'+(d.kpis?'<div class="kpis">'+d.kpis((f.q||(d.filters||[]).some(fl=>f[fl.k]))?rows:S[d.col])+'</div>'+((f.q||(d.filters||[]).some(fl=>f[fl.k]))?'<p class="sub" style="margin:-4px 0 0">Indicadores calculados só com o que está filtrado ('+rows.length+' de '+S[d.col].length+').</p>':''):'')+(d.note?'<div class="note">'+d.note+'</div>':'')+(d.top?d.top():'')+bar+'<div class="tw"><table style="min-width:'+(d.minw||760)+'px"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>'+v160PagBar(d.tab)+'</div>';
 }
 function formMod(d,rec){
   const isNew=!get(d.col,rec.id);
@@ -2699,13 +2699,13 @@ V.sc=()=>{
   (cfg().emailComprador?'':'<div class="note"><b>E-mail do comprador.</b> Cadastre em Configurações para que a solicitação já saia endereçada.</div>')+
   '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_sc" data-filter="sc.q" value="'+esc(f.q)+'" placeholder="Número, solicitante ou projeto"></label><label class="f"><span>Status</span><select id="s_scst" data-filter="sc.st">'+opt(Object.keys(SC_ST).map(k=>[k,SC_ST[k][0]]),f.st,'Todos')+'</select></label><label class="f"><span>Projeto</span><select id="s_scproj" data-filter="sc.proj">'+opt(projOpts(),f.proj,'Todos')+'</select></label></div>'+
   '<div class="tw"><table><thead><tr><th>Número</th><th>Data</th><th>Projeto e solicitante</th><th>Necessidade</th><th class="num">Separar</th><th class="num">Comprar</th><th>Status</th><th></th></tr></thead><tbody>'+
-  (rows.length?rows.map(s=>{
+  (rows.length?v160Pag('sc',rows).map(s=>{
     const st=SC_ST[s.status]||SC_ST.rascunho,env=s.status!=='rascunho'&&s.status!=='cancelada';
     const ns=env?s.itens.filter(i=>(+i.qSep||0)>0).length:'—',nc=env?s.itens.filter(i=>(+i.qCom||0)>0).length:'—';
     const b=(a,l,c)=>'<button class="btn sm'+(c?' '+c:'')+'" data-act="'+a+'" data-id="'+s.id+'">'+l+'</button>';
     const acts=s.status==='rascunho'?b('scEnviar','Enviar ao comprador','pri')+b('scEdit','Editar')+b('scDel','Excluir','dng'):s.status==='enviada'?b('scCotar','Abrir cotação','pri')+b('scVer','Detalhes')+b('scEmail','E-mail')+b('scCancel','Cancelar','dng'):s.status==='cotacao'?b('scCotar','Ver cotação','pri')+b('scVer','Detalhes')+b('scEmail','E-mail')+b('scCancel','Cancelar','dng'):s.status==='cancelada'?b('scVer','Detalhes')+b('scDel','Excluir','dng'):b('scVer','Detalhes')+b('scEmail','E-mail');
     return '<tr><td class="mono">'+esc(s.numero)+'</td><td class="mono">'+fmtDate(s.data)+'</td><td>'+(s.projId?esc(projNome(s.projId)):'<span class="mut">Sem projeto</span>')+'<div class="sub">'+esc(s.solicitante||'—')+' · '+s.itens.length+' item(ns)</div></td><td class="mono">'+fmtDate(s.necessidade)+(['enviada','cotacao'].includes(s.status)&&s.necessidade<hoje?' '+pill('atrasada','neg'):'')+'</td><td class="num">'+ns+'</td><td class="num">'+nc+'</td><td>'+pill(st[0],st[1])+'</td><td class="act">'+acts+'</td></tr>';
-  }).join(''):emptyRow(8,'Nenhuma solicitação neste filtro.'))+'</tbody></table></div></div>';
+  }).join(''):emptyRow(8,'Nenhuma solicitação neste filtro.'))+'</tbody></table></div>'+v160PagBar('sc')+'</div>';
 };
 Object.assign(ACT_GROUP,{scNovo:'comp',scEdit:'comp',scDel:'comp',scAddItem:'comp',scDelItem:'comp',scEnviar:'comp',scCotar:'comp',scCancel:'comp',scEmail:'comp',cqAddForn:'comp',cqDelForn:'comp',cqMenor:'comp',cqSalvar:'comp',cqGerar:'comp',cotDel:'comp',sepSeparar:'est',sepEntregar:'est',sepCancel:'comp',pedEmail:'nf'});
 Object.assign(GROUP_OF_TAB,{sc:'comp',cot:'comp',sep:'comp',etapa:'proj',pmat:'proj',rproj:'proj'});
@@ -6483,11 +6483,11 @@ A.bdiCalc=()=>{if(EDC)edRead();const v=EDC&&EDC.rec.bdiP||{};
   $$('#mb input').forEach(i=>i.addEventListener('input',up));up();};
 ACT_GROUP.bdiCalc=null;
 V.ctr=()=>{
-  const f=ui.ctr,q=gsNorm(f.q),rows=S.ctr.filter(c=>(!f.st||c.status===f.st)&&(!q||gsNorm([c.numero,c.objeto,parcNome(c.parcId),c.processo].join(' ')).includes(q))).sort((a,b)=>String(b.assinatura).localeCompare(String(a.assinatura)));
+  const f=ui.ctr,q=gsNorm(f.q),rows=S.ctr.filter(c=>(!f.st||c.status===f.st)&&v160CtrProjOk(c,f.proj)&&(!q||gsNorm([c.numero,c.objeto,parcNome(c.parcId),c.processo].join(' ')).includes(q))).sort((a,b)=>String(b.assinatura).localeCompare(String(a.assinatura)));
   const vig=S.ctr.filter(c=>c.status==='vigente'),cart=r2(sum(vig,c=>Math.max(0,ctrAtual(c)-ctrMedido(c))));
   return pageHead('Contratos','Valor contratado, aditivos, medições, saldo a executar, garantias e vigência de cada contrato público ou privado.','<button class="btn pri" data-act="ctrNovo">Novo contrato</button>')+
   '<div class="stack"><div class="kpis">'+kpi('Carteira a executar',money(cart),vig.length+' contrato(s) vigente(s)')+kpi('Medido no mês',money(sum(S.med.filter(m=>m.status!=='rascunho'&&String(m.fim||m.data).slice(0,7)===todayStr().slice(0,7)),m=>medTot(m).fat)),'medições aprovadas')+kpi('Com alerta',String(vig.filter(c=>ctrAlertas(c).length).length),'vigência, garantia ou aditivo','neg')+'</div>'+
-  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_ctr" data-filter="ctr.q" value="'+esc(f.q)+'" placeholder="Número, objeto, cliente ou processo"></label><label class="f"><span>Situação</span><select id="s_ctr_st" data-filter="ctr.st">'+opt(Object.keys(CTR_ST).map(k=>[k,CTR_ST[k][0]]),f.st,'Todas')+'</select></label></div>'+
+  '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_ctr" data-filter="ctr.q" value="'+esc(f.q)+'" placeholder="Número, objeto, cliente ou processo"></label><label class="f"><span>Situação</span><select id="s_ctr_st" data-filter="ctr.st">'+opt(Object.keys(CTR_ST).map(k=>[k,CTR_ST[k][0]]),f.st,'Todas')+'</select></label>'+v160CtrProjSel(f.proj)+'</div>'+
   '<div class="tw"><table style="min-width:1000px"><thead><tr><th>Contrato</th><th>Cliente</th><th class="num">Valor atual</th><th class="num">Medido</th><th class="num">Saldo</th><th>Vigência</th><th>Alertas</th><th></th></tr></thead><tbody>'+
   (rows.length?rows.map(c=>{const at=ctrAtual(c),me_=ctrMedido(c),al=ctrAlertas(c);return '<tr><td><b>'+esc(c.numero)+'</b><div class="sub">'+esc(String(c.objeto).slice(0,70))+'</div></td><td>'+filNomeH(c.parcId)+'<div class="sub">'+esc((CTR_MOD.find(x=>x[0]===c.modalidade)||[0,''])[1])+'</div></td><td class="num">'+money(at)+(ctrAcr(c)||ctrSup(c)?'<div class="sub">inicial '+money(ctrIni(c))+'</div>':'')+'</td><td class="num">'+money(me_)+'<div class="sub">'+pctV(at?me_/at:null)+'</div></td><td class="num">'+money(at-me_)+'</td><td class="mono">'+fmtDate(c.vigIni)+'<br>'+fmtDate(ctrFim(c))+'</td><td>'+pill(CTR_ST[c.status||'vigente'][0],CTR_ST[c.status||'vigente'][1])+al.map(a=>' '+pill(a[1],a[0])).join('')+'</td><td class="act"><button class="btn sm" data-act="ctrVer" data-id="'+c.id+'">Detalhes</button><button class="btn sm pri" data-act="medNova" data-c="'+c.id+'">Medir</button><button class="btn sm" data-act="ctrEdit" data-id="'+c.id+'">Editar</button></td></tr>';}).join(''):emptyRow(8,'Nenhum contrato.'))+'</tbody></table></div></div>';
 };
@@ -10735,7 +10735,7 @@ A.eapEnviarDe=d=>eapParaEtapas(d.c);ACT_GROUP.eapEnviarDe='proj';
 
 /* ===== v49: Etapas e execução puxam o cronograma do contrato; atividades individuais ===== */
 {const d=MODS2.etapa,f0=d.fields;
-  d.fields=r=>{const fs=f0(r);fs.push({t:'sect',l:'Atividade individual (opcional)'},F('respUsr','Usuário responsável','select',{o:()=>S.usr.filter(u=>u.uid&&u.ativo!==false&&u.perfil!=='pendente').map(u=>[u.uid,nameOf(u.uid)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1]))),blank:'—'}),F('grupo','Faz parte da etapa (grupo)','text'));return fs;};
+  d.fields=r=>{const fs=f0(r);fs.push({t:'sect',l:'Atividade individual (opcional)'},F('respUsr','Usuário responsável','select',{o:()=>S.usr.filter(u=>u.uid&&u.ativo!==false&&u.perfil!=='pendente').map(u=>[u.uid,v160NomeUsr(u.uid)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1]))),blank:'—'}),F('grupo','Faz parte da etapa (grupo)','text'));return fs;};
   d.filters=(d.filters||[]).concat([{k:'minhas',l:'Atividades',opts:()=>[['eu','Só as minhas']],match:(r,v)=>v!=='eu'||etMinha(r)}]);
   d.cols=d.cols.map(c=>c[0]==='Etapa'?[c[0],r=>c[1](r)+(r.grupo?'<div class="sub">'+esc(r.grupo)+(r.eapCod?' · EAP '+esc(r.eapCod):'')+'</div>':'')+(r.respUsr?'<div class="sub">👤 '+esc(nameOf(r.respUsr))+'</div>':'')].concat(c.slice(2)):c);
   ui.etapa.minhas=ui.etapa.minhas||'';}
@@ -12019,7 +12019,7 @@ function avisoChat(u,txt){if(!u||store.mode!=='db'||u===chMe())return false;try{
 function subAbas(key,abas){const cur=ui[key]||abas[0][0];return '<div class="acts" role="tablist" style="margin:0 0 12px;flex-wrap:wrap">'+abas.map(a=>'<button class="btn sm'+(cur===a[0]?' pri':'')+'" role="tab" aria-selected="'+(cur===a[0])+'" data-act="subAba" data-k="'+key+'" data-v="'+a[0]+'">'+esc(a[1])+'</button>').join('')+'</div>';}
 A.subAba=d=>{ui[d.k]=d.v;render();};ACT_GROUP.subAba=null;
 const comAbas=(h,abas)=>{const i=h.indexOf('<div class="stack">');return i>=0?h.slice(0,i)+abas+h.slice(i):abas+h;};
-const usrOpts=()=>chUsers().map(u=>[u,nameOf(u)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+const usrOpts=()=>chUsers().map(u=>[u,v160NomeUsr(u)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
 const cliOpts=()=>S.parc.filter(p=>p.tipo!=='fornecedor').slice().sort(byNome).map(p=>[p.id,p.nome]);
 const sitVal=v=>!v?'semval':dTo(v)<0?'venc':dTo(v)<=30?'avenc':'ok';
 const SIT_VAL=[['venc','Vencido'],['avenc','Vence em 30 dias'],['ok','Em dia'],['semval','Sem validade']];
@@ -12201,7 +12201,7 @@ function matCard(){const p=matPend(),mc=matCfg(),w=mayW('cfg');
   return '<div class="card"><h2>Material pedido nas obras</h2><div class="tw" style="border:0"><table style="min-width:720px"><thead><tr><th>Nº</th><th>Obra</th><th>Itens</th><th>Precisa até</th><th>Pedido por</th><th></th></tr></thead><tbody>'+(p.length?p.map(s=>'<tr><td class="mono">'+esc(s.numero)+'</td><td>'+esc(projNome(s.projId))+'<div class="sub">'+esc(s.obs||'')+'</div></td><td>'+s.itens.map(i=>esc(fmtQ(i.qtd)+' '+(i.un||'')+' '+i.desc)).join('<br>')+'</td><td class="mono">'+fmtDate(s.necessidade)+(s.necessidade<todayStr()?' '+pill('atrasada','neg'):'')+'</td><td>'+esc(s.solicitante||'')+(s.aprovUid?'<div class="sub">para '+esc(nameOf(s.aprovUid))+'</div>':'')+'</td><td class="act">'+(podeAprovarMat(s)?'<button class="btn sm pri" data-act="matAprovar" data-id="'+s.id+'">Aprovar</button><button class="btn sm dng" data-act="matAprovar" data-dec="nao" data-id="'+s.id+'">Recusar</button>':'<span class="sub">aguardando aprovador</span>')+'</td></tr>').join(''):emptyRow(6,'Nenhum pedido de material aguardando.'))+'</tbody></table></div>'+
   (w?'<div class="sect">Quem participa</div><div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">'+usrOpts().map(u=>'<label class="ch-pk"><input type="checkbox" data-mau="'+esc(u[0])+'"'+(mc.aprov.includes(u[0])?' checked':'')+'> '+esc(u[1])+'</label>').join('')+'</div><p class="sub" style="margin:4px 0 8px">Marque os supervisores e coordenadores que aprovam material.</p><div class="fg">'+field('Almoxarife (recebe a separação)','maAlmox','select',mc.almox,{opts:usrOpts(),blank:'Ninguém'})+field('Comprador (recebe o que falta)','maComp','select',mc.comprador,{opts:usrOpts(),blank:'Ninguém'})+'</div><div class="acts" style="margin-top:8px"><button class="btn pri" data-act="matCfgSalvar">Salvar fluxo</button></div>':'')+'</div>';}
 {const v0=V.aprov;V.aprov=()=>{const h=v0(),k='<div class="card"><h2>Pendentes</h2>',i=h.indexOf(k);return i>=0?h.slice(0,i)+matCard()+h.slice(i):h+matCard();};}
-{const v0=V.sc;V.sc=()=>{let h=v0();matPend().forEach(s=>{const k='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';if(podeAprovarMat(s))h=h.replace(k,'<button class="btn sm pri" data-act="matAprovar" data-id="'+s.id+'">Aprovar</button><button class="btn sm dng" data-act="matAprovar" data-dec="nao" data-id="'+s.id+'">Recusar</button>'+k);});return h;};}
+{const v0=V.sc;V.sc=()=>{let h=v0();v160Vis('sc',matPend()).forEach(s=>{const k='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';if(podeAprovarMat(s))h=h.replace(k,'<button class="btn sm pri" data-act="matAprovar" data-id="'+s.id+'">Aprovar</button><button class="btn sm dng" data-act="matAprovar" data-dec="nao" data-id="'+s.id+'">Recusar</button>'+k);});return h;};}
 function alertasMat(){if(isColab())return [];const n=matPend().filter(podeAprovarMat).length;return n?[['aprov',n+' pedido(s) de material das obras aguardando aprovação',String(n)]]:[];}
 
 {const rd=rdoDoc;rdoDoc=function(r){const o=rd(r);const it=(r.matsol||[]).filter(x=>x.desc);if(it.length){const sc=r.scId?get('sc',r.scId):null;(o.tables=o.tables||[]).push({title:'Solicitação de material'+(sc?' nº '+sc.numero+' · '+(SC_ST[sc.status]||[''])[0]:''),head:['Material','Un.','Qtd.'],num:[2],rows:it.map(x=>[x.desc,x.un||'',fmtQ(x.qtd)])});}return o;};}
@@ -14812,7 +14812,7 @@ document.addEventListener('click',e=>{const a=e.target&&e.target.closest&&e.targ
   if(/^(javascript|data|vbscript):/.test(h)){e.preventDefault();e.stopPropagation();toast('Link bloqueado por segurança.','neg');}},true);
 {const c0=csv;csv=function(rows){return c0((rows||[]).map(r=>Array.isArray(r)?r.map(v=>typeof v==='string'&&/^[=+\-@\t\r]/.test(v)&&!/^-?\d+([.,]\d+)?$/.test(v)?"'"+v:v):r));};}
 ACT_GROUP.sairConta=null;
-A.sairConta=()=>confirmBox('Sair do sistema neste aparelho?',()=>{location.href='/sair';},'Sair');
+A.sairConta=()=>confirmBox('Sair do sistema neste aparelho?',()=>{v160Sair();},'Sair');
 
 /* ===== v91: jornada em lote e totais da Sólides na conferência ===== */
 ACT_GROUP.jorLote='rh';ACT_GROUP.jorLoteOk='rh';
@@ -15285,7 +15285,7 @@ A.fzCfgAbrir=()=>{const c=fzCfg(),us=(S.usr||[]).filter(u=>u&&u.uid&&u.ativo!==f
     field('Competência da nota de entrada','compEntrada','select',c.compEntrada,{opts:[['fechado','Mês da emissão; se estiver fechado, mês da data de entrada (extemporânea)'],['entrada','Sempre o mês da data de entrada (escrituração)']],full:true})+
     field('Fechamento do mês','fech2','select',c.fech2?'sim':'nao',{opts:[['sim','Em duas etapas: o Financeiro pede, um diretor confirma'],['nao','Direto, por quem grava na contabilidade']],full:true})+'</div>'+
     '<div class="sect" style="margin:12px 0 6px">Diretores que aprovam proposta abaixo da margem mínima</div>'+
-    (us.length?us.map(u=>'<label class="chk" style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fzdir="'+esc(u.uid)+'"'+(c.diretores.includes(u.uid)?' checked':'')+'> '+esc(u.nome||u.email||u.uid)+'</label>').join(''):'<p class="sub" style="margin:0">Nenhum usuário cadastrado.</p>')+
+    (us.length?us.map(u=>'<label class="chk" style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fzdir="'+esc(u.uid)+'"'+(c.diretores.includes(u.uid)?' checked':'')+'> '+esc(v160NomeUsr(u.uid))+'</label>').join(''):'<p class="sub" style="margin:0">Nenhum usuário cadastrado.</p>')+
     '<p class="sub" style="margin:8px 0 0">Sem ninguém marcado, aprovam o dono da página e os administradores. Margem = (preço − custo do orçamento − tributos sobre o preço) ÷ preço.</p>',
     saveLabel:'Salvar regras',save:root=>{const v=readForm(root),n=k=>v[k]==null||isNaN(v[k])||v[k]<0?FZ_DEF[k]:+v[k];const dirs=$$('[data-fzdir]',root).filter(x=>x.checked).map(x=>x.dataset.fzdir);
       put('cfg',Object.assign(cl(cfg()),{id:'empresa',fz:Object.assign({},cfg().fz||{},{diasMedNfse:Math.round(n('diasMedNfse')),margemMin:n('margemMin'),tribPct:n('tribPct'),tolValor:n('tolValor'),diretores:dirs,compEntrada:v.compEntrada==='entrada'?'entrada':'fechado',fech2:v.fech2!=='nao'})}));toast('Regras salvas.','pos');}});};
@@ -19246,10 +19246,10 @@ if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{cfgPadroes:'Preenche só 
 
 /* ---------- 1. responsável pela obra ---------- */
 FLABEL.respObra='Responsável pela obra';
-const obrUsuarios=()=>(S.usr||[]).filter(u=>u&&u.uid&&u.ativo!==false).map(u=>[u.uid,u.nome||u.email||u.uid]).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+const obrUsuarios=()=>(S.usr||[]).filter(u=>u&&u.uid&&u.ativo!==false).map(u=>[u.uid,v160NomeUsr(u.uid)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1]))); /* v160: o cadastro de usuário não tem nome nem e-mail (vêm do perfil do servidor) */
 function obrRespValida(v){if(!v)return '';return obrUsuarios().some(u=>u[0]===v)||!(S.usr||[]).length?'':'Escolha um usuário ativo como responsável pela obra.';}
 {const f0=projForm;projForm=function(p){f0.apply(this,arguments);try{const mb=$('#mb');if(!mb||!mb.querySelector)return;const fg=mb.querySelector('.fg');if(!fg||!fg.insertAdjacentHTML)return;
-  const us=obrUsuarios(),cur=p&&p.respObra||'';if(cur&&!us.some(u=>u[0]===cur))us.push([cur,nameOf(cur)]);
+  const cur=p&&p.respObra||'',us=v160RespOpts(cur);v160CarregaNomes(us.map(u=>u[0]),()=>v160AtualizaOpts('#f_respObra')); /* v160 */
   fg.insertAdjacentHTML('beforeend','<div class="sect" style="grid-column:1/-1">Responsável pela obra</div>'+field('Responsável pela obra (engenheiro)','respObra','select',cur,{opts:us,blank:'Sem responsável definido'})+'<p class="sub" style="grid-column:1/-1;margin:0">Recebe o alerta do dia 5 e, junto com a diretoria, é quem grava a previsão no término.</p>');
   const s0=mSave;if(!s0)return;mSave=root=>{const v=readForm(root),e=obrRespValida(v.respObra||'');if(e){toast(e,'neg');return false;}return s0(root);};}catch(e){}};}
 
@@ -21245,7 +21245,7 @@ function p0AprovSemFin(){const ids=new Set();['n1','n2','n3'].forEach(k=>{try{(a
   return [...ids].map(u=>(S.usr||[]).find(x=>x.uid===u||x.id===u)).filter(u=>{if(!u||u.ativo===false)return false;const p=PERFIS[u.perfil];if(!p)return false;
     const tem=l=>l==='*'||(Array.isArray(l)&&l.includes('fin'));return !(tem(p.r)||tem(p.w));});}
 if(typeof V.aprovcfg==='function'){const v0=V.aprovcfg;V.aprovcfg=function(){const h=v0.apply(this,arguments);let ls=[];try{ls=p0AprovSemFin();}catch(e){}if(!ls.length)return h;
-  const nota='<div class="note" id="p0AprovNota" style="margin:0 0 12px"><b>Aprovadores sem acesso ao financeiro.</b> '+ls.map(u=>esc(u.nome||u.email||u.uid)+' ('+esc((PERFIS[u.perfil]||{}).nome||u.perfil)+')').join(', ')+' está(ão) na matriz de pagamentos, mas o perfil não abre contas a pagar nem Início › Aprovações. Troque o perfil (Financeiro, Diretoria ou um personalizado com o Financeiro em consulta) ou tire da matriz.</div>';
+  const nota='<div class="note" id="p0AprovNota" style="margin:0 0 12px"><b>Aprovadores sem acesso ao financeiro.</b> '+ls.map(u=>esc(v160NomeUsr(u.uid))+' ('+esc((PERFIS[u.perfil]||{}).nome||u.perfil)+')').join(', ')+' está(ão) na matriz de pagamentos, mas o perfil não abre contas a pagar nem Início › Aprovações. Troque o perfil (Financeiro, Diretoria ou um personalizado com o Financeiro em consulta) ou tire da matriz.</div>';
   const i=h.indexOf('</div></div>',h.indexOf('class="ph"'));return i>0?h.slice(0,i+12)+nota+h.slice(i+12):nota+h;};}
 
 /* ===== v115 · P1: painéis por setor — Pessoal, Segurança do Trabalho, Qualidade, Frota e Equipamentos =====
@@ -26845,7 +26845,7 @@ const scrScReab=c=>{const sc=c&&c.scId?get('sc',c.scId):null;return sc&&sc.statu
   return h;};}
 /* lista: botões novos */
 {const v0=V.sc;V.sc=()=>{let h=v0();
-  S.sc.forEach(s=>{
+  v160Vis('sc',S.sc).forEach(s=>{
     const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
     if(['enviada','cotacao'].includes(s.status)&&scPodeReabrir(s))h=h.replace(det,det+'<button class="btn sm" data-act="scReabrir" data-id="'+s.id+'">Reabrir para editar</button>');
     else if(['comprada','atendida'].includes(s.status))h=h.replace(det,det+'<button class="btn sm" data-act="scCompl" data-id="'+s.id+'">Criar SC complementar</button>');
@@ -27263,7 +27263,7 @@ function p2nSepPendHtml(){const ls=p2nSepPend();if(!ls.length)return '';const po
   return '<div class="note" style="margin:0 0 10px"><b>'+ls.length+' solicitação(ões) aprovada(s) com separação a criar.</b> Quem aprovou ou enviou não grava separação; '+(pode?'crie aqui':'o almoxarife ou o comprador cria')+'.<ul style="margin:6px 0 0;padding-left:18px">'+ls.map(s=>'<li>SC nº '+esc(s.numero)+(s.projId?' · '+esc(projNome(s.projId)):'')+' · '+(s.sepPend.itens||[]).length+' item(ns)'+(pode?' <button class="btn sm pri" data-act="p2nCriarSep" data-id="'+s.id+'">Criar separação</button>':'')+'</li>').join('')+'</ul></div>';}
 ['sep','sc'].forEach(t=>{if(typeof V[t]!=='function')return;const v0=V[t];V[t]=function(){const h=v0.apply(this,arguments),a=p2nSepPendHtml();if(!a)return h;const k='<div class="stack">',i=h.indexOf(k);return i>=0?h.slice(0,i+k.length)+a+h.slice(i+k.length):a+h;};});
 /* aprovar direto da lista de solicitações */
-{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);S.sc.filter(s=>s.status==='aprovacao').forEach(s=>{if(typeof podeAprovarMat!=='function'||!podeAprovarMat(s))return;if(h.includes('data-act="matAprovar" data-id="'+s.id+'"'))return;const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
+{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);v160Vis('sc',S.sc.filter(s=>s.status==='aprovacao')).forEach(s=>{if(typeof podeAprovarMat!=='function'||!podeAprovarMat(s))return;if(h.includes('data-act="matAprovar" data-id="'+s.id+'"'))return;const det='<button class="btn sm" data-act="scVer" data-id="'+s.id+'">Detalhes</button>';
   h=h.replace(det,'<button class="btn sm pri" data-act="matAprovar" data-id="'+s.id+'">Aprovar</button><button class="btn sm dng" data-act="matAprovar" data-dec="nao" data-id="'+s.id+'">Recusar</button>'+det);});return h;};}
 /* configuração: aprovar automaticamente até R$ X (0 = sempre aprovar) */
 {const m0=matCard;matCard=function(){let h=m0.apply(this,arguments);if(!mayW('cfg'))return h;const k='<div class="acts" style="margin-top:8px"><button class="btn pri" data-act="matCfgSalvar">';
@@ -28734,7 +28734,7 @@ function v148Antes(col,rec,prev){try{
 }catch(e){return prev;}}
 function v148Falhou(key){try{V148.falhou.add(key);}catch(e){}}
 /* aviso na lista de solicitações: separação a criar */
-{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);try{S.sc.filter(s=>s.sepPend&&!s.sepId&&s.status==='enviada').forEach(s=>{const k='data-act="scVer" data-id="'+s.id+'"';const i=h.indexOf(k);if(i<0)return;const j=h.lastIndexOf('<tr',i);const t=h.indexOf('</td>',j);if(j<0||t<0||t>i)return;
+{const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);try{v160Vis('sc',S.sc.filter(s=>s.sepPend&&!s.sepId&&s.status==='enviada')).forEach(s=>{const k='data-act="scVer" data-id="'+s.id+'"';const i=h.indexOf(k);if(i<0)return;const j=h.lastIndexOf('<tr',i);const t=h.indexOf('</td>',j);if(j<0||t<0||t>i)return;
   h=h.slice(0,t)+'<div class="sub">separação a criar pelo almoxarife</div>'+h.slice(t);});}catch(e){}return h;};}
 
 /* ---------- 2. máscara de valores no desenho da linha e em qualquer redesenho parcial ---------- */
@@ -31051,7 +31051,7 @@ const v157Rest=()=>{try{return !me.owner&&v155Restrito();}catch(e){return false;
 
 /* ---------- 1. SC em rascunho ---------- */
 if(V.sc){const v0=V.sc;V.sc=function(){let h=v0.apply(this,arguments);if(!v157Rest())return h;
-  (S.sc||[]).forEach(s=>{if((s.status||'rascunho')!=='rascunho')return;
+  v160Vis('sc',S.sc||[]).forEach(s=>{if((s.status||'rascunho')!=='rascunho')return;
     let canc=false;try{canc=!p2PodeGravar('sc',s,Object.assign(cl(s),{status:'cancelada'}),false);}catch(e){}
     h=h.split('<button class="btn sm dng" data-act="scDel" data-id="'+s.id+'">Excluir</button>').join(canc?'<button class="btn sm dng" data-act="scCancel" data-id="'+s.id+'" title="A solicitação fica guardada como cancelada">Cancelar</button>':'');});
   return h;};}
@@ -31191,7 +31191,7 @@ document.addEventListener('change',e=>{const t=e.target;if(!scActive||!scd||!t||
 {const v0=V.sc;V.sc=function(){const all=S.sc,so=v158ScProprias();let h;
   if(so){S.sc=all.filter(v158MinhaSc);try{h=v0.apply(this,arguments);}finally{S.sc=all;}}else h=v0.apply(this,arguments);
   h=v152Linhas(h,'sc',(tr,s)=>{const t=v152Tipo(s);if(t!=='rh'&&t!=='frota')return tr;return tr.replace('<span class="mut">Sem projeto</span>',v158TipoPill(s)+' <span>'+esc(v158Destino(s))+'</span>');});
-  if(so){(all||[]).forEach(s=>{if(!v158MinhaSc(s))return;
+  if(so){v160Vis('sc',all||[]).forEach(s=>{if(!v158MinhaSc(s))return;
     let canc=false;try{canc=(s.status||'rascunho')==='rascunho'&&!p2PodeGravar('sc',s,Object.assign(cl(s),{status:'cancelada'}),false);}catch(e){}
     h=h.split('<button class="btn sm dng" data-act="scDel" data-id="'+s.id+'">Excluir</button>').join(canc?'<button class="btn sm dng" data-act="scCancel" data-id="'+s.id+'" title="A solicitação fica guardada como cancelada">Cancelar</button>':'');});
     if(!h.includes('v158aviso'))h=h.replace('<div class="stack">','<div class="stack"><div class="note v158aviso" style="margin:0">Aqui aparecem só as solicitações de compra que você criou: situação, quem precisa aprovar, Pedir aprovação e, se recusada, Corrigir e reenviar. Cotações e pedidos de compra ficam com o Comprador.</div>');}
@@ -31403,9 +31403,246 @@ function v159Instala(){
       leu.forEach(c=>e.s.add(c));if(limpo||V159R.rLimpo)e.limpo=true;V159R.rLimpo=false;}};
 }
 
+/* ===== v160: paginação das listas grandes, sincronização incremental e três ajustes de Obras (relatorios/feito_v160.md) =====
+   1. Paginação (50 por página, com seletor de página e total) em Solicitações de compra, Pedidos de compra, Notas
+      fiscais, Abastecimentos, Saídas de veículos, Manutenção de veículos e Envio e retorno de equipamentos (histórico).
+      Busca, filtros, indicadores e totais continuam sobre todos os registros (filtrados); só o corpo da tabela é cortado.
+      Os acréscimos por registro feitos depois do desenho (botões de aprovar, reabrir, cancelar, avisos) passam a percorrer
+      só os registros da página (v160Vis), em vez de varrer o HTML inteiro uma vez por registro.
+      Já tinham limite e não mudaram: Lançamentos, Contas a pagar e a receber ("Mostrar mais"), Estoque, Produtos e o
+      ponto (últimos 15 registros).
+   2. Sincronização incremental: feita na ponte (shim.js) e no servidor (sinc160.js); aqui só o botão Sair apaga a cópia
+      local antes de encerrar a sessão.
+   3. Obras em ordem de número, da mais nova para a mais antiga (P490, P488…), em toda caixa de escolha de obra.
+   4. Responsável pela obra (e os outros seletores de usuário com o mesmo defeito): nome da pessoa (ou o e-mail), nunca o
+      código interno; só perfis que podem ser responsáveis (Administrador, Diretoria, Gestor de projetos, Encarregado e
+      personalizados que gravam em Projetos), mantendo o valor atual.
+   5. EAP › materiais da etapa: busca enquanto digita em todos os produtos (código, descrição, família), com filtro de
+      família; material fora do estoque fica marcado "não cadastrado" e não impede o orçamento.
+   6. Comercial › Contratos com clientes: filtro por projeto/obra (caixa com busca, obras da mais nova para a mais antiga),
+      somado à busca e à situação.
+   7. Cadastro de produto da família EPI: "Com variações" some e aparece a orientação de um produto por tamanho, com
+      "Criar tamanhos" (um produto por tamanho, com o mesmo CA, validade do CA, vida útil, NCM, unidade e família) e, para
+      EPI já cadastrado com variações, o aviso com o botão que transforma cada variação em produto (o original fica).
+   ======================================================================================================================= */
+const V160={n:50,pg:{},lista:new Set(['vabas','vsai','vman','fmov']),pr:null,mat:{el:null,box:null,vis:[],sel:0,ix:null,ixDe:null,esc:false}};
+
+/* ---------- 1. paginação ---------- */
+/* chave dos filtros da tela (tudo do estado, menos a página): filtro mudou, volta à primeira página */
+function v160Chave(f){try{const o={};Object.keys(f||{}).sort().forEach(k=>{if(k!=='pg')o[k]=f[k];});return JSON.stringify(o);}catch(e){return '';}}
+/* corta a lista (já filtrada e ordenada) na página atual e guarda quais registros ficaram na tela */
+function v160Pag(tab,rows,n){
+  const f=ui[tab]||(ui[tab]={}),N=n||V160.n,k=v160Chave(f);let st=V160.pg[tab];
+  if(!st)st=V160.pg[tab]={k};else if(st.k!==k){st.k=k;f.pg=0;}
+  const tot=rows.length,np=Math.max(1,Math.ceil(tot/N)),p=Math.min(np-1,Math.max(0,parseInt(f.pg,10)||0));f.pg=p;
+  const sl=np>1?rows.slice(p*N,p*N+N):rows;
+  Object.assign(st,{tot,np,p,N,ids:np>1?new Set(sl.map(r=>r&&r.id)):null});
+  return sl;}
+/* listas genéricas (defMod): só as que crescem sem limite */
+function v160PagL(tab,rows){if(!V160.lista.has(tab)){delete V160.pg[tab];return rows;}return v160Pag(tab,rows);}
+/* registros da página atual (para os acréscimos feitos depois do desenho); sem paginação, a lista inteira */
+function v160Vis(tab,list){const st=V160.pg[tab];if(!st||!st.ids||!Array.isArray(list))return list;return list.filter(r=>r&&st.ids.has(r.id));}
+/* barra de páginas (só aparece quando há mais de uma página) */
+function v160PagBar(tab){const st=V160.pg[tab];if(!st||st.np<=1)return '';const fm=x=>x.toLocaleString('pt-BR'),a=st.p*st.N+1,b=Math.min(st.tot,a+st.N-1);
+  const ops=[];for(let i=0;i<st.np;i++)ops.push([String(i),'Página '+(i+1)+' de '+st.np]);
+  return '<div class="acts v160pg" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:4px 0 0"><span class="sub">Mostrando '+fm(a)+'–'+fm(b)+' de <b>'+fm(st.tot)+'</b> registro(s). A busca e os filtros procuram em todos.</span>'+
+    '<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn sm" data-act="v160Pg" data-tab="'+esc(tab)+'" data-v="0"'+(st.p===0?' disabled':'')+' aria-label="Primeira página">«</button><button class="btn sm" data-act="v160Pg" data-tab="'+esc(tab)+'" data-v="'+(st.p-1)+'"'+(st.p===0?' disabled':'')+'>‹ Anterior</button>'+
+    '<select data-filter="'+esc(tab)+'.pg" aria-label="Página" style="width:auto">'+opt(ops,String(st.p))+'</select>'+
+    '<button class="btn sm" data-act="v160Pg" data-tab="'+esc(tab)+'" data-v="'+(st.p+1)+'"'+(st.p>=st.np-1?' disabled':'')+'>Próxima ›</button><button class="btn sm" data-act="v160Pg" data-tab="'+esc(tab)+'" data-v="'+(st.np-1)+'"'+(st.p>=st.np-1?' disabled':'')+' aria-label="Última página">»</button></span></div>';}
+A.v160Pg=d=>{const t=d&&d.tab;if(!t||!ui[t])return;ui[t].pg=Math.max(0,parseInt(d.v,10)||0);render();try{const v=$('#view .v160pg');if(v&&v.scrollIntoView)window.scrollTo(0,0);}catch(e){}};
+ACT_GROUP.v160Pg=null;
+if(typeof TIP_ACT!=='undefined')TIP_ACT.v160Pg='Mostra outra página da lista.';
+
+/* ---------- 2. Sair: apaga a cópia local da sincronização (shim.js) antes de encerrar a sessão ---------- */
+function v160Sair(){const ir=()=>{location.href='/sair';};try{if(typeof window!=='undefined'&&typeof window.__cgSair==='function'){Promise.resolve(window.__cgSair()).then(ir,ir);setTimeout(ir,2000);return;}}catch(e){}ir();}
+
+/* ---------- 3. obras em ordem de número, da mais nova para a mais antiga ---------- */
+const v160ProjNum=p=>{const m=String((p&&p.codigo)||'').match(/(\d+)(?!.*\d)/);return m?+m[1]:-1;};
+function v160ProjCmp(a,b){const x=v160ProjNum(a),y=v160ProjNum(b);if(x!==y)return y-x;
+  const c=String((b&&b.codigo)||'').localeCompare(String((a&&a.codigo)||''),'pt-BR',{numeric:true});if(c)return c;
+  return String((a&&a.nome)||'').localeCompare(String((b&&b.nome)||''),'pt-BR');}
+/* lista de opções que é de obras (ids de projeto, mais opções especiais como "Sem projeto"): ordena as obras */
+function v160OrdObras(list){
+  if(!Array.isArray(list)||list.length<2||typeof IDX==='undefined')return list;
+  const ler=()=>{const ix=IDX.proj;if(!ix||!ix.size)return null;let np=0;
+    for(const x of list){if(!Array.isArray(x))return null;const v=String(x[0]==null?'':x[0]);if(ix.has(v))np++;else if(v!==''&&v[0]!=='_')return null;}
+    if(np<2)return null;
+    const esp=[],obras=[];list.forEach((x,i)=>{const r=ix.get(String(x[0]));if(r)obras.push([x,r,i]);else esp.push(x);});
+    obras.sort((a,b)=>v160ProjCmp(a[1],b[1])||a[2]-b[2]);return esp.concat(obras.map(o=>o[0]));};
+  try{const r=typeof V159R!=='undefined'&&V159R.semLer?V159R.semLer(ler):ler();return r||list;}catch(e){return list;}}
+{const o0=opt;opt=function(list,sel,blank){return o0.call(this,v160OrdObras(list),sel,blank);};}
+
+/* ---------- 4. nomes de usuário nos seletores ---------- */
+/* o mesmo nome do resto do sistema (nameOf: perfil do servidor ou apelido); sem nome, o e-mail; nunca o código interno */
+function v160NomeUsr(uid){if(!uid)return '—';let n='';try{n=nameOf(uid);}catch(e){}
+  if(n&&n!=='Usuário'&&n!=='—'&&n!==uid)return n;
+  const p=profCache.get(uid)||{},u=(S.usr||[]).find(x=>x&&x.uid===uid)||{};
+  return p.email||u.email||u.apelido||u.nome||'Usuário sem nome';}
+/* busca no servidor os nomes que ainda não estão no cache e troca o texto das opções já na tela */
+function v160CarregaNomes(uids,depois){try{const f=[...new Set((uids||[]).filter(i=>i&&i!=='local'&&!(profCache.get(i)&&profCache.get(i).name)))];
+  if(!f.length||!me.u||!me.u.profiles)return;me.u.profiles(f).then(ps=>{f.forEach(i=>{if(ps&&ps[i])profCache.set(i,ps[i]);});if(depois)try{depois();}catch(e){}}).catch(()=>{});}catch(e){}}
+/* perfis que podem ser responsáveis por obra */
+const V160_RESP=new Set(['admin','diretoria','projetos','encarregado']);
+function v160PodeResp(u){if(!u)return false;const pf=u.perfil||'';if(V160_RESP.has(pf))return true;const d=PERFIS[pf];if(!d||d.interno)return false;
+  return d.w==='*'||(Array.isArray(d.w)&&d.w.includes('proj'));}
+function v160RespOpts(cur){const us=(S.usr||[]).filter(u=>u&&u.uid&&u.ativo!==false&&v160PodeResp(u));
+  const l=us.map(u=>[u.uid,v160NomeUsr(u.uid)]);if(cur&&!l.some(x=>x[0]===cur))l.push([cur,v160NomeUsr(cur)]);
+  return l.sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt-BR'));}
+/* depois de carregar os nomes, troca o texto das opções de um seletor aberto */
+function v160AtualizaOpts(sel){try{const el=typeof sel==='string'?$(sel):sel;if(!el||!el.options)return;[...el.options].forEach(o=>{if(o.value)o.textContent=v160NomeUsr(o.value);});}catch(e){}}
+
+/* ---------- 5. EAP: material por busca no estoque ---------- */
+const V160_MAT_PH='Digite para buscar no estoque';
+function v160MatIx(){const M=V160.mat;if(M.ix&&M.ixDe===S.prod)return M.ix;
+  M.ix=S.prod.map(p=>({p,n:lbNorm([p.sku,p.nome,p.familia,p.ean].filter(Boolean).join(' ')),s:lbNorm(p.sku||''),t:lbNorm(p.nome||'')}));M.ixDe=S.prod;return M.ix;}
+const v160Fams=()=>[...new Set(S.prod.map(p=>String(p.familia||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+function v160MatBusca(q,fam){const ps=lbNorm(q).split(' ').filter(Boolean),fn=lbNorm(fam||'');
+  let l=v160MatIx().filter(x=>(!fn||lbNorm(x.p.familia||'')===fn)&&ps.every(t=>x.n.includes(t)));
+  if(ps.length){const q0=ps.join(' '),nota=x=>(x.s===q0?0:x.s.startsWith(q0)?1:x.t.startsWith(q0)?2:(' '+x.t).includes(' '+ps[0])?3:4)*1000+Math.min(999,x.t.length);l=l.map(x=>[x,nota(x)]).sort((a,b)=>a[1]-b[1]||String(a[0].p.nome).localeCompare(String(b[0].p.nome),'pt-BR')).map(x=>x[0]);}
+  else l=l.slice().sort((a,b)=>String(a.p.nome).localeCompare(String(b.p.nome),'pt-BR'));
+  return l;}
+function v160MatFamSel(){return '<label class="f" style="grid-column:1/-1;max-width:420px;margin:2px 0 4px"><span>Família (filtra a busca do material)</span><select id="v160EapFam">'+opt(v160Fams().map(f=>[f,f]),'','Todas as famílias')+'</select></label>';}
+/* marca "não cadastrado" ao lado do material digitado que não é produto do estoque */
+function v160MatMarca(inp){try{if(!inp||!inp.closest)return;const td=inp.closest('td');if(!td)return;let b=td.querySelector('.v160nc');const v=String(inp.value||'').trim(),livre=!!v&&!obr3Prod(v);
+  if(livre&&!b){td.insertAdjacentHTML('beforeend','<span class="pill warn v160nc" title="Material digitado à mão, fora do cadastro de produtos: o orçamento aceita; unidade e preço são os que você informar." style="margin-top:3px;display:inline-block">não cadastrado</span>');}
+  else if(!livre&&b)b.remove();}catch(e){}}
+function v160MatPrep(root){if(!root||!root.querySelectorAll)return;
+  root.querySelectorAll('tr[data-r="mat"] input[data-k="desc"]').forEach(i=>{if(i.dataset.v160m)return;i.dataset.v160m='1';i.removeAttribute('list');i.setAttribute('placeholder',V160_MAT_PH);i.setAttribute('autocomplete','off');i.setAttribute('aria-autocomplete','list');v160MatMarca(i);});}
+function v160MatFecha(){const M=V160.mat;if(M.box){M.box.remove();M.box=null;}M.el=null;M.vis=[];}
+function v160MatPos(){const M=V160.mat;if(!M.el||!M.box)return;const r=M.el.getBoundingClientRect(),W=window.innerWidth,H=window.innerHeight,w=Math.min(W-16,Math.max(r.width,520)),alt=Math.min(380,H-16);
+  let top=r.bottom+4;if(top+alt>H-8&&r.top-alt-4>8)top=r.top-alt-4;else if(top+alt>H-8)top=Math.max(8,H-alt-8);
+  Object.assign(M.box.style,{left:Math.min(Math.max(8,r.left),W-w-8)+'px',top:top+'px',width:w+'px',maxHeight:alt+'px'});}
+function v160MatAbre(inp){const M=V160.mat;if(M.el!==inp){v160MatFecha();M.el=inp;}
+  if(!M.box){const b=document.createElement('div');b.className='lb-pop v160mat';b.setAttribute('role','listbox');b.innerHTML='<div class="lb-list"></div><div class="lb-foot"></div>';document.body.appendChild(b);M.box=b;
+    b.addEventListener('mousedown',e=>{const it=e.target.closest('.lb-it');e.preventDefault();if(it&&it.dataset.k!=null)v160MatEscolhe(+it.dataset.k);});}
+  const famEl=$('#v160EapFam'),fam=famEl?famEl.value:'',q=inp.value||'',l=v160MatBusca(q,fam),lim=l.slice(0,50);M.vis=lim;M.sel=0;
+  const ps=lbNorm(q).split(' ').filter(x=>x.length>1),hl=t=>{let h=esc(t);ps.forEach(p=>{try{h=h.replace(new RegExp('('+p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>');}catch(e){}});return h;};
+  M.box.querySelector('.lb-list').innerHTML=lim.length?lim.map((x,k)=>'<div class="lb-it'+(k===0?' on':'')+'" role="option" data-k="'+k+'"><span class="lb-t">'+hl((x.p.sku?x.p.sku+' · ':'')+x.p.nome)+(x.p.familia?' <span class="sub">· '+esc(x.p.familia)+'</span>':'')+'</span>'+lbEst(x.p.id)+'</div>').join(''):
+    '<div class="lb-it" style="cursor:default">'+(S.prod.length?'Nenhum produto do estoque com esse texto'+(fam?' na família '+esc(fam):'')+'. Pode continuar digitando: o material entra como <b>não cadastrado</b>.':'Nenhum produto cadastrado no estoque. Digite o material: ele entra como <b>não cadastrado</b>.')+'</div>';
+  M.box.querySelector('.lb-foot').textContent=(l.length>50?'Mostrando 50 de '+l.length.toLocaleString('pt-BR')+'. Digite mais para refinar. ':l.length.toLocaleString('pt-BR')+' produto(s). ')+'↑↓ navega · Enter escolhe · Esc fecha · fora da lista = não cadastrado';
+  v160MatPos();}
+function v160MatVer(){const M=V160.mat;if(!M.box)return;M.box.querySelectorAll('.lb-it[data-k]').forEach((d,k)=>{d.classList.toggle('on',k===M.sel);});const c=M.box.querySelector('.lb-it.on');if(c&&c.scrollIntoView)c.scrollIntoView({block:'nearest'});}
+function v160MatEscolhe(k){const M=V160.mat,x=M.vis[k],inp=M.el;v160MatFecha();if(!x||!inp)return;
+  inp.value=x.p.nome;M.esc=true;try{inp.dispatchEvent(new Event('input',{bubbles:true}));inp.dispatchEvent(new Event('change',{bubbles:true}));}finally{M.esc=false;}
+  v160MatMarca(inp);if(inp.focus)inp.focus();}
+if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('input',e=>{const t=e.target;if(!t||!t.dataset||!t.dataset.v160m||V160.mat.esc)return;v160MatAbre(t);v160MatMarca(t);});
+  document.addEventListener('focusin',e=>{const t=e.target;if(t&&t.dataset&&t.dataset.v160m&&!V160.mat.esc)v160MatAbre(t);else if(V160.mat.box&&t!==V160.mat.el&&!(V160.mat.box.contains&&V160.mat.box.contains(t)))v160MatFecha();});
+  document.addEventListener('focusout',e=>{const t=e.target;if(t&&t.dataset&&t.dataset.v160m){v160MatMarca(t);setTimeout(()=>{if(V160.mat.el===t&&document.activeElement!==t)v160MatFecha();},150);}});
+  document.addEventListener('change',e=>{const t=e.target;if(t&&t.id==='v160EapFam'){const i=V160.mat.el;if(i&&i.isConnected)v160MatAbre(i);}});
+  document.addEventListener('keydown',e=>{const M=V160.mat,t=e.target;if(!M.box||t!==M.el)return;const n=M.vis.length;
+    if(e.key==='ArrowDown'){e.preventDefault();M.sel=Math.min(n-1,M.sel+1);v160MatVer();}
+    else if(e.key==='ArrowUp'){e.preventDefault();M.sel=Math.max(0,M.sel-1);v160MatVer();}
+    else if(e.key==='Enter'){if(n){e.preventDefault();e.stopPropagation();v160MatEscolhe(M.sel);}else v160MatFecha();}
+    else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();v160MatFecha();}
+    else if(e.key==='Tab')v160MatFecha();},true);
+  window.addEventListener&&window.addEventListener('resize',()=>{if(V160.mat.box)v160MatPos();});
+  document.addEventListener('scroll',e=>{const M=V160.mat;if(M.box&&!(M.box.contains&&M.box.contains(e.target))){if(M.el&&!M.el.isConnected)v160MatFecha();else v160MatPos();}},true);}
+/* formulário da etapa: sem a lista fixa dos 600 primeiros produtos; família ao lado; linhas novas também */
+{const f0=eapItemForm;eapItemForm=function(){const m0=modal;
+  modal=function(op){try{if(op&&typeof op.body==='string'&&op.body.indexOf('eapR_mat')>=0){
+      op.body=op.body.replace(/<datalist id="eapProdL">[\s\S]*?<\/datalist>/,'').split(' list="eapProdL"').join('');
+      op.body=op.body.replace('margin-top:10px">Materiais</div>','margin-top:10px">Materiais</div>'+v160MatFamSel());
+      const oo=op.onOpen;op.onOpen=r=>{if(oo)oo(r);v160MatPrep(r||$('#mb'));};}}catch(e){}return m0.apply(this,arguments);};
+  try{return f0.apply(this,arguments);}finally{modal=m0;v160MatPrep($('#mb'));}};}
+{const a0=A.eapLinha;A.eapLinha=function(d){const r=a0.apply(this,arguments);if(d&&d.t==='mat')v160MatPrep($('#mb'));return r;};}
+
+/* ---------- 6. Contratos com clientes: filtro por projeto/obra ---------- */
+/* projetos dos contratos (o escolhido fica mesmo sem contrato), "Sem projeto" quando há contrato sem obra; o opt() ordena as
+   obras pelo número, da mais nova para a mais antiga */
+function v160CtrProjOk(c,pj){if(!pj)return true;const tem=!!(c&&c.projId&&get('proj',c.projId));return pj==='_sem'?!tem:!!c&&c.projId===pj;}
+function v160CtrProjSel(cur){const ids=new Set();let sem=false;(S.ctr||[]).forEach(c=>{if(c&&c.projId&&get('proj',c.projId))ids.add(c.projId);else sem=true;});
+  if(cur&&cur!=='_sem'&&get('proj',cur))ids.add(cur);
+  const l=[...ids].map(id=>[id,projOptNome(id)]);if(sem||cur==='_sem')l.unshift(['_sem','Sem projeto']);
+  return '<label class="f" style="min-width:200px;max-width:320px"><span>Projeto / obra</span><select id="s_ctr_proj" data-filter="ctr.proj" data-lb="1" aria-label="Filtrar por projeto ou obra">'+opt(l,cur||'','Todos')+'</select></label>';}
+/* caixa marcada com data-lb="1": abre a busca por texto mesmo com poucas opções (as grandes já abrem sozinhas) */
+const v160LbForca=t=>!!t&&t.tagName==='SELECT'&&!!t.dataset&&t.dataset.lb==='1'&&!t.disabled&&typeof lbGrande==='function'&&!lbGrande(t);
+if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('mousedown',e=>{const t=e.target;if(e.button!==0||!v160LbForca(t)||(window.matchMedia&&matchMedia('(pointer:coarse)').matches))return;
+    e.preventDefault();if(LB.el===t&&LB.box){lbFechar();return;}if(t.focus)t.focus();lbAbrir(t,'');},true);
+  document.addEventListener('keydown',e=>{const t=e.target;if(!v160LbForca(t)||LB.box||e.ctrlKey||e.metaKey)return;
+    if(e.key==='Enter'||e.key===' '||(e.altKey&&e.key==='ArrowDown')||e.key==='F4'){e.preventDefault();lbAbrir(t,'');}
+    else if(e.key.length===1&&!e.altKey){e.preventDefault();lbAbrir(t,e.key);}},true);}
+
+/* ---------- 7. EPI: um produto por tamanho ---------- */
+const V160_EPI_DICA='Para EPI, cadastre um produto por tamanho: cada tamanho tem estoque, CA e entrega próprios';
+/* lista de tamanhos: "P, M, G, GG", "38–44", "38 a 44", "36-40, 44" (sem repetir, na ordem digitada, até 60) */
+function v160Tams(txt){const out=[],add=x=>{x=String(x).trim().replace(/\s+/g,' ').toUpperCase();if(x&&!out.includes(x)&&out.length<60)out.push(x);};
+  String(txt||'').split(/[,;\/\n]+/).forEach(par=>{const m=par.trim().match(/^(\d{1,3})\s*(?:-|–|—|a|até|ate)\s*(\d{1,3})$/i);
+    if(m&&+m[2]>=+m[1]&&+m[2]-+m[1]<=60){for(let i=+m[1];i<=+m[2];i++)add(String(i));return;}
+    par.trim().split(/\s+/).forEach(add);});
+  return out;}
+/* nome sem o tamanho no fim (" · Tam. G") */
+const v160EpiBase=n=>String(n||'').replace(/\s*·\s*tam\.?\s*[^·]*$/i,'').trim();
+const v160SkuSuf=t=>String(t||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9.]/g,'');
+/* já existe (ativo ou inativo): mesmo código, mesmo nome, ou mesmo produto-base com o mesmo tamanho */
+function v160EpiExiste(nome,sku,base,tam){const nn=gsNorm(nome),nb=gsNorm(base),nt=gsNorm(tam);
+  return (S.prod||[]).concat(S.prodinat||[]).find(x=>x&&x._del!==true&&((sku&&x.sku===sku)||gsNorm(x.nome)===nn||(nt&&gsNorm(x.tam||'')===nt&&gsNorm(v160EpiBase(x.nome))===nb)))||null;}
+/* produto de um tamanho a partir dos dados do produto-base (nome + " · Tam. X", família, CA, validade do CA, vida útil, NCM, unidade) */
+function v160EpiNovo(b,tam,extra){const base=v160EpiBase(b.nome),sku=b.sku?String(b.sku).trim()+'-'+v160SkuSuf(tam):'';
+  return Object.assign({id:uid(),nome:base+' · Tam. '+tam,sku,un:b.un||'UN',ncm:b.ncm?digits(b.ncm):'',familia:b.familia||'',ca:b.ca||'',caVal:b.caVal||'',
+    vidaEpi:b.vidaEpi==null?'':b.vidaEpi,tam,epi:true,preco:0,minimo:0,definicao:'simples',kit:false,origem:'0',tipoSped:'99 - Outras',componentes:[],variacoes:[],caracteristicas:[]},extra||{});}
+/* grava os produtos que ainda não existem; devolve {criados, pulados} */
+function v160EpiGrava(b,lista){const criados=[],pulados=[],recusa=[];
+  lista.forEach(x=>{const r=v160EpiNovo(b,x.tam,x.extra);if(x.sku)r.sku=x.sku;const ja=v160EpiExiste(r.nome,r.sku,v160EpiBase(b.nome),x.tam);
+    if(ja){pulados.push(x.tam+' ('+(ja.sku?ja.sku+' · ':'')+ja.nome+')');return;}
+    let m='';try{if(typeof p2PodeGravar==='function')m=p2PodeGravar('prod',null,r,false)||'';}catch(e){}
+    if(m){recusa.push(x.tam+': '+m);return;}put('prod',r);criados.push(r);});
+  return {criados,pulados,recusa};}
+function v160EpiAviso(r){const l=[];if(r.criados.length)l.push(r.criados.length+' produto(s) criado(s): '+r.criados.map(p=>p.nome).join('; ')+'.');
+  if(r.pulados.length)l.push('Já existiam (pulados): '+r.pulados.join('; ')+'.');if(r.recusa.length)l.push('Recusados: '+r.recusa.join('; ')+'.');
+  toast(l.join(' ')||'Nada a criar.',r.criados.length?'pos':'neg');}
+/* ficha aberta: EPI pela família escolhida (ou pela marcação antiga de EPI) */
+function v160FichaEhEpi(){const s=typeof document!=='undefined'?document.getElementById('f_familia'):null,p=typeof PF!=='undefined'?PF.p:null;
+  return v154EhFamEpi(s?s.value:(p&&p.familia)||'')||!!(p&&p.epi===true);}
+function v160EpiVarPend(p){const vs=(p&&p.comVar&&Array.isArray(p.variacoes)?p.variacoes:[]).filter(v=>v&&(v.desc||v.codigo));
+  return vs.map(v=>{const tam=String(v.desc||v.codigo||'').trim().replace(/^tam(anho)?\.?\s*:?\s*/i,'').trim()||String(v.codigo||'').trim();
+    const sku=v.codigo?String(v.codigo).trim():'';return {tam,sku,extra:{ean:v.ean||'',preco:v.preco===''||v.preco==null?(+p.preco||0):(+v.preco||0)}};}).filter(x=>x.tam);}
+function v160EpiBox(p,epi){const pode=v156PodeCriarProd();
+  let h='<div id="v160EpiTam" class="note" style="margin:8px 0 0'+(epi?'':';display:none')+'"><b>'+esc(V160_EPI_DICA)+'.</b>'+
+    (pode?'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:6px"><label class="f" style="flex:1;min-width:220px;margin:0"><span>Tamanhos a criar</span><input id="v160TamLista" autocomplete="off" placeholder="Ex.: P, M, G, GG ou 38–44"></label><button type="button" class="btn sm pri" data-act="v160EpiTam">Criar tamanhos</button></div>'+
+      '<div class="sub" style="margin-top:4px">Cria um produto para cada tamanho: o nome ganha " · Tam. X", com a mesma família, CA, validade do CA, vida útil, NCM e unidade; o código ganha o tamanho no fim. Tamanho que já existe é pulado.</div>'
+      :'<div class="sub" style="margin-top:4px">O seu perfil não cadastra produto: peça ao Fiscal ou ao Administrador para criar os tamanhos.</div>')+'</div>';
+  return h+v160EpiVarHtml(p);}
+/* aviso do EPI já cadastrado "Com variações" (só o produto salvo; nada é convertido sem o clique) */
+function v160EpiVarHtml(p){const pode=v156PodeCriarProd();let h='';
+  const salvo=p&&p.id?get('prod',p.id):null,vs=salvo&&v154EhEpi(salvo)?v160EpiVarPend(salvo):[];
+  if(vs.length){const falta=vs.filter(x=>!v160EpiExiste(v160EpiBase(salvo.nome)+' · Tam. '+x.tam,x.sku||(salvo.sku?String(salvo.sku).trim()+'-'+v160SkuSuf(x.tam):''),v160EpiBase(salvo.nome),x.tam));
+    h+='<div id="v160EpiVar" class="note warn" style="margin:8px 0 0">'+(falta.length?'<b>Este EPI está cadastrado "Com variações" ('+vs.length+': '+esc(vs.map(x=>x.tam).join(', '))+').</b> As variações não têm estoque, CA nem entrega próprios. '+
+        (pode?'<button type="button" class="btn sm pri" data-act="v160EpiConv">Transformar cada variação em um produto</button> <span class="sub">(o produto original continua como está; variação que já virou produto é pulada)</span>':'<span class="sub">Peça ao Fiscal ou ao Administrador para transformar cada variação em um produto.</span>')
+      :'<b>As variações deste EPI já viraram produtos.</b> <span class="sub">A lista de variações continua neste cadastro; para tirá-la, desmarque abaixo e salve.</span> <button type="button" class="btn sm" data-act="v160EpiSemVar">Tirar a lista de variações</button>')+'</div>';}
+  return h;}
+if(typeof prodFicha==='function'){const f0=prodFicha;prodFicha=function(){const m0=modal;
+  modal=function(o){modal=m0;try{if(o&&typeof o.body==='string'&&o.body.indexOf('id="f_comVar"')>=0&&typeof PF!=='undefined'&&PF.p){const p=PF.p,epi=v154EhEpi(p);
+      let b=o.body.replace('<label title="Cor, tamanho, voltagem','<label id="v160VarLbl"'+(epi?' style="display:none"':'')+' title="Cor, tamanho, voltagem');
+      b=b.replace('<div class="pf-def">',v160EpiBox(p,epi)+'<div class="pf-def">');o=Object.assign({},o,{body:b});}}catch(e){}return m0.call(this,o);};
+  try{return f0.apply(this,arguments);}finally{if(modal!==m0)modal=m0;}};}
+function v160EpiMostra(){try{const epi=v160FichaEhEpi(),l=document.getElementById('v160VarLbl'),b=document.getElementById('v160EpiTam');if(l&&l.style)l.style.display=epi?'none':'';if(b&&b.style)b.style.display=epi?'':'none';}catch(e){}}
+if(typeof document!=='undefined'&&document.addEventListener){
+  ['input','change'].forEach(ev=>document.addEventListener(ev,e=>{if(e.target&&e.target.id==='f_familia')v160EpiMostra();}));
+  document.addEventListener('keydown',e=>{const t=e.target;if(t&&t.id==='v160TamLista'&&e.key==='Enter'){e.preventDefault();e.stopPropagation();A.v160EpiTam();}},true);}
+A.v160EpiTam=()=>{if(!v156PodeCriarProd()){toast('O seu perfil não cadastra produto.','neg');return;}
+  const mb=$('#mb'),v=mb?readForm(mb):{},p=PF.p||{},i=document.getElementById('v160TamLista'),tams=v160Tams(i?i.value:'');
+  const b={nome:v.nome||p.nome||'',sku:v.sku!=null?v.sku:(p.sku||''),un:v.un||p.un||'UN',ncm:v.ncm!=null?v.ncm:(p.ncm||''),familia:v.familia!=null?v.familia:(p.familia||''),
+    ca:v.ca!=null?v.ca:(p.ca||''),caVal:v.caVal!=null?v.caVal:(p.caVal||''),vidaEpi:v.vidaEpi!=null?v.vidaEpi:(p.vidaEpi||'')};
+  if(!v154EhFamEpi(b.familia)&&p.epi!==true){toast('Escolha a família '+v154Fam()+' para criar os tamanhos.','neg');return;}
+  if(!v160EpiBase(b.nome)){toast('Informe a descrição do produto antes de criar os tamanhos.','neg');return;}
+  if(!tams.length){toast('Digite os tamanhos, por exemplo: P, M, G, GG ou 38–44.','neg');if(i&&i.focus)i.focus();return;}
+  if(b.ncm&&!/^\d{8}$/.test(digits(b.ncm))){toast('O NCM tem 8 dígitos.','neg');return;}
+  const r=v160EpiGrava(b,tams.map(t=>({tam:t})));v160EpiAviso(r);
+  if(r.criados.length){if(i)i.value='';const salvo=p.id&&(get('prod',p.id)||get('prodinat',p.id));if(!salvo)closeModal();}};
+A.v160EpiConv=()=>{if(!v156PodeCriarProd()){toast('O seu perfil não cadastra produto.','neg');return;}
+  const p=PF.p&&get('prod',PF.p.id);if(!p||!v154EhEpi(p)){toast('Salve o produto na família '+v154Fam()+' antes.','neg');return;}
+  const vs=v160EpiVarPend(p);if(!vs.length){toast('Este produto não tem variações cadastradas.','neg');return;}
+  const r=v160EpiGrava(p,vs);v160EpiAviso(r);if(r.criados.length||r.pulados.length){const w=document.getElementById('v160EpiVar');if(w)w.outerHTML=v160EpiVarHtml(p);}};
+A.v160EpiSemVar=()=>{const c=document.getElementById('f_comVar');if(c){c.checked=false;c.dispatchEvent(new Event('change',{bubbles:true}));}const w=document.getElementById('v160EpiVar');if(w)w.remove();toast('Lista de variações tirada. Clique em Salvar.','pos');};
+Object.assign(ACT_GROUP,{v160EpiTam:'est',v160EpiConv:'est',v160EpiSemVar:'est'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v160EpiTam:'Cria um produto para cada tamanho digitado.',v160EpiConv:'Cria um produto para cada variação (o original fica).',v160EpiSemVar:'Desmarca "Com variações" neste cadastro.'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='159',APP_DATA='2026-11-05';
+const APP_VER='160',APP_DATA='2026-11-06';
 const CHANGELOG=[
+  ['160','2026-11-06',['Listas grandes em páginas de 50: Solicitações de compra, Pedidos de compra, Notas fiscais, Abastecimentos, Saídas e Manutenção de veículos e o histórico de envio de equipamentos. A busca, os filtros e os totais continuam valendo para todos os registros.', 'Abrir e salvar nessas telas ficou muito mais rápido com muitos registros.', 'O sistema baixa só o que mudou desde a última leitura, ao abrir de novo, ao reconectar e nas atualizações automáticas. Se não der, baixa tudo, como antes.', 'Neste navegador fica uma cópia cifrada das listas de compras, estoque, obras e frota, para abrir mais rápido. Ela só abre com a sua conta e é apagada ao clicar em Sair. RH, ponto, folha, saúde e financeiro não ficam guardados.', 'Obras aparecem da mais nova para a mais antiga (P490, P488...) nas caixas de escolha de obra.', 'Responsável pela obra: a lista mostra o nome das pessoas (ou o e-mail) e só quem pode ser responsável: administração, diretoria, gestão de projetos e encarregados.', 'Materiais da etapa na EAP: digite para buscar em todo o estoque (código, descrição ou família), com filtro de família. Material que não está no estoque pode ser digitado e fica marcado como não cadastrado.', 'Contratos com clientes: novo filtro por projeto ou obra (com busca, da obra mais nova para a mais antiga), junto com a busca e a situação.', 'Produto da família EPI: em vez de "Com variações", cadastre um produto por tamanho. O botão Criar tamanhos faz isso de uma vez (P, M, G, GG ou 38–44), com o mesmo CA, vida útil, NCM e unidade. EPI já cadastrado com variações mostra um aviso com o botão que transforma cada variação em produto.']],
   ['159','2026-11-05',['Troca de tela e gravação muito mais rápidas. As telas eram preparadas de novo a cada redesenho e ficavam mais lentas ao longo do dia; isso acabou.', 'A tela não é mais redesenhada quando nada mudou: as leituras periódicas e o retorno do servidor depois de salvar não travam mais a página. Salvar faz um redesenho só.', 'Quando outra pessoa grava algo que a tela aberta não mostra, a sua tela não é redesenhada. Várias mudanças seguidas viram um redesenho só.', 'Painel, Painel da diretoria, espelho de ponto e custo de mão de obra por obra calculam o ponto bem mais rápido, com o mesmo resultado.', 'A página chega comprimida (cerca de 4 vezes menor) e, ao recarregar, o navegador só confere se mudou, sem baixar de novo. As listas grandes do servidor também chegam comprimidas.', 'A sincronização da Sólides não regrava mais os meses em que nenhuma marcação mudou.', 'A tela Mapa de cotação não fica mais em branco quando uma cotação está sem a tabela de preços.']],
   ['158','2026-11-05',['Perfil novo Recursos humanos e compras: tudo o que o RH faz e, em Suprimentos, cria solicitação de compra dos tipos RH (EPI, uniforme, material de treinamento, exames) e Administrativa. Vê só as próprias solicitações, com a situação, quem precisa aprovar, Pedir aprovação e Corrigir e reenviar. Não vê cotações, pedidos de compra nem preços negociados. Entra no Painel de Pessoal.', 'Perfil novo Administrador de frota: cuida da frota inteira, de todos os locais, com os valores da frota. Não exclui registros da frota; abastecimento e manutenção se corrigem com o motivo, que fica no histórico de correções do registro. Entra no Painel da Frota.', 'Frota › Condutores (Administrador de frota): nome, função e CNH dos colaboradores para escolher o condutor, com o CPF mascarado. Salário, documentos do RH, ASO e folha não aparecem.', 'O Administrador de frota consulta fornecedores e clientes e o saldo e o local das peças no estoque (sem custo) e cria solicitação de compra dos tipos Frota (peças, pneus, serviço de oficina, com o veículo) e Administrativa.', 'Leitura de planilhas (SheetJS): se a cópia do próprio servidor faltar, a reserva passa a ser a versão 0.20.3, do site oficial da SheetJS, que corrige falhas de segurança da versão antiga (0.18.5).', 'Os dois perfis aparecem em Sistema › Usuários e em Sistema › Perfis de acesso, onde o administrador pode ajustar as funções. O servidor confere tudo: o que o perfil não pode ver não é entregue, e o que não pode gravar ou excluir é recusado.']],
   ['157','2026-11-05',['Solicitações de compra: o Almoxarife não exclui mais a solicitação em rascunho. No lugar de Excluir aparece Cancelar, e ela fica guardada como cancelada. O servidor confere.', 'O Almoxarife não muda a família do produto: no cadastro do produto o campo fica só para consulta, e Colocar produto na família EPI e Não é EPI não aparecem para ele. O servidor recusa a troca por qualquer caminho. Os filtros por família (Estoque, Produtos, separação, EPI, relatórios) continuam.', 'Aceite do fornecedor: o servidor só gera o link, mostra o pedido e registra o aceite quando o pedido está aprovado dentro da alçada. Se não estiver, a página do fornecedor explica que o pedido ainda está em aprovação.', 'Integração Sólides: o aviso de endereço não encontrado (404) ou de falta de configuração aparece no registro do servidor uma vez e depois no máximo a cada 6 horas, em vez de a cada sincronização.', 'Bibliotecas de imagem da página (html2canvas) e de montagem de PDF (pdf-lib) passam a vir do próprio servidor. A internet externa (CDN) fica só como reserva se a cópia local falhar.']],
