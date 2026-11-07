@@ -1122,6 +1122,47 @@ Alterados: `regras.js`, `server.js`, `Dockerfile`, `perfis.json` e `public/index
   **Pergunte ao gerente da conta da Sem Parar** se há API do relatório de utilização ou envio automático do arquivo (e-mail/SFTP).
 - Atraso de retorno: o servidor avisa o condutor e o responsável a cada hora (uma vez por saída).
 
+## Terceiros e locações: documentos, trabalhadores, locação de equipamentos e bloqueio do pagamento (v166)
+
+Arquivos novos no serviço `gestao`: `ajuste166.js` e `terc166.js` (este roda também no navegador, para as regras darem igual).
+Alterados: `regras.js`, `Dockerfile`, `perfis.json` e `public/index.html`. **Reconstrua a imagem** do serviço `gestao`.
+Coleções novas (gravadas só pelas telas, rotas `/api/ter166/*`): `ter166` (empresa terceira; o id é o do fornecedor do
+cadastro), `tdc166` (documentos), `loc166` (contrato de locação), `leq166` (equipamento locado) e `tnl166` (nota do locador que
+não é da locação). Tabela nova `ter_link166` (links dos terceiros: o banco guarda o hash e o token cifrado com a `CHAVE_MESTRA`).
+
+- **Menu Terceiros**: Painel de terceiros e locações, Empresas terceiras, Conferência de documentos e Locações de equipamentos.
+  Módulo "Terceiros e locações" em Sistema › Perfis de acesso. Padrão: Comprador, Compras, Almoxarife e RH e compras gravam tudo
+  do módulo; RH e Gestor de SST gravam o cadastro do terceiro e os documentos; Técnico de SST só os documentos; Gestor de
+  projetos e Encarregado só a guarda do equipamento na obra; Financeiro, Fiscal e Somente leitura consultam. Aprovar ou recusar
+  documento pede também RH, SST ou Documentos dos empreiteiros.
+- **Empresa terceira**: escolha o fornecedor já cadastrado (não duplica). Documentos com tipo, arquivo, emissão e validade
+  (contrato social, cartão CNPJ, CND federal, CRF do FGTS, CNDT, estadual, municipal, falência, seguro, alvará, outro); os
+  exigidos são configuráveis (Regras) e por terceiro. As certidões têm o botão "Consultar" (sites oficiais). As certidões e a
+  folha/guias já marcadas no checklist antigo (Documentos dos empreiteiros) continuam valendo até a validade.
+- **Obrigações do mês** por contrato (empreiteiro ou locação com operador): folha, FGTS, INSS (DCTFWeb/eSocial), holerites e
+  ponto, com entregue / aprovado / pendente / recusado (com motivo). O mês exigido é o anterior ao da medição/nota (Regras).
+- **Trabalhadores do terceiro** (SST › Trabalhadores terceiros, os mesmos de antes): ASO, integração, ficha de EPI, NRs da função
+  (padrão NR-18 para todos, NR-11 e NR-12 para operador, NR-35 para montador, NR-10 para eletricista; ajuste em Regras), registro
+  (CTPS digital ou eSocial) e CNH do operador. "Liberado / Não liberado" por obra (inclui a integração do cliente da obra). O
+  diário de obra recusa trabalhador não liberado; a liberação do dia é a de sempre (CIPA e SST › Liberações de aptidão, SST ou
+  Administrador, com justificativa). **Atenção**: trabalhadores antigos sem NR-18 ou sem registro passam a "não liberado".
+- **Locações** (Compras): contrato com o locador e a obra, com ou sem operador; equipamentos com valor por dia/semana/mês,
+  franquia de horas, hora excedente e quem paga a manutenção; retirada (vistoria, fotos, horímetro, responsável), guarda e
+  transferência entre obras (obra), devolução (vistoria, avarias com foto, horímetro, horas). Horas pelo diário de obra (linha
+  "Equipamento locado"). Avisos no chat: antes do fim do período (padrão 3 dias) e devolução atrasada.
+- **Custo só pela nota do locador**: Locações › Conciliar nota liga a nota ao equipamento e à obra e mostra o previsto (dias ×
+  valor, a combinação mais barata de diária/semana/mês, + horas acima da franquia) ao lado da nota; diferença acima da
+  tolerância (padrão 2%) pede justificativa. Nota do locador que não é da locação: marque "não é da locação" com o motivo.
+- **Pagamento bloqueado por documentação** (no servidor): a conta a pagar da medição do empreiteiro ou da nota do locador não
+  é paga, aprovada, baixada nem entra em remessa com documento da empresa vencido ou faltando, obrigação do mês não aprovada,
+  trabalhador do período não liberado ou nota do locador sem conciliação. Contas a pagar mostra "Bloqueado por documentação" e
+  o que falta. Só o **Administrador** libera, com justificativa (fica na auditoria `TERC_PAGAMENTO_LIBERADO` e na conta).
+- **Link do terceiro** (`/terceiro/<token>`, sem senha e sem acesso ao sistema): Empresas terceiras › Gerar ou copiar o link
+  (mensagem pronta para WhatsApp ou e-mail). Validade `TERCEIROS_LINK_DIAS` (padrão 30), revogável, limite de tentativas por IP,
+  arquivos PDF/JPG/PNG até `TERCEIROS_ARQ_MB` (padrão 10). Cada envio chega "aguardando conferência" e fica na auditoria
+  (`TERC_LINK_UPLOAD`: link, IP e hora); o RH/SST aprova ou recusa com motivo (o terceiro vê o motivo no link). O terceiro também
+  indica trabalhador novo, que entra no cadastro da SST quando aprovado. O ASO enviado só é aberto por RH, SST e Administrador.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

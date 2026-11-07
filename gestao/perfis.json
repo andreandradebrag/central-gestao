@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-07T11:43:31.112Z",
+ "gerado": "2026-11-07T12:32:49.841Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -31,6 +31,7 @@
     "serv",
     "qual",
     "meu",
+    "ter",
     "ajuda"
    ],
    "frotaTodos": true,
@@ -84,6 +85,7 @@
     "ctb",
     "ctr",
     "meu",
+    "ter",
     "ajuda"
    ],
    "padFn": {
@@ -171,7 +173,8 @@
     "ctr",
     "serv",
     "qual",
-    "fab"
+    "fab",
+    "ter"
    ],
    "r": [
     "nf",
@@ -181,6 +184,11 @@
     "meu",
     "ajuda"
    ],
+   "so": {
+    "ter": [
+     "leq166"
+    ]
+   },
    "telasFora": [
     "v164pendf"
    ],
@@ -207,6 +215,7 @@
     "qual",
     "meu",
     "fab",
+    "ter",
     "ajuda"
    ],
    "valNao": true,
@@ -221,7 +230,8 @@
     "folha",
     "chat",
     "agenda",
-    "empdoc"
+    "empdoc",
+    "ter"
    ],
    "r": [
     "proj",
@@ -232,6 +242,12 @@
     "ajuda"
    ],
    "frotaTodos": true,
+   "so": {
+    "ter": [
+     "ter166",
+     "tdc166"
+    ]
+   },
    "padFn": {
     "proj": {
      "proj": "n",
@@ -396,6 +412,7 @@
     "meu",
     "empdoc",
     "fab",
+    "ter",
     "ajuda"
    ],
    "nome": "Leitura completa"
@@ -405,7 +422,8 @@
     "proj",
     "comp",
     "chat",
-    "agenda"
+    "agenda",
+    "ter"
    ],
    "r": [
     "est",
@@ -422,6 +440,9 @@
     ],
     "comp": [
      "sc"
+    ],
+    "ter": [
+     "leq166"
     ]
    },
    "padFn": {
@@ -524,7 +545,8 @@
     "nf",
     "cad",
     "chat",
-    "agenda"
+    "agenda",
+    "ter"
    ],
    "r": [
     "est",
@@ -590,7 +612,8 @@
     "ferr",
     "sst",
     "chat",
-    "agenda"
+    "agenda",
+    "ter"
    ],
    "r": [
     "proj",
@@ -793,7 +816,8 @@
     "sst",
     "empdoc",
     "chat",
-    "agenda"
+    "agenda",
+    "ter"
    ],
    "r": [
     "proj",
@@ -803,6 +827,12 @@
     "meu",
     "ajuda"
    ],
+   "so": {
+    "ter": [
+     "ter166",
+     "tdc166"
+    ]
+   },
    "papel": "sst",
    "padFn": {
     "proj": {
@@ -856,7 +886,8 @@
     "sst",
     "empdoc",
     "chat",
-    "agenda"
+    "agenda",
+    "ter"
    ],
    "r": [
     "proj",
@@ -885,6 +916,9 @@
      "trein",
      "treinc",
      "tterc"
+    ],
+    "ter": [
+     "tdc166"
     ]
    },
    "papel": "ssttec",
@@ -962,7 +996,8 @@
     "est",
     "cad",
     "chat",
-    "agenda"
+    "agenda",
+    "ter"
    ],
    "r": [
     "proj",
@@ -981,7 +1016,8 @@
     "sst",
     "chat",
     "agenda",
-    "empdoc"
+    "empdoc",
+    "ter"
    ],
    "r": [
     "proj",
@@ -991,6 +1027,12 @@
     "meu",
     "ajuda"
    ],
+   "so": {
+    "ter": [
+     "ter166",
+     "tdc166"
+    ]
+   },
    "padFn": {
     "proj": {
      "proj": "n",
@@ -1287,6 +1329,7 @@
     "chat",
     "agenda",
     "empdoc",
+    "ter",
     "comp"
    ],
    "r": [
@@ -1299,6 +1342,10 @@
    ],
    "frotaTodos": true,
    "so": {
+    "ter": [
+     "ter166",
+     "tdc166"
+    ],
     "comp": [
      "sc"
     ]
@@ -1992,6 +2039,21 @@
   "vfat165": [
    "frota"
   ],
+  "ter166": [
+   "ter"
+  ],
+  "tdc166": [
+   "ter"
+  ],
+  "loc166": [
+   "ter"
+  ],
+  "leq166": [
+   "ter"
+  ],
+  "tnl166": [
+   "ter"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -2504,6 +2566,21 @@
   "vfat165": [
    "frota"
   ],
+  "ter166": [
+   "ter"
+  ],
+  "tdc166": [
+   "ter"
+  ],
+  "loc166": [
+   "ter"
+  ],
+  "leq166": [
+   "ter"
+  ],
+  "tnl166": [
+   "ter"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -2656,6 +2733,10 @@
   [
    "fab",
    "Fábrica: ordens de fabricação e painel de produção"
+  ],
+  [
+   "ter",
+   "Terceiros e locações: empresas terceiras, documentos, trabalhadores e locação de equipamentos"
   ],
   [
    "ajuda",
@@ -3537,6 +3618,24 @@
     "proj",
     "sc",
     "prod"
+   ]
+  },
+  "ter": {
+   "loc166": [
+    "loc166"
+   ],
+   "tdc166": [
+    "tdc166"
+   ],
+   "ter166": [
+    "ter166",
+    "tdc166"
+   ],
+   "leq166": [
+    "leq166"
+   ],
+   "tnl166": [
+    "tnl166"
    ]
   }
  }

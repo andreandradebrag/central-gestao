@@ -776,6 +776,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (!pode(conta, p, 'w') || !perfilPermite(conta, p, 'w')) return erro('Seu perfil não aprova este tipo de item.'); /* quem aprova é decidido pela alçada e pelas listas de cada tipo, abaixo */
     if (['lanc', 'ped', 'aprovsol', 'notas'].includes(c) && acaoNeg(conta, 'aprovar')) { auditar(conta, req, 'APROVAR_NEGADO_PERFIL', p, null, null); return erro('Seu perfil não aprova: a ação "Aprovar" está desligada em Sistema › Perfis de acesso. As alçadas de valor continuam na matriz de aprovadores.'); } /* v142 */
     const velho = doc(p); if (!velho) return erro('Item não encontrado.', 404);
+    if (c === 'lanc' && dec !== 'nao') { const e166 = C166.trava(conta, req, Object.assign({}, velho, { id }), 'aprovação'); if (e166) return e166; } /* v166: conta de terceiro bloqueada por documentação não é aprovada */
     const n = JSON.parse(JSON.stringify(velho)), agora = Date.now(), ip = ipDe(req), eu = conta.id, dono = ehDono(conta);
     const ex = b.extra && typeof b.extra === 'object' ? b.extra : {};
     let msg = dec === 'nao' ? 'Recusado.' : 'Aprovado.', parcial = false;
@@ -1112,6 +1113,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (precisaAprovPag(l) && !aprovacaoValida(l)) bloq.push((l.desc || id) + ': aguardando aprovação');
       if (l.notaId) { const n = doc('notas/' + l.notaId); if (n && n.confPend && !confOk(n.confAprov)) bloq.push((l.desc || id) + ': NF ' + (n.numero || 's/n') + ' com divergência aguardando aprovação'); }
       { const ep = empreiteiroPend(l); if (ep) bloq.push((l.desc || id) + ': ' + ep); }
+      { const t6 = C166.travaTxt(Object.assign({}, l, { id })); if (t6) bloq.push((l.desc || id) + ': ' + t6); } /* v166 */
     }
     if (bloq.length) return erro('Remessa recusada pelo servidor: ' + bloq.slice(0, 5).join('; ') + '.', 409);
     Object.assign(novo, { hash: sha256(novo.txt), hashEm: Date.now(), hashPor: conta.id, srvTotal: r2(tot), srvQtd: ids.length, por: conta.id });
@@ -1678,6 +1680,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const PAG_PESQ_CSS = '.ns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.n{width:44px;height:44px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--tx);font-size:16px;cursor:pointer}.n.on{background:var(--acc);color:#fff;border-color:var(--acc)}.esc{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-bottom:12px}.err{color:var(--neg)}';
   async function rotaPublica(p, m, req, res) {
     if (await ACEITE.publica(p, m, req, res)) return true; /* v150: aceite do pedido e verificação do código */
+    if (await C166.publica(p, m, req, res)) return true; /* v166: link do terceiro para enviar documentos */
     const mp = p.match(/^\/pesquisa\/([A-Za-z0-9_-]{32,64})$/), ma = p.match(/^\/api\/pub\/pesquisa\/([A-Za-z0-9_-]{32,64})$/);
     if (!mp && !ma) return false;
     if (mp) { X.html(res, 200, pag('Pesquisa de satisfação', '<style>' + PAG_PESQ_CSS + '</style><div class="card" style="max-width:560px;margin:30px auto"><h1>Pesquisa de satisfação</h1><div id="c"><p class="sub">Carregando…</p></div></div><script>' + PAG_PESQ_JS + '</script>'), { 'x-robots-tag': 'noindex' }); return true; }
@@ -2125,6 +2128,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C162 = require('./iamed162.js')({ fn: () => ({}) }); /* v162: medição importada de PDF (iamed162.js) */
   const C164 = require('./ajuste164.js')({ q, db, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, papelConta, papelDe, cfgEmp, lerJson, json, EMAIL, APP_URL, nomeConta, gravaCol, pode, perfilPermite, gravacaoPermitida, C153: () => C153, pedPend: r => { try { return !!C152.quem('ped', r).pend; } catch (e) { return false; } }, antesGravar: (...a) => antesGravar(...a), depois: (...a) => depois(...a) }); /* v164: SC recebida, lote, entrega do pedido, material na obra, romaneio, devolução, guarda (ajuste164.js) */
   const C165 = require('./ajuste165.js')({ q, db, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, cfgEmp, lerJson, json, APP_URL, DATA: X.DATA, nomeConta, gravaCol, ia: (...a) => X.ia(...a), auditarIa: (...a) => auditarIa(...a), antesGravar: (...a) => antesGravar(...a), depois: (...a) => depois(...a) }); /* v165: frota — reserva, saída, retorno, cidade, condutor autorizado, Sem Parar, recibo, fatura (ajuste165.js + frota165.js) */
+  const C166 = require('./ajuste166.js')({ db, q, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, gravaGrupo, gravaCol, cfgEmp, lerJson, lerCorpo: X.lerCorpo, json, html: X.html, pag, ipDe, SEG, APP_URL, DATA, nomeConta, leModulo: (c, c0) => leModulo(c, c0) }); /* v166: Terceiros e locações — documentos, trabalhadores, locação, bloqueio do pagamento, link do terceiro (ajuste166.js + terc166.js) */
   const C163 = require('./ajuste163.js')({ col, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, cfgEmp, notaTotais: n => P2.notaTotais(n), lerJson, json, gravaCol, C154: () => C154, leSst: c => leModulo(c, 'epi') }); /* v163: manutenção sem contas a pagar, aprovador de compras da obra, entrega de EPI (ajuste163.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
@@ -2166,6 +2170,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'vabas' || c0 === 'vman') { e = C158.antesFrota(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v158: correção com motivo e histórico */
       if (c0 === 'vman' || c0 === 'fman' || c0 === 'lanc' || c0 === 'epi' || c0 === 'epitr') { e = C163.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v163: manutenção sem conta a pagar (custo pela nota), quem entrega EPI, pedido de transferência de EPI só pelas rotas */
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
+      if (C166.COLS.has(c0)) { e = C166.antes(conta, c0, s[1], velho, novo, req); if (e) return e; } /* v166: coleções só pelas rotas; baixa bloqueada por documentação; diário com terceiro não liberado ou equipamento locado fora da obra */
       if (C165.COLS.has(c0)) { e = C165.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v165: escopo da cidade, travas da saída, campos da importação e do recibo, coleções só pelas rotas */
       if (C164.COLS.has(c0)) { e = C164.antes(conta, c0, s[1], velho, novo, req); if (e) return e; } /* v164: campos do aviso na SC, lote, entrega do pedido, romaneio, encerramento da obra, guarda */
       if (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig') { e = C154.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v154: EPI com baixa e higienização só pelas rotas */
@@ -2231,6 +2236,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (s.length === 2 && c0 === 'epitr') { const e = C163.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v163 */
     if (s.length === 2 && C164.COLS.has(c0)) { const e = C164.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v164 */
     if (s.length === 2 && C165.COLS.has(c0)) { const e = C165.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v165 */
+    if (s.length === 2 && C166.COLS.has(c0)) { const e = C166.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v166 */
     if (s.length === 2 && c0 === 'prodfam') { const e = C156.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v156: família só sai sem produtos; Almoxarife não exclui */
     if (s.length === 2) { const e = (c0 === 'sc' ? C158.antesExcluirSc(conta, req, s[1], velho) : null) || C158.antesExcluirFrota(conta, req, c0, s[1], velho); if (e) return e; } /* v158: SC só as próprias; o Administrador de frota não exclui registros da frota */
     if (s.length === 2 && c0 === 'sc') { const e = C157.antesExcluirSc(conta, req, s[1], velho); if (e) return e; } /* v157: o Almoxarife não exclui SC em rascunho (usa Cancelar) */
@@ -2272,6 +2278,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
+    if (await C166.rota(p, m, req, res, conta)) return true; /* v166: /api/ter166/* */
     if (await C165.rota(p, m, req, res, conta)) return true; /* v165: /api/frota165/* */
     if (await C164.rota(p, m, req, res, conta)) return true; /* v164: /api/sc164, /api/lote164, /api/rec164, /api/obra164, /api/gua164 */
     if (await C163.rota(p, m, req, res, conta)) return true; /* v163: /api/epi163/*; quem entrega EPI e CA vencido nas rotas da v154 */

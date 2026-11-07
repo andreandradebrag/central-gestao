@@ -34323,9 +34323,581 @@ A.v165Revogar=d=>{const f=get('func',d.id);if(!f)return;modal({title:'Revogar a 
 {const p0=put;put=function(col,rec){const old=col==='func'&&rec&&rec.id?get('func',rec.id):null;const r=p0.apply(this,arguments);
   try{if(col==='func'&&rec&&rec.status==='desligado'&&(!old||old.status!=='desligado')&&!v165Srv()){const a=(S.vaut165||[]).find(x=>x.funcId===rec.id);if(a&&a.st!=='revogada')p0('vaut165',Object.assign(cl(a),{st:'revogada',motivo:'Desligamento',revPor:'sistema',revEm:v165Agora()}));}}catch(e){}return r;};}
 
+/* ===== v166: Terceiros e locações — empresa terceira (documentos com validade, obrigações do mês), trabalhadores do terceiro
+   (liberado / não liberado por obra), locação de equipamentos com e sem operador (retirada, guarda, devolução, alertas, nota
+   conciliada com o previsto), bloqueio do pagamento por documentação e o link para o terceiro enviar documentos
+   (relatorios/feito_v166.md) =====
+   Regras e contas: V166C (deploy/gestao/terc166.js, o MESMO arquivo do servidor, embutido pelo patch148.py). As ações vão
+   pelas rotas /api/ter166/* (ajuste166.js), que conferem tudo de novo; sem o servidor da empresa (modo local) as telas mostram
+   os dados e avisam que a ação precisa do servidor. Telas (grupo de permissão "ter", menu Terceiros):
+     t166pn   Painel de terceiros e locações
+     t166emp  Empresas terceiras (cadastro ligado ao fornecedor, documentos, obrigações do mês, trabalhadores, link)
+     t166doc  Conferência de documentos (RH e SST aprovam ou recusam com motivo)
+     t166loc  Locações de equipamentos (contrato, equipamentos, retirada, guarda, devolução, conciliação da nota)
+   Também: Contas a pagar mostra "Bloqueado por documentação" (e a liberação do Administrador); o diário de obra só aceita o
+   equipamento locado que está na obra (horas); a SST › Trabalhadores terceiros ganha registro, CNH do operador e a liberação.
+   Prefixos v166*, V166*. */
+/* terc166.js (deploy/gestao): as mesmas regras e contas do servidor */
+const V166C=(function(){const module={exports:{}};
+'use strict';
+/* v166 (relatorios/feito_v166.md): núcleo de "Terceiros e locações" — o MESMO arquivo roda no servidor (ajuste166.js) e vai
+   embutido no navegador (patch148.py → V166C). Só contas e regras, sem banco: quem chama monta o contexto X
+   { cfg (cfg/empresa), ter, tdc, tdoc, tterc, ctremp, medemp, loc, leq, rdo, notas, tnl, integ, proj, parc, hoje }.
+   1. Empresa terceira (ter166, id = fornecedor do cadastro): documentos da empresa com tipo, arquivo, emissão e validade
+      (tdc166 escopo 'emp'); certidões antigas do checklist mensal (tdoc) valem como aprovadas até a validade.
+   2. Obrigações do mês por contrato (tdc166 escopo 'mes'): folha, FGTS, INSS (DCTFWeb/eSocial), holerites e ponto;
+      situação entregue / aprovado / pendente / recusado. Folha e guias marcadas no tdoc antigo valem como aprovadas.
+   3. Trabalhadores do terceiro (tterc + tdc166 escopo 'trab'): ASO, NRs da função (configurável), registro (CTPS/eSocial),
+      CNH do operador, integração e ficha de EPI; "liberado" ou "não liberado" por obra (integração do cliente da obra).
+   4. Locação de equipamentos (loc166 contrato, leq166 equipamento): valor previsto (dias × diária/semana/mês, o mais barato
+      que cobre o período, + horas acima da franquia) e os alertas (fim do período e atraso).
+   5. Pagamento: bloqueio(X, lanc) diz se a conta a pagar de um terceiro sob contrato está "Bloqueada por documentação" e o
+      que falta exatamente (documento da empresa vencido, obrigação do mês não aprovada, trabalhador não liberado). */
+
+const DOC_EMP = [ /* [chave, nome, tem validade, exigido por padrão, nome na lista de certidões (links oficiais)] */
+  ['contrato', 'Contrato social (última alteração)', false, true, ''],
+  ['cnpj', 'Cartão CNPJ', false, true, 'Cartão CNPJ'],
+  ['cnd', 'CND federal (Receita/PGFN)', true, true, 'CND federal (Receita/PGFN)'],
+  ['crf', 'CRF do FGTS', true, true, 'CRF do FGTS'],
+  ['cndt', 'CNDT (débitos trabalhistas)', true, true, 'CNDT (débitos trabalhistas)'],
+  ['estadual', 'Certidão estadual', true, true, 'Certidão estadual'],
+  ['municipal', 'Certidão municipal', true, true, ''],
+  ['falencia', 'Certidão de falência e recuperação judicial', true, false, 'Certidão de falência e recuperação judicial'],
+  ['seguro', 'Apólice de seguro', true, false, ''],
+  ['alvara', 'Alvará de funcionamento', true, false, ''],
+  ['outro', 'Outro documento', true, false, '']];
+const OBRIG = [['folha', 'Folha de pagamento do mês'], ['fgts', 'Guia e comprovante do FGTS (FGTS Digital)'], ['inss', 'Guia e comprovante do INSS (DCTFWeb/eSocial)'], ['holerites', 'Holerites dos trabalhadores da obra'], ['ponto', 'Ponto dos trabalhadores da obra']];
+const DOC_TRAB = [['registro', 'Registro (CTPS digital ou eSocial)', false], ['aso', 'ASO', true], ['nr', 'Certificado de NR', true], ['cnh', 'CNH (operador)', true], ['integ', 'Integração de SST', true], ['epi', 'Ficha de EPI', true]];
+const ST_DOC = { aguardando: ['Aguardando conferência', 'warn'], aprovado: ['Aprovado', 'pos'], recusado: ['Recusado', 'neg'], pendente: ['Pendente', 'neg'], entregue: ['Entregue', 'warn'] };
+const LOC_ST = { aguardando: ['Aguardando retirada', ''], retirado: ['Na obra', 'acc'], devolvido: ['Devolvido', 'pos'] };
+const VIST_PAD = ['Estrutura e lataria', 'Pneus ou esteiras', 'Vazamentos (óleo, combustível)', 'Comandos e painel', 'Iluminação e alarme de ré', 'Acessórios e manual', 'Limpeza'];
+const NR_FUNC_PAD = [{ f: '*', nrs: ['NR-18'] }, { f: 'operador', nrs: ['NR-11', 'NR-12'] }, { f: 'montador', nrs: ['NR-35'] }, { f: 'eletric', nrs: ['NR-10'] }];
+
+const s = v => String(v == null ? '' : v).trim();
+const num = v => { if (typeof v === 'number') return isFinite(v) ? v : 0; const t = s(v).replace(/\s/g, ''); if (!t) return 0; const x = /,\d{1,4}$/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : +t.replace(/,/g, ''); return isFinite(x) ? x : 0; };
+const r2 = v => Math.round((+v || 0) * 100) / 100;
+const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(s(d));
+const ym = d => /^\d{4}-\d{2}/.test(s(d)) ? s(d).slice(0, 7) : '';
+const maisDias = (d, n) => { const x = new Date(s(d).slice(0, 10) + 'T12:00:00Z'); if (isNaN(x)) return ''; x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const dias = (a, b) => Math.round((Date.parse(s(b).slice(0, 10) + 'T12:00:00Z') - Date.parse(s(a).slice(0, 10) + 'T12:00:00Z')) / 864e5);
+const maisMeses = (m, n) => { const p = s(m).split('-').map(Number); if (!p[0] || !p[1]) return ''; const i = p[0] * 12 + (p[1] - 1) + n; return Math.floor(i / 12) + '-' + String(i % 12 + 1).padStart(2, '0'); };
+const br = d => dataOk(s(d).slice(0, 10)) ? s(d).slice(8, 10) + '/' + s(d).slice(5, 7) + '/' + s(d).slice(0, 4) : '';
+const brYm = m => /^\d{4}-\d{2}$/.test(s(m)) ? s(m).slice(5, 7) + '/' + s(m).slice(0, 4) : '';
+const norm = v => s(v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const digitos = v => s(v).replace(/\D/g, '');
+/* LGPD: o CPF aparece sempre mascarado (só os 3 dígitos do meio e os 2 do fim) */
+const mascCpf = v => { const d = digitos(v); return d.length === 11 ? '***.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-' + d.slice(9) : d ? '***' : ''; };
+const uniq = a => [...new Set(a.filter(Boolean))];
+/* a chave do cadastro antigo (SST › Trabalhadores terceiros) tem dois dígitos: NR-06 → nr_06, NR-35 → nr_35 */
+const nrKey = t => { const m = s(t).match(/^NR\s*-?\s*(\d{1,2})/i); return m ? 'nr_' + String(+m[1]).padStart(2, '0') : 'nr_' + s(t); };
+const nrCurto = t => { const m = s(t).match(/^NR\s*-?\s*(\d{1,2})/i); return m ? 'NR-' + String(+m[1]).padStart(2, '0') : s(t); };
+
+function cfgPad(c) {
+  c = c && typeof c === 'object' ? c : {};
+  const ex = {}; DOC_EMP.forEach(d => { ex[d[0]] = c.exigEmp && typeof c.exigEmp[d[0]] === 'boolean' ? c.exigEmp[d[0]] : d[3]; }); ex.outro = false;
+  const ob = {}; OBRIG.forEach(o => { ob[o[0]] = !(c.obrigExig && c.obrigExig[o[0]] === false); });
+  const nf = Array.isArray(c.nrFunc) && c.nrFunc.length ? c.nrFunc.filter(x => x && s(x.f) && Array.isArray(x.nrs)).map(x => ({ f: s(x.f).slice(0, 60), nrs: uniq(x.nrs.map(n => nrCurto(s(n).toUpperCase()))).slice(0, 12) })) : NR_FUNC_PAD;
+  const av = (Array.isArray(c.avisoDias) ? c.avisoDias : [30, 15, 0]).map(n => Math.round(+n)).filter(n => n >= 0 && n <= 120);
+  return {
+    avisoDias: uniq(av.length ? av : [30, 15, 0]).sort((a, b) => b - a), locAviso: Math.min(30, Math.max(0, Math.round(c.locAviso == null || c.locAviso === '' ? 3 : +c.locAviso || 0))),
+    defas: Math.min(3, Math.max(0, Math.round(c.defas == null || c.defas === '' ? 1 : +c.defas || 0))), tolPct: Math.min(50, Math.max(0, c.tolPct == null || c.tolPct === '' ? 2 : +c.tolPct || 0)),
+    exigeRegistro: c.exigeRegistro !== false, bloqDiario: c.bloqDiario !== false, locSemOpDocs: c.locSemOpDocs !== false, exigeTrab: c.exigeTrab !== false,
+    operador: s(c.operador) || 'operador|motorista|munck|guindast|retro|escavad|empilhad', exigEmp: ex, obrigExig: ob, nrFunc: nf,
+    vist: Array.isArray(c.vist) && c.vist.length ? c.vist.map(x => s(x).slice(0, 60)).filter(Boolean).slice(0, 30) : VIST_PAD.slice()
+  };
+}
+const C6 = X => cfgPad((X.cfg || {}).ter166);
+const nomeDoc = k => (DOC_EMP.find(d => d[0] === k) || [k, k])[1];
+const nomeObrig = k => (OBRIG.find(d => d[0] === k) || [k, k])[1];
+const nomeTrab = (k, nr) => k === 'nr' ? 'Certificado ' + (nrCurto(nr) || 'de NR') : (DOC_TRAB.find(d => d[0] === k) || [k, k])[1];
+const temVal = k => { const d = DOC_EMP.find(x => x[0] === k); return d ? d[2] : true; };
+/* o documento mais recente que serve (enviado por último) */
+const maisNovo = L => L.slice().sort((a, b) => (+b.enviadoEm || 0) - (+a.enviadoEm || 0) || s(b.id).localeCompare(s(a.id)))[0] || null;
+
+/* =================================================================== 1. documentos da empresa */
+function exigidos(X, parcId) {
+  const c = C6(X), t = (X.ter || []).find(x => x.id === parcId || x.parcId === parcId) || {}, ex = Object.assign({}, c.exigEmp);
+  if (t.exig && typeof t.exig === 'object') Object.keys(t.exig).forEach(k => { if (k !== 'outro' && typeof t.exig[k] === 'boolean' && k in ex) ex[k] = t.exig[k]; });
+  return ex;
+}
+const TD_LEGADO = { cnd: 'cnd', crf: 'crf', cndt: 'cndt' };
+function empDoc(X, parcId, k) {
+  const hoje = X.hoje, L = (X.tdc || []).filter(d => d.parcId === parcId && d.escopo === 'emp' && d.tipo === k && d.st !== 'cancelado');
+  let ap = maisNovo(L.filter(d => d.st === 'aprovado')), ult = maisNovo(L);
+  if (TD_LEGADO[k]) { /* certidão marcada no checklist mensal antigo (tdoc) */
+    for (const t of (X.tdoc || [])) { const it = t && t.parcId === parcId && t.itens && t.itens[TD_LEGADO[k]]; if (it && it.ok && dataOk(it.val) && (!ap || s(it.val) > s(ap.validade))) ap = { id: 'tdoc_' + t.id, tipo: k, st: 'aprovado', validade: it.val, legado: true, arqs: it.arqs || [] }; }
+  }
+  const tv = temVal(k), valido = !!ap && (!tv || (dataOk(ap.validade) && ap.validade >= hoje));
+  const d = ap && dataOk(ap.validade) ? dias(hoje, ap.validade) : null;
+  let st = valido ? (d != null && d <= 30 ? 'vence' : 'ok') : ap ? 'vencido' : 'falta';
+  const pend = ult && ult.st !== 'aprovado' && (!ap || (+ult.enviadoEm || 0) >= (+ap.enviadoEm || 0)) ? ult : null;
+  return { k, nome: nomeDoc(k), ap, ult, pend, valido, st, validade: ap ? ap.validade || '' : '', dias: d };
+}
+function empDocs(X, parcId) { const ex = exigidos(X, parcId); return DOC_EMP.map(d => Object.assign(empDoc(X, parcId, d[0]), { exig: !!ex[d[0]] })); }
+function empFaltas(X, parcId) {
+  const out = [];
+  for (const d of empDocs(X, parcId)) {
+    if (!d.exig || d.valido) continue;
+    const ag = d.pend && d.pend.st === 'aguardando' ? ' (enviado, aguardando conferência)' : d.pend && d.pend.st === 'recusado' ? ' (recusado: ' + s(d.pend.motivo).slice(0, 80) + ')' : '';
+    out.push(d.ap ? d.nome + ' vencida em ' + br(d.ap.validade) + ag : d.nome + ' não entregue' + ag);
+  }
+  return out;
+}
+
+/* =================================================================== 2. obrigações do mês (por contrato) */
+const ctrDe = (X, col, id) => col === 'loc166' ? (X.loc || []).find(x => x.id === id) : (X.ctremp || []).find(x => x.id === id);
+const TD_MES = { folha: 'folha', fgts: 'gfgts', inss: 'gdctf' };
+function mesItens(X, ctrCol, ctrId, parcId, mes) {
+  const c = C6(X), L = (X.tdc || []).filter(d => d.escopo === 'mes' && d.ctrId === ctrId && (d.ctrCol || 'ctremp') === ctrCol && d.mes === mes && d.st !== 'cancelado');
+  const td = (X.tdoc || []).find(t => t.id === 'td_' + parcId + '_' + mes);
+  return OBRIG.map(([k, nome]) => {
+    const ds = L.filter(d => d.tipo === k), ap = maisNovo(ds.filter(d => d.st === 'aprovado')), ult = maisNovo(ds);
+    let st = ap ? 'aprovado' : ult ? (ult.st === 'aguardando' ? 'entregue' : ult.st) : 'pendente';
+    if (st !== 'aprovado' && TD_MES[k] && td && td.itens && td.itens[TD_MES[k]] && td.itens[TD_MES[k]].ok) st = 'aprovado';
+    return { k, nome, exig: c.obrigExig[k] !== false, st, doc: ult, ap, motivo: ult && ult.st === 'recusado' ? s(ult.motivo) : '' };
+  });
+}
+function mesFaltas(X, ctrCol, ctrId, parcId, mes, temTrab) {
+  return mesItens(X, ctrCol, ctrId, parcId, mes).filter(i => i.exig && i.st !== 'aprovado' && (temTrab || !['holerites', 'ponto'].includes(i.k)))
+    .map(i => i.nome + ' de ' + brYm(mes) + ': ' + (i.st === 'pendente' ? 'não entregue' : i.st === 'entregue' ? 'aguardando conferência' : 'recusado' + (i.motivo ? ' (' + i.motivo.slice(0, 80) + ')' : '')));
+}
+
+/* =================================================================== 3. trabalhadores */
+function nrsDaFuncao(c, funcao) {
+  const f = norm(funcao), out = [];
+  for (const r of c.nrFunc) { const k = norm(r.f); if (k === '*' || (k && f.includes(k))) out.push(...r.nrs); }
+  return uniq(out);
+}
+const ehOperador = (c, funcao) => { try { return new RegExp(c.operador, 'i').test(norm(funcao)); } catch (e) { return /operador/.test(norm(funcao)); } };
+/* pendências do trabalhador (as mensagens do ASO, integração, EPI e NRs são as mesmas da tela antiga de SST) */
+function trabPend(cfgEmp, t, hoje, extra) {
+  const out = []; if (!t) return out; const c = cfgPad((cfgEmp || {}).ter166);
+  if (!t.asoVal) out.push('sem ASO'); else if (t.asoVal < hoje) out.push('ASO vencido');
+  if (!t.integVal) out.push('sem integração'); else if (t.integVal < hoje) out.push('integração vencida');
+  if (!t.epiVal) out.push('sem ficha de EPI'); else if (t.epiVal < hoje) out.push('EPI vencido');
+  const mat = ((cfgEmp || {}).matrizTrein || {})[t.funcao || ''] || [];
+  const req = uniq(mat.concat(extra || []).concat(nrsDaFuncao(c, t.funcao)));
+  const reqK = new Set(req.map(nrKey));
+  const visto = new Set();
+  req.forEach(nr => { const k = nrKey(nr); if (visto.has(k)) return; visto.add(k); const v = t[k]; if (!v) out.push(nrCurto(nr) + ' falta'); else if (v < hoje) out.push(nrCurto(nr) + ' vencido'); });
+  Object.keys(t).filter(k => /^nr_\d+$/.test(k) && !reqK.has(k)).sort().forEach(k => { const v = t[k]; if (v && dataOk(v) && v < hoje) out.push('NR-' + k.slice(3) + ' vencido'); });
+  if (c.exigeRegistro && !s(t.registro166)) out.push('sem registro (CTPS digital ou eSocial)');
+  if (ehOperador(c, t.funcao)) { if (!s(t.cnhCat166) || !t.cnhVal166) out.push('sem CNH (operador)'); else if (t.cnhVal166 < hoje) out.push('CNH vencida'); }
+  return out;
+}
+/* integração do cliente da obra: se a obra (ou o cliente) tem integração externa registrada, o trabalhador precisa estar nela */
+function integObra(X, t, projId) {
+  if (!projId) return '';
+  const p = (X.proj || []).find(x => x.id === projId), ex = (X.integ || []).filter(i => i && i.tipo === 'externa' && ((p && p.parcId && i.parcId === p.parcId) || i.projId === projId));
+  if (!ex.length) return '';
+  const meu = ex.filter(i => i.tercId === t.id || (Array.isArray(i.tercIds) && i.tercIds.includes(t.id))).sort((a, b) => s(b.validade || '9999').localeCompare(s(a.validade || '9999')))[0];
+  if (!meu) return 'sem integração do cliente da obra'; if (meu.validade && meu.validade < X.hoje) return 'integração do cliente vencida'; return '';
+}
+function trabStatus(X, t, projId) {
+  if (!t) return { lib: false, motivos: ['trabalhador não cadastrado'] };
+  const m = trabPend(X.cfg, t, X.hoje);
+  if (t.ativo === false) m.unshift('inativo');
+  if (projId && t.projId && t.projId !== projId) m.push('ligado a outra obra');
+  const io = integObra(X, t, projId); if (io) m.push(io);
+  return { lib: !m.length, motivos: uniq(m) };
+}
+const tercsDe = (X, parcId) => (X.tterc || []).filter(t => t.parcId === parcId);
+/* trabalhadores do contrato no período: os ativos do cadastro (da obra ou de todas as obras) e os que estiveram no diário da obra no mês */
+function trabsPeriodo(X, alvo) {
+  const ids = new Set(), out = [];
+  const add = t => { if (t && !ids.has(t.id)) { ids.add(t.id); out.push(t); } };
+  if (alvo.tipo === 'loccom') { const lc = (X.loc || []).find(x => x.id === alvo.ctrId); (lc && Array.isArray(lc.operadores) ? lc.operadores : []).forEach(id => add((X.tterc || []).find(t => t.id === id))); }
+  else if (alvo.tipo === 'serv') tercsDe(X, alvo.parcId).filter(t => t.ativo !== false && (!t.projId || !alvo.projId || t.projId === alvo.projId)).forEach(add);
+  if (alvo.mes && alvo.projId && alvo.tipo !== 'locsem') for (const r of (X.rdo || [])) {
+    if (r.projId !== alvo.projId || ym(r.data) !== alvo.mes) continue;
+    (Array.isArray(r.efetivo) ? r.efetivo : []).forEach(x => { if (x && x.tercId) { const t = (X.tterc || []).find(w => w.id === x.tercId); if (t && t.parcId === alvo.parcId) add(t); } });
+  }
+  return out;
+}
+
+/* =================================================================== 4. locação */
+/* o menor custo que cobre n dias com diária, semana (7) e mês (30): pode sair mais barato fechar uma semana para 5 dias */
+function custoDias(n, eq) {
+  n = Math.max(0, Math.round(n)); if (!n) return 0;
+  const T = [[1, num(eq.vDia)], [7, num(eq.vSem)], [30, num(eq.vMes)]].filter(x => x[1] > 0); if (!T.length) return 0;
+  const c = [0]; for (let i = 1; i <= n; i++) { let b = Infinity; for (const [l, v] of T) b = Math.min(b, c[Math.max(0, i - l)] + v); c[i] = b; }
+  return r2(c[n]);
+}
+const inicioEq = eq => (eq.ret && dataOk(eq.ret.data) ? eq.ret.data : '') || s(eq.ini);
+const fimEq = (eq, hoje) => eq.st === 'devolvido' && eq.dev && dataOk(eq.dev.data) ? eq.dev.data : hoje;
+/* horas de uso: as do diário de obra (equipamento locado escolhido na linha) ou, sem diário, a diferença do horímetro */
+function horasEq(X, eq, de, ate) {
+  let h = 0, tem = false;
+  const obras = new Set([eq.projId].concat((eq.guardaHist || []).flatMap(g => g ? [g.de && g.de.projId, g.para && g.para.projId] : [])).filter(Boolean)); /* transferido entre obras: vale o diário de cada uma */
+  for (const r of (X.rdo || [])) { if (r.projId && obras.size && !obras.has(r.projId)) continue; if (de && r.data < de) continue; if (ate && r.data > ate) continue;
+    (Array.isArray(r.equip) ? r.equip : []).forEach(x => { if (x && x.leqId === eq.id) { h += num(x.horas); tem = true; } }); }
+  if (!tem && eq.ret && eq.dev && num(eq.dev.hor) > num(eq.ret.hor)) { h = num(eq.dev.hor) - num(eq.ret.hor); }
+  return Math.round(h * 10) / 10;
+}
+function previsto(X, eq, de, ate) {
+  const ini = inicioEq(eq); if (!dataOk(ini)) return { dias: 0, aluguel: 0, horas: 0, franquia: 0, excedentes: 0, valorExc: 0, total: 0, de: '', ate: '' };
+  const a = dataOk(de) && de > ini ? de : ini, f0 = fimEq(eq, X.hoje), b = dataOk(ate) && ate < f0 ? ate : f0;
+  const n = b >= a ? dias(a, b) + 1 : 0, alug = custoDias(n, eq), h = horasEq(X, eq, a, b);
+  const fr = Math.round(num(eq.franqH) * n / 30 * 10) / 10, ex = Math.max(0, Math.round((h - fr) * 10) / 10), vx = r2(ex * num(eq.vHoraExc));
+  return { dias: n, aluguel: alug, horas: h, franquia: fr, excedentes: ex, valorExc: vx, total: r2(alug + vx), de: a, ate: b };
+}
+function eqAlerta(X, eq) {
+  if (eq.st !== 'retirado' || !dataOk(eq.fim)) return null;
+  const d = dias(X.hoje, eq.fim), c = C6(X);
+  if (d < 0) return { k: 'atraso', dias: -d, txt: 'Devolução atrasada há ' + (-d) + ' dia(s) (fim do período em ' + br(eq.fim) + '): cada dia a mais é cobrado.' };
+  if (d <= c.locAviso) return { k: 'fim', dias: d, txt: d === 0 ? 'O período termina hoje: devolva ou renove para não pagar dias a mais.' : 'O período termina em ' + d + ' dia(s) (' + br(eq.fim) + '): devolva ou renove.' };
+  return null;
+}
+const locTipo = (X, eq) => { const l = (X.loc || []).find(x => x.id === eq.locId); return l && l.tipo === 'com' ? 'loccom' : 'locsem'; };
+
+/* =================================================================== 5. bloqueio do pagamento */
+function notaValor(n) { if (!n) return 0; if (n.total != null && num(n.total) > 0) return r2(num(n.total)); const it = Array.isArray(n.itens) ? n.itens : []; return r2(it.reduce((t, i) => t + num(i.qtd) * num(i.vUnit), 0) + num(n.frete) + num(n.outras) + num(n.ipi) - num(n.desconto)); }
+function eqsDaNota(X, notaId) { return (X.leq || []).filter(e => Array.isArray(e.notas166) && e.notas166.some(x => x && x.notaId === notaId)); }
+/* de que contrato de terceiro é esta conta a pagar (medição de empreiteiro, contrato ou nota do locador) */
+function alvoDoLanc(X, l) {
+  if (!l || l.tipo !== 'pagar' || l.status === 'cancelado') return null;
+  if (l.retPendDe && l.retLib && l.retLib.modo === 'compensar') return null; /* retido usado para quitar a guia/folha do terceiro: o dinheiro não vai ao terceiro */
+  const medId = s(l.medempId || l.retPendDe), ctrId = s(l.ctrempId);
+  if (medId || ctrId) {
+    const m = medId ? (X.medemp || []).find(x => x.id === medId) : null, c = (X.ctremp || []).find(x => x.id === (m && m.ctrId ? m.ctrId : ctrId));
+    if (!c || !c.parcId) return null;
+    return { tipo: 'serv', parcId: c.parcId, ctrCol: 'ctremp', ctrId: c.id, projId: s(c.projId || (m && m.projId)), mes: ym((m && (m.fim || m.ini || m.data)) || l.comp || l.venc), ref: m ? 'Medição nº ' + s(m.numero) : 'Contrato ' + s(c.numero) };
+  }
+  if (l.notaId) {
+    const n = (X.notas || []).find(x => x.id === l.notaId); if (!n) return null;
+    const es = eqsDaNota(X, n.id), mes = ym(n.emissao || n.data || l.venc);
+    if (es.length) { const e = es[0], lc = (X.loc || []).find(x => x.id === e.locId); return { tipo: locTipo(X, e), parcId: s(e.parcId || (lc && lc.parcId) || n.parcId), ctrCol: 'loc166', ctrId: s(e.locId), projId: s(e.projId), mes, eqIds: es.map(x => x.id), notaId: n.id, ref: 'Nota nº ' + s(n.numero) + ' da locação ' + s(lc && lc.numero) }; }
+    if ((X.tnl || []).some(x => x.id === n.id)) return null; /* marcada como "não é da locação" por quem concilia */
+    const lcs = (X.loc || []).filter(x => x.parcId === n.parcId && x.st !== 'encerrado' && x.st !== 'cancelado');
+    if (lcs.length) return { tipo: 'locnc', parcId: s(n.parcId), ctrCol: 'loc166', ctrId: lcs[0].id, projId: s(lcs[0].projId), mes, notaId: n.id, ref: 'Nota nº ' + s(n.numero) };
+  }
+  return null;
+}
+function faltasAlvo(X, alvo) {
+  const c = C6(X), out = [];
+  if (alvo.tipo === 'locnc') out.push('Nota do locador ainda não conciliada com a locação, o equipamento e a obra (Terceiros e locações › Locações › Conciliar nota)');
+  if (alvo.tipo !== 'locsem' && alvo.tipo !== 'locnc' || c.locSemOpDocs) empFaltas(X, alvo.parcId).forEach(f => out.push('Empresa: ' + f));
+  if (alvo.tipo === 'serv' || alvo.tipo === 'loccom') {
+    const ts = trabsPeriodo(X, alvo), mesRef = alvo.mes ? maisMeses(alvo.mes, -c.defas) : '';
+    if (mesRef) mesFaltas(X, alvo.ctrCol, alvo.ctrId, alvo.parcId, mesRef, ts.length > 0).forEach(f => out.push('Obrigação do mês: ' + f));
+    if (!ts.length && alvo.tipo === 'serv' && c.exigeTrab && (((X.cfg || {}).rhx || {}).tdExigeTrab !== false)) out.push('Nenhum trabalhador do terceiro cadastrado para a obra');
+    if (!ts.length && alvo.tipo === 'loccom') out.push('Locação com operador sem operador cadastrado');
+    ts.forEach(t => { const st = trabStatus(X, t, alvo.projId); if (!st.lib) out.push('Trabalhador ' + s(t.nome) + (t.cpf ? ' (' + mascCpf(t.cpf) + ')' : '') + ' não liberado: ' + st.motivos.join(', ')); });
+  }
+  return out;
+}
+function bloqueio(X, l) {
+  const alvo = alvoDoLanc(X, l); if (!alvo) return { sob: false, bloq: false, faltas: [] };
+  const faltas = faltasAlvo(X, alvo), lib = l.lib166 && l.lib166.srv ? l.lib166 : null;
+  return { sob: true, alvo, faltas, bloq: faltas.length > 0 && !lib, lib };
+}
+
+/* =================================================================== 6. painel */
+function painel(X, mesRef) {
+  const c = C6(X), hoje = X.hoje, mes = mesRef || maisMeses(ym(hoje), -c.defas), lim = Math.max(30, ...c.avisoDias);
+  const docsVenc = [];
+  const parcs = uniq((X.ter || []).filter(t => t.ativo !== false).map(t => t.parcId || t.id).concat((X.ctremp || []).filter(x => x.status === 'vigente').map(x => x.parcId)).concat((X.loc || []).filter(x => x.st !== 'encerrado').map(x => x.parcId)));
+  for (const p of parcs) for (const d of empDocs(X, p)) { if (!d.exig) continue; if (!d.valido || (d.dias != null && d.dias <= lim)) docsVenc.push({ parcId: p, k: d.k, nome: d.nome, validade: d.validade, dias: d.dias, st: d.st }); }
+  for (const t of (X.tterc || [])) { if (t.ativo === false) continue; [['asoVal', 'ASO'], ['integVal', 'Integração'], ['epiVal', 'Ficha de EPI'], ['cnhVal166', 'CNH']].concat(Object.keys(t).filter(k => /^nr_\d+$/.test(k)).map(k => [k, 'NR-' + k.slice(3)])).forEach(([k, n]) => { const v = t[k]; if (dataOk(v) && dias(hoje, v) <= lim) docsVenc.push({ parcId: t.parcId, tercId: t.id, nomeT: t.nome, nome: n, validade: v, dias: dias(hoje, v), st: v < hoje ? 'vencido' : 'vence' }); }); }
+  docsVenc.sort((a, b) => (a.dias == null ? -1e9 : a.dias) - (b.dias == null ? -1e9 : b.dias));
+  const porObra = {}, devPrev = [], devAtr = [];
+  for (const e of (X.leq || [])) {
+    if (e.st === 'retirado') { const pv = previsto(X, e, '', hoje), o = porObra[e.projId || ''] = porObra[e.projId || ''] || { projId: e.projId || '', eqs: [], custo: 0 }; o.eqs.push({ id: e.id, desc: e.desc, tipo: e.tipo, parcId: e.parcId, dias: pv.dias, custo: pv.total, fim: e.fim }); o.custo = r2(o.custo + pv.total); }
+    const a = eqAlerta(X, e); if (a && a.k === 'atraso') devAtr.push({ id: e.id, desc: e.desc, projId: e.projId, parcId: e.parcId, fim: e.fim, dias: a.dias });
+    else if (e.st === 'retirado' && dataOk(e.fim) && dias(hoje, e.fim) <= 7) devPrev.push({ id: e.id, desc: e.desc, projId: e.projId, parcId: e.parcId, fim: e.fim, dias: dias(hoje, e.fim) });
+  }
+  const naoLib = [];
+  for (const t of (X.tterc || [])) { if (t.ativo === false) continue; const st = trabStatus(X, t, t.projId || ''); if (!st.lib) naoLib.push({ id: t.id, nome: t.nome, cpf: mascCpf(t.cpf), funcao: t.funcao || '', parcId: t.parcId, projId: t.projId || '', motivos: st.motivos }); }
+  const obrPend = [];
+  const ctrs = (X.ctremp || []).filter(x => x.status === 'vigente' && x.parcId).map(x => ({ col: 'ctremp', id: x.id, parcId: x.parcId, projId: x.projId || '', nome: 'Contrato ' + s(x.numero), tipo: 'serv' }))
+    .concat((X.loc || []).filter(x => x.tipo === 'com' && x.st !== 'encerrado').map(x => ({ col: 'loc166', id: x.id, parcId: x.parcId, projId: x.projId || '', nome: 'Locação ' + s(x.numero), tipo: 'loccom' })));
+  for (const k of ctrs) { const ts = trabsPeriodo(X, { tipo: k.tipo, parcId: k.parcId, ctrId: k.id, projId: k.projId, mes }); const it = mesItens(X, k.col, k.id, k.parcId, mes).filter(i => i.exig && i.st !== 'aprovado' && (ts.length || !['holerites', 'ponto'].includes(i.k))); if (it.length) obrPend.push({ ctrCol: k.col, ctrId: k.id, parcId: k.parcId, projId: k.projId, nome: k.nome, mes, itens: it.map(i => ({ k: i.k, nome: i.nome, st: i.st, motivo: i.motivo })) }); }
+  const bloq = [];
+  for (const l of (X.lanc || [])) { if (l.tipo !== 'pagar' || l.pago || l.status === 'cancelado') continue; const b = bloqueio(X, l); if (b.sob && (b.bloq || b.lib)) bloq.push({ id: l.id, desc: l.desc, valor: +l.valor || 0, venc: l.venc, parcId: b.alvo.parcId, ref: b.alvo.ref, faltas: b.faltas, lib: !!b.lib }); }
+  const aguard = (X.tdc || []).filter(d => d.st === 'aguardando').length;
+  return { mes, docsVenc, porObra: Object.values(porObra), devPrev: devPrev.sort((a, b) => a.dias - b.dias), devAtr: devAtr.sort((a, b) => b.dias - a.dias), naoLib, obrPend, bloq, aguard };
+}
+
+module.exports = { DOC_EMP, OBRIG, DOC_TRAB, ST_DOC, LOC_ST, VIST_PAD, NR_FUNC_PAD, cfgPad, C6, s, num, r2, br, brYm, ym, dias, maisDias, maisMeses, dataOk, norm, mascCpf, uniq, nrKey, nrCurto,
+  nomeDoc, nomeObrig, nomeTrab, temVal, exigidos, empDoc, empDocs, empFaltas, mesItens, mesFaltas, nrsDaFuncao, ehOperador, trabPend, integObra, trabStatus, tercsDe, trabsPeriodo,
+  custoDias, previsto, horasEq, eqAlerta, locTipo, notaValor, eqsDaNota, alvoDoLanc, faltasAlvo, bloqueio, painel, ctrDe, maisNovo };
+
+return module.exports;})();
+const V166={lst:null,lstEm:0,lstCar:0,emp:{},empCar:{},pn:null,pnEm:0,pnCar:0,bl:null,blEm:0,blCar:0,links:{},f:null,prev:null};
+const v166Srv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV();
+const v166Adm=()=>store.mode!=='db'||me.owner||!!(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+/* papéis pela coleção que o perfil grava no módulo "ter" (o mesmo do servidor; Sistema › Perfis de acesso ajusta):
+   loc166 Compras/suprimentos, leq166 guarda na obra, ter166 cadastro e link, tdc166 documentos (+ RH/SST para aprovar) */
+const v166Def=()=>(typeof p2Def==='function'&&p2Def(me.perfil))||PERFIS[me.perfil]||null;
+const v166WC=c=>{if(v166Adm())return true;if(!mayW('ter'))return false;const p=v166Def();return !(p&&p.so&&Array.isArray(p.so.ter)&&!p.so.ter.includes(c));};
+const v166Ter=()=>v166Adm()||mayW('ter');
+const v166Comp=()=>v166WC('loc166');
+const v166Cad=()=>v166WC('ter166');
+const v166Reg=()=>v166WC('tdc166');
+const v166Docs=()=>v166Adm()||(v166WC('tdc166')&&(mayW('rh')||mayW('sst')||mayW('empdoc')));
+const v166Obra=()=>v166WC('leq166');
+const v166Cfg=()=>V166C.cfgPad((cfg()||{}).ter166);
+function v166X(){return {cfg:cfg()||{},hoje:todayStr(),ter:S.ter166||[],tdc:S.tdc166||[],tdoc:S.tdoc||[],tterc:S.tterc||[],ctremp:S.ctremp||[],medemp:S.medemp||[],loc:S.loc166||[],leq:S.leq166||[],rdo:S.rdo||[],notas:S.notas||[],tnl:S.tnl166||[],integ:S.integ||[],proj:S.proj||[],lanc:S.lanc||[]};}
+const v166Pn=id=>(V166.lst&&V166.lst.nomes&&V166.lst.nomes[id])||(get('parc',id)||{}).nome||'—';
+const v166Pj=id=>!id?'—':(get('proj',id)?projNome(id):(V166.lst&&V166.lst.projs&&V166.lst.projs[id])||'—');
+const v166StPill=k=>{const o=V166C.ST_DOC[k]||({ok:['Em dia','pos'],vence:['Vence em breve','warn'],vencido:['Vencido','neg'],falta:['Pendente','neg']})[k]||[k,''];return pill(o[0],o[1]);};
+const v166Msg=(r,ok)=>{if(r&&r.erro){toast(r.erro,'neg');return false;}toast((r&&r.msg)||ok||'Feito.','pos');return true;};
+async function v166Post(rota,body){if(!v166Srv())return {erro:'Esta ação precisa do servidor da empresa: abra o sistema pelo endereço da empresa.'};
+  try{const j=await segaPost('/api/ter166/'+rota,body);(j.docs||[]).forEach(d=>{if(S[d.col])segaLocal(d.col,Object.assign({},d.data,{id:d.id}));});V166.lst=null;V166.pn=null;V166.bl=null;V166.emp={};return j;}catch(e){return {erro:e.message};}}
+function v166Get(k,url,local){const c=V166[k+'Car'],em=V166[k+'Em']||0;
+  if(!v166Srv()){try{return local();}catch(e){return {erro:e.message};}}
+  if((!V166[k]||Date.now()-em>30000)&&!c){V166[k+'Car']=1;segaPost(url,null,'GET').then(j=>{V166[k]=j;V166[k+'Em']=Date.now();V166[k+'Car']=0;render();}).catch(e=>{V166[k]=V166[k]||{erro:e.message};V166[k+'Car']=0;render();});}
+  return V166[k];}
+const v166Load=m=>!m?'<div class="card"><p class="sub" style="margin:0">Carregando…</p></div>':m.erro?'<div class="note">'+esc(m.erro)+'</div>':'';
+const v166Pag=(k,n,por)=>{const u=ui[k]||{},pg=Math.max(0,Math.min(+u.pg||0,Math.max(0,Math.ceil(n/por)-1)));return {pg,ini:pg*por,fim:pg*por+por,html:n>por?'<div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn sm" data-act="v166Pg" data-k="'+k+'" data-d="-1"'+(pg?'':' disabled')+'>Anterior</button><span class="sub">'+(pg*por+1)+'–'+Math.min(n,pg*por+por)+' de '+n+'</span><button class="btn sm" data-act="v166Pg" data-k="'+k+'" data-d="1"'+((pg+1)*por<n?'':' disabled')+'>Próxima</button></div>':''};};
+A.v166Pg=d=>{const u=ui[d.k]=ui[d.k]||{};u.pg=Math.max(0,(+u.pg||0)+(+d.d));render();};
+
+/* ---------- coleções e módulo de permissão "ter" ---------- */
+function v166Col(c,nome){if(!COLS.includes(c)){COLS.push(c);S[c]=S[c]||[];IDX[c]=new Map();}if(typeof LIVE_COLS!=='undefined'&&!LIVE_COLS.includes(c))LIVE_COLS.push(c);COL_NOME[c]=nome;}
+v166Col('ter166','Empresa terceira');v166Col('tdc166','Documento de terceiro');v166Col('loc166','Contrato de locação');v166Col('leq166','Equipamento locado');v166Col('tnl166','Nota fora da locação');
+MODS.push(['ter','Terceiros e locações: empresas terceiras, documentos, trabalhadores e locação de equipamentos']);
+['comprador','compras','rhcompras','almoxarife','rh','sstgestor','ssttec','sst','projetos','encarregado'].forEach(k=>{const p=PERFIS[k];if(p&&Array.isArray(p.w)&&!p.w.includes('ter'))p.w.push('ter');});
+['financeiro','fiscal','leitura','leituratotal'].forEach(k=>{const p=PERFIS[k];if(p&&Array.isArray(p.r)&&!p.r.includes('ter'))p.r.push('ter');});
+/* dentro do módulo, cada área grava só a sua parte (o Administrador ajusta em Sistema › Perfis de acesso) */
+Object.entries({rh:['ter166','tdc166'],sstgestor:['ter166','tdc166'],sst:['ter166','tdc166'],ssttec:['tdc166'],projetos:['leq166'],encarregado:['leq166']}).forEach(([k,cs])=>{const p=PERFIS[k];if(p&&Array.isArray(p.w)&&p.w.includes('ter')){p.so=Object.assign({},p.so||{});if(!p.so.ter)p.so.ter=cs.slice();}});
+if(typeof P2_MODS!=='undefined'&&!P2_MODS.some(m=>m[0]==='ter'))P2_MODS.push(['ter','Terceiros e locações']);
+if(typeof U3_CURTO!=='undefined')U3_CURTO.ter='Terceiros';
+if(typeof SETOR_COR!=='undefined')SETOR_COR.ter='#9a3412';if(typeof MN_SIG!=='undefined')MN_SIG.ter='TE';
+if(!MENU.some(m=>m[0]==='ter')){const i=MENU.findIndex(m=>m[0]==='sup');MENU.splice(i<0?MENU.length:i+1,0,['ter','Terceiros',[]]);}
+novaTab('t166pn','Painel de terceiros e locações','Terceiros','ter','ter');
+novaTab('t166emp','Empresas terceiras','Terceiros','ter','ter','t166pn');
+novaTab('t166doc','Conferência de documentos','Terceiros','ter','ter','t166emp');
+novaTab('t166loc','Locações de equipamentos','Terceiros','ter','ter','t166doc');
+Object.assign(TAB_COLS,{t166pn:['ter166','tdc166','loc166','leq166'],t166emp:['ter166','tdc166'],t166doc:['tdc166'],t166loc:['loc166','leq166','tnl166']});
+if(typeof DBW_TABCOLS!=='undefined')Object.assign(DBW_TABCOLS,{t166pn:['ter166','tdc166','loc166','leq166'],t166emp:['ter166','tdc166','loc166'],t166doc:['tdc166','tterc'],t166loc:['loc166','leq166','tnl166','notas','tterc','rdo','parc']});
+Object.assign(GS_SIN,{t166pn:'terceiros locacao painel documentos vencendo equipamento alugado devolucao bloqueado',t166emp:'terceiro empreiteiro locador documentos cnd crf cndt certidao contrato social cartao cnpj seguro alvara link',t166doc:'conferencia documentos terceiros aprovar recusar aso nr folha fgts inss holerite ponto',t166loc:'locacao equipamento aluguel retirada devolucao guarda horimetro franquia nota locador operador'});
+const V166_CSS='<style>.v166g{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;align-items:start}.v166pg .li{flex-wrap:wrap;gap:6px}.v166pg .li>div:first-child{flex:1 1 200px;min-width:0}.v166pg .li .acts{margin-left:auto}.v166g .card{margin:0}.v166r{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.v166ck{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}.v166ck>div{border:1px solid var(--line);border-radius:8px;padding:8px}.v166ck b{display:block;margin-bottom:4px;font-size:13px}.v166ck label{display:inline-flex;gap:4px;align-items:center;margin-right:10px}.v166ck input{width:auto;margin:0}@media(max-width:560px){.v166hide{display:none}}</style>';
+const v166Li=(t,s,a)=>'<div class="li"><div><div class="t">'+t+'</div>'+(s?'<div class="sub">'+s+'</div>':'')+'</div>'+(a?'<div class="acts">'+a+'</div>':'')+'</div>';
+const v166Card=(t,n,rows,vazio,max)=>'<div class="card"><h2>'+esc(t)+' <small>'+n+'</small></h2>'+(rows.length?'<div class="list">'+rows.slice(0,max||12).join('')+'</div>'+(rows.length>(max||12)?'<p class="sub" style="margin:6px 0 0">e mais '+(rows.length-(max||12))+'.</p>':''):'<p class="sub" style="margin:0">'+esc(vazio)+'</p>')+'</div>';
+
+/* =================================================================== 1. painel */
+function v166PainelLocal(){const X=v166X(),P=V166C.painel(X);return Object.assign({ok:true,parcs:{},projs:{}},P);}
+V.t166pn=()=>{const P=v166Get('pn','/api/ter166/painel',v166PainelLocal),w=v166Load(P);
+  const acts=(v166Adm()?'<button class="btn" data-act="v166Regras">Regras</button>':'')+'<button class="btn" data-act="nav" data-tab="t166emp">Empresas terceiras</button><button class="btn" data-act="nav" data-tab="t166loc">Locações</button>';
+  if(w)return pageHead('Painel de terceiros e locações','',acts)+w;
+  const pn=id=>esc((P.parcs&&P.parcs[id])||v166Pn(id)),pj=id=>esc((P.projs&&P.projs[id])||v166Pj(id));
+  const custo=P.porObra.reduce((t,o)=>t+o.custo,0),neq=P.porObra.reduce((t,o)=>t+o.eqs.length,0);
+  const k=kpi('Documentos vencendo',String(P.docsVenc.filter(d=>d.st!=='vencido'&&d.st!=='falta').length),P.docsVenc.filter(d=>d.st==='vencido'||d.st==='falta').length+' vencido(s) ou faltando',P.docsVenc.length?'warn':'')+
+    kpi('Equipamentos locados',String(neq),money(custo)+' acumulado')+kpi('Devoluções atrasadas',String(P.devAtr.length),P.devPrev.length+' prevista(s) em 7 dias',P.devAtr.length?'neg':'')+
+    kpi('Trabalhadores não liberados',String(P.naoLib.length),'',P.naoLib.length?'neg':'')+kpi('Pagamentos bloqueados',String(P.bloq.filter(b=>!b.lib).length),money(P.bloq.filter(b=>!b.lib).reduce((t,b)=>t+b.valor,0)),P.bloq.some(b=>!b.lib)?'neg':'')+
+    kpi('Obrigações pendentes',String(P.obrPend.length),'contratos com folha/guias de '+fmtYm(P.mes),P.obrPend.length?'warn':'')+kpi('Aguardando conferência',String(P.aguard||0),'documentos enviados',P.aguard?'acc':'');
+  const dv=P.docsVenc.map(d=>v166Li(esc(d.nome)+' '+(d.st==='falta'?pill('Falta','neg'):d.st==='vencido'?pill('Vencido','neg'):pill(d.dias===0?'Vence hoje':'Vence em '+d.dias+' dia(s)','warn')),pn(d.parcId)+(d.nomeT?' · '+esc(d.nomeT):'')+(d.validade?' · validade '+fmtDate(d.validade):'')));
+  const ob=P.porObra.map(o=>'<div class="li" style="display:block"><div class="t">'+pj(o.projId)+' <span class="mono">'+money(o.custo)+'</span></div><div class="sub">'+o.eqs.map(e=>esc(e.desc)+' · '+e.dias+' dia(s) · '+money(e.custo)+(e.fim?' · até '+fmtDate(e.fim):'')).join('<br>')+'</div></div>');
+  const da=P.devAtr.map(e=>v166Li(esc(e.desc)+' '+pill(e.dias+' dia(s) de atraso','neg'),pn(e.parcId)+' · '+pj(e.projId)+' · fim '+fmtDate(e.fim)));
+  const dp=P.devPrev.map(e=>v166Li(esc(e.desc)+' '+pill(e.dias===0?'hoje':'em '+e.dias+' dia(s)','warn'),pn(e.parcId)+' · '+pj(e.projId)+' · fim '+fmtDate(e.fim)));
+  const nl=P.naoLib.map(t=>v166Li(esc(t.nome)+' <span class="sub">'+esc(t.cpf||'')+'</span>',pn(t.parcId)+(t.projId?' · '+pj(t.projId):'')+' · '+esc(t.motivos.slice(0,4).join(', '))));
+  const bl=P.bloq.map(b=>v166Li(esc(b.desc||'Conta a pagar')+' '+(b.lib?pill('Liberado pelo Administrador','warn'):pill('Bloqueado por documentação','neg')),money(b.valor)+' · venc. '+fmtDate(b.venc)+' · '+pn(b.parcId)+' · '+esc(b.ref||'')+'<br>'+esc(b.faltas.slice(0,3).join('; '))+(b.faltas.length>3?' …':'')));
+  const op=P.obrPend.map(o=>v166Li(esc(o.nome)+' · '+fmtYm(o.mes),pn(o.parcId)+' · '+o.itens.map(i=>esc(i.nome)+': '+(V166C.ST_DOC[i.st]||[i.st])[0]).join('; ')));
+  return pageHead('Painel de terceiros e locações','Documentos vencendo, equipamentos locados por obra, devoluções, trabalhadores não liberados, pagamentos bloqueados e obrigações do mês.',acts)+V166_CSS+'<div class="stack"><div class="kpis">'+k+'</div><div class="v166g">'+
+    v166Card('Documentos vencendo ou vencidos',P.docsVenc.length,dv,'Nenhum documento vencendo.')+v166Card('Equipamentos locados por obra',neq,ob,'Nenhum equipamento na obra.')+
+    v166Card('Devoluções atrasadas',P.devAtr.length,da,'Nenhuma devolução atrasada.')+v166Card('Devoluções previstas (7 dias)',P.devPrev.length,dp,'Nenhuma devolução prevista.')+
+    v166Card('Trabalhadores não liberados',P.naoLib.length,nl,'Todos os trabalhadores ativos estão liberados.')+v166Card('Pagamentos bloqueados',P.bloq.length,bl,'Nenhum pagamento de terceiro bloqueado.')+
+    v166Card('Obrigações do mês pendentes ('+fmtYm(P.mes)+')',P.obrPend.length,op,'Nenhuma obrigação pendente.')+'</div></div>';};
+A.v166Regras=()=>{if(!v166Adm())return;const c=v166Cfg();
+  modal({title:'Regras de Terceiros e locações',wide:true,body:'<div class="fg">'+field('Avisar antes do vencimento (dias, separados por vírgula)','avisoDias','text',c.avisoDias.join(', '))+field('Aviso antes do fim da locação (dias)','locAviso','number',c.locAviso)+
+    field('Folha e guias exigidas: meses antes da medição/nota','defas','number',c.defas)+field('Tolerância da nota × previsto (%)','tolPct','number',c.tolPct)+field('Exigir registro (CTPS digital/eSocial) do trabalhador','exigeRegistro','checkbox',c.exigeRegistro)+
+    field('Diário de obra recusa trabalhador não liberado','bloqDiario','checkbox',c.bloqDiario)+field('Locação sem operador também exige os documentos da empresa','locSemOpDocs','checkbox',c.locSemOpDocs)+field('Funções que exigem CNH (operador; separe por |)','operador','text',c.operador,{full:true})+'</div>'+
+    '<div class="sect">Documentos da empresa exigidos (padrão; cada terceiro pode mudar)</div><div class="fg">'+V166C.DOC_EMP.filter(d=>d[0]!=='outro').map(d=>field(d[1],'ex_'+d[0],'checkbox',c.exigEmp[d[0]])).join('')+'</div>'+
+    '<div class="sect">Obrigações do mês exigidas</div><div class="fg">'+V166C.OBRIG.map(o=>field(o[1],'ob_'+o[0],'checkbox',c.obrigExig[o[0]]!==false)).join('')+'</div>'+
+    '<div class="sect">NRs exigidas por função</div><p class="sub" style="margin:0 0 6px">Uma linha por função (parte do nome). "*" vale para todos. Ex.: <span class="mono">operador: NR-11, NR-12</span></p>'+field('Funções e NRs','nrFunc','textarea',c.nrFunc.map(x=>x.f+': '+x.nrs.join(', ')).join('\n'),{full:true,rows:5})+
+    '<div class="sect">Vistoria da retirada e da devolução</div>'+field('Itens (um por linha)','vist','textarea',c.vist.join('\n'),{full:true,rows:5}),
+    saveLabel:'Salvar regras',save:root=>{const v=readForm(root),ex={},ob={};V166C.DOC_EMP.forEach(d=>{if(d[0]!=='outro')ex[d[0]]=!!v['ex_'+d[0]];});V166C.OBRIG.forEach(o=>{ob[o[0]]=!!v['ob_'+o[0]];});
+      const nf=String(v.nrFunc||'').split('\n').map(l=>{const i=l.indexOf(':');return i>0?{f:l.slice(0,i).trim(),nrs:l.slice(i+1).split(/[,;]/).map(x=>x.trim()).filter(Boolean)}:null;}).filter(x=>x&&x.f&&x.nrs.length);
+      const n={avisoDias:String(v.avisoDias||'').split(/[,;\s]+/).filter(Boolean).map(Number),locAviso:v.locAviso,defas:v.defas,tolPct:v.tolPct,exigeRegistro:!!v.exigeRegistro,bloqDiario:!!v.bloqDiario,locSemOpDocs:!!v.locSemOpDocs,operador:v.operador,exigEmp:ex,obrigExig:ob,nrFunc:nf,vist:String(v.vist||'').split('\n').map(x=>x.trim()).filter(Boolean)};
+      if(!v166Srv()){put('cfg',Object.assign({},cfg(),{id:'empresa',ter166:V166C.cfgPad(n)}));toast('Regras salvas.','pos');return;}
+      v166Post('cfg',{ter166:n}).then(r=>{if(v166Msg(r,'Regras salvas.')){closeModal();render();}});return false;}});};
+
+/* =================================================================== 2. empresas terceiras */
+ui.t166emp={q:'',sit:'',pg:0,id:''};
+function v166ListaLocal(){const X=v166X(),ps=V166C.uniq(X.ter.map(t=>t.parcId||t.id).concat(X.ctremp.filter(c=>c.status==='vigente').map(c=>c.parcId)).concat(X.loc.map(l=>l.parcId)));
+  return {ok:true,nomes:{},projs:{},emps:ps.map(p=>{const t=X.ter.find(x=>x.id===p),ts=V166C.tercsDe(X,p).filter(w=>w.ativo!==false);return {parcId:p,nome:(get('parc',p)||{}).nome||p,ativo:!t||t.ativo!==false,cad:!!t,servico:t?t.servico||'':'',nCtr:X.ctremp.filter(c=>c.parcId===p&&c.status==='vigente').length,nLoc:X.loc.filter(l=>l.parcId===p&&l.st!=='encerrado').length,faltas:V166C.empFaltas(X,p),aguard:X.tdc.filter(d=>d.parcId===p&&d.st==='aguardando').length,trabs:ts.length,naoLib:ts.filter(w=>!V166C.trabStatus(X,w,w.projId||'').lib).length};}).sort((a,b)=>String(a.nome).localeCompare(String(b.nome)))};}
+V.t166emp=()=>{const u=ui.t166emp;if(u.id)return v166EmpDet(u.id);
+  const L=v166Get('lst','/api/ter166/lista',v166ListaLocal),w=v166Load(L);
+  const acts=(v166Cad()?'<button class="btn pri" data-act="v166EmpNovo">Cadastrar terceiro</button>':'');
+  if(w)return pageHead('Empresas terceiras','',acts)+w;
+  const q=gsNorm(u.q||''),rows=L.emps.filter(e=>(!q||gsNorm(e.nome+' '+e.servico).includes(q))&&(!u.sit||(u.sit==='pend'?(e.faltas.length||e.naoLib):u.sit==='ok'?!e.faltas.length&&!e.naoLib:u.sit==='ag'?e.aguard:true))),pg=v166Pag('t166emp',rows.length,30);
+  return pageHead('Empresas terceiras','Empreiteiros e locadores ligados ao fornecedor do cadastro: documentos da empresa com validade, obrigações do mês, trabalhadores e o link para o terceiro enviar os documentos.',acts)+V166_CSS+'<div class="stack v166pg">'+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input data-filter="t166emp.q" id="q_t166emp" value="'+esc(u.q||'')+'" placeholder="Terceiro ou serviço"></label><label class="f"><span>Situação</span><select data-filter="t166emp.sit">'+opt([['pend','Com pendência'],['ok','Em dia'],['ag','Com documento aguardando conferência']],u.sit,'Todas')+'</select></label></div>'+
+    '<div class="kpis">'+kpi('Terceiros',String(L.emps.length),'')+kpi('Com pendência',String(L.emps.filter(e=>e.faltas.length||e.naoLib).length),'documento da empresa ou trabalhador',L.emps.some(e=>e.faltas.length||e.naoLib)?'neg':'')+kpi('Aguardando conferência',String(L.emps.reduce((t,e)=>t+e.aguard,0)),'documentos enviados','acc')+'</div>'+
+    '<div class="tw"><table style="min-width:820px"><thead><tr><th>Terceiro</th><th>Contratos</th><th>Documentos da empresa</th><th>Trabalhadores</th><th></th></tr></thead><tbody>'+
+    (rows.length?rows.slice(pg.ini,pg.fim).map(e=>'<tr><td><b>'+esc(e.nome)+'</b>'+(e.servico?'<div class="sub">'+esc(e.servico)+'</div>':'')+(!e.cad?'<div class="sub">sem cadastro de terceiro</div>':'')+'</td><td>'+e.nCtr+' serviço(s) · '+e.nLoc+' locação(ões)</td><td>'+(e.faltas.length?'<div class="sub neg">'+esc(e.faltas.slice(0,3).join('; '))+(e.faltas.length>3?' …':'')+'</div>':pill('Em dia','pos'))+(e.aguard?'<div>'+pill(e.aguard+' aguardando conferência','warn')+'</div>':'')+'</td><td>'+e.trabs+' ativo(s)'+(e.naoLib?'<div class="sub neg">'+e.naoLib+' não liberado(s)</div>':'')+'</td><td class="act"><button class="btn sm pri" data-act="v166EmpAbrir" data-id="'+esc(e.parcId)+'">Abrir</button></td></tr>').join(''):emptyRow(5,'Nenhum terceiro. Cadastre o empreiteiro ou locador (ele precisa estar em Cadastros › Fornecedores).'))+'</tbody></table></div>'+pg.html+'</div>';};
+A.v166EmpAbrir=d=>{ui.t166emp.id=d.id;V166.emp[d.id]=null;render();};
+A.v166EmpVoltar=()=>{ui.t166emp.id='';render();};
+A.v166EmpNovo=()=>{const fs=typeof fornOpts==='function'?fornOpts():[];modal({title:'Cadastrar terceiro',body:'<p class="sub">O terceiro é o fornecedor do cadastro (Cadastros › Fornecedores): nada é duplicado.</p><div class="fg">'+field('Fornecedor','parcId','select','',{opts:fs,blank:'Selecione…',full:true})+field('Serviço ou equipamento','servico','text','',{full:true,ph:'Ex.: impermeabilização, locação de plataforma'})+field('Contato','contato','text','')+field('WhatsApp','whats','text','',{ph:'+55 11 9…'})+field('E-mail','email','email','')+'</div>',
+  saveLabel:'Cadastrar',save:root=>{const v=readForm(root);v166Post('emp',v).then(r=>{if(v166Msg(r,'Terceiro cadastrado.')){closeModal();ui.t166emp.id=v.parcId;render();}});return false;}});};
+function v166EmpLocal(id){const X=v166X(),c6=V166C.C6(X),mes=V166C.maisMeses(V166C.ym(X.hoje),-c6.defas);const ctrs=X.ctremp.filter(c=>c.parcId===id).map(c=>({col:'ctremp',id:c.id,numero:c.numero||'',projId:c.projId||'',obra:v166Pj(c.projId),status:c.status||'',tipo:'serv'})).concat(X.loc.filter(l=>l.parcId===id).map(l=>({col:'loc166',id:l.id,numero:l.numero||'',projId:l.projId||'',obra:v166Pj(l.projId),status:l.st||'',tipo:l.tipo==='com'?'loccom':'locsem'})));
+  return {ok:true,parcId:id,nome:v166Pn(id),ter:X.ter.find(t=>t.id===id)||null,docs:V166C.empDocs(X,id).map(d=>({k:d.k,nome:d.nome,exig:d.exig,st:d.st,validade:d.validade,dias:d.dias,pend:d.pend?{id:d.pend.id,st:d.pend.st,motivo:d.pend.motivo||''}:null,apId:d.ap?d.ap.id:'',arqs:d.ap&&d.ap.arqs||[]})),faltas:V166C.empFaltas(X,id),ctrs,mes,
+    meses:ctrs.filter(k=>k.tipo!=='locsem'&&!['encerrado','cancelado','concluido'].includes(k.status)).map(k=>({ctrCol:k.col,ctrId:k.id,nome:(k.tipo==='serv'?'Contrato ':'Locação ')+k.numero+(k.obra?' · '+k.obra:''),mes,itens:V166C.mesItens(X,k.col,k.id,id,mes)})),
+    trabs:V166C.tercsDe(X,id).filter(w=>w.ativo!==false).map(w=>{const st=V166C.trabStatus(X,w,w.projId||'');return {id:w.id,nome:w.nome,cpf:V166C.mascCpf(w.cpf),funcao:w.funcao||'',projId:w.projId||'',obra:v166Pj(w.projId),lib:st.lib,motivos:st.motivos,operador:V166C.ehOperador(c6,w.funcao),nrs:V166C.uniq(((cfg().matrizTrein||{})[w.funcao||'']||[]).concat(V166C.nrsDaFuncao(c6,w.funcao)).map(V166C.nrCurto))};})};}
+function v166EmpModelo(id){if(!v166Srv())return v166EmpLocal(id);const m=V166.emp[id];if(!m&&!V166.empCar[id]){V166.empCar[id]=1;segaPost('/api/ter166/emp?parcId='+encodeURIComponent(id),null,'GET').then(j=>{V166.emp[id]=j;V166.empCar[id]=0;render();}).catch(e=>{V166.emp[id]={erro:e.message};V166.empCar[id]=0;render();});}
+  if(!V166.links[id]&&!V166.empCar['l'+id]){V166.empCar['l'+id]=1;segaPost('/api/ter166/links?parcId='+encodeURIComponent(id),null,'GET').then(j=>{V166.links[id]=j;V166.empCar['l'+id]=0;render();}).catch(()=>{V166.empCar['l'+id]=0;});}
+  return m;}
+const v166Cert=k=>{const d=V166C.DOC_EMP.find(x=>x[0]===k),u=d&&d[4]&&typeof HAB_EMITIR!=='undefined'?HAB_EMITIR[d[4]]:'';return u?'<a class="btn sm" href="'+esc(u)+'" target="_blank" rel="noopener noreferrer" title="Abre o site oficial para emitir ou consultar">Consultar ↗</a>':'';};
+const v166Arqs=a=>(a||[]).map(x=>'<a href="/_blob/'+esc(x.id)+'" target="_blank" rel="noopener">'+esc(x.nome||'arquivo')+'</a>').join(' · ');
+function v166EmpDet(id){const m=v166EmpModelo(id),w=v166Load(m),back='<button class="btn" data-act="v166EmpVoltar">Voltar</button>';if(w)return pageHead('Empresa terceira','',back)+w;
+  const t=m.ter||{},podeR=v166Reg(),podeC=v166Cad();
+  const cad='<div class="card"><h2>Cadastro</h2><div class="v166r"><b>'+esc(m.nome)+'</b>'+(m.faltas.length?pill('Documentação pendente','neg'):pill('Documentos da empresa em dia','pos'))+'</div><p class="sub" style="margin:6px 0">'+esc([t.servico,t.contato,t.whats,t.email].filter(Boolean).join(' · ')||'Sem contato cadastrado.')+'</p>'+(podeC?'<button class="btn sm" data-act="v166EmpEditar" data-id="'+esc(id)+'">Editar cadastro e documentos exigidos</button>':'')+'</div>';
+  const docs='<div class="card"><h2>Documentos da empresa</h2><div class="tw" style="border:0"><table style="min-width:720px"><thead><tr><th>Documento</th><th>Situação</th><th>Validade</th><th>Arquivo</th><th></th></tr></thead><tbody>'+
+    m.docs.filter(d=>d.exig||d.apId||d.pend).map(d=>'<tr><td>'+esc(d.nome)+(d.exig?'':'<div class="sub">não exigido</div>')+'</td><td>'+v166StPill(d.st)+(d.pend?'<div>'+v166StPill(d.pend.st)+(d.pend.motivo?' <span class="sub">'+esc(d.pend.motivo)+'</span>':'')+'</div>':'')+'</td><td class="mono">'+(d.validade?fmtDate(d.validade)+(d.dias!=null?'<div class="sub">'+(d.dias<0?'há '+(-d.dias)+' dia(s)':d.dias+' dia(s)')+'</div>':''):'—')+'</td><td>'+(v166Arqs(d.arqs)||'<span class="mut">—</span>')+'</td><td class="act">'+v166Cert(d.k)+(podeR?'<button class="btn sm" data-act="v166DocNovo" data-p="'+esc(id)+'" data-e="emp" data-t="'+d.k+'">Registrar</button>':'')+'</td></tr>').join('')+'</tbody></table></div>'+(podeR?'<button class="btn sm" data-act="v166DocNovo" data-p="'+esc(id)+'" data-e="emp" data-t="outro">+ Outro documento</button>':'')+'</div>';
+  const mes=m.meses.map(k=>'<div class="card"><h2>'+esc(k.nome)+' <small>obrigações de '+fmtYm(k.mes)+'</small></h2><div class="list">'+k.itens.filter(i=>i.exig).map(i=>v166Li(esc(i.nome)+' '+v166StPill(i.st),i.motivo?'Recusado: '+esc(i.motivo):'',podeR&&i.st!=='aprovado'?'<button class="btn sm" data-act="v166DocNovo" data-p="'+esc(id)+'" data-e="mes" data-t="'+i.k+'" data-c="'+esc(k.ctrCol)+'" data-ci="'+esc(k.ctrId)+'" data-m="'+esc(k.mes)+'">Registrar</button>':'')).join('')+'</div></div>').join('');
+  const trabs='<div class="card"><h2>Trabalhadores do terceiro <small>'+m.trabs.length+'</small></h2>'+(m.trabs.length?'<div class="list">'+m.trabs.map(x=>v166Li('<b>'+esc(x.nome)+'</b> <span class="sub">'+esc(x.cpf)+' · '+esc(x.funcao)+'</span> '+(x.lib?pill('Liberado','pos'):pill('Não liberado','neg')),(x.obra&&x.obra!=='—'?esc(x.obra)+' · ':'')+(x.motivos.length?esc(x.motivos.join(', ')):'documentos em dia'),podeR?'<button class="btn sm" data-act="v166DocTrab" data-p="'+esc(id)+'" data-id="'+esc(x.id)+'">Registrar documento</button>':'')).join('')+'</div>':'<p class="sub" style="margin:0">Nenhum trabalhador cadastrado. Cadastre em SST › Trabalhadores terceiros ou peça ao terceiro para indicar pelo link.</p>')+'</div>';
+  const L=V166.links[id],ativos=L&&L.links?L.links.filter(x=>x.ativo):[];
+  const link='<div class="card"><h2>Link para o terceiro enviar documentos</h2><p class="sub" style="margin:0 0 8px">O terceiro abre o link sem senha, vê só o que falta dele e envia PDF/JPG/PNG. Cada envio fica "aguardando conferência". Validade de '+((L&&L.dias)||30)+' dias; pode ser revogado.</p>'+
+    (podeC||podeR?'<div class="acts" style="justify-content:flex-start"><button class="btn pri" data-act="v166Link" data-id="'+esc(id)+'">Gerar ou copiar o link</button></div>':'')+
+    (ativos.length?'<div class="list" style="margin-top:8px">'+ativos.map(x=>v166Li('Link '+esc(x.id)+(x.ctr?' (contrato)':''),'criado '+fmtDT(x.criado)+' por '+esc(x.por)+' · vale até '+fmtDT(x.expira)+' · '+x.envios+' envio(s)'+(x.ult?' · último '+fmtDT(x.ult):''),podeC||podeR?'<button class="btn sm dng" data-act="v166LinkRevogar" data-id="'+esc(x.id)+'" data-p="'+esc(id)+'">Revogar</button>':'')).join('')+'</div>':'<p class="sub" style="margin:8px 0 0">Nenhum link ativo.</p>')+'</div>';
+  return pageHead(m.nome,'Empresa terceira: documentos, obrigações do mês, trabalhadores e link.',back)+V166_CSS+'<div class="stack v166pg">'+cad+docs+mes+trabs+link+'</div>';}
+A.v166EmpEditar=d=>{const m=V166.emp[d.id]||v166EmpLocal(d.id),t=m.ter||{},ex=Object.assign({},v166Cfg().exigEmp,t.exig||{});
+  modal({title:'Cadastro de '+m.nome,wide:true,body:'<div class="fg">'+field('Serviço ou equipamento','servico','text',t.servico||'',{full:true})+field('Contato','contato','text',t.contato||'')+field('WhatsApp','whats','text',t.whats||'')+field('E-mail','email','email',t.email||'')+field('Ativo','ativo','checkbox',t.ativo!==false)+'</div><div class="sect">Documentos exigidos deste terceiro</div><div class="fg">'+V166C.DOC_EMP.filter(x=>x[0]!=='outro').map(x=>field(x[1],'ex_'+x[0],'checkbox',!!ex[x[0]])).join('')+'</div>',
+    saveLabel:'Salvar',save:root=>{const v=readForm(root),exig={};V166C.DOC_EMP.forEach(x=>{if(x[0]!=='outro')exig[x[0]]=!!v['ex_'+x[0]];});v166Post('emp',{parcId:d.id,servico:v.servico,contato:v.contato,whats:v.whats,email:v.email,ativo:v.ativo,exig}).then(r=>{if(v166Msg(r,'Cadastro salvo.')){closeModal();render();}});return false;}});};
+/* registrar documento (pela tela): anexo + emissão + validade; o RH/SST pode registrar já aprovado */
+function v166DocModal(o){V166.f={arqs:[],o};const temV=o.escopo==='emp'?V166C.temVal(o.tipo):o.escopo==='trab'?o.tipo!=='registro':false;
+  const corpo=()=>'<p class="sub">'+esc(o.titulo)+'</p><div class="fg">'+(o.escopo==='emp'&&o.tipo==='outro'?field('Nome do documento','nomeOutro','text','',{full:true}):'')+(o.escopo==='trab'&&o.tipo==='nr'?field('NR','nr','select',o.nr||'',{opts:['NR-06','NR-10','NR-11','NR-12','NR-18','NR-33','NR-35'].map(x=>[x,x]),blank:'Selecione…'}):'')+(o.escopo==='trab'&&o.tipo==='cnh'?field('Categoria','cnhCat','text',''):'')+(o.escopo==='trab'&&o.tipo==='registro'?field('Tipo','regTipo','select','ctps',{opts:[['ctps','CTPS digital'],['esocial','eSocial']]}):'')+
+    field('Emissão','emissao','date','')+(temV?field('Validade','validade','date',''):'')+(v166Docs()?field('Conferido: registrar já aprovado','aprovar','checkbox',true):'')+'</div><div class="v166r" style="margin-top:8px"><button type="button" class="btn" data-act="v166DocArq">Anexar arquivo (PDF, JPG ou PNG)</button><span id="v166arqs" class="sub">'+(V166.f.arqs.map(a=>esc(a.nome)).join(', ')||'nenhum arquivo')+'</span></div>';
+  modal({title:'Registrar documento',body:corpo(),saveLabel:'Registrar',save:root=>{const v=readForm(root),b=Object.assign({parcId:o.parcId,escopo:o.escopo,tipo:o.tipo,ctrCol:o.ctrCol,ctrId:o.ctrId,mes:o.mes,tercId:o.tercId,nr:v.nr||o.nr,arqs:V166.f.arqs},v);
+    v166Post('doc',b).then(r=>{if(v166Msg(r,'Documento registrado.')){closeModal();render();}});return false;}});}
+A.v166DocArq=()=>v164Upload('application/pdf,image/jpeg,image/png',f=>{if(!V166.f)return;V166.f.arqs.push(f);const el=document.getElementById('v166arqs');if(el)el.textContent=V166.f.arqs.map(a=>a.nome).join(', ');});
+A.v166DocNovo=d=>{const nome=d.e==='emp'?V166C.nomeDoc(d.t):V166C.nomeObrig(d.t);v166DocModal({parcId:d.p,escopo:d.e,tipo:d.t,ctrCol:d.c,ctrId:d.ci,mes:d.m,titulo:v166Pn(d.p)+' · '+nome+(d.m?' · '+fmtYm(d.m):'')});};
+A.v166DocTrab=d=>{const m=V166.emp[d.p]||v166EmpLocal(d.p),w=(m.trabs||[]).find(x=>x.id===d.id)||{};
+  modal({title:'Documento de '+(w.nome||'trabalhador'),body:'<div class="list">'+V166C.DOC_TRAB.filter(x=>x[0]!=='cnh'||w.operador).map(x=>v166Li(esc(x[1]),'','<button class="btn sm" data-act="v166DocTrabTipo" data-p="'+esc(d.p)+'" data-id="'+esc(d.id)+'" data-t="'+x[0]+'">Registrar</button>')).join('')+'</div>',foot:'<button class="btn" data-act="closeModal">Fechar</button>'});};
+A.v166DocTrabTipo=d=>{const m=V166.emp[d.p]||v166EmpLocal(d.p),w=(m.trabs||[]).find(x=>x.id===d.id)||{};v166DocModal({parcId:d.p,escopo:'trab',tipo:d.t,tercId:d.id,titulo:(w.nome||'')+' ('+(w.cpf||'')+') · '+V166C.nomeTrab(d.t,'')});};
+/* link: gerar/copiar e o texto para WhatsApp ou e-mail */
+A.v166Link=async d=>{const r=await v166Post('link',{parcId:d.id});if(r.erro){toast(r.erro,'neg');return;}V166.links[d.id]=null;const m=V166.emp[d.id]||{},t=(m.ter)||{},e=cfg()||{};
+  const txt='Olá! Aqui é a '+(e.fantasia||e.razao||'empresa')+'. Pelo link abaixo, envie os documentos pendentes de '+(m.nome||'sua empresa')+' (empresa, folha e guias do mês e trabalhadores). O link vale até '+fmtDate(new Date(r.expira).toISOString().slice(0,10))+'.\n'+r.url;
+  const wa='https://wa.me/'+String(t.whats||'').replace(/\D/g,'')+'?text='+encodeURIComponent(txt),ml='mailto:'+encodeURIComponent(t.email||'')+'?subject='+encodeURIComponent('Documentos pendentes · '+(e.fantasia||e.razao||''))+'&body='+encodeURIComponent(txt);
+  modal({title:'Link para o terceiro',body:'<p class="sub">Copie e envie ao terceiro. Quem tiver o link envia documentos deste terceiro (e só deste); não acessa o sistema.</p>'+field('Link','v166url','text',r.url,{full:true})+field('Mensagem','v166txt','textarea',txt,{full:true,rows:5})+'<div class="acts" style="justify-content:flex-start;margin-top:8px"><a class="btn" href="'+esc(wa)+'" target="_blank" rel="noopener noreferrer">WhatsApp</a><a class="btn" href="'+esc(ml)+'">E-mail</a><button class="btn" data-act="v166Copiar">Copiar mensagem</button></div>',foot:'<button class="btn pri" data-act="closeModal">Fechar</button>'});render();};
+A.v166Copiar=()=>{const el=document.getElementById('f_v166txt');try{navigator.clipboard.writeText(el?el.value:'');toast('Mensagem copiada.','pos');}catch(e){toast('Selecione e copie o texto.');}};
+A.v166LinkRevogar=d=>confirmBox('Revogar este link? Quem tiver o endereço não consegue mais enviar documentos.',()=>{v166Post('link/revogar',{id:d.id}).then(r=>{v166Msg(r,'Link revogado.');V166.links[d.p]=null;render();});},'Revogar',true);
+
+/* =================================================================== 3. conferência de documentos */
+ui.t166doc={st:'aguardando',q:'',pg:0};
+const v166DocNome=d=>d.escopo==='emp'?(d.tipo==='outro'?d.nomeOutro||'Outro documento':V166C.nomeDoc(d.tipo)):d.escopo==='mes'?V166C.nomeObrig(d.tipo)+' de '+fmtYm(d.mes):d.escopo==='trab'?V166C.nomeTrab(d.tipo,d.nr)+(d.cnhCat?' ('+d.cnhCat+')':''):'Novo trabalhador indicado';
+V.t166doc=()=>{const u=ui.t166doc;if(!V166.lst&&v166Srv())v166Get('lst','/api/ter166/lista',v166ListaLocal);
+  const q=gsNorm(u.q||''),L=(S.tdc166||[]).filter(d=>(!u.st||d.st===u.st)&&(!q||gsNorm(v166Pn(d.parcId)+' '+(d.tercNome||'')+' '+v166DocNome(d)).includes(q))).sort((a,b)=>(+b.enviadoEm||0)-(+a.enviadoEm||0)),pg=v166Pag('t166doc',L.length,25),ap=v166Docs();
+  return pageHead('Conferência de documentos','Documentos enviados pelo link do terceiro ou registrados pela equipe. RH e SST aprovam (podem corrigir a validade) ou recusam com o motivo, que o terceiro vê no link.')+V166_CSS+'<div class="stack v166pg">'+
+    '<div class="bar"><label class="f"><span>Situação</span><select data-filter="t166doc.st">'+opt([['aguardando','Aguardando conferência'],['aprovado','Aprovados'],['recusado','Recusados']],u.st,'Todos')+'</select></label><label class="f grow"><span>Buscar</span><input data-filter="t166doc.q" id="q_t166doc" value="'+esc(u.q||'')+'" placeholder="Terceiro, trabalhador ou documento"></label></div>'+
+    '<div class="tw"><table style="min-width:860px"><thead><tr><th>Terceiro</th><th>Documento</th><th>Datas</th><th>Arquivo</th><th>Envio</th><th>Situação</th><th></th></tr></thead><tbody>'+
+    (L.length?L.slice(pg.ini,pg.fim).map(d=>'<tr><td><b>'+esc(v166Pn(d.parcId))+'</b>'+(d.tercNome?'<div class="sub">'+esc(d.tercNome)+'</div>':'')+(d.novo?'<div class="sub">'+esc(d.novo.nome)+' · '+esc(V166C.mascCpf(d.novo.cpf))+' · '+esc(d.novo.funcao||'')+'</div>':'')+'</td><td>'+esc(v166DocNome(d))+'</td><td class="mono">'+(d.emissao?'emissão '+fmtDate(d.emissao)+'<br>':'')+(d.validade?'validade '+fmtDate(d.validade):'')+'</td><td>'+(v166Arqs(d.arqs)||'—')+'</td><td class="sub">'+(d.origem==='link'?'pelo link':'pela equipe')+'<br>'+fmtDT(d.enviadoEm)+'</td><td>'+v166StPill(d.st)+(d.motivo?'<div class="sub">'+esc(d.motivo)+'</div>':'')+(d.revPor?'<div class="sub">'+esc(nameOf(d.revPor))+'</div>':'')+'</td><td class="act">'+(ap&&d.st==='aguardando'?'<button class="btn sm pri" data-act="v166DocAprovar" data-id="'+esc(d.id)+'">Aprovar</button><button class="btn sm dng" data-act="v166DocRecusar" data-id="'+esc(d.id)+'">Recusar</button>':'')+'</td></tr>').join(''):emptyRow(7,'Nenhum documento nesta situação.'))+'</tbody></table></div>'+pg.html+
+    (ap?'':'<p class="sub">Só o RH, a Segurança do trabalho e o Administrador aprovam ou recusam.</p>')+'</div>';};
+A.v166DocAprovar=d=>{const x=get('tdc166',d.id);if(!x)return;const tv=x.escopo==='emp'?V166C.temVal(x.tipo):x.escopo==='trab'?x.tipo!=='registro':false;
+  modal({title:'Aprovar documento',body:'<p class="sub">'+esc(v166Pn(x.parcId)+' · '+v166DocNome(x))+'</p>'+(tv?field('Validade (confira no documento)','validade','date',x.validade||''):'<p class="sub">Este documento não tem validade.</p>')+(x.escopo==='trabnovo'?'<p class="sub">Ao aprovar, o trabalhador entra no cadastro de trabalhadores terceiros (SST) e o terceiro passa a enviar os documentos dele.</p>':''),
+    saveLabel:'Aprovar',save:root=>{const v=readForm(root);v166Post('doc/decidir',{id:d.id,aprovar:true,validade:v.validade}).then(r=>{if(v166Msg(r,'Documento aprovado.')){closeModal();render();}});return false;}});};
+A.v166DocRecusar=d=>modal({title:'Recusar documento',body:field('Motivo (o terceiro vê este texto)','motivo','textarea','',{full:true,rows:3,ph:'Ex.: certidão vencida; envie a emitida este mês'}),saveLabel:'Recusar',save:root=>{const v=readForm(root);v166Post('doc/decidir',{id:d.id,aprovar:false,motivo:v.motivo}).then(r=>{if(v166Msg(r,'Documento recusado.')){closeModal();render();}});return false;}});
+
+/* =================================================================== 4. locações */
+ui.t166loc={q:'',st:'ativos',obra:'',pg:0};
+const v166EqSt=e=>{const o=V166C.LOC_ST[e.st]||[e.st,''];return pill(o[0],o[1]);};
+V.t166loc=()=>{const u=ui.t166loc,X=v166X();if(!V166.lst&&v166Srv())v166Get('lst','/api/ter166/lista',v166ListaLocal);
+  const q=gsNorm(u.q||''),locs=(S.loc166||[]).filter(l=>(u.st!=='ativos'||l.st!=='encerrado')&&(!u.obra||l.projId===u.obra||(S.leq166||[]).some(e=>e.locId===l.id&&e.projId===u.obra))&&(!q||gsNorm(v166Pn(l.parcId)+' '+l.numero+' '+(S.leq166||[]).filter(e=>e.locId===l.id).map(e=>e.desc).join(' ')).includes(q))).sort((a,b)=>String(b.ini||'').localeCompare(String(a.ini||''))),pg=v166Pag('t166loc',locs.length,10);
+  const pc=v166Comp(),po=v166Obra();
+  const card=l=>{const es=(S.leq166||[]).filter(e=>e.locId===l.id);
+    return '<div class="card"><div class="v166r"><b>'+esc(l.numero)+'</b>'+pill(l.tipo==='com'?'Com operador':'Sem operador','')+(l.st==='encerrado'?pill('Encerrada',''):'')+'<span class="sub">'+esc(v166Pn(l.parcId))+' · '+esc(v166Pj(l.projId))+' · '+fmtDate(l.ini)+(l.fim?' a '+fmtDate(l.fim):'')+'</span></div>'+
+      (l.tipo==='com'?'<p class="sub" style="margin:4px 0">Operador(es): '+esc((l.operadores||[]).map((id,i)=>{const t=get('tterc',id);return t?t.nome:(l.opNomes||[])[i]||'—';}).join(', ')||'nenhum')+'</p>':'')+
+      '<div class="tw" style="border:0"><table style="min-width:760px"><thead><tr><th>Equipamento</th><th>Obra e guarda</th><th>Período</th><th>Previsto até hoje</th><th>Situação</th><th></th></tr></thead><tbody>'+
+      (es.length?es.map(e=>{const pv=V166C.previsto(X,e,'',''),a=V166C.eqAlerta(X,e),g=e.guarda||{};
+        return '<tr><td><b>'+esc(e.desc)+'</b><div class="sub">'+esc([e.tipo,e.serie?'série '+e.serie:'',e.patr?'patr. '+e.patr:''].filter(Boolean).join(' · '))+'</div><div class="sub">'+[e.vDia?money(e.vDia)+'/dia':'',e.vSem?money(e.vSem)+'/semana':'',e.vMes?money(e.vMes)+'/mês':''].filter(Boolean).join(' · ')+(e.franqH?' · franquia '+e.franqH+' h/mês':'')+(e.vHoraExc?' · '+money(e.vHoraExc)+'/h exc.':'')+' · manutenção: '+(e.manutPor==='empresa'?'nossa':'do locador')+'</div></td>'+
+          '<td>'+esc(v166Pj(e.projId))+(g.resp?'<div class="sub">guarda: '+esc(g.resp)+(g.local?' · '+esc(g.local):'')+'</div>':'')+((e.guardaHist||[]).length?'<div class="sub">'+(e.guardaHist||[]).length+' transferência(s)</div>':'')+'</td>'+
+          '<td class="mono">'+fmtDate(e.ini)+(e.fim?' a '+fmtDate(e.fim):'')+(e.ret?'<div class="sub">retirado '+fmtDate(e.ret.data)+'</div>':'')+(e.dev?'<div class="sub">devolvido '+fmtDate(e.dev.data)+'</div>':'')+'</td>'+
+          '<td class="mono">'+(e.st==='aguardando'?'—':money(pv.total)+'<div class="sub">'+pv.dias+' dia(s) · '+pv.horas+' h'+(pv.excedentes?' · '+pv.excedentes+' h exc.':'')+'</div>')+((e.notas166||[]).length?'<div class="sub">notas: '+e.notas166.map(n=>'nº '+esc(n.numero||'')+' '+money(n.valor)).join(', ')+'</div>':'')+'</td>'+
+          '<td>'+v166EqSt(e)+(a?'<div>'+pill(a.k==='atraso'?'Atrasado '+a.dias+' dia(s)':a.dias===0?'Termina hoje':'Termina em '+a.dias+' dia(s)',a.k==='atraso'?'neg':'warn')+'</div>':'')+'</td>'+
+          '<td class="act">'+(pc&&e.st==='aguardando'?'<button class="btn sm pri" data-act="v166Ret" data-id="'+esc(e.id)+'">Retirada</button>':'')+((pc||po)&&e.st==='retirado'?'<button class="btn sm" data-act="v166Gua" data-id="'+esc(e.id)+'">Guarda / transferir</button>':'')+(pc&&e.st==='retirado'?'<button class="btn sm pri" data-act="v166Dev" data-id="'+esc(e.id)+'">Devolução</button>':'')+(pc&&e.st!=='devolvido'?'<button class="btn sm" data-act="v166EqEd" data-id="'+esc(e.id)+'" data-l="'+esc(l.id)+'">Editar</button>':'')+'</td></tr>';}).join(''):emptyRow(6,'Nenhum equipamento nesta locação.'))+'</tbody></table></div>'+
+      (pc&&l.st!=='encerrado'?'<div class="acts" style="justify-content:flex-start"><button class="btn sm" data-act="v166EqEd" data-l="'+esc(l.id)+'">+ Equipamento</button><button class="btn sm" data-act="v166LocEd" data-id="'+esc(l.id)+'">Editar locação</button>'+(pc&&es.some(e=>e.st!=='aguardando')?'<button class="btn sm" data-act="v166Nota" data-l="'+esc(l.id)+'">Conciliar nota</button>':'')+'</div>':'')+'</div>';};
+  const pobras=V166C.uniq((S.loc166||[]).map(l=>l.projId).concat((S.leq166||[]).map(e=>e.projId))).map(id=>[id,v166Pj(id)]);
+  return pageHead('Locações de equipamentos','Contrato com o locador (com ou sem operador), equipamentos, retirada com vistoria e fotos, guarda na obra, devolução e a nota do locador conciliada com o previsto. O custo entra só pela nota fiscal.',pc?'<button class="btn pri" data-act="v166LocEd">Nova locação</button>':'')+V166_CSS+'<div class="stack v166pg">'+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input data-filter="t166loc.q" id="q_t166loc" value="'+esc(u.q||'')+'" placeholder="Locador, nº ou equipamento"></label><label class="f"><span>Obra</span><select data-filter="t166loc.obra">'+opt(pobras,u.obra,'Todas')+'</select></label><label class="f"><span>Mostrar</span><select data-filter="t166loc.st">'+opt([['ativos','Vigentes'],['todas','Todas']],u.st)+'</select></label></div>'+
+    (locs.length?locs.slice(pg.ini,pg.fim).map(card).join(''):'<div class="card"><p class="sub" style="margin:0">Nenhuma locação. Compras cadastra a locação com o locador (fornecedor do cadastro) e a obra.</p></div>')+pg.html+'</div>';};
+A.v166LocEd=d=>{const l=d&&d.id?get('loc166',d.id):null;if(v166Srv()&&!(d&&d.ok)){segaPost('/api/ter166/trabs',null,'GET').then(j=>{V166.trabs=j.trabs||[];A.v166LocEd(Object.assign({},d||{},{ok:1}));}).catch(()=>{V166.trabs=null;A.v166LocEd(Object.assign({},d||{},{ok:1}));});return;}
+  const x=l||{tipo:'sem',parcId:'',projId:'',ini:todayStr(),fim:'',operadores:[],obs:''};const ts=(V166.trabs||(S.tterc||[]).map(t=>({id:t.id,nome:t.nome,parcId:t.parcId}))).filter(t=>!x.parcId||t.parcId===x.parcId);
+  modal({title:l?'Locação '+l.numero:'Nova locação',wide:true,body:'<div class="fg">'+field('Locador (fornecedor)','parcId','select',x.parcId,{opts:typeof fornOpts==='function'?fornOpts():[],blank:'Selecione…'})+field('Obra','projId','select',x.projId,{opts:projOpts(),blank:'Selecione…'})+field('Tipo','tipo','select',x.tipo,{opts:[['sem','Sem operador'],['com','Com operador (o operador é trabalhador do terceiro)']]})+field('Início do período','ini','date',x.ini)+field('Fim do período','fim','date',x.fim)+field('Observações','obs','text',x.obs||'',{full:true})+'</div>'+
+    '<div class="sect">Operador(es) (locação com operador)</div>'+(ts.length?'<div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">'+ts.map(t=>'<label class="ch-pk"><input type="checkbox" data-v166op="'+esc(t.id)+'"'+((x.operadores||[]).includes(t.id)?' checked':'')+'> <span>'+esc(t.nome)+'<span class="sub"> · '+esc(fornNome(t.parcId))+'</span></span></label>').join('')+'</div>':'<p class="sub">Nenhum trabalhador do locador cadastrado (SST › Trabalhadores terceiros, ou o locador indica pelo link).</p>')+
+    (l&&l.st!=='encerrado'?field('Encerrar esta locação (todos os equipamentos devolvidos)','encerrar','checkbox',false,{full:true}):''),
+    saveLabel:'Salvar',save:root=>{const v=readForm(root);v.operadores=$$('#mb [data-v166op]').filter(c=>c.checked).map(c=>c.dataset.v166op);if(l)v.id=l.id;v166Post('loc',v).then(r=>{if(v166Msg(r,'Locação salva.')){closeModal();render();}});return false;}});};
+A.v166EqEd=d=>{const e=d.id?get('leq166',d.id):null,l=get('loc166',d.l||(e&&e.locId)),x=e||{tipo:'',desc:'',serie:'',patr:'',projId:l?l.projId:'',ini:l?l.ini:todayStr(),fim:l?l.fim:'',vDia:'',vSem:'',vMes:'',franqH:'',vHoraExc:'',manutPor:'locador'};
+  modal({title:e?'Equipamento':'Novo equipamento',wide:true,body:'<div class="fg">'+field('Tipo','tipo','text',x.tipo,{ph:'Ex.: plataforma, retroescavadeira, gerador'})+field('Descrição','desc','text',x.desc,{full:true})+field('Nº de série','serie','text',x.serie)+field('Patrimônio do locador','patr','text',x.patr)+field('Obra','projId','select',x.projId,{opts:projOpts(),blank:'A da locação'})+field('Início','ini','date',x.ini)+field('Fim do período','fim','date',x.fim)+
+    field('Valor por dia (R$)','vDia','number',x.vDia)+field('Valor por semana (R$)','vSem','number',x.vSem)+field('Valor por mês (R$)','vMes','number',x.vMes)+field('Franquia de horas por mês','franqH','number',x.franqH)+field('Valor da hora excedente (R$)','vHoraExc','number',x.vHoraExc)+field('Manutenção por conta de','manutPor','select',x.manutPor,{opts:[['locador','Locador'],['empresa','Nossa empresa']]})+'</div><p class="sub">O previsto usa a combinação mais barata de diária, semana (7 dias) e mês (30 dias) que cobre o período, mais as horas acima da franquia (proporcional aos dias).</p>',
+    saveLabel:'Salvar',save:root=>{const v=readForm(root);v.locId=l?l.id:'';if(e)v.id=e.id;v166Post('eq',v).then(r=>{if(v166Msg(r,'Equipamento salvo.')){closeModal();render();}});return false;}});};
+function v166VistHtml(){const c=v166Cfg();return '<div class="v166ck">'+c.vist.map((i,k)=>'<div><b>'+esc(i)+'</b><label><input type="radio" name="v166v'+k+'" data-v166v="'+esc(i)+'" value="ok"> OK</label><label><input type="radio" name="v166v'+k+'" data-v166v="'+esc(i)+'" value="nok"> Problema</label></div>').join('')+'</div>';}
+const v166VistLer=()=>{const o={};$$('#mb [data-v166v]').forEach(el=>{if(el.checked)o[el.dataset.v166v]=el.value;});return o;};
+const v166FotosHtml=()=>'<div class="v166r" style="margin-top:8px"><button type="button" class="btn" data-act="v166Foto">📷 Foto</button><span id="v166fotos" class="sub">'+((V166.f&&V166.f.fotos||[]).length||'nenhuma')+' foto(s)</span></div>';
+A.v166Foto=()=>{if(!v166Srv()){toast('A foto é enviada ao servidor da empresa.','neg');return;}v164Upload('image/*',f=>{if(!V166.f)return;V166.f.fotos.push(f);const el=document.getElementById('v166fotos');if(el)el.textContent=V166.f.fotos.length+' foto(s)';});};
+A.v166Ret=d=>{const e=get('leq166',d.id);if(!e)return;V166.f={fotos:[]};
+  modal({title:'Retirada · '+e.desc,wide:true,body:'<div class="fg">'+field('Data','data','date',todayStr())+field('Hora','hora','time','')+field('Horímetro','hor','number','')+field('Responsável pela retirada','resp','text',nameOf(actorId())==='Usuário'?'':nameOf(actorId()))+field('Responsável pela guarda na obra','guardaResp','text','')+field('Local na obra','local','text','',{ph:'Ex.: pátio, galpão 2'})+'</div><div class="sect">Vistoria</div>'+v166VistHtml()+field('Problemas encontrados','vistObs','text','',{full:true})+v166FotosHtml(),
+    saveLabel:'Registrar retirada',save:root=>{const v=readForm(root);Object.assign(v,{id:e.id,vist:v166VistLer(),fotos:V166.f.fotos});v166Post('eq/retirada',v).then(r=>{if(v166Msg(r,'Retirada registrada.')){closeModal();render();}});return false;}});};
+A.v166Gua=d=>{const e=get('leq166',d.id);if(!e)return;const g=e.guarda||{};
+  modal({title:'Guarda · '+e.desc,body:'<p class="sub">Hoje: '+esc(v166Pj(e.projId))+(g.resp?' · '+esc(g.resp):'')+(g.local?' · '+esc(g.local):'')+'</p><div class="fg">'+field('Obra','projId','select',e.projId,{opts:projOpts()})+field('Novo responsável pela guarda','resp','text',g.resp||'')+field('Quem recebe','recebe','text','')+field('Local na obra','local','text',g.local||'')+field('Data','data','date',todayStr())+field('Motivo (obrigatório na transferência entre obras)','motivo','text','',{full:true})+'</div>'+
+    ((e.guardaHist||[]).length?'<div class="sect">Histórico</div><div class="list">'+e.guardaHist.slice().reverse().map(h=>v166Li(fmtDate(h.data)+' · '+esc(h.de.resp||'—')+' → '+esc(h.para.resp||'—'),(h.de.projId!==h.para.projId?esc(v166Pj(h.de.projId))+' → '+esc(v166Pj(h.para.projId))+' · ':'')+esc(h.motivo||'')+' · '+esc(nameOf(h.por)))).join('')+'</div>':''),
+    saveLabel:'Salvar',save:root=>{const v=readForm(root);v.id=e.id;v166Post('eq/guarda',v).then(r=>{if(v166Msg(r,'Guarda atualizada.')){closeModal();render();}});return false;}});};
+A.v166Dev=d=>{const e=get('leq166',d.id);if(!e)return;V166.f={fotos:[],av:[]};const pv=V166C.previsto(v166X(),e,'','');
+  const corpo=()=>'<p class="sub">Retirado em '+fmtDate(e.ret&&e.ret.data)+(e.ret&&e.ret.hor?' com horímetro '+e.ret.hor:'')+' · previsto até hoje '+money(pv.total)+' ('+pv.dias+' dia(s), '+pv.horas+' h)</p><div class="fg">'+field('Data','data','date',todayStr())+field('Hora','hora','time','')+field('Horímetro','hor','number','')+'</div><div class="sect">Vistoria</div>'+v166VistHtml()+'<div class="sect">Avarias</div><div id="v166av">'+v166AvHtml()+'</div><button type="button" class="btn sm" data-act="v166AvAdd">+ Avaria (com foto)</button>'+v166FotosHtml();
+  modal({title:'Devolução · '+e.desc,wide:true,body:corpo(),saveLabel:'Registrar devolução',save:root=>{v166AvLer();const v=readForm(root);Object.assign(v,{id:e.id,vist:v166VistLer(),fotos:V166.f.fotos,avarias:V166.f.av});v166Post('eq/devolucao',v).then(r=>{if(v166Msg(r,'Devolução registrada.')){closeModal();render();}});return false;}});};
+const v166AvHtml=()=>(V166.f.av||[]).map((a,i)=>'<div class="v166r" style="margin:4px 0"><input data-v166av="'+i+'" value="'+esc(a.desc||'')+'" placeholder="Onde e o quê" style="flex:1 1 220px"><button type="button" class="btn sm'+(a.foto?' pri':'')+'" data-act="v166AvFoto" data-i="'+i+'">'+(a.foto?'✓ Foto':'📷 Foto')+'</button></div>').join('');
+const v166AvLer=()=>{$$('#mb [data-v166av]').forEach(el=>{const a=V166.f.av[+el.dataset.v166av];if(a)a.desc=el.value;});};
+A.v166AvAdd=()=>{v166AvLer();V166.f.av.push({desc:'',foto:null});const b=document.getElementById('v166av');if(b)b.innerHTML=v166AvHtml();};
+A.v166AvFoto=d=>{v166AvLer();v164Upload('image/*',f=>{const a=V166.f.av[+d.i];if(a)a.foto=f;const b=document.getElementById('v166av');if(b)b.innerHTML=v166AvHtml();});};
+/* conciliação da nota do locador: valor da nota ao lado do previsto (dias × valor + horas excedentes) */
+A.v166Nota=d=>{const l=get('loc166',d.l);if(!l)return;const ns=(S.notas||[]).filter(n=>n.parcId===l.parcId&&n.tipo!=='saida'&&n.status!=='cancelada'&&!(S.leq166||[]).some(e=>(e.notas166||[]).some(x=>x.notaId===n.id))&&!get('tnl166',n.id)),es=(S.leq166||[]).filter(e=>e.locId===l.id&&e.st!=='aguardando');
+  V166.prev=null;const corpo=()=>{const P=V166.prev;return '<div class="fg">'+field('Nota do locador','notaId','select',V166.f&&V166.f.notaId||'',{opts:ns.map(n=>[n.id,'NF '+(n.numero||'s/n')+' · '+fmtDate(n.emissao||n.data)+' · '+money(V166C.notaValor(n))]),blank:ns.length?'Selecione…':'Nenhuma nota deste locador sem conciliação'})+'</div><div class="sect">Equipamentos da nota</div><div class="ch-pick">'+es.map(e=>'<label class="ch-pk"><input type="checkbox" data-v166eq="'+esc(e.id)+'"'+(!V166.f||!V166.f.eqIds||V166.f.eqIds.includes(e.id)?' checked':'')+'> <span>'+esc(e.desc)+'<span class="sub"> · '+esc(v166Pj(e.projId))+'</span></span></label>').join('')+'</div>'+
+    '<div class="acts" style="justify-content:flex-start;margin-top:6px"><button type="button" class="btn sm" data-act="v166NotaPrev">Calcular o previsto</button></div>'+
+    (P?'<div class="card" style="margin-top:8px"><div class="kpis">'+kpi('Valor da nota',money(P.valorNota),'')+kpi('Previsto',money(P.previsto),P.itens.map(i=>esc(i.desc)+': '+i.dias+' dia(s), '+i.horas+' h'+(i.excedentes?' ('+i.excedentes+' h exc.)':'')).join('<br>'))+kpi('Diferença',money(P.valorNota-P.previsto),P.previsto?((P.valorNota-P.previsto)/P.previsto*100).toFixed(1)+'% (tolerância '+P.tolPct+'%)':'',Math.abs(P.valorNota-P.previsto)>P.previsto*P.tolPct/100+0.01?'neg':'pos')+'</div></div>':'')+
+    field('Justificativa da diferença (se passar da tolerância)','just','text','',{full:true})+'<p class="sub">Se a nota não é desta locação (ex.: venda de peça), marque abaixo com o motivo: o pagamento dela não fica bloqueado.</p>'+field('Esta nota não é da locação','naoLoc','checkbox',false)+field('Motivo','motivo','text','',{full:true});};
+  V166.f={notaId:'',eqIds:es.map(e=>e.id),corpo};
+  modal({title:'Conciliar nota · '+l.numero+' · '+v166Pn(l.parcId),wide:true,body:corpo(),saveLabel:'Conciliar',save:root=>{const v=readForm(root),eqIds=$$('#mb [data-v166eq]').filter(c=>c.checked).map(c=>c.dataset.v166eq);
+    v166Post('nota',{notaId:v.notaId,eqIds,just:v.just,naoLoc:v.naoLoc,motivo:v.motivo}).then(r=>{if(v166Msg(r,'Nota conciliada.')){closeModal();render();}});return false;}});};
+A.v166NotaPrev=()=>{const root=$('#mb'),v=readForm(root),eqIds=$$('#mb [data-v166eq]').filter(c=>c.checked).map(c=>c.dataset.v166eq);if(!v.notaId){toast('Escolha a nota.','neg');return;}V166.f.notaId=v.notaId;V166.f.eqIds=eqIds;
+  const fim=j=>{V166.prev=j;$('#mb').innerHTML=V166.f.corpo();};
+  if(!v166Srv()){const X=v166X(),n=get('notas',v.notaId),its=X.leq.filter(e=>eqIds.includes(e.id)).map(e=>Object.assign({id:e.id,desc:e.desc},V166C.previsto(X,e,'',e.st==='devolvido'?'':(n&&n.emissao)||'')));fim({valorNota:V166C.notaValor(n),previsto:its.reduce((t,i)=>t+i.total,0),itens:its,tolPct:V166C.C6(X).tolPct});return;}
+  segaPost('/api/ter166/previsto?notaId='+encodeURIComponent(v.notaId)+'&eqIds='+encodeURIComponent(eqIds.join(',')),null,'GET').then(fim).catch(e=>toast(e.message,'neg'));};
+
+/* =================================================================== 5. contas a pagar: bloqueado por documentação */
+function v166Bloqs(){if(!v166Srv()){const X=v166X(),o={};(S.lanc||[]).filter(l=>l.tipo==='pagar'&&!l.pago&&l.status!=='cancelado').forEach(l=>{const b=V166C.bloqueio(X,l);if(b.sob&&(b.faltas.length||b.lib))o[l.id]={bloq:b.bloq,faltas:b.faltas,ref:b.alvo.ref,parc:v166Pn(b.alvo.parcId),lib:b.lib?{nome:nameOf(b.lib.por),em:b.lib.em,just:b.lib.just}:null};});return {ok:true,bloq:o};}
+  const r=v166Get('bl','/api/ter166/bloqueios',()=>({bloq:{}}));return r&&r.bloq?r:{bloq:{}};}
+{const v0=V.pag;V.pag=function(){let h=v0.apply(this,arguments);let B;try{B=v166Bloqs().bloq;}catch(e){return h;}
+  Object.keys(B).forEach(id=>{const b=B[id],tag='data-act="baixar" data-id="'+id+'"',i=h.indexOf(tag);if(i<0)return;const a=h.lastIndexOf('<button',i);if(a<0)return;
+    const p=b.lib?'<span title="'+esc('Liberado por '+b.lib.nome+': '+b.lib.just)+'">'+pill('Liberado pelo Administrador','warn')+'</span> ':'<button class="btn sm dng" data-act="v166BloqVer" data-id="'+esc(id)+'" title="'+esc(b.faltas.slice(0,3).join('; '))+'">Bloqueado por documentação</button> ';h=h.slice(0,a)+p+h.slice(a);});
+  return h;};}
+function v166BloqModal(id,b){const l=get('lanc',id)||{};
+  modal({title:'Bloqueado por documentação',wide:true,body:'<p class="sub">'+esc((l.desc||'Conta a pagar')+' · '+money(l.valor)+' · '+(b.parc||'')+' · '+(b.ref||''))+'</p><div class="note" style="border-color:#b91c1c"><b>O pagamento, a aprovação e a baixa desta conta estão bloqueados</b> até regularizar:</div><ul style="margin:8px 0;padding-left:18px">'+b.faltas.map(f=>'<li>'+esc(f)+'</li>').join('')+'</ul>'+
+    (v166Adm()?'<div class="sect">Liberação do Administrador</div>'+field('Justificativa (obrigatória; fica na auditoria e na conta)','just','textarea','',{full:true,rows:3}):'<p class="sub">Só o Administrador libera o pagamento, com justificativa.</p>'),
+    foot:'<button class="btn" data-act="nav" data-tab="t166emp">Terceiros e locações</button><button class="btn" data-act="closeModal">Fechar</button>'+(v166Adm()?'<button class="btn pri" data-act="v166Liberar" data-id="'+esc(id)+'">Liberar o pagamento</button>':'')});}
+A.v166BloqVer=d=>{const B=v166Bloqs().bloq;if(B[d.id])v166BloqModal(d.id,B[d.id]);};
+A.v166Liberar=d=>{const el=document.getElementById('f_just'),j=el?String(el.value||'').trim():'';if(j.length<15){toast('Escreva a justificativa (ao menos 15 caracteres).','neg');return;}
+  if(!v166Srv()){const l=get('lanc',d.id);if(l){put('lanc',Object.assign(cl(l),{lib166:{srv:1,por:actorId(),nome:nameOf(actorId()),em:Date.now(),just:j}}));toast('Pagamento liberado.','pos');closeModal();render();}return;}
+  v166Post('liberar',{lancId:d.id,just:j}).then(r=>{if(v166Msg(r,'Pagamento liberado.')){closeModal();render();}});};
+{const b0=A.baixar;A.baixar=d=>{const l=get('lanc',d&&d.id);if(!l||l.tipo!=='pagar'||l.pago)return b0(d);let B={};try{B=v166Bloqs().bloq;}catch(e){}const b=B[l.id];if(b&&b.bloq){v166BloqModal(l.id,b);return;}return b0(d);};}
+Object.assign(ACT_GROUP,{v166BloqVer:null,v166Liberar:null});
+
+/* =================================================================== 6. trabalhadores, diário e alocação */
+/* as pendências do trabalhador terceiro vêm do núcleo (as mesmas do servidor): ASO, integração, EPI, NRs da função
+   (matriz + regras da v166), registro (CTPS/eSocial) e a CNH do operador */
+tercPend=function(t,extra){return V166C.trabPend(cfg()||{},t,todayStr(),extra);};
+{const d=MODS2.tterc;if(d){const f0=d.fields;d.fields=r=>{const L=f0(r),i=L.findIndex(x=>x&&x.t==='sect');const ex=[F('registro166','Registro (CTPS digital ou eSocial)','select',{o:()=>[['CTPS digital','CTPS digital'],['eSocial','eSocial']],blank:'Não informado'}),F('cnhCat166','CNH: categoria (operador)','text'),F('cnhVal166','CNH válida até','date')];L.splice(i<0?L.length:i,0,...ex);const tem=new Set(L.map(x=>x&&x.k).filter(Boolean));V166C.uniq(v166Cfg().nrFunc.flatMap(x=>x.nrs)).forEach(n=>{const k=V166C.nrKey(n);if(!tem.has(k)){L.splice(L.length-1,0,F(k,n+' válido até','date'));tem.add(k);}});return L;};
+  const ci=d.cols.findIndex(c=>c[0]==='Situação');if(ci>=0)d.cols[ci]=['Liberação',r=>{if(r.ativo===false)return pill('Inativo','');const st=V166C.trabStatus(v166X(),r,r.projId||'');return st.lib?pill('Liberado','pos'):pill('Não liberado','neg')+'<div class="sub">'+esc(st.motivos.join(', '))+'</div>';}];
+  d.fnote=(d.fnote||'')+' A liberação para a obra também confere o registro (CTPS digital ou eSocial), a CNH do operador e as NRs da função (Terceiros › Regras).';}}
+Object.assign(FLABEL,{registro166:'Registro (CTPS/eSocial)',cnhCat166:'CNH (categoria)',cnhVal166:'CNH válida até'});
+/* diário: linha de equipamento pode ser um equipamento locado que está na obra (as horas vão para o previsto da locação) */
+{const eq=RDO_ROWS.equip;if(!eq.some(c=>c[0]==='leqId'))eq.splice(0,0,['leqId','Equipamento locado','select',[['','—']]]);}
+function v166EqObra(pid,data){return (S.leq166||[]).filter(e=>e.st!=='aguardando'&&(e.projId===pid||(e.guardaHist||[]).some(g=>g&&g.para&&g.para.projId===pid))&&e.ret&&(!data||e.ret.data<=data)&&(e.st!=='devolvido'||!e.dev||!data||e.dev.data>=data));}
+{const re0=rowsEd;rowsEd=function(k,rows){if(k==='equip'&&rdoCur){const c=RDO_ROWS.equip.find(x=>x[0]==='leqId');if(c){const L=v166EqObra(rdoCur.projId,rdoCur.data),ja=new Set(L.map(e=>e.id));c[3]=[['','—']].concat(L.map(e=>[e.id,e.desc+' · '+v166Pn(e.parcId)]));(rows||[]).forEach(r=>{if(r.leqId&&!ja.has(r.leqId))c[3].push([r.leqId,(r.nome||'Equipamento locado')+' (fora da obra)']);});}}return re0.apply(this,arguments);};}
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||t.dataset.rk!=='equip'||t.dataset.rc!=='leqId'||!rdoCur)return;const row=t.closest&&t.closest('tr'),x=get('leq166',t.value);if(row&&x){const el=row.querySelector('[data-rc="nome"]');if(el)el.value=x.desc;}});
+{const s0=A.rdoSalvar;A.rdoSalvar=function(){rdoLer();if(rdoCur){(rdoCur.equip||[]).forEach(x=>{if(x.leqId){const e=get('leq166',x.leqId);if(e&&!x.nome)x.nome=e.desc;}});
+  const bad=(rdoCur.equip||[]).find(x=>x.leqId&&!v166EqObra(rdoCur.projId,rdoCur.data).some(e=>e.id===x.leqId));if(bad&&S.leq166&&S.leq166.length){toast('O equipamento locado '+(bad.nome||'')+' não estava retirado para esta obra nesse dia.','neg');return false;}
+  const nl=(rdoCur.efetivo||[]).filter(x=>x.tercId).map(x=>({x,t:get('tterc',x.tercId)})).filter(o=>o.t&&!V166C.trabStatus(v166X(),o.t,rdoCur.projId).lib);
+  if(nl.length&&v166Cfg().bloqDiario&&typeof j4LibValida==='function'){const sem=nl.filter(o=>!j4LibValida('',o.t.id,rdoCur.projId,rdoCur.data||todayStr()));if(sem.length){toast('Trabalhador terceiro não liberado para esta obra: '+sem.map(o=>o.t.nome).join(', ')+'. Regularize os documentos ou peça a liberação do SST.','neg');return false;}}}
+  return s0.apply(this,arguments);};}
+/* lista do efetivo no diário: "não liberado" ao lado do nome na escolha do trabalhador (como a alocação irregular) */
+{const re0=rowsEd;rowsEd=function(k,rows){let h=re0.apply(this,arguments);if(k!=='efetivo'||!rdoCur||!S.tterc||!S.tterc.length)return h;const X=v166X();
+  S.tterc.filter(t=>t.ativo!==false).forEach(t=>{const st=V166C.trabStatus(X,t,rdoCur.projId||'');if(st.lib)return;const id=String(t.id).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');h=h.replace(new RegExp('(<option value="'+id+'"[^>]*>)([^<]*)(</option>)','g'),'$1$2 — não liberado$3');});return h;};}
+/* tutorial curto */
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v166Link:'Gera o link para o terceiro enviar os documentos (sem senha, com validade).',v166DocAprovar:'Aprova o documento: a validade passa a contar para o pagamento e para a liberação do trabalhador.',v166Liberar:'Libera o pagamento bloqueado (só o Administrador, com justificativa).'});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='165',APP_DATA='2026-11-06';
+const APP_VER='166',APP_DATA='2026-11-07';
 const CHANGELOG=[
+  ['166','2026-11-07',['Novo menu Terceiros: painel, empresas terceiras, conferência de documentos e locações de equipamentos. O terceiro é o próprio fornecedor do cadastro (nada é duplicado).', 'Documentos da empresa terceira com tipo, arquivo, emissão e validade: contrato social, cartão CNPJ, CND federal, CRF do FGTS, CNDT, certidões estadual e municipal, seguro, alvará e outros. Cada certidão tem o botão para consultar no site oficial.', 'Avisos de vencimento dos documentos (30, 15 e 0 dias, configurável) no chat da Central de Gestão para o RH, a SST e Compras.', 'Obrigações do mês por contrato: folha, guia e comprovante do FGTS e do INSS (DCTFWeb/eSocial), holerites e ponto dos trabalhadores da obra, com situação entregue, aprovado, pendente ou recusado (com motivo).', 'Trabalhadores do terceiro: registro (CTPS digital ou eSocial), ASO, NRs exigidas pela função (configurável: NR-18 para todos, NR-11 e NR-12 para operador, NR-35 para montador), CNH do operador, integração e ficha de EPI, cada um com arquivo e validade. O CPF aparece mascarado.', 'Cada trabalhador fica "Liberado" ou "Não liberado" por obra. O diário de obra recusa trabalhador não liberado (o SST ou o Administrador liberam com justificativa) e a lista do efetivo mostra quem não está liberado.', 'Locação de equipamentos sem operador e com operador: equipamento, nº de série ou patrimônio, obra, período, valor por dia, semana ou mês, franquia de horas, hora excedente e quem paga a manutenção.', 'Retirada com vistoria, fotos, horímetro e responsável; guarda na obra com responsável e local, e transferência entre obras registrada; devolução com vistoria, avarias com foto, horímetro e horas usadas.', 'Alertas da locação: alguns dias antes do fim do período (padrão 3, para não pagar dias a mais) e devolução atrasada.', 'O custo da locação entra só pela nota do locador: a conciliação liga a nota ao contrato, ao equipamento e à obra e mostra o valor previsto (dias × valor + horas excedentes) ao lado do valor da nota.', 'Na locação com operador, o operador é trabalhador do terceiro e as horas do equipamento são lançadas no diário de obra.', 'Contratos de empreiteiros (serviços como impermeabilização) usam os mesmos documentos da empresa, os trabalhadores e as obrigações do mês: não há um tipo de contrato novo.', 'Pagamento "Bloqueado por documentação": a medição ou a nota do terceiro não é paga, aprovada nem baixada (o servidor recusa) com documento da empresa vencido, obrigação do mês não aprovada ou trabalhador não liberado, e a tela mostra exatamente o que falta.', 'Só o Administrador libera um pagamento bloqueado, com justificativa obrigatória que fica na auditoria e aparece na conta.', 'Link para o terceiro enviar documentos, sem senha e sem acesso ao sistema: validade de 30 dias, pode ser revogado, aceita PDF, JPG e PNG, e cada envio fica "aguardando conferência" para o RH ou a SST aprovar ou recusar. A mensagem pronta vai por WhatsApp ou e-mail.']],
   ['165','2026-11-06',['Frota: reserva, saída e retorno agora são telas separadas, feitas para o celular. O condutor pede o veículo (ou "qualquer disponível na minha cidade") com data, hora, retorno previsto, destino e motivo.', 'Cada veículo tem a Cidade/base (Tuiuti ou São Paulo; a lista é configurável) e cada cidade tem um Responsável pela frota com substituto (Configurações › Frota). O responsável aprova, troca o veículo ou recusa a reserva com o motivo, e só vê e gere os veículos da cidade dele.', 'Duas reservas aprovadas no mesmo horário para o mesmo veículo são recusadas. Saída sem reserva só pelo responsável da cidade ou pelo Administrador (a configuração pode liberar).', 'Saída do veículo: escolha pela reserva aprovada, pela lista ou pelo QR do veículo (etiqueta para imprimir em Frota › Veículos), com km do painel, combustível (vazio a cheio), checklist configurável, fotos dos 4 lados e do painel e as avarias que já estavam no veículo. O veículo fica "Em uso por" o condutor.', 'A saída é bloqueada com CNH vencida ou de categoria errada, condutor não autorizado, veículo em manutenção ou com avaria grave aberta, e o motivo aparece na tela.', 'Retorno do veículo: só as saídas abertas da própria pessoa (o responsável vê as da cidade), km de chegada e km rodados, combustível na chegada (até 1/4 gera alerta), checklist, fotos, avarias novas com foto e o abastecimento da viagem com a foto do cupom. Atraso avisa o condutor e o responsável.', 'Painel da frota por cidade: disponíveis, em uso (quem e desde quando), manutenção, retornos atrasados, combustível baixo, avarias novas (abrir a manutenção num toque), reservas pendentes, vencimentos, CNHs e condutores bloqueados.', 'Multas: o cadastro mostra quem estava com o veículo na data e hora da infração e sugere esse condutor.', 'Condutores: nova coluna Autorização (Autorizado, Vence em breve, Bloqueado, Não autorizado), com quem autorizou, validade, tipos de veículo, cidade ou veículos, requisitos (CNH, EAR, exame toxicológico, cursos) e o termo de responsabilidade assinado. Desligados ficam escondidos; desligamento revoga e afastamento suspende a autorização.', 'Os condutores que saíram com veículo nos últimos 90 dias entram como "Autorizado (migração)" por 30 dias, para o Administrador confirmar; os demais começam como "Não autorizado".', 'Abastecimentos: importação do "Relatório Utilização Combustível" da Sem Parar (.xls), com prévia por linha (novo, já importado, casado com recibo, com alerta). Repetir a importação não duplica.', 'Conferências automáticas: km negativo, km alto ou dígito a mais no hodômetro, km baixo e dois abastecimentos no mesmo dia, hodômetro e motorista diferentes da saída, abastecimento sem saída, combustível errado, litros acima do tanque, preço acima da mediana e queda de km/l.', 'Foto do cupom no retorno ou no abastecimento: a IA lê placa, km, litros, valor, AUT e NSU para o condutor conferir; o abastecimento fica provisório até o relatório e vira confirmado quando casa com a linha.', 'O responsável pela cidade ou o Administrador de frota corrige o hodômetro com motivo; o consumo e os alertas usam o valor corrigido e o original fica no histórico.', 'Fatura da Sem Parar: compara o importado do mês com a fatura e lança uma conta a pagar só, com o rateio por obra (sem saída, custo geral da frota da cidade).']],
   ['164','2026-11-06',['Solicitação de compra recebida: quem pediu recebe o aviso no chat (Central de Gestão), na lista de pendências e por e-mail quando o envio está configurado, com o que chegou, o que falta e onde retirar (almoxarifado e prateleira) ou "entregue na obra".', 'Recebimento parcial avisa o que chegou e o que falta; o restante gera um aviso novo. O botão "Recebi / retirei" conclui a SC e registra quem retirou e quando; o almoxarife também pode registrar pela pessoa. Depois de 3 dias sem retirada, a pessoa e o almoxarife recebem um lembrete.', 'Lista de SC com as situações Comprada, A caminho, Recebida – aguardando retirada e Concluída.', 'Lote e validade: produto com controle de lote tem saldo por almoxarifado e lote. A entrada pede o lote e a validade (a NF-e já traz os lotes do grupo rastro); sem validade, o sistema calcula pelos dias de validade do produto.', 'Saídas, transferências, romaneios e entrega de EPI usam primeiro o lote que vence antes (FEFO). Lote vencido não sai, a não ser como perda ou descarte com motivo. O saldo antigo fica no lote SEM-LOTE, para identificar no inventário.', 'Nova tela Estoque › Lotes e validades: lotes vencidos e que vencem em 30, 60 e 90 dias por almoxarifado, com o valor em risco, a baixa do vencido como perda, o inventário por lote e a rastreabilidade de cada lote.', 'Pedido de compra com o campo Entrega: no almoxarifado, direto na obra (o endereço da obra vai no pedido) ou retirada com veículo próprio (cria a saída do veículo na frota). Obras › Recebimentos pendentes desta obra: o encarregado ou o responsável pela obra confere item a item, fotografa a nota e o material, registra falta e avaria e assina.', 'Falta e avaria no recebimento na obra avisam o comprador e ficam como pendência com o fornecedor (Suprimentos › Pendências com fornecedores). O material entra e sai como consumo da obra, com o custo do pedido; a nota só é liberada com o recebimento na obra.', 'Desconto no pedido de compra em % ou em R$, no item e no pedido inteiro. O desconto do pedido é rateado pelos itens no custo do estoque e aparece no PDF, no aceite do fornecedor, na nota e nas contas a pagar.', 'O responsável pela obra é preenchido sozinho ao escolher o projeto (etapa da EAP, diário, romaneio, devolução, não conformidade, termo de recebimento, PGR, plano de ação e recebimento na obra). Equipamentos com acessórios, garantia, nota de compra e calibração. O retorno pelo cartão do quadro já abre no item; estados novos: em funcionamento e limpo / e sujo.', 'Nova tela Obras › Material na obra: o que foi enviado, devolvido, transferido e consumido em cada obra, com o saldo e o detalhe de cada envio. A devolução sai do saldo, pelo custo do envio; transferência entre obras leva o custo junto.', 'Romaneio novo só transporta: material por separação (o produto avulso vira separação rápida), ferramenta por Envio de ferramentas e volumes avulsos. A obra recebe e assina (com os acessórios); romaneio de retorno leva sobras e ferramentas de volta ao almoxarifado.', 'Devolução de obra com motivo e estado por item: avariado vai para a quarentena; outros destinos (outra obra, fornecedor, descarte na obra); conferência às cegas no almoxarifado. A obra só é encerrada com o saldo zerado, salvo liberação do Administrador com justificativa.', 'Transferência de guarda das ferramentas na obra entre responsáveis, com checagem conjunta, as duas assinaturas, ficha de entrega e termo de devolução da guarda. Desligamento, afastamento ou mudança de obra de quem tem ferramentas avisa o RH e o almoxarife.', 'Corrigido: no romaneio, o Almoxarife via a lista de veículos vazia. Agora vê os veículos ativos (só placa, modelo, tipo, situação e capacidade, sem valores nem documentos).']],
   ['163','2026-11-06',['Medições ao cliente passou para o menu Comercial (Comercial › Medições ao cliente). A tela e as permissões são as mesmas; favoritos e links antigos continuam funcionando.', 'Manutenção de veículos e de equipamentos não lança mais conta a pagar. O custo vem da nota fiscal da oficina ou da compra de peças, ligada à manutenção (a nota inteira ou só algumas linhas).', 'A ligação pode ser feita na manutenção (Editar › Ligar nota fiscal) ou na própria nota (Ver nota › Ligar a veículo ou equipamento). A manutenção mostra o número, o fornecedor e o valor de cada nota; manutenção antiga com conta a pagar fica como está.', 'Cadastro da obra: novo campo Aprovador de compras (nível 1) e o Substituto. A SC da obra vai para esse aprovador; quando ele está ausente (Matriz de aprovadores), vai para o substituto. A lista mostra "Aguardando aprovação de" com o nome.', 'EPI: só o RH e a Segurança do trabalho registram a entrega. O sistema escolhe o almoxarifado do colaborador (São Paulo ou Tuiuti, ou o Almoxarifado de EPI do cadastro) e mostra os EPI em uso, as trocas próximas e o último tamanho.', 'Nova entrega de EPI: o EPI vem do estoque, com tamanho, CA, validade e saldo por almoxarifado; CA vencido bloqueia. Com saldo, a baixa e a ficha saem na hora. Só em Tuiuti para quem é de São Paulo: o romaneio de transferência é criado e a entrega aguarda a chegada. Sem estoque: SC de RH.', 'Entrega de vários EPI de uma vez (kit de admissão) e painel de EPI: trocas, CA vencendo, estoque abaixo do mínimo e entregas aguardando transferência. A troca abre a próxima entrega já preenchida.', 'Solicitação de compra em rascunho: cada item mostra se será separado ou comprado e o motivo (item sem produto, tipo Reposição, saldo reservado por outra SC, saldo zero). Item livre pode ser ligado a um produto do estoque.', 'O botão mostra a divisão, por exemplo "Enviar (1 para separação · 0 para compra)". Corrigido: a lista e o documento da SC em rascunho mostravam números diferentes do formulário; agora todos usam o estoque do momento.']],
