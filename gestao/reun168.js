@@ -465,10 +465,27 @@ module.exports = function (X) {
     const h = hojeBr(), d2 = maisDias(h, 2); let n = 0;
     for (const t of col('tar168')) {
       if (!['afazer', 'andamento'].includes(t.status) || !dataOk(t.prazo)) continue;
-      if (t.prazo === d2 && t.resp && avisoNovo('tar:d2:' + t.id + ':' + t.prazo)) n += avisarChat([t.resp], 'Faltam 2 dias para o prazo da tarefa da reunião "' + t.reunTitulo + '": ' + t.descricao + ' (prazo ' + fmtBr(t.prazo) + ').');
-      if (t.prazo < h && avisoNovo('tar:atraso:' + t.id + ':' + t.prazo)) n += avisarChat(uniq([t.resp, t.org]), 'Tarefa atrasada da reunião "' + t.reunTitulo + '": ' + t.descricao + ' — prazo era ' + fmtBr(t.prazo) + (t.resp ? '' : ' (responsável de fora: ' + (t.respNome || '—') + ')') + '. Responsável: ' + (t.resp ? nomeConta(t.resp) : t.respNome || '—') + '.');
+      if (t.prazo === d2 && t.resp && avisoNovo('tar:d2:' + t.id + ':' + t.prazo)) n += avisarChat([t.resp], 'Faltam 2 dias para o prazo da tarefa ' + deOnde(t) + ': ' + t.descricao + ' (prazo ' + fmtBr(t.prazo) + ').');
+      if (t.prazo < h && avisoNovo('tar:atraso:' + t.id + ':' + t.prazo)) n += avisarChat(uniq([t.resp, t.org]), 'Tarefa atrasada ' + deOnde(t) + ': ' + t.descricao + ' — prazo era ' + fmtBr(t.prazo) + (t.resp ? '' : ' (responsável de fora: ' + (t.respNome || '—') + ')') + '. Responsável: ' + (t.resp ? nomeConta(t.resp) : t.respNome || '—') + '.');
     }
     return n;
+  }
+
+  /* v169: tarefa avulsa (sem reunião), criada pela própria pessoa (ex.: proposta de um assistente de IA confirmada no chat).
+     Para outra pessoa só quem grava na Agenda; quem cria é o "organizador" (vê, muda prazo e responsável, cancela). */
+  const deOnde = t => t.reunId ? 'da reunião "' + t.reunTitulo + '"' : '(' + (t.reunTitulo || 'tarefa avulsa') + ')';
+  function novaTarefa(conta, req, b) {
+    const descricao = txtL(b.descricao, 2000); if (!descricao) return erro('Descreva a tarefa.', 400);
+    const resp = String(b.resp || conta.id); if (!ID_OK.test(resp) || !q.contaPorId.get(resp)) return erro('Responsável inválido.', 400);
+    if (resp !== conta.id && !podeAgenda(conta)) return erro('Seu perfil não grava na Agenda: crie a tarefa para você mesmo.');
+    if (!dataOk(b.prazo)) return erro('Prazo inválido.', 400);
+    const pri = ['alta', 'media', 'baixa'].includes(b.prioridade) ? b.prioridade : 'media', agora = Date.now();
+    const o = b.origem && typeof b.origem === 'object' ? { tipo: txt(b.origem.tipo, 20), asst: txt(b.origem.asst, 30), nome: txt(b.origem.nome, 80) } : null;
+    const t = { id: novoId('tr'), reunId: '', reunTitulo: o && o.nome ? o.nome : 'Tarefa avulsa', reunData: hojeBr(), serie: '', acaoId: '', pautaId: '', assunto: '', descricao, resp, respNome: '', prazo: b.prazo, prioridade: pri,
+      status: 'afazer', notas: [], evid: [], org: conta.id, crBy: conta.id, cr: agora, origem: o, hist: [{ em: agora, por: conta.id, st: 'afazer', txt: o && o.tipo === 'ia169' ? 'Criada ao confirmar uma proposta do ' + o.nome : 'Criada' }] };
+    grava('tar168/' + t.id, t); auditar(conta, req, 'REUNIAO_TAREFA_NOVA_168', 'tar168/' + t.id, null, { resp, prazo: t.prazo, origem: o ? o.tipo : '' });
+    if (resp !== conta.id && avisoNovo('tar:nova:' + t.id)) avisarChat([resp], 'Nova tarefa para você (' + t.reunTitulo + '): ' + descricao + '\nPrazo: ' + fmtBr(t.prazo) + '. Veja em Minha área › Minhas tarefas.');
+    return { ok: true, tarefa: tarPub(t) };
   }
 
   /* ---------------- busca nas atas e transcrições ---------------- */
@@ -555,6 +572,7 @@ module.exports = function (X) {
     }
     if (m !== 'POST') return fim(erro('Método não permitido.', 400));
     let b = {}; try { b = (await lerJson(req)) || {}; } catch (e) { return fim(erro('Pedido inválido.', 400)); }
+    if (p === '/api/reun168/tarefa/nova') return fim(novaTarefa(conta, req, b)); /* v169 */
     if (p === '/api/reun168/tarefa') return fim(alterarTarefa(conta, req, b));
     if (p === '/api/reun168/bib/pasta') return fim(salvarPasta(conta, req, b));
     if (p === '/api/reun168/bib/doc') return fim(salvarDocBib(conta, req, b));
@@ -602,5 +620,5 @@ module.exports = function (X) {
   /* transcrição que estava "transcrevendo" quando o servidor caiu volta para a fila */
   setImmediate(() => { try { for (const x of col('reunx168')) if (x.transcr && x.transcr.st === 'transcrevendo') { x.transcr.st = 'fila'; gravaExtra(x); } } catch (e) { } });
 
-  return { COLS, rota, podeLer, antes, antesExcluir, setFontes, lembretes, avisosTarefas, retencao, gravacoesParadas, trabalhar, normMinuta, promptAta, acessoPasta };
+  return { COLS, rota, podeLer, antes, antesExcluir, novaTarefa, setFontes, lembretes, avisosTarefas, retencao, gravacoesParadas, trabalhar, normMinuta, promptAta, acessoPasta };
 };

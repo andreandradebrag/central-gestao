@@ -6,7 +6,7 @@
      ficam no IndexedDB do próprio app (pacote do modo Campo), só os necessários e só da pessoa.
    - Background Sync (Android/Chrome): quando a conexão volta, envia a fila do modo Campo (o mesmo fila167.js do app). */
 'use strict';
-const VER = '168', CASCO = 'cg-casco-' + VER;
+const VER = '169', CASCO = 'cg-casco-' + VER;
 const ARQS = ['/', '/shim.js', '/manifest.webmanifest', '/icones/icone-192.png', '/icones/icone-512.png', '/icones/icone-maskable-512.png', '/icones/apple-touch-icon.png'];
 const VENDOR = ["/vendor/pdfjs/pdf.min.mjs", "/vendor/pdfjs/pdf.worker.min.mjs", "/vendor/xlsx/xlsx.full.min.js", "/vendor/html2canvas/html2canvas.min.js", "/vendor/jspdf/jspdf.umd.min.js", "/vendor/jszip/jszip.min.js", "/vendor/pdflib/pdf-lib.min.js"];
 /* fila167.js — fila de envio do modo Campo (v167, relatorios/feito_v167.md). O mesmo arquivo roda no app (embutido no

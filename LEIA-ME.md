@@ -1298,6 +1298,60 @@ A pasta de dados ganha `reun168/` (partes da gravação enquanto grava; somem ao
   servidor já tem a interface (`transcricao168.js`: `transcrever(arquivo) → {texto, segmentos}`; a fonte "teams" está
   prevista e hoje só avisa que use a importação).
 
+## Assistentes de IA por setor no chat (v169, etapa 1)
+
+Arquivo novo no serviço `gestao`: `assist169.js`. Alterados: `server.js`, `regras.js`, `reun168.js`, `Dockerfile`,
+`perfis.json` (só a data) e `public/` (`index.html` e `sw.js`, versão 169). **Reconstrua a imagem** do serviço `gestao`.
+O banco ganha as tabelas `ia169_cfg` (configuração), `ia169_uso` (uso do mês), `ia169_hist` (histórico curto das
+conversas), `ia169_acao` (ações propostas), `ia169_fb` (Útil / Não útil), `ia169_resumo` e `ia169_resumo_k` (resumos).
+Usa a mesma chave da IA de sempre (`ANTHROPIC_API_KEY`); sem ela os contatos aparecem, mas não respondem.
+
+- **10 assistentes**: Diretoria, Financeiro, Fiscal, Comercial, Obras, Suprimentos, Pessoas (RH/DP), Segurança do Trabalho,
+  Frota e Equipamentos, Fábrica e Qualidade. Todos começam **inativos**. Cada assistente ativo vira um contato do chat
+  interno só para quem pode usá-lo (perfis padrão: Diretoria e Administrador; Financeiro; Fiscal; Comercial; Projetos e
+  Encarregado; Comprador, Almoxarife, Almoxarife da fábrica e Recursos humanos e compras (só a parte de SC); Recursos
+  humanos e Recursos humanos e compras; Gestor e Técnico de SST; Administrador de frota e os responsáveis da frota de cada
+  cidade; Fábrica e Almoxarife da fábrica). O Administrador muda perfis e acrescenta pessoas.
+- **Permissões**: cada consulta do assistente lê os dados **como a pessoa que perguntou**, pelas mesmas regras da leitura
+  da API (perfil, módulo, valores gerenciais, dados de RH e saúde, SC só as próprias etc.). CPF sai mascarado; salário e
+  saúde só para quem já lê. Sem permissão, a resposta diz "Não tenho acesso a isso". A Diretoria usa as consultas de
+  todos os setores, limitadas pelo perfil de quem pergunta.
+- **Ações**: o assistente pode propor uma tarefa (Minha área › Minhas tarefas), uma SC em rascunho, um lembrete de cobrança
+  (registrado no lançamento, com o texto para copiar) ou um item de pauta. **Nada é feito sem o "Confirmar"** da pessoa,
+  e a gravação segue o caminho normal do sistema, com as permissões dela (quem não grava no módulo recebe a recusa).
+- **Resumo periódico**: semanal (segunda, 07:00 de Brasília) por padrão, diário ou desligado, para cada responsável, com os
+  dados lidos com as permissões **do responsável**: números do período contra o anterior, alertas, o que está fora das
+  metas e 3 a 5 propostas de melhoria. Pulado (e registrado) quando o limite de custo foi atingido. "Enviar resumo agora"
+  na tela serve para testar.
+- **Limites**: limite de custo do mês por assistente e geral (R$ estimado ou tokens); o limite por hora da IA de sempre
+  vale também nas perguntas. O custo é estimado pelo preço de tabela (`IA169_PRECO_QUICK|DEFAULT|COMPLEX=entrada,saída` em
+  US$ por milhão de tokens) e pelo dólar `IA169_DOLAR` (padrão 5,6). Modelos: `IA169_MODELO_CHAT` (padrão `default`) e
+  `IA169_MODELO_RESUMO` (padrão `complex`). `IA169_ROTINA=0` desliga a rotina dos resumos.
+- **Auditoria**: `IA_USO` e `IA169_USO` em cada chamada (quem, assistente, ferramentas, tamanhos, tokens e custo, sem o
+  conteúdo); `IA169_CFG` em cada mudança da configuração (com os responsáveis de antes e de depois); `IA169_ACAO`,
+  `IA169_RESUMO`, `IA169_RESUMO_PULADO`, `IA169_LIMITE`, `IA169_NEGADO` e `IA169_FEEDBACK`.
+- **LGPD**: a pergunta e os resultados resumidos das consultas (com nomes de clientes, fornecedores e colaboradores, nunca
+  o CPF inteiro) vão para a Anthropic. Inclua os assistentes no registro de tratamento (ROPA) e confira o contrato (DPA).
+
+**Passo de configuração (Sistema › Assistentes de IA, como Administrador).** Os responsáveis abaixo são os pretendidos
+pelo dono; **não foram gravados no sistema**, porque cada nome precisa ser casado com a conta certa. Em cada assistente,
+clique em Editar, use "Sugerir pelos nomes" (ou escolha na lista), confira as contas, marque "Assistente ativo" e Salvar:
+
+| Assistente | Responsáveis pretendidos |
+|---|---|
+| Diretoria | Andre, Denise, Carolina |
+| Financeiro | Andre |
+| Fiscal | Andre, Arilei |
+| Comercial | Denise, Procópio |
+| Obras | Walison, Carolina |
+| Suprimentos | Paulo, Marcelo |
+| Pessoas (RH/DP) | Udmara, Isadora |
+| Segurança do Trabalho | Ben-Hur, Carolina |
+| Fábrica e Qualidade | Dirceu, Andre |
+| Frota e Equipamentos | os responsáveis da frota de cada cidade (v165), já por padrão: deixe a lista vazia |
+
+Confira também as metas (valores padrão sugeridos, todos editáveis) e ponha um limite de custo do mês antes de ativar.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

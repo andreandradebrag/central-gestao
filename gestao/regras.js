@@ -2365,5 +2365,6 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const auditarIa = (conta, req, corpo, ok, erroIa) => auditar(conta, req, 'IA_USO', '/api/ia', null, PRIV.resumoIa(req, corpo || {}, ok, erroIa));
   return { podeLer, redigir, antesGravar, antesExcluir, depois, excecaoGravacao, auditar, auditarHttp, rota, servirBlob, listarAnexos, excluirAnexo, MODO_LEIT,
     campo167: (...a) => C167.antes(...a), /* v167 */
+    tarefa168: (...a) => C168.novaTarefa(...a), /* v169: tarefa avulsa (ação confirmada no chat do assistente de IA) */
     pontoTravado, rotaPublica, aprovadoresDe, avisarAprovadores, enviarResumo, registrarLeitura, ehSaude: PRIV.ehSaude, auditarIa, PRIV };
 };

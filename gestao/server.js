@@ -977,7 +977,7 @@ async function rotear(req, res) {
       res.writeHead(st, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(st === 502 ? JSON.stringify({ erro: 'Consulta indisponível (' + r.status + ').' }) : corpo);
     } catch (e) { return json(res, 502, { erro: 'Consulta indisponível agora.' }); }
   }
-  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf' || p === '/api/frota165/recibo' || p === '/api/reun168/ata/gerar') && m === 'POST') { /* v168: a minuta da ata pela IA conta no mesmo limite */ /* v165: o recibo lido pela IA conta no mesmo limite (frota165) */ /* v162: a leitura de PDF de medição conta no mesmo limite */
+  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf' || p === '/api/frota165/recibo' || p === '/api/reun168/ata/gerar' || p === '/api/ia169/perguntar') && m === 'POST') { /* v169: a pergunta ao assistente conta no mesmo limite */ /* v168: a minuta da ata pela IA conta no mesmo limite */ /* v165: o recibo lido pela IA conta no mesmo limite (frota165) */ /* v162: a leitura de PDF de medição conta no mesmo limite */
     if (NIV[conta.nivel] < NIV.interact) return json(res, 403, { code: 'not_granted', erro: 'Sem permissão para usar a IA.' });
     const ui0 = usoIa.get(conta.id) || { n: 0, ini: Date.now() }; if (Date.now() - ui0.ini > 3600e3) { ui0.n = 0; ui0.ini = Date.now(); } ui0.n++; usoIa.set(conta.id, ui0);
     if (ui0.n > (NIV[conta.nivel] >= NIV.admin ? 120 : 30)) return json(res, 429, { code: 'rate_limited', erro: 'Limite de uso da IA nesta hora atingido.' });
@@ -985,6 +985,7 @@ async function rotear(req, res) {
   if (p === '/api/ia' && m === 'POST') { /* v112 (B9): o uso fica na auditoria (quem, quando, função, tamanho), sem o conteúdo */
     let corpo = {}; try { corpo = await lerJson(req); const r = await ia(Object.assign({}, corpo, { nivel: NIV[conta.nivel] })); REG.auditarIa(conta, req, corpo, true); return json(res, 200, r); }
     catch (e) { REG.auditarIa(conta, req, corpo, false, e.msg || e.message); return json(res, e.st || 500, { code: e.code || (e.st === 503 ? 'capability_disabled' : 'upstream_error'), erro: e.msg || 'Falha na IA.' }); } }
+  if (await C169.rota(p, m, req, res, conta)) return; /* v169: assistentes de IA por setor (assist169.js) */
   if (p === '/api/ia/medicao-pdf' && m === 'POST') return C162.rota(conta, req, res); /* v162: medição lida de PDF (iamed162.js) */
   /* v114: perfil personalizado usa as integrações pelo módulo: ponto (com dados de RH), contas bancárias (com dados bancários), notas fiscais */
   const dcu = defConta(conta), cu = dcu && dcu.custom ? dcu : null, cuW = g => !!cu && cu.w.includes(g), cuR = g => !!cu && (cu.w.includes(g) || cu.r.includes(g));
@@ -1085,6 +1086,36 @@ const ARQF = require('./arquivofiscal.js')({ db, q, json, lerCorpo, avisarDoc, p
 /* ===== fim v129 ===== */
 /* ===== v130: leitura da caixa nfe@ (Microsoft 365 / Graph): NF-e anexadas vão para o arquivo fiscal (origem "email") ===== */
 const ICO = require('./icones168.js')({ DATA, json, lerJson, perfilEm: (...a) => perfilEm(...a), auditar: (...a) => REG.auditar(...a) }); /* v168: ícones do app pelo logotipo */
+/* v169: os assistentes de IA leem e gravam COMO a pessoa: as mesmas regras de /api/db/col (podeVer + redigir, registro da
+   leitura de saúde) e de /api/db/doc (nível, perfil, módulo, regras do servidor, auditoria) */
+function acessoCol169(conta, c) { const p = c + '/_'; return pode(conta, p, 'r') && perfilPermite(conta, p, 'r') && VAL.podeLer(conta, p); }
+function lerComo169(conta, c, req) {
+  const memo = new Map(), rows = q.colGet.all(c).map(r => { try { return { id: r.id, data: JSON.parse(r.data) }; } catch (e) { return null; } }).filter(r => r && podeVer(conta, c + '/' + r.id, r.data, memo));
+  if (rows.length && REG.ehSaude(c)) REG.registrarLeitura(conta, req, c, rows.map(r => r.id), 'assistente de IA');
+  return rows.map(r => Object.assign({}, redigir(conta, c + '/' + r.id, r.data), { id: r.id }));
+}
+function gravarComo169(conta, req, dp, dados, patch) {
+  if (!validPath(dp, true)) return { erro: 'Caminho inválido.', st: 400 };
+  if (!pode(conta, dp, 'w') || !perfilPermite(conta, dp, 'w')) return { erro: 'Seu perfil não permite alterar estes dados.', st: 403 };
+  const m = patch ? 'PATCH' : 'PUT', seg = dp.split('/'), parent = seg.slice(0, -1).join('/'), id = seg[seg.length - 1], ts = Date.now();
+  const r0 = q.docGet.get(dp), velho = r0 ? JSON.parse(r0.data) : null;
+  if (patch && !r0) return { erro: 'Registro não existe.', st: 404 }; if (!patch && r0) return { erro: 'O registro já existe.', st: 409 };
+  let data = patch ? Object.assign(JSON.parse(r0.data), dados) : Object.assign({}, dados);
+  if (Object.prototype.hasOwnProperty.call(data, 'id') && data.id !== id) data.id = id;
+  data = preservarFunc(conta, dp, data); data = VAL.preservar(conta, dp, velho, data); data = chEstadoMescla(dp, velho, data);
+  if (!gravacaoPermitida(conta, dp) && !REG.excecaoGravacao(conta, dp, velho, data, m)) {
+    try { permLogPut.run(new Date().toISOString().slice(0, 10), conta.id, perfilDe(conta), dp.split('/')[0], Date.now()); } catch (e) { }
+    if (MODO_GRAV === 'bloquear') { REG.auditar(conta, req, m + '_NEGADO', dp, null, null); return { erro: 'Seu perfil não grava neste módulo. Peça a um administrador.', st: 403 }; }
+  }
+  const v = REG.antesGravar(conta, dp, velho, data, req);
+  if (v && v.reauth) return { erro: 'Esta alteração pede a sua senha de novo: faça pela tela.', st: 403 };
+  if (v && v.erro) { REG.auditar(conta, req, m + '_RECUSADO', dp, null, { erro: v.erro }); return { erro: v.erro, st: v.st || 403 }; }
+  data = v.data; const t = JSON.stringify(data); if (t.length > 4 * 1024 * 1024) return { erro: 'Documento grande demais.', st: 413 };
+  q.docPut.run(dp, parent, id, t, ts); avisarDoc('set', dp, data, ts); REG.depois(conta, req, m, dp, velho, data, v); return { ok: true, ts };
+}
+const C169 = require('./assist169.js')({ db, q, json, lerJson, avisarDoc, NIV, AI_MODELS, aiKey: () => AI_KEY, PERM: () => PERM, perfilEm: (...a) => perfilEm(...a), perfilDe: c => perfilDe(c), papelDe: p => papelDe(p),
+  nomeConta: id => { const c = id && q.contaPorId.get(id); return c ? (c.nome || c.email || id) : (id || '—'); }, auditar: (...a) => REG.auditar(...a), auditarIa: (...a) => REG.auditarIa(...a),
+  acessoCol: acessoCol169, lerComo: lerComo169, gravarComo: gravarComo169, tarefa168: (...a) => REG.tarefa168(...a) }); /* v169: assistentes de IA por setor no chat */
 const C162 = require('./iamed162.js')({ fn: () => ({ ia, json, lerJson, REG, q, DATA, pode, perfilPermite, gravacaoPermitida, MODO_GRAV, podeVer }) }); /* v162: medições lidas de PDF pela IA */
 S160 = require('./sinc160.js')({ db, q, perfilDe: c => perfilDe(c), PERM, podeVer, redigir }); /* v160: revisão por gravação, marcas de exclusão e época por pessoa */
 const CAIXA = require('./caixanfe.js')({ db, json, lerCorpo, perfilDe, papelDe, uid, ARQF, auditar: (...a) => REG.auditar(...a) });
