@@ -688,6 +688,7 @@ async function rotear(req, res) {
     tentativas.delete('e:' + String(c.email || '').toLowerCase()); END.loginDesbloquear(c.email, []); /* v130.1: senha nova zera o atraso do e-mail */
     return html(res, 200, pag('Senha criada', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Senha salva</h1><div class="msg">Pronto. Agora entre com o seu e-mail e a senha nova.</div><a class="btn pri" href="/login" style="display:block;text-align:center">Ir para o login</a></div>'));
   }
+  if ((m === 'GET' || m === 'HEAD') && /^\/icones\/[a-z0-9-]{1,40}\.png$/.test(p) && ICO.servir(req, res, p)) return; /* v168: ícones feitos do logotipo da empresa (icones168.js); sem eles, os padrão abaixo */
   if ((m === 'GET' || m === 'HEAD') && (p === '/sw.js' || p === '/manifest.webmanifest' || /^\/icones\/[a-z0-9-]{1,40}\.png$/.test(p)) && estatico(req, res, p.slice(1))) return; /* v167: app instalável — o navegador busca o service worker, o manifest e os ícones sem login */
   if (await REG.rotaPublica(p, m, req, res)) return; /* v111: pesquisa de satisfação respondida pelo cliente (link de uso único) */
   const conta = contaDa(req);
@@ -900,6 +901,7 @@ async function rotear(req, res) {
     }
   }
   /* ---- API do runtime ---- */
+  if (await ICO.rota(p, m, req, res, conta)) return; /* v168: /api/icones168 */
   if (p === '/api/eu') return json(res, 200, Object.assign(perfilPub(conta), S160 ? { sinc: 160, ck: S160.chave(conta) } : {}, { /* v160: chave da cópia local (só da própria conta) */ isOwner: conta.nivel === 'owner', canEdit: NIV[conta.nivel] >= NIV.admin, nivel: conta.nivel, ia: !!AI_KEY, fiscal: !!FISCAL_URL }));
   if (p === '/api/perfis') { const ids = String(u.searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 500), o = {}; ids.forEach(i => { const c = q.contaPorId.get(i); if (c) o[i] = Object.assign(perfilPub(c), { isMe: c.id === conta.id }); }); return json(res, 200, o); }
   if (p === '/api/busca-pessoas') { const t = String(u.searchParams.get('q') || '').toLowerCase(); return json(res, 200, q.contas.all().filter(c => c.ativo && (!t || (c.nome + ' ' + c.email).toLowerCase().includes(t))).slice(0, 30).map(c => Object.assign(perfilPub(c), { isMe: c.id === conta.id }))); }
@@ -975,7 +977,7 @@ async function rotear(req, res) {
       res.writeHead(st, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(st === 502 ? JSON.stringify({ erro: 'Consulta indisponível (' + r.status + ').' }) : corpo);
     } catch (e) { return json(res, 502, { erro: 'Consulta indisponível agora.' }); }
   }
-  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf' || p === '/api/frota165/recibo') && m === 'POST') { /* v165: o recibo lido pela IA conta no mesmo limite (frota165) */ /* v162: a leitura de PDF de medição conta no mesmo limite */
+  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf' || p === '/api/frota165/recibo' || p === '/api/reun168/ata/gerar') && m === 'POST') { /* v168: a minuta da ata pela IA conta no mesmo limite */ /* v165: o recibo lido pela IA conta no mesmo limite (frota165) */ /* v162: a leitura de PDF de medição conta no mesmo limite */
     if (NIV[conta.nivel] < NIV.interact) return json(res, 403, { code: 'not_granted', erro: 'Sem permissão para usar a IA.' });
     const ui0 = usoIa.get(conta.id) || { n: 0, ini: Date.now() }; if (Date.now() - ui0.ini > 3600e3) { ui0.n = 0; ui0.ini = Date.now(); } ui0.n++; usoIa.set(conta.id, ui0);
     if (ui0.n > (NIV[conta.nivel] >= NIV.admin ? 120 : 30)) return json(res, 429, { code: 'rate_limited', erro: 'Limite de uso da IA nesta hora atingido.' });
@@ -1082,6 +1084,7 @@ const bancosRota = require('./bancos.js')({ q, db, avisarDoc, json, lerJson, NIV
 const ARQF = require('./arquivofiscal.js')({ db, q, json, lerCorpo, avisarDoc, perfilDe, papelDe, PERM, END, DATA, uid, FISCAL_URL, FISCAL_TOKEN, auditar: (...a) => REG.auditar(...a) });
 /* ===== fim v129 ===== */
 /* ===== v130: leitura da caixa nfe@ (Microsoft 365 / Graph): NF-e anexadas vão para o arquivo fiscal (origem "email") ===== */
+const ICO = require('./icones168.js')({ DATA, json, lerJson, perfilEm: (...a) => perfilEm(...a), auditar: (...a) => REG.auditar(...a) }); /* v168: ícones do app pelo logotipo */
 const C162 = require('./iamed162.js')({ fn: () => ({ ia, json, lerJson, REG, q, DATA, pode, perfilPermite, gravacaoPermitida, MODO_GRAV, podeVer }) }); /* v162: medições lidas de PDF pela IA */
 S160 = require('./sinc160.js')({ db, q, perfilDe: c => perfilDe(c), PERM, podeVer, redigir }); /* v160: revisão por gravação, marcas de exclusão e época por pessoa */
 const CAIXA = require('./caixanfe.js')({ db, json, lerCorpo, perfilDe, papelDe, uid, ARQF, auditar: (...a) => REG.auditar(...a) });

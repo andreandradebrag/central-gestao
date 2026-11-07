@@ -1462,6 +1462,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   function podeLer(conta, p, data, memo) {
     if (!conta || conta.nivel === 'owner' || NIV[conta.nivel] < NIV.admin) return true;
     const c0 = p.split('/')[0];
+    if (C168.COLS.has(c0)) return C168.podeLer(conta, p, data); /* v168: reunião (participantes), biblioteca (acesso da pasta) e tarefas (responsável) */
     if (c0 === 'treino') return TREINO.podeLer(conta, p); /* v151: o próprio; todos só Administrador, dono e RH */
     if (c0 === 'lixo') { if (!data || !data.col) return true; if (data.col === 'func' && !veFuncCompleto(conta)) return false; const pp = data.col + '/' + (data.rid || 'x'); return perfilPermite(conta, pp, 'r') && podeLer(conta, pp, data.rec || null, memo); }
     if (VEIC_COLS.has(c0) && !veicOk(conta, c0, data, memo)) return false;
@@ -2131,9 +2132,11 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C166 = require('./ajuste166.js')({ db, q, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, gravaGrupo, gravaCol, cfgEmp, lerJson, lerCorpo: X.lerCorpo, json, html: X.html, pag, ipDe, SEG, APP_URL, DATA, nomeConta, leModulo: (c, c0) => leModulo(c, c0) }); /* v166: Terceiros e locações — documentos, trabalhadores, locação, bloqueio do pagamento, link do terceiro (ajuste166.js + terc166.js) */
   const C163 = require('./ajuste163.js')({ col, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, cfgEmp, notaTotais: n => P2.notaTotais(n), lerJson, json, gravaCol, C154: () => C154, leSst: c => leModulo(c, 'epi') }); /* v163: manutenção sem contas a pagar, aprovador de compras da obra, entrega de EPI (ajuste163.js) */
   const C167 = require('./campo167.js')({ db, q, col, doc, json, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, pode, perfilPermite, gravacaoPermitida, nomeConta, C154: () => C154, C163: () => C163, C164: () => C164, C165: () => C165 }); /* v167: modo Campo — pacote para uso sem internet, envio sem duplicar (campo167.js) */
+  const C168 = require('./reun168.js')({ db, q, col, doc, erro, json, lerJson, lerCorpo: X.lerCorpo, avisarDoc, EMAIL, APP_URL, DATA, auditar: (...a) => auditar(...a), auditarIa: (...a) => auditarIa(...a), ia: (...a) => X.ia(...a), ehDono, perfilEm, perfilDe, papelDe: (...a) => X.papelDe(...a), nomeConta, gravaGrupo, podeVer }); /* v168: reuniões — documentos, biblioteca, gravação, transcrição, ata pela IA e tarefas (reun168.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
+    if (C168.COLS.has(c0) || (c0 === 'reun' && s.length === 2)) { const e = C168.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v168: coleções das reuniões só pelas rotas; ata168/conv168 do servidor */
     if (c0 === 'treino') { const e = TREINO.antes(conta, p, velho, novo); return e.erro ? e : { data: e.data, ctx }; } /* v151: cada pessoa grava só o próprio progresso */
     if (p === 'cfg/empresa') TREINO.cfgAntes(conta, velho, novo); /* v151: cursos × perfis só pelo Administrador */
     if (c0 === 'perfc') { const e = /^a_/.test(s[1] || '') ? regraPerfa(conta, req, p, velho, novo) : regraPerfc(conta, req, p, velho, novo); if (e) return e; return { data: novo, ctx }; } /* v114; v127: ajuste de perfil padrão */
@@ -2229,6 +2232,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   }
   function antesExcluir(conta, p, velho, req) {
     const s = p.split('/'), c0 = s[0];
+    if (C168.COLS.has(c0) || (c0 === 'reun' && s.length === 2)) { const e = C168.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v168 */
     if (c0 === 'treino') return TREINO.antesExcluir(); /* v151: zerar só por /api/treino/zerar */
     if (c0 === 'proj' && s.length === 2 && velho) { const e = regraExcluirObra(conta, req, p, s[1], velho); if (e) return e; } /* v128 */
     if (c0 === 'ctbfech') return erro('Competência fechada não se exclui; use Reabrir.');
@@ -2280,6 +2284,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
+    if (await C168.rota(p, m, req, res, conta)) return true; /* v168: /api/reun168/* */
     if (await C167.rota(p, m, req, res, conta)) return true; /* v167: /api/campo167/* */
     if (await C166.rota(p, m, req, res, conta)) return true; /* v166: /api/ter166/* */
     if (await C165.rota(p, m, req, res, conta)) return true; /* v165: /api/frota165/* */

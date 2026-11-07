@@ -5975,7 +5975,7 @@ GROUP_OF_TAB.agenda='agenda';TAB_COLS.agenda=['reun'];COL_NOME.reun='Reunião';
 ['agNova','agEdit','agVer','agSalvar','agStatus','agAta','agMeet','agChat','agCopiar','agMes','agModo','agDel','agJitsi'].forEach(a=>{ACT_GROUP[a]='agenda';});
 ACT_GROUP.agVer=null;ACT_GROUP.agMes=null;ACT_GROUP.agModo=null;ACT_GROUP.agCopiar=null;
 const AG_ST={agendada:['Agendada','acc'],realizada:['Realizada','pos'],cancelada:['Cancelada','']};
-const AG_PLAT=[['meet','Google Meet (criado na sua Agenda Google)'],['jitsi','Jitsi Meet (link gerado na hora, sem conta)'],['link','Outro link (Teams, Zoom…)'],['presencial','Presencial, sem link']];
+const AG_PLAT=[['teams','Microsoft Teams (criar pelo Outlook e colar o link)'],['meet','Google Meet (criado na sua Agenda Google)'],['jitsi','Jitsi Meet (link gerado na hora, sem conta)'],['link','Outro link (Teams, Zoom…)'],['presencial','Presencial, sem link']];
 ui.agenda={modo:'lista',mes:todayStr().slice(0,7),quem:'',proj:''};
 const agIni=r=>r.data+'T'+(r.ini||'00:00');
 const agTs=r=>new Date(agIni(r)+':00').getTime();
@@ -6026,7 +6026,7 @@ V.agenda=()=>{
   }
   const hj=S.reun.filter(r=>r.data===hoje&&r.status==='agendada'&&agEu(r)).length;
   return pageHead('Agenda de reuniões','Reuniões entre a equipe e com pessoas de fora, com link de reunião virtual, convite e ata.','<button class="btn pri" data-act="agNova">Nova reunião</button>')+
-    '<div class="stack"><div class="kpis">'+kpi('Hoje',String(hj),'reuniões suas')+kpi('Próximos 7 dias',String(S.reun.filter(r=>r.status==='agendada'&&r.data>=hoje&&r.data<=addDays(hoje,7)).length),'todas')+kpi('Sem ata',String(S.reun.filter(r=>r.status==='realizada'&&!r.ata).length),'reuniões realizadas','neg')+'</div>'+bar+body+'</div>';
+    '<div class="stack"><div class="kpis">'+kpi('Hoje',String(hj),'reuniões suas')+kpi('Próximos 7 dias',String(S.reun.filter(r=>r.status==='agendada'&&r.data>=hoje&&r.data<=addDays(hoje,7)).length),'todas')+kpi('Sem ata',String(S.reun.filter(r=>r.status==='realizada'&&!r.ata&&!r.ata168).length),'reuniões realizadas','neg')+'</div>'+bar+body+'</div>';
 };
 A.agModo=d=>{ui.agenda.modo=d.m;render();};
 A.agMes=d=>{ui.agenda.mes=addMonths(ui.agenda.mes,+d.d);render();};
@@ -6037,16 +6037,16 @@ function agForm(r){
   modal({title:novo?'Nova reunião':'Editar reunião',wide:true,body:'<div class="fg">'+
     field('Assunto *','titulo','text',r.titulo,{full:true})+field('Data *','data','date',r.data)+field('Início *','ini','time',r.ini)+field('Fim','fim','time',r.fim)+
     field('Projeto','projId','select',r.projId,{opts:projOpts(),blank:'—'})+
-    field('Reunião virtual','plat','select',r.plat||'jitsi',{opts:AG_PLAT})+
-    field('Link (Teams, Zoom ou outro)','link','text',r.plat==='link'?r.link:'',{full:true,ph:'https://…'})+
+    field('Reunião virtual','plat','select',r.plat||'teams',{opts:AG_PLAT})+
+    field('Link (Teams, Zoom ou outro)','link','text',r.plat==='link'||r.plat==='teams'?r.link:'',{full:true,ph:'https://teams.microsoft.com/…'})+r168FormExtra(r)+
     field('Local (se presencial ou híbrida)','local','text',r.local,{full:true})+
     '<div class="sect" style="grid-column:1/-1">Participantes da empresa</div><div style="grid-column:1/-1">'+(us.length?'<div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">'+us.map(u=>'<label class="ch-pk"><input type="checkbox" data-agu="'+esc(u)+'"'+((r.internos||[]).includes(u)?' checked':'')+'> '+chAvatar(u,22)+' <span>'+esc(nameOf(u))+'</span></label>').join('')+'</div>':'<p class="sub">Nenhum outro usuário cadastrado.</p>')+'</div>'+
     '<div class="sect" style="grid-column:1/-1">Participantes de fora</div>'+field('Um por linha: Nome &lt;email@dominio.com&gt;','externos','textarea',r.externos,{full:true,rows:3})+
-    field('Pauta','pauta','textarea',r.pauta,{full:true,rows:3})+'</div>'+
-    '<p class="sub" style="margin:10px 0 0">Google Meet cria o evento na Agenda Google de quem salvar e envia o convite por e-mail aos participantes de fora. Jitsi gera um link aberto: quem tiver o link entra, então não o divulgue fora dos convidados.</p>',
+    r168PautaForm(r)+'</div>'+
+    '<p class="sub" style="margin:10px 0 0">Teams: use “Abrir o Outlook para criar a reunião do Teams”, ligue Reunião do Teams no Outlook e cole aqui o link. Google Meet cria o evento na Agenda Google de quem salvar e envia o convite por e-mail aos participantes de fora. Jitsi gera um link aberto: quem tiver o link entra, então não o divulgue fora dos convidados.</p>',
     save:root=>A.agSalvar(r,root),saveLabel:novo?'Agendar':'Salvar'});
 }
-A.agNova=d=>{const h=new Date();h.setMinutes(0,0,0);h.setHours(h.getHours()+1);agForm({id:uid(),titulo:'',data:todayStr(),ini:pad(h.getHours())+':00',fim:pad((h.getHours()+1)%24)+':00',projId:(d&&d.proj)||'',plat:'jitsi',internos:[],externos:'',pauta:'',status:'agendada'});};
+A.agNova=d=>{const h=new Date();h.setMinutes(0,0,0);h.setHours(h.getHours()+1);agForm({id:uid(),titulo:'',data:todayStr(),ini:pad(h.getHours())+':00',fim:pad((h.getHours()+1)%24)+':00',projId:(d&&d.proj)||'',plat:'teams',link:'',internos:[],externos:'',pauta:'',pautaItens:[],lembrete:30,status:'agendada'});};
 A.agEdit=d=>{const r=get('reun',d.id);if(r)agForm(cl(r));};
 A.agSalvar=(r,root)=>{
   const v=readForm(root);
@@ -6057,7 +6057,8 @@ A.agSalvar=(r,root)=>{
   if(bad.length){toast('Informe o e-mail de: '+bad.map(x=>x.nome).slice(0,3).join(', '),'neg');return false;}
   const internos=Array.from(document.querySelectorAll('#mb [data-agu]')).filter(x=>x.checked).map(x=>x.dataset.agu);
   const n=Object.assign(cl(r),{titulo:String(v.titulo).trim().slice(0,140),data:v.data,ini:v.ini,fim:v.fim||'',projId:v.projId||'',plat:v.plat,local:v.local||'',externos:String(v.externos||'').slice(0,4000),pauta:String(v.pauta||'').slice(0,4000),internos,org:r.org||actorId(),status:r.status||'agendada'});
-  if(v.plat==='link')n.link=v.link;else if(v.plat==='jitsi')n.link=r.plat==='jitsi'&&agUrlOk(r.link)?r.link:agJitsiLink();else if(v.plat==='presencial')n.link='';
+  if(v.plat==='link'||v.plat==='teams')n.link=v.link||'';else if(v.plat==='jitsi')n.link=r.plat==='jitsi'&&agUrlOk(r.link)?r.link:agJitsiLink();else if(v.plat==='presencial')n.link='';
+  {const e168=r168SalvarExtra(v,n);if(e168){toast(e168,'neg');return false;}} /* v168: pauta em itens, série, secretário, lembrete e link do Teams */
   const conf=agConflitos(n);
   put('reun',n);
   if(conf.length)toast('Atenção: conflito de horário com "'+conf[0].titulo+'".','neg');else toast('Reunião salva.','pos');
@@ -6073,11 +6074,11 @@ A.agVer=d=>{
     (r.link&&agUrlOk(r.link)?'<p style="margin:0 0 6px"><a class="btn pri" href="'+esc(r.link)+'" target="_blank" rel="noopener">Entrar na reunião</a> <span class="sub mono" style="word-break:break-all">'+esc(r.link)+'</span></p>':r.plat==='meet'?'<p class="sub">O link do Google Meet ainda não foi criado.</p>':'')+
     (r.local?'<p style="margin:0 0 6px">Local: '+esc(r.local)+'</p>':'')+(r.projId?'<p style="margin:0 0 6px">Projeto: '+esc(projNome(r.projId))+'</p>':'')+
     '<div class="sect">Participantes</div><ul style="margin:0;padding-left:18px"><li>'+esc(nameOf(r.org))+' (organizador)</li>'+(r.internos||[]).filter(u=>u!==r.org).map(u=>'<li>'+esc(nameOf(u))+'</li>').join('')+ext.map(x=>'<li>'+esc(x.nome||x.email)+' <span class="sub">'+esc(x.email)+' · de fora</span></li>').join('')+'</ul>'+
-    (r.pauta?'<div class="sect">Pauta</div><p style="white-space:pre-wrap;margin:0">'+esc(r.pauta)+'</p>':'')+
+    r168PautaVer(r)+
     (r.ata?'<div class="sect">Ata</div><p style="white-space:pre-wrap;margin:0">'+esc(r.ata)+'</p>':'')+
     '<div class="sect">Convite</div><div class="acts"><button class="btn" data-act="agCopiar" data-id="'+r.id+'">Copiar convite</button>'+(ext.some(x=>x.email)?'<a class="btn" href="mailto:'+esc(ext.filter(x=>x.email).map(x=>x.email).join(','))+'?subject='+esc(encodeURIComponent(r.titulo))+'&body='+esc(encodeURIComponent(agTexto(r)))+'">E-mail aos de fora</a>':'')+(w&&(r.internos||[]).length?'<button class="btn" data-act="agChat" data-id="'+r.id+'">Avisar no chat</button>':'')+'<a class="btn" href="'+esc(agGoogleUrl(r))+'" target="_blank" rel="noopener">Abrir no Google Agenda</a><a class="btn" href="'+esc(agOutlookUrl(r))+'" target="_blank" rel="noopener">Abrir no Outlook</a>'+(w&&r.plat==='meet'&&!(r.gcal&&r.gcal.id)?'<button class="btn pri" data-act="agMeet" data-id="'+r.id+'">Criar no Google Agenda com Meet</button>':'')+'</div>'+
     (r.gcal&&r.gcal.id?'<p class="sub" style="margin:8px 0 0">Evento criado na Agenda Google'+(r.gcal.por?' de '+esc(nameOf(r.gcal.por)):'')+'. Mudanças de data feitas aqui não atualizam o evento; ajuste também na Agenda Google.</p>':''),
-    foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(w?(r.status==='agendada'?'<button class="btn dng" data-act="agStatus" data-id="'+r.id+'" data-s="cancelada">Cancelar reunião</button><button class="btn" data-act="agStatus" data-id="'+r.id+'" data-s="realizada">Marcar como realizada</button>':'')+'<button class="btn" data-act="agAta" data-id="'+r.id+'">'+(r.ata?'Editar ata':'Registrar ata')+'</button><button class="btn pri" data-act="agEdit" data-id="'+r.id+'">Editar</button>':'')});
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(w?(r.status==='agendada'?'<button class="btn dng" data-act="agStatus" data-id="'+r.id+'" data-s="cancelada">Cancelar reunião</button><button class="btn" data-act="agStatus" data-id="'+r.id+'" data-s="realizada">Marcar como realizada</button>':'')+'<button class="btn" data-act="agAta" data-id="'+r.id+'"'+(r.ata168?' hidden':'')+'>'+(r.ata?'Editar ata':'Registrar ata')+'</button><button class="btn pri" data-act="agEdit" data-id="'+r.id+'">Editar</button>':'')});
 };
 A.agCopiar=d=>{const r=get('reun',d.id);if(!r)return;const t=agTexto(r);try{navigator.clipboard.writeText(t).then(()=>toast('Convite copiado.','pos'),()=>textModal('Convite',t));}catch(e){textModal('Convite',t);}};
 A.agChat=d=>{
@@ -6121,7 +6122,7 @@ function agLembrete(){
 }
 RH_POST.push(agLembrete);
 try{setInterval(()=>{try{agLembrete();}catch(e){}},60000);}catch(e){}
-function alertasAgenda(){if(!mayR('agenda')||isColab())return [];const h=todayStr(),n=S.reun.filter(r=>r.data===h&&r.status==='agendada'&&agEu(r)).length,sa=S.reun.filter(r=>r.status==='realizada'&&!r.ata&&r.org===actorId()).length;const it=[];if(n)it.push(['agenda',n+' reunião(ões) suas hoje',String(n)]);if(sa)it.push(['agenda',sa+' reunião(ões) que você organizou sem ata',String(sa)]);return it;}
+function alertasAgenda(){if(!mayR('agenda')||isColab())return [];const h=todayStr(),n=S.reun.filter(r=>r.data===h&&r.status==='agendada'&&agEu(r)).length,sa=S.reun.filter(r=>r.status==='realizada'&&!r.ata&&!r.ata168&&r.org===actorId()).length;const it=[];if(n)it.push(['agenda',n+' reunião(ões) suas hoje',String(n)]);if(sa)it.push(['agenda',sa+' reunião(ões) que você organizou sem ata',String(sa)]);return it;}
 ROPA.push(['Participantes externos de reuniões','Nome e e-mail','Agendamento e convites de reuniões','Execução de contrato ou interesse legítimo','Enquanto a reunião for relevante para o contrato ou projeto','reun']);
 {const t0=toolsHtml;toolsHtml=function(){
   const h=t0();if(!h||!mayR('agenda')||isColab())return h;
@@ -6346,7 +6347,7 @@ V.rmes=()=>{
     (svgCurvaS(d)?'<div class="card"><h2>Curva S</h2>'+svgCurvaS(d)+'</div>':'')+
     '<div class="card"><h2>Etapas em '+esc(fmtDate(d.corte))+'</h2><div class="tw" style="border:0"><table style="min-width:640px"><thead><tr><th>Etapa</th><th>Prazo</th><th class="num">Previsto</th><th class="num">Realizado</th><th class="num">Desvio</th></tr></thead><tbody>'+(d.etapas.length?d.etapas.map(x=>'<tr><td>'+esc((x.e.ordem?x.e.ordem+'. ':'')+x.e.nome)+'</td><td class="mono">'+fmtDate(x.e.inicio)+' a '+fmtDate(x.e.fim)+'</td><td class="num">'+pctTx(x.prev)+'</td><td class="num">'+pctTx(x.real)+'</td><td class="num '+(x.desvio!=null&&x.desvio<=-5?'neg':'')+'">'+(x.desvio==null?'—':(x.desvio>0?'+':'')+pctTx(x.desvio).replace('%',' p.p.'))+'</td></tr>').join(''):emptyRow(5,'Projeto sem etapas.'))+'</tbody></table></div></div>'+
     '<div class="card"><h2>Diário de obra no mês</h2><p style="margin:0">'+d.rdo.n+' diário(s) · '+d.rdo.impr+' dia(s) impraticável(is) · efetivo médio '+String(Math.round(d.rdo.efMedio*10)/10).replace('.',',')+'</p>'+(d.rdo.ocorr.length?'<ul style="margin:8px 0 0;padding-left:18px">'+d.rdo.ocorr.slice(0,10).map(o=>'<li>'+esc(o)+'</li>').join('')+'</ul>':'')+'</div>'+
-    '<div class="card"><h2>Reuniões no mês</h2>'+(d.reun.length?'<ul style="margin:0;padding-left:18px">'+d.reun.map(r=>'<li>'+esc(fmtDate(r.data)+' · '+r.titulo)+(r.ata?' <span class="sub">(com ata)</span>':'')+'</li>').join('')+'</ul>':'<p class="sub" style="margin:0">Nenhuma.</p>')+'</div>'+
+    '<div class="card"><h2>Reuniões no mês</h2>'+(d.reun.length?'<ul style="margin:0;padding-left:18px">'+d.reun.map(r=>'<li>'+esc(fmtDate(r.data)+' · '+r.titulo)+(r.ata||r.ata168?' <span class="sub">(com ata)</span>':'')+'</li>').join('')+'</ul>':'<p class="sub" style="margin:0">Nenhuma.</p>')+'</div>'+
     '<div class="card"><h2>Contatos do contrato</h2>'+projContatosHtml(d.p)+'</div>'+
     '<div class="acts"><button class="btn pri" data-act="rmesPdf" data-id="'+d.p.id+'">Relatório (PDF)</button><button class="btn" data-act="rmesEmail" data-id="'+d.p.id+'">Enviar resumo por e-mail</button></div></div>';
   return h;
@@ -35527,9 +35528,475 @@ const V167_CSS='<style>.v167{max-width:860px;margin:0 auto}.v167 .card.v167c{mar
   '@media (max-width:600px){.v167 .fg{grid-template-columns:1fr 1fr}.v167 .ph{flex-wrap:wrap}.v167acts .btn.pri{width:100%}.v167menu{grid-template-columns:1fr 1fr}}@media (max-width:380px){.v167 .fg{grid-template-columns:1fr}}</style>';
 if(typeof document!=='undefined'&&document.head&&document.head.insertAdjacentHTML)try{document.head.insertAdjacentHTML('beforeend',V167_CSS);}catch(e){}
 
+/* ===== v168: reuniões — pauta em itens, documentos da reunião, biblioteca de documentos, convite com lembrete, Teams pelo
+   Outlook, gravação (consentimento LGPD), transcrição (OpenAI ou importada do Teams/Meet), minuta da ata pela IA, aprovação,
+   assinatura dos presentes, tarefas das ações (Minhas tarefas e Tarefas de reuniões), reunião seguinte da mesma série e busca
+   nas atas e transcrições (relatorios/feito_v168.md) =====
+   Servidor: deploy/gestao/reun168.js (rotas /api/reun168/*; confere tudo de novo) e transcricao168.js (interface
+   transcrever(arquivo) → {texto, segmentos}). Coleções do servidor (não vêm na carga do app; cada tela pede o que precisa):
+   reunx168, bib168p, bib168d, tar168. A "reun" continua na carga de sempre (pauta em itens, série, secretário, lembrete).
+   Telas (grupo "agenda", fora do menu; abertas pela Agenda): r168reun (a reunião), r168tar (Tarefas de reuniões), r168bib
+   (Biblioteca de documentos), r168busca (busca em atas e transcrições); Minha área › Minhas tarefas (r168minhas, grupo meu).
+   Só com o servidor da empresa (online); o modo Campo e o service worker da v167 não mudam.
+   Ícones do app: desenhados do logotipo de Sistema › Configurações › Logo da empresa (icones168.js no servidor).
+   Prefixos r168*, R168*, V168. */
+const V168={x:{},xEm:{},xCar:{},tar:null,tarEm:0,tarCar:0,minhas:null,minhasEm:0,minhasCar:0,bib:null,bibEm:0,bibCar:0,busca:{q:'',r:null,car:0},rec:null,poll:0,icoKey:''};
+ui.r168={id:''};ui.r168tar={resp:'',st:'abertas',reun:'',serie:'',atras:'',pg:0};ui.r168bib={pasta:'',q:'',tag:'',pg:0};ui.r168min={st:'abertas'};
+const r168Srv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV();
+const R168_SEMSRV='Esta parte precisa do servidor da empresa: abra o sistema pelo endereço da empresa (com internet).';
+const r168Adm=()=>store.mode!=='db'||me.owner||!!(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+const r168Msg=(r,ok)=>{if(r&&r.erro){toast(r.erro,'neg');return false;}toast((r&&r.msg)||ok||'Feito.','pos');return true;};
+async function r168Post(rota,body){if(!r168Srv())return {erro:R168_SEMSRV};try{return await segaPost('/api/reun168/'+rota,body||{});}catch(e){return {erro:e.message,st:e.st};}}
+function r168Get(k,url,maxIdade){
+  if(!r168Srv())return {erro:R168_SEMSRV};
+  const em=V168[k+'Em']||0;
+  if((!V168[k]||Date.now()-em>(maxIdade||20000))&&!V168[k+'Car']){V168[k+'Car']=1;segaPost(url,null,'GET').then(j=>{V168[k]=j;V168[k+'Em']=Date.now();V168[k+'Car']=0;render();}).catch(e=>{V168[k]=V168[k]&&!V168[k].erro?V168[k]:{erro:e.message};V168[k+'Em']=Date.now();V168[k+'Car']=0;render();});}
+  return V168[k];
+}
+function r168X(id,forca){
+  if(!r168Srv())return {erro:R168_SEMSRV};
+  const em=V168.xEm[id]||0;
+  if((forca||!V168.x[id]||Date.now()-em>20000)&&!V168.xCar[id]){V168.xCar[id]=1;segaPost('/api/reun168/reuniao?id='+encodeURIComponent(id),null,'GET').then(j=>{V168.x[id]=j;V168.xEm[id]=Date.now();V168.xCar[id]=0;render();}).catch(e=>{V168.x[id]={erro:e.message,st:e.st};V168.xEm[id]=Date.now();V168.xCar[id]=0;render();});}
+  return V168.x[id];
+}
+const r168Recarrega=id=>{V168.xEm[id]=0;V168.tarEm=0;V168.minhasEm=0;r168X(id,true);};
+const r168Load=m=>!m?'<div class="card"><p class="sub" style="margin:0">Carregando…</p></div>':m.erro?'<div class="note">'+esc(m.erro)+'</div>':'';
+function r168Ir(tab){ui.tab=tab;try{history.replaceState(null,'','#'+tab);}catch(_){}render();try{window.scrollTo(0,0);}catch(_){}}
+const r168Hm=ms=>{if(ms==null)return '';const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60);return (h?h+':'+pad(m):String(m))+':'+pad(s%60);};
+const r168Quando=t=>{if(!t)return '';const d=new Date(t);return fmtDate(d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()))+' '+pad(d.getHours())+':'+pad(d.getMinutes());};
+const R168_ST={afazer:['A fazer','warn'],andamento:['Em andamento','acc'],concluida:['Concluída','pos'],cancelada:['Cancelada','']};
+const R168_PRI={alta:['Alta','neg'],media:['Média','warn'],baixa:['Baixa','']};
+const r168StPill=t=>t.atrasada?pill('Atrasada','neg'):pill((R168_ST[t.status]||[t.status])[0],(R168_ST[t.status]||[])[1]);
+const R168_ACEITA='.pdf,.xlsx,.docx,.pptx,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp';
+const r168Baixar=(a,nome)=>'/_blob/'+encodeURIComponent(a.id)+'?baixar=1&nome='+encodeURIComponent(nome||a.nome||'arquivo');
+const r168Pag=(k,n,por)=>{const u=ui[k]||{},pg=Math.max(0,Math.min(+u.pg||0,Math.max(0,Math.ceil(n/por)-1)));return {pg,ini:pg*por,fim:pg*por+por,html:n>por?'<div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn sm" data-act="r168Pg" data-k="'+k+'" data-d="-1"'+(pg?'':' disabled')+'>Anterior</button><span class="sub">'+(pg*por+1)+'–'+Math.min(n,pg*por+por)+' de '+n+'</span><button class="btn sm" data-act="r168Pg" data-k="'+k+'" data-d="1"'+((pg+1)*por<n?'':' disabled')+'>Próxima</button></div>':''};};
+A.r168Pg=d=>{const u=ui[d.k]=ui[d.k]||{};u.pg=Math.max(0,(+u.pg||0)+(+d.d));render();};
+async function r168Sobe(f){const as=await getAssets();if(!as)throw new Error('Seu acesso não permite enviar arquivos.');const up=await as.upload(f,f.type?{type:f.type}:undefined);return {id:up.id,nome:String(f.name||'arquivo').slice(0,140)};}
+
+/* ---------- telas ---------- */
+novaTab('r168reun','Reunião: documentos, gravação e ata','Agenda','agenda',null);
+novaTab('r168tar','Tarefas de reuniões','Agenda','agenda',null);
+novaTab('r168bib','Biblioteca de documentos','Agenda','agenda',null);
+novaTab('r168busca','Busca em atas e transcrições','Agenda','agenda',null);
+novaTab('r168minhas','Minhas tarefas','Minha área','meu','meu','v167campo');
+Object.assign(TAB_COLS,{r168reun:['reun'],r168tar:['reun'],r168bib:[],r168busca:['reun'],r168minhas:[]});
+if(typeof GS_SIN!=='undefined')Object.assign(GS_SIN,{r168tar:'tarefas reuniao acoes ata responsavel prazo atrasadas',r168bib:'biblioteca documentos pastas versoes arquivos reuniao',r168busca:'busca ata transcricao reuniao',r168minhas:'minhas tarefas reuniao acoes prazo'});
+['r168Doc','r168DocRem','r168Liga','r168LigaRem','r168BibAnexa','r168BibDesanexa','r168Convite','r168Gravar','r168Parar','r168Finalizar','r168AudioApaga','r168Transcrever','r168ImportarTr','r168AtaGerar','r168AtaEditar','r168AtaAprovar','r168Levar','r168PastaNova','r168PastaEdit','r168DocBibNovo','r168DocBibVersao','r168DocBibExcluir'].forEach(a=>{ACT_GROUP[a]='agenda';});
+['r168Abrir','r168Pg','r168TarVer','r168TarSalvar','r168AtaPdf','r168AtaAssinar','r168Buscar','r168Outlook','r168PautaAdd','r168PautaRem','r168BibVer','r168Pasta','r168TrVer','r168AcAdd','r168AcRem','r168Varrer'].forEach(a=>{ACT_GROUP[a]=null;});
+/* plataforma: Teams pelo Outlook é o padrão; Jitsi continua */
+const R168_CSS='<style>.r168g{columns:2 440px;column-gap:14px}.r168g>.card{margin:0 0 14px;break-inside:avoid;display:inline-block;width:100%;box-sizing:border-box}.r168li{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}.r168li:first-of-type{border-top:0}.r168li>div:first-child{flex:1 1 220px;min-width:0;overflow-wrap:anywhere}.r168li .acts{margin-left:auto;flex-wrap:wrap}'+
+  '.r168pi{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,180px) 80px 36px;gap:6px;align-items:end;margin:0 0 6px}.r168pi input,.r168pi select{min-width:0}.r168tr{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;line-height:1.5}.r168tr p{margin:0 0 6px}.r168tr .mono{color:var(--muted);margin-right:6px}'+
+  '.r168grav{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:60;display:flex;gap:10px;align-items:center;max-width:calc(100vw - 32px);padding:8px 10px 8px 14px;border-radius:22px;background:#b91c1c;color:#fff;font:600 14px/1.25 system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3)}.r168grav .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:r168p 1s infinite}.r168grav button{min-height:32px;border:0;border-radius:16px;padding:4px 12px;background:#fff;color:#b91c1c;font-weight:700;cursor:pointer}.r168grav span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@keyframes r168p{50%{opacity:.3}}'+
+  '.r168ac{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.2fr) 150px 110px 36px;gap:6px;align-items:end;margin:0 0 8px}.r168ac textarea{min-height:44px}.r168bib{display:grid;grid-template-columns:260px minmax(0,1fr);gap:14px;align-items:start}.r168pasta{display:block;width:100%;text-align:left;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card,#fff);color:inherit;font:inherit;margin:0 0 6px;cursor:pointer}.r168pasta[aria-current]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}'+
+  '.r168tag{display:inline-block;padding:1px 8px;margin:2px 4px 0 0;border-radius:10px;background:var(--line);font-size:12px}.r168tw{overflow-x:auto}.r168tw table{min-width:760px}.r168card{border:1px solid var(--line);border-radius:10px;padding:12px;margin:0 0 10px}.r168card .t{font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.r168ck{display:flex;gap:8px;align-items:center;min-height:36px}'+
+  '@media (max-width:760px){.r168bib{grid-template-columns:1fr}.r168pi{grid-template-columns:minmax(0,1fr) 70px 36px}.r168pi .r168pir{grid-column:1/-1;order:3}.r168ac{grid-template-columns:1fr 1fr}.r168ac .r168acd{grid-column:1/-1}.r168tw table{min-width:0}.r168tw thead{display:none}.r168tw tr{display:block;border-top:1px solid var(--line);padding:8px 0}.r168tw td{display:block;border:0;padding:2px 0}}</style>';
+if(typeof document!=='undefined'&&document.head&&document.head.insertAdjacentHTML)try{document.head.insertAdjacentHTML('beforeend',R168_CSS);}catch(e){}
+
+/* ---------- pauta em itens, série, secretário e lembrete no formulário ---------- */
+function r168PautaLinha(it){it=it||{};const us=chUsers();
+  return '<div class="r168pi" data-pi="'+esc(it.id||uid())+'"'+(it.deTar?' data-detar="'+esc(it.deTar)+'"':'')+'><label class="f"><span>Item da pauta</span><input data-pit value="'+esc(it.titulo||'')+'" placeholder="Assunto"></label>'+
+    '<label class="f r168pir"><span>Responsável</span><input data-pir list="r168dlU" value="'+esc(it.resp||'')+'" placeholder="Quem apresenta"></label><label class="f"><span>Min</span><input data-pim type="number" min="0" max="600" inputmode="numeric" value="'+esc(it.min==null?'':it.min)+'"></label>'+
+    '<button type="button" class="btn sm" data-act="r168PautaRem" aria-label="Tirar item">✕</button></div>';}
+function r168PautaForm(r){
+  const it=Array.isArray(r.pautaItens)?r.pautaItens:[],us=chUsers();
+  return '<div class="sect" style="grid-column:1/-1">Pauta</div><div style="grid-column:1/-1"><datalist id="r168dlU">'+us.map(u=>'<option value="'+esc(nameOf(u))+'">').join('')+'</datalist><div id="r168pis">'+(it.length?it:[{}]).map(r168PautaLinha).join('')+'</div><button type="button" class="btn sm" data-act="r168PautaAdd">+ Item da pauta</button> <span class="sub" id="r168pmin">'+(it.length?r168PautaMin(it)+' min no total':'')+'</span></div>'+
+    (r.pauta?field('Pauta antiga (texto livre)','pauta','textarea',r.pauta,{full:true,rows:3}):'');}
+const r168PautaMin=it=>it.reduce((s,x)=>s+(+x.min||0),0);
+A.r168PautaAdd=()=>{const b=$('#r168pis');if(b)b.insertAdjacentHTML('beforeend',r168PautaLinha({}));const l=b&&b.lastElementChild&&b.lastElementChild.querySelector('[data-pit]');if(l)l.focus();};
+A.r168PautaRem=(d,el)=>{const row=el&&el.closest?el.closest('[data-pi]'):null;if(row)row.remove();};
+function r168LerPauta(){return Array.from(document.querySelectorAll('#mb [data-pi]')).map(row=>{const q=s=>row.querySelector(s);const o={id:row.dataset.pi,titulo:String((q('[data-pit]')||{}).value||'').trim().slice(0,200),resp:String((q('[data-pir]')||{}).value||'').trim().slice(0,80),min:Math.max(0,Math.min(600,parseInt((q('[data-pim]')||{}).value,10)||0))};if(row.dataset.detar)o.deTar=row.dataset.detar;return o;}).filter(x=>x.titulo).slice(0,60);}
+function r168FormExtra(r){
+  const series=[...new Set(S.reun.map(x=>String(x.serie||'').trim()).filter(Boolean))].sort();
+  return '<div style="grid-column:1/-1" class="acts r168tm"><button type="button" class="btn" data-act="r168Outlook">Abrir o Outlook para criar a reunião do Teams</button><span class="sub">No Outlook, ligue “Reunião do Teams”, salve e cole aqui o link de participação.</span></div>'+
+    '<label class="f"><span>Série ou assunto recorrente</span><input data-f="serie" id="f_serie" list="r168dlS" value="'+esc(r.serie||'')+'" placeholder="Ex.: Reunião semanal da obra"></label><datalist id="r168dlS">'+series.map(s=>'<option value="'+esc(s)+'">').join('')+'</datalist>'+
+    field('Secretário da reunião','secretario','select',r.secretario||'',{opts:chUsers().map(u=>[u,nameOf(u)]),blank:'— o organizador —'})+
+    field('Lembrete no chat (minutos antes)','lembrete','number',r.lembrete==null?30:r.lembrete,{step:'1'});
+}
+A.r168Outlook=()=>{const v=readForm($('#mb'));const r={titulo:v.titulo||'Reunião',data:v.data||todayStr(),ini:v.ini||'09:00',fim:v.fim||'',local:v.local||'',externos:v.externos||'',pauta:'',pautaItens:r168LerPauta(),internos:[],org:actorId(),projId:v.projId||''};
+  try{window.open(agOutlookUrl(r),'_blank','noopener');}catch(e){}toast('Outlook aberto em outra aba: crie a reunião do Teams e cole o link aqui.');};
+function r168SalvarExtra(v,n){
+  if(v.plat==='teams'&&v.link&&!agUrlOk(v.link))return 'O link do Teams deve começar com https://';
+  n.pautaItens=r168LerPauta();
+  if(n.pautaItens.some(x=>!x.titulo))return 'Dê um título a cada item da pauta.';
+  n.serie=String(v.serie||'').trim().slice(0,120);n.secretario=v.secretario||'';
+  n.lembrete=v.lembrete==null||v.lembrete===''?30:Math.max(0,Math.min(1440,Math.round(+v.lembrete||0)));
+  if(n.secretario&&n.secretario!==n.org&&!(n.internos||[]).includes(n.secretario))n.internos=(n.internos||[]).concat([n.secretario]);
+  return '';
+}
+const r168PautaTxt=r=>(r.pautaItens||[]).map((x,i)=>(i+1)+'. '+x.titulo+(x.resp?' ('+x.resp+')':'')+(x.min?' · '+x.min+' min':'')).join('\n');
+function r168PautaVer(r,semTit){
+  const it=Array.isArray(r.pautaItens)?r.pautaItens:[];
+  return (it.length?(semTit?'':'<div class="sect">Pauta</div>')+'<ol style="margin:0;padding-left:20px">'+it.map(x=>'<li>'+esc(x.titulo)+(x.resp?' <span class="sub">· '+esc(x.resp)+'</span>':'')+(x.min?' <span class="sub">· '+x.min+' min</span>':'')+'</li>').join('')+'</ol>'+(r168PautaMin(it)?'<p class="sub" style="margin:4px 0 0">'+r168PautaMin(it)+' min previstos</p>':''):'')+
+    (r.pauta?'<div class="sect">'+(it.length?'Pauta antiga (texto)':'Pauta')+'</div><p style="white-space:pre-wrap;margin:0">'+esc(r.pauta)+'</p>':'');
+}
+{const t0=agTexto;agTexto=function(r,c){if(r&&Array.isArray(r.pautaItens)&&r.pautaItens.length){const p=r168PautaTxt(r);return t0(Object.assign({},r,{pauta:r.pauta?p+'\n'+r.pauta:p}),c);}return t0(r,c);};}
+/* detalhes (janela da Agenda): botão para a tela da reunião */
+{const v0=A.agVer;A.agVer=d=>{v0(d);const r=get('reun',d&&d.id);const mb=$('#mb');if(!r||!mb||!mb.insertAdjacentHTML)return;
+  mb.insertAdjacentHTML('afterbegin','<div class="note" style="margin:0 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="flex:1 1 220px">Documentos, convite, gravação, transcrição, ata e tarefas desta reunião'+(r.ata168?' · <b>ata aprovada</b>':'')+'.</span><button class="btn pri" data-act="r168Abrir" data-id="'+esc(r.id)+'">Abrir a reunião</button></div>');};}
+A.r168Abrir=d=>{ui.r168.id=d.id;closeModal();r168X(d.id,true);r168Ir('r168reun');};
+/* Agenda: atalhos para as telas novas */
+{const v0=V.agenda;V.agenda=()=>v0().replace('<button class="btn pri" data-act="agNova">','<button class="btn" data-act="nav" data-tab="r168tar">Tarefas de reuniões</button><button class="btn" data-act="nav" data-tab="r168bib">Biblioteca de documentos</button><button class="btn" data-act="nav" data-tab="r168busca">Buscar em atas</button><button class="btn pri" data-act="agNova">');}
+
+/* ---------- tela da reunião ---------- */
+const r168Card=(t,corpo,acts)=>'<div class="card"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><h2 style="margin:0;flex:1 1 200px">'+esc(t)+'</h2>'+(acts?'<div class="acts">'+acts+'</div>':'')+'</div>'+corpo+'</div>';
+V.r168reun=()=>{
+  const r=get('reun',ui.r168.id),volta='<button class="btn" data-act="nav" data-tab="agenda">← Agenda</button>';
+  if(!r)return pageHead('Reunião','',volta)+'<div class="card"><p class="sub" style="margin:0">Escolha a reunião na Agenda (Detalhes › Abrir a reunião).</p></div>';
+  const x=r168X(r.id),st=AG_ST[r.status]||AG_ST.agendada;
+  const topo=pageHead(r.titulo,fmtDate(r.data)+' · '+(r.ini||'')+(r.fim?' às '+r.fim:'')+(r.local?' · '+r.local:''),volta+(r.link&&agUrlOk(r.link)&&r.status==='agendada'?'<a class="btn pri" href="'+esc(r.link)+'" target="_blank" rel="noopener">Entrar na reunião</a>':'')+(mayW('agenda')?'<button class="btn" data-act="agEdit" data-id="'+esc(r.id)+'">Editar</button>':''))+
+    '<p style="margin:-6px 0 12px">'+pill(st[0],st[1])+(r.serie?' '+pill('Série: '+r.serie,'acc'):'')+(r.plat==='teams'&&!r.link?' '+pill('Falta o link do Teams','warn'):'')+'</p>';
+  if(!x||x.erro)return topo+'<div class="r168g">'+r168Card('Pauta',r168PautaVer(r)||'<p class="sub" style="margin:0">Sem pauta.</p>')+'</div>'+(x&&x.erro?'<div class="note" style="margin-top:12px">'+esc(x.erro)+'</div>':r168Load(x));
+  if(x.transcr&&['fila','transcrevendo'].includes(x.transcr.st))r168Poll(r.id);
+  return topo+'<div class="r168g">'+r168SecPauta(r,x)+r168SecDocs(r,x)+r168SecConvite(r,x)+r168SecGrav(r,x)+r168SecTr(r,x)+r168SecAta(r,x)+r168SecTar(r,x)+'</div>';
+};
+function r168Poll(id){if(V168.poll)return;V168.poll=setTimeout(()=>{V168.poll=0;if(ui.tab==='r168reun'&&ui.r168.id===id)r168X(id,true);},5000);}
+function r168SecPauta(r,x){
+  const a=x.anterior;let ant='';
+  if(a){const pend=(a.tarefas||[]).filter(t=>['afazer','andamento'].includes(t.status)),feitas=(a.tarefas||[]).filter(t=>t.status==='concluida'),ja=new Set((r.pautaItens||[]).map(i=>i.deTar).filter(Boolean));
+    ant='<div class="sect">Da reunião anterior: '+esc(a.titulo)+' ('+esc(fmtDate(a.data))+')</div>'+(!a.ver?'<p class="sub" style="margin:0">Você não participou da reunião anterior: as tarefas dela ficam com os participantes.</p>':
+      (pend.length?'<p style="margin:0 0 4px"><b>Pendentes ('+pend.length+')</b></p>'+pend.map(t=>'<div class="r168li"><div>'+esc(t.descricao)+'<div class="sub">'+esc(t.respNomeV||'—')+' · prazo '+esc(fmtDate(t.prazo))+'</div></div>'+r168StPill(t)+'</div>').join(''):'<p class="sub" style="margin:0">Nenhuma tarefa pendente.</p>')+
+      (feitas.length?'<p style="margin:8px 0 4px"><b>Concluídas ('+feitas.length+')</b></p>'+feitas.map(t=>'<div class="r168li"><div>'+esc(t.descricao)+'<div class="sub">'+esc(t.respNomeV||'—')+'</div></div>'+pill('Concluída','pos')+'</div>').join(''):'')+
+      (pend.some(t=>!ja.has(t.id))&&mayW('agenda')&&!r.ata168?'<div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="r168Levar" data-id="'+esc(r.id)+'">Levar as pendentes para a pauta</button></div>':''));}
+  return r168Card('Pauta',(r168PautaVer(r,true)||'<p class="sub" style="margin:0">Sem pauta. Use Editar para montar os itens.</p>')+ant);
+}
+A.r168Levar=d=>{const r=get('reun',d.id),x=V168.x[d.id];if(!r||!x||!x.anterior)return;const ja=new Set((r.pautaItens||[]).map(i=>i.deTar).filter(Boolean));
+  const novos=(x.anterior.tarefas||[]).filter(t=>['afazer','andamento'].includes(t.status)&&!ja.has(t.id)).map(t=>({id:uid(),titulo:('Pendência: '+t.descricao).slice(0,200),resp:t.respNomeV||'',min:5,deTar:t.id}));
+  if(!novos.length){toast('As pendentes já estão na pauta.');return;}put('reun',Object.assign(cl(r),{pautaItens:(r.pautaItens||[]).concat(novos)}));toast(novos.length+' pendência(s) levada(s) para a pauta.','pos');};
+function r168SecDocs(r,x){
+  const docs=(x.docs||[]).map(d=>'<div class="r168li"><div><a href="'+esc(r168Baixar(d))+'">'+esc(d.nome)+'</a><div class="sub">'+esc(d.tipo?d.tipo.toUpperCase():'')+' · '+esc(fmtBytes(d.tam))+' · '+esc(d.porNome||'')+'</div></div><div class="acts">'+(d.tipo==='pdf'||/^(png|jpg|webp)$/.test(d.tipo)?'<a class="btn sm" href="/_blob/'+esc(encodeURIComponent(d.id))+'" target="_blank" rel="noopener">Ver</a>':'')+((x.gere||d.por===actorId())?'<button class="btn sm" data-act="r168DocRem" data-r="'+esc(r.id)+'" data-id="'+esc(d.id)+'" aria-label="Remover '+esc(d.nome)+'">Remover</button>':'')+'</div></div>').join('');
+  const bib=(x.bib||[]).map(b=>'<div class="r168li"><div>'+(b.sumiu?'<s>'+esc(b.bibId)+'</s> <span class="sub">documento excluído da biblioteca</span>':b.acesso&&b.arq?'<a href="'+esc(r168Baixar(b.arq))+'">'+esc(b.titulo)+'</a>':esc(b.titulo))+'<div class="sub">Biblioteca'+(b.pasta?' › '+esc(b.pasta):'')+(b.versao?' · versão '+b.versao:'')+(b.acesso||b.sumiu?'':' · sem acesso à pasta: peça a quem cuida dela')+'</div></div><div class="acts">'+(x.gere?'<button class="btn sm" data-act="r168BibDesanexa" data-r="'+esc(r.id)+'" data-id="'+esc(b.bibId)+'">Tirar</button>':'')+'</div></div>').join('');
+  const TAB={proj:'proj',ctr:'ctr',med:'med',rmesf:'rmes',rdo:'rdo'};
+  const lks=(x.links||[]).map(l=>'<div class="r168li"><div><button class="btn sm" data-act="nav" data-tab="'+esc(TAB[l.col]||'agenda')+'">'+esc(l.tipo)+'</button> '+esc(l.rot)+'</div><div class="acts">'+(x.gere?'<button class="btn sm" data-act="r168LigaRem" data-r="'+esc(r.id)+'" data-c="'+esc(l.col)+'" data-id="'+esc(l.rid)+'">Tirar</button>':'')+'</div></div>').join('');
+  return r168Card('Documentos da reunião',(docs||bib||lks?docs+bib+lks:'<p class="sub" style="margin:0">Nenhum documento. Os participantes veem e baixam o que estiver aqui.</p>')+'<input type="file" id="r168fDoc" hidden multiple accept="'+R168_ACEITA+'">',
+    '<button class="btn sm pri" data-act="r168Doc" data-id="'+esc(r.id)+'">Enviar arquivo</button><button class="btn sm" data-act="r168BibAnexa" data-id="'+esc(r.id)+'">Da biblioteca</button><button class="btn sm" data-act="r168Liga" data-id="'+esc(r.id)+'">Ligar registro</button>');
+}
+A.r168Doc=d=>{if(!r168Srv()){toast(R168_SEMSRV,'neg');return;}window.__r168DocR=d.id;const f=$('#r168fDoc');if(f)f.click();};
+document.addEventListener('change',async e=>{const t=e.target;if(!t||t.id!=='r168fDoc')return;const fs=Array.from(t.files||[]);t.value='';const rid=window.__r168DocR;if(!fs.length||!rid)return;
+  const mx=((V168.x[rid]||{}).cfg||{}).docMb||20;let ok=0;
+  for(const f of fs){if(f.size>mx*1048576){toast(f.name+': passa de '+mx+' MB.','neg');continue;}if(!/\.(pdf|xlsx|docx|pptx|png|jpe?g|webp)$/i.test(f.name)){toast(f.name+': envie PDF, xlsx, docx, pptx ou imagem.','neg');continue;}
+    toast('Enviando '+f.name+'…');try{const a=await r168Sobe(f);const j=await r168Post('doc',{reunId:rid,arq:a});if(j.erro)toast(f.name+': '+j.erro,'neg');else ok++;}catch(err){toast(f.name+': '+err.message,'neg');}}
+  if(ok)toast(ok+' arquivo(s) na reunião.','pos');r168Recarrega(rid);});
+A.r168DocRem=d=>confirmBox('Tirar este arquivo da reunião?',async()=>{const j=await r168Post('doc/remover',{reunId:d.r,id:d.id});r168Msg(j,'Arquivo removido.');r168Recarrega(d.r);},'Remover',true);
+A.r168LigaRem=async d=>{const j=await r168Post('link/remover',{reunId:d.r,col:d.c,rid:d.id});r168Msg(j,'Registro desligado.');r168Recarrega(d.r);};
+A.r168BibDesanexa=async d=>{const j=await r168Post('bib/desanexar',{reunId:d.r,bibId:d.id});r168Msg(j,'Documento tirado da reunião.');r168Recarrega(d.r);};
+function r168Registros(t){
+  const n=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),q=n(t),out=[];
+  const add=(c,id,rot)=>{if(!q||n(rot).includes(q))out.push([c,id,rot]);};
+  (S.proj||[]).forEach(p=>add('proj',p.id,'Obra '+(p.codigo?p.codigo+' · ':'')+(p.nome||'')));
+  (S.ctr||[]).forEach(c=>add('ctr',c.id,'Contrato '+(c.numero||'')+' · '+((get('parc',c.parcId)||{}).nome||c.cliente||'')+(c.projId?' · '+projNome(c.projId):'')));
+  (S.med||[]).forEach(m=>add('med',m.id,'Medição nº '+(m.numero||'')+(m.ctrId&&get('ctr',m.ctrId)?' · contrato '+(get('ctr',m.ctrId).numero||''):'')+(m.fim?' · '+fmtDate(m.fim):'')));
+  (S.rmesf||[]).forEach(f=>add('rmesf',f.id,'Relatório mensal '+(f.mes||'')+' · '+projNome(f.projId)));
+  (S.rdo||[]).forEach(d=>add('rdo',d.id,'Diário de obra nº '+(d.numero||'')+' · '+fmtDate(d.data)+' · '+projNome(d.projId)));
+  return out.slice(0,40);
+}
+A.r168Liga=d=>{const rid=d.id;const lista=t=>r168Registros(t).map(x=>'<div class="r168li"><div>'+esc(x[2])+'</div><div class="acts"><button class="btn sm pri" data-act="r168LigaOk" data-r="'+esc(rid)+'" data-c="'+esc(x[0])+'" data-id="'+esc(x[1])+'" data-rot="'+esc(x[2])+'">Ligar</button></div></div>').join('')||'<p class="sub">Nada encontrado.</p>';
+  modal({title:'Ligar registro do sistema',wide:true,body:'<label class="f"><span>Procurar obra, contrato, medição, relatório mensal ou diário de obra</span><input id="r168lq" placeholder="Digite parte do nome ou número"></label><div id="r168ll" style="margin-top:10px">'+lista('')+'</div>',foot:'<button class="btn" data-act="closeModal">Fechar</button>',
+    onOpen:mb=>{const i=mb.querySelector&&mb.querySelector('#r168lq');if(i&&i.addEventListener)i.addEventListener('input',()=>{const l=mb.querySelector('#r168ll');if(l)l.innerHTML=lista(i.value);});}});};
+A.r168LigaOk=async d=>{const j=await r168Post('link',{reunId:d.r,col:d.c,rid:d.id,rot:d.rot});if(r168Msg(j,'Registro ligado à reunião.'))closeModal();r168Recarrega(d.r);};
+ACT_GROUP.r168LigaOk='agenda';
+A.r168BibAnexa=d=>{const rid=d.id,b=r168Get('bib','/api/reun168/biblioteca');if(!b||b.erro){toast(b&&b.erro?b.erro:'Carregando a biblioteca… tente de novo.',b&&b.erro?'neg':'');return;}
+  const ps=new Map((b.pastas||[]).map(p=>[p.id,p.nome])),ja=new Set(((V168.x[rid]||{}).bib||[]).map(x=>x.bibId));
+  const lista=t=>{const n=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),q=n(t);return (b.docs||[]).filter(x=>!ja.has(x.id)&&(!q||n(x.titulo+' '+(x.tags||[]).join(' ')+' '+ps.get(x.pastaId)).includes(q))).slice(0,40).map(x=>'<div class="r168li"><div>'+esc(x.titulo)+'<div class="sub">'+esc(ps.get(x.pastaId)||'')+' · versão '+(x.versoes||[]).length+'</div></div><div class="acts"><button class="btn sm pri" data-act="r168BibAnexaOk" data-r="'+esc(rid)+'" data-id="'+esc(x.id)+'">Anexar</button></div></div>').join('')||'<p class="sub">Nenhum documento na biblioteca (ou nas pastas que você acessa).</p>';};
+  modal({title:'Anexar documento da biblioteca',wide:true,body:'<label class="f"><span>Procurar</span><input id="r168bq" placeholder="Título, etiqueta ou pasta"></label><div id="r168bl" style="margin-top:10px">'+lista('')+'</div><p class="sub" style="margin:10px 0 0">Quem não tem acesso à pasta vê o título, mas não baixa o arquivo.</p>',foot:'<button class="btn" data-act="closeModal">Fechar</button>',
+    onOpen:mb=>{const i=mb.querySelector&&mb.querySelector('#r168bq');if(i&&i.addEventListener)i.addEventListener('input',()=>{const l=mb.querySelector('#r168bl');if(l)l.innerHTML=lista(i.value);});}});};
+A.r168BibAnexaOk=async d=>{const j=await r168Post('bib/anexar',{reunId:d.r,bibId:d.id});if(r168Msg(j,'Documento anexado à reunião.'))closeModal();r168Recarrega(d.r);};
+ACT_GROUP.r168BibAnexaOk='agenda';
+function r168SecConvite(r,x){
+  const c=r.conv168,lem=r.lembrete==null?30:+r.lembrete,cfg0=x.cfg||{};
+  return r168Card('Convite e lembrete','<p style="margin:0 0 6px">'+(c?'Convite enviado em '+esc(r168Quando(c.em))+' por '+esc(nameOf(c.por))+': chat a '+(+c.chat||0)+' pessoa(s)'+(cfg0.smtp?', e-mail a '+(+c.email||0)+'.':'.'):'Convite ainda não enviado pelo sistema.')+'</p>'+
+    '<p class="sub" style="margin:0">O convite vai no chat (conversa Central de Gestão) com a pauta, os documentos e o link'+(cfg0.smtp?', e por e-mail aos participantes da empresa e de fora':'; o e-mail do servidor não está configurado: use “E-mail aos de fora” nos Detalhes')+'. Lembrete no chat '+(lem>0?lem+' minutos antes':'desligado')+'.</p>',
+    x.gere?'<button class="btn sm pri" data-act="r168Convite" data-id="'+esc(r.id)+'">'+(c?'Enviar de novo':'Enviar convite')+'</button><button class="btn sm" data-act="agCopiar" data-id="'+esc(r.id)+'">Copiar convite</button>':'');
+}
+A.r168Convite=async d=>{const j=await r168Post('convite',{reunId:d.id});r168Msg(j);};
+
+/* ---------- gravação ---------- */
+const r168MimeOk=()=>{try{if(typeof MediaRecorder==='undefined')return '';for(const m of ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'])if(!MediaRecorder.isTypeSupported||MediaRecorder.isTypeSupported(m))return m;}catch(e){}return '';};
+const r168TemTela=()=>{try{return !!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia);}catch(e){return false;}};
+function r168SecGrav(r,x){
+  const c=x.cfg||{},rec=V168.rec&&V168.rec.reunId===r.id?V168.rec:null,mime=r168MimeOk();
+  const lst=(x.gravs||[]).slice().reverse().map(g=>{const dur=g.dur?r168Hm(g.dur*1000):'';
+    return '<div class="r168li"><div><b>'+esc(r168Quando(g.ini))+'</b> · '+esc(g.modo==='online'?'online':'presencial')+(dur?' · '+dur:'')+(g.tam?' · '+esc(fmtBytes(g.tam)):'')+'<div class="sub">'+esc(g.porNome||'')+' · consentimento registrado em '+esc(r168Quando(g.consent&&g.consent.em))+' ('+((g.consent&&g.consent.participantes)||[]).length+' participante(s) avisados)'+
+      (g.st==='gravando'?' · <b>gravando</b>':g.st==='interrompida'?' · interrompida (o que chegou foi guardado)':g.st==='apagada'?' · áudio apagado em '+esc(r168Quando(g.apagadoEm))+(g.apagadoMotivo==='prazo'?' (prazo de guarda)':''):g.st==='vazia'?' · sem áudio':g.expira?' · áudio guardado até '+esc(fmtDate(g.expiraData)):'')+'</div>'+
+      (g.audio?'<audio controls preload="none" src="/_blob/'+esc(encodeURIComponent(g.audio))+'" style="width:100%;max-width:420px;margin-top:6px"></audio>':'')+'</div><div class="acts">'+
+      (g.st==='gravando'&&!rec&&(x.gere||g.por===actorId())?'<button class="btn sm" data-act="r168Finalizar" data-r="'+esc(r.id)+'" data-id="'+esc(g.id)+'">Finalizar o que chegou</button>':'')+
+      (g.audio&&x.gere?'<button class="btn sm" data-act="r168Transcrever" data-r="'+esc(r.id)+'" data-id="'+esc(g.id)+'">Transcrever</button><button class="btn sm dng" data-act="r168AudioApaga" data-r="'+esc(r.id)+'" data-id="'+esc(g.id)+'">Apagar áudio</button>':'')+'</div></div>';}).join('');
+  const aviso='<p class="sub" style="margin:8px 0 0">Só áudio, gravado neste navegador e enviado em partes a cada '+(c.parteS||30)+' s (se a aba fechar, o que já foi enviado fica). Até '+(c.gravMin||180)+' min e '+(c.gravMb||300)+' MB. O áudio fica guardado por '+(c.audioDias||90)+' dias e depois é apagado; a transcrição e a ata ficam. Acesso: participantes, organizador e Administrador.'+(r168TemTela()?' Online: no Chrome ou Edge, escolha a aba da reunião e marque “Compartilhar áudio da aba”.':' Este navegador não captura o áudio da aba: grava só o microfone.')+'</p>';
+  const bt=rec?'<button class="btn sm dng" data-act="r168Parar">Parar a gravação</button>':x.gere&&r.status!=='cancelada'?(mime?'<button class="btn sm pri" data-act="r168Gravar" data-id="'+esc(r.id)+'">● Gravar</button>':''):'';
+  return r168Card('Gravação',(rec?'<p class="neg" style="margin:0 0 6px"><b>● Gravando</b> desde '+esc(r168Quando(rec.ini))+' · '+rec.enviadas+' parte(s) enviada(s)'+(rec.pend?' · '+rec.pend+' aguardando':'')+'</p>':'')+(lst||'<p class="sub" style="margin:0">Nenhuma gravação.</p>')+(x.gere&&!mime?'<p class="note" style="margin:8px 0 0">Este navegador não grava áudio (MediaRecorder). Use o Chrome, o Edge ou o Firefox.</p>':'')+aviso,bt);
+}
+A.r168Gravar=d=>{
+  const r=get('reun',d.id),x=V168.x[d.id];if(!r||!x)return;if(V168.rec){toast('Já há uma gravação em andamento.','neg');return;}
+  const part=x.participantes||[],online=!!(r.link||r.plat==='teams'||r.plat==='jitsi'||r.plat==='meet'||r.plat==='link');
+  modal({title:'Gravar a reunião (LGPD)',wide:true,body:'<p style="margin:0 0 8px">Antes de gravar, <b>avise todos os participantes</b>: a reunião será gravada (somente áudio) para a transcrição e a ata. '+(x.cfg&&x.cfg.transcricao?'Para transcrever, o áudio é enviado à OpenAI. ':'')+'O áudio fica guardado por '+((x.cfg||{}).audioDias||90)+' dias e depois é apagado; a transcrição e a ata ficam. Só os participantes, o organizador e o Administrador acessam.</p>'+
+    '<div class="sect">Participantes avisados</div>'+part.map((p,i)=>'<label class="r168ck"><input type="checkbox" data-r168p="'+esc(p.nome)+'" checked> '+esc(p.nome)+(p.interno?'':' <span class="sub">de fora</span>')+'</label>').join('')+
+    '<label class="f" style="margin-top:8px"><span>Outros presentes (um por linha)</span><textarea id="r168pOut" rows="2"></textarea></label>'+
+    '<div class="fg" style="margin-top:8px">'+field('Tipo','modo','select',online?'online':'presencial',{opts:[['presencial','Presencial: microfone deste aparelho'],['online','Online: microfone e o áudio da aba (quando o navegador deixa)']]})+'</div>'+
+    (r168TemTela()?'<p class="sub" style="margin:6px 0 0">Online no Chrome ou Edge: o navegador pede para escolher a aba da reunião; marque “Compartilhar áudio da aba”. No Safari e no Firefox só o microfone é gravado: deixe o som da reunião sair pelo alto-falante perto do microfone.</p>':'<p class="sub" style="margin:6px 0 0">Este navegador não captura o áudio da aba: só o microfone é gravado.</p>')+
+    '<label class="r168ck" style="margin-top:10px"><input type="checkbox" id="r168ok"> <b>Avisei os participantes acima e eles concordaram com a gravação.</b></label>',
+    saveLabel:'Começar a gravar',save:root=>{
+      if(!($('#r168ok')||{}).checked){toast('Confirme que os participantes foram avisados e concordaram.','neg');return false;}
+      const nomes=Array.from(document.querySelectorAll('#mb [data-r168p]')).filter(i=>i.checked).map(i=>i.dataset.r168p).concat(String(($('#r168pOut')||{}).value||'').split('\n').map(s=>s.trim()).filter(Boolean));
+      if(!nomes.length){toast('Marque ao menos um participante.','neg');return false;}
+      const v=readForm(root);r168Comecar(r,v.modo==='online'?'online':'presencial',nomes);
+    }});
+};
+async function r168Comecar(r,modo,nomes){
+  const mime=r168MimeOk();if(!mime){toast('Este navegador não grava áudio.','neg');return;}
+  let mic=null,tela=null,ctx=null,stream=null;
+  try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});}catch(e){toast('O microfone não foi liberado: permita o microfone para este site e tente de novo.','neg');return;}
+  if(modo==='online'&&r168TemTela()){try{tela=await navigator.mediaDevices.getDisplayMedia({audio:true,video:true});tela.getVideoTracks().forEach(t=>{try{t.stop();}catch(e){}});if(!tela.getAudioTracks().length){toast('O áudio da aba não foi compartilhado: grava só o microfone.','neg');tela=null;}}catch(e){toast('Sem o áudio da aba: grava só o microfone.');tela=null;}}
+  if(tela){try{ctx=new (window.AudioContext||window.webkitAudioContext)();const dst=ctx.createMediaStreamDestination();ctx.createMediaStreamSource(mic).connect(dst);ctx.createMediaStreamSource(new MediaStream(tela.getAudioTracks())).connect(dst);stream=dst.stream;}catch(e){stream=mic;}}else stream=mic;
+  const j=await r168Post('grav/inicio',{reunId:r.id,modo,participantes:nomes,aviso:true,ct:mime,sistemaAudio:!!tela});
+  if(j.erro){toast(j.erro,'neg');[mic,tela].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));return;}
+  let mr;try{mr=new MediaRecorder(stream,{mimeType:mime,audioBitsPerSecond:32000});}catch(e){mr=new MediaRecorder(stream);}
+  const rec=V168.rec={reunId:r.id,titulo:r.titulo,gravId:j.grav.id,ini:Date.now(),n:0,fila:[],enviadas:0,pend:0,mr,mic,tela,ctx,mime:mr.mimeType||mime,maxMs:(j.maxMin||180)*60e3,parando:false,envia:null,erros:0};
+  mr.ondataavailable=e=>{if(e.data&&e.data.size){rec.fila.push({n:rec.n++,b:e.data});rec.pend=rec.fila.length;r168Envia(rec);}};
+  mr.onstop=()=>{r168Envia(rec).then(()=>r168Fim(rec));};
+  mr.start((j.parteS||30)*1000);
+  rec.tm=setInterval(()=>{r168Barra();if(Date.now()-rec.ini>=rec.maxMs){toast('Duração máxima da gravação: parando.','neg');A.r168Parar();}},1000);
+  r168Barra();toast('Gravando. O aviso vermelho no alto fica visível em todas as telas.','pos');r168Recarrega(r.id);
+}
+async function r168Envia(rec){
+  if(rec.envia)return rec.envia;
+  rec.envia=(async()=>{while(rec.fila.length){const it=rec.fila[0];let ok=false,parar=false;
+    for(let t=0;t<6&&!ok;t++){try{const res=await fetch('/api/reun168/grav/parte?r='+encodeURIComponent(rec.reunId)+'&g='+encodeURIComponent(rec.gravId)+'&n='+it.n,{method:'POST',credentials:'same-origin',headers:{'content-type':rec.mime.split(';')[0]},body:it.b});
+        if(res.ok)ok=true;else{const jj=await res.json().catch(()=>({}));if(jj.parar){parar=true;toast(jj.erro||'Gravação no limite.','neg');break;}if(res.status===409||res.status===404)break;}}catch(e){}
+      if(!ok&&!parar)await new Promise(z=>setTimeout(z,Math.min(15000,1000*Math.pow(2,t))));}
+    if(ok){rec.fila.shift();rec.enviadas++;rec.erros=0;if(ui.tab==='r168reun'&&!($('#ov')&&!$('#ov').hidden))try{render();}catch(e){}}else{rec.erros++;if(parar||rec.erros>3){rec.fila.shift();}else await new Promise(z=>setTimeout(z,5000));}
+    rec.pend=rec.fila.length;if(parar&&!rec.parando)A.r168Parar();}})().finally(()=>{rec.envia=null;});
+  return rec.envia;
+}
+async function r168Fim(rec){
+  [rec.mic,rec.tela].forEach(s=>{try{s&&s.getTracks().forEach(t=>t.stop());}catch(e){}});try{rec.ctx&&rec.ctx.close();}catch(e){}
+  clearInterval(rec.tm);
+  const j=await r168Post('grav/fim',{reunId:rec.reunId,gravId:rec.gravId,dur:Math.round((Date.now()-rec.ini)/1000)});
+  V168.rec=null;r168Barra();r168Msg(j,'Gravação guardada ('+rec.enviadas+' parte(s)).');r168Recarrega(rec.reunId);
+}
+A.r168Parar=()=>{const rec=V168.rec;if(!rec||rec.parando)return;rec.parando=true;try{if(rec.mr.state!=='inactive')rec.mr.stop();else r168Envia(rec).then(()=>r168Fim(rec));}catch(e){r168Fim(rec);}r168Barra();};
+function r168Barra(){
+  if(typeof document==='undefined'||!document.body||!document.getElementById)return;let b=document.getElementById('r168grav');const rec=V168.rec;
+  if(!rec){if(b)b.remove();return;}
+  if(!b){b=document.createElement('div');b.id='r168grav';b.className='r168grav';b.setAttribute('role','status');document.body.appendChild(b);}
+  const t=r168Hm(Date.now()-rec.ini);b.innerHTML='<i class="dot"></i><span>'+(rec.parando?'Encerrando… ':'Gravando ')+esc(t)+' · '+esc(rec.titulo)+(rec.pend?' · '+rec.pend+' parte(s) a enviar':'')+'</span>'+(rec.parando?'':'<button type="button" data-act="r168Parar">Parar</button>');
+}
+if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('beforeunload',e=>{if(V168.rec){e.preventDefault();e.returnValue='A gravação está em andamento.';return e.returnValue;}});
+A.r168Finalizar=async d=>{const j=await r168Post('grav/fim',{reunId:d.r,gravId:d.id});r168Msg(j,'Gravação finalizada com o que chegou ao servidor.');r168Recarrega(d.r);};
+A.r168AudioApaga=d=>confirmBox('Apagar agora o áudio desta gravação? A transcrição e a ata continuam.',async()=>{const j=await r168Post('grav/apagar',{reunId:d.r,gravId:d.id});r168Msg(j,'Áudio apagado.');r168Recarrega(d.r);},'Apagar áudio',true);
+
+/* ---------- transcrição ---------- */
+const R168_TST={fila:['Na fila','warn'],transcrevendo:['Transcrevendo','acc'],pronto:['Pronta','pos'],erro:['Erro','neg']};
+function r168SecTr(r,x){
+  const t=x.transcr,st=t&&R168_TST[t.st],temAudio=(x.gravs||[]).some(g=>g.audio),c=x.cfg||{};
+  const corpo=!t?'<p class="sub" style="margin:0">Sem transcrição. '+(temAudio?'Use “Transcrever” na gravação':'Grave a reunião')+' ou importe a transcrição do Teams ou do Meet (.vtt, .docx) ou um texto (.txt).</p>':
+    '<p style="margin:0 0 6px">'+pill(st?st[0]:t.st,st?st[1]:'')+' '+(t.fonte==='manual'?'Importada ('+esc(t.arquivo||'')+')':'Automática'+(t.modelo?' · '+esc(t.modelo):''))+(t.prog?' · parte '+t.prog.i+' de '+t.prog.n:'')+(t.em?' · '+esc(r168Quando(t.em)):'')+'</p>'+
+    (t.st==='erro'?'<div class="note" style="margin:0 0 6px">'+esc(t.erro||'Falha na transcrição.')+'</div>':'')+
+    (t.texto?'<details'+(t.st==='pronto'?'':' open')+'><summary>Ver a transcrição ('+((t.segs||[]).length||1)+' trecho(s))</summary><div class="r168tr">'+((t.segs||[]).length?t.segs.slice(0,3000).map(s=>'<p>'+(s.ini!=null?'<span class="mono">'+esc(r168Hm(s.ini))+'</span>':'')+(s.quem?'<b>'+esc(s.quem)+':</b> ':'')+esc(s.t)+'</p>').join(''):'<p style="white-space:pre-wrap">'+esc(t.texto)+'</p>')+'</div></details>':'');
+  const acts=x.gere?((t&&t.st==='erro'&&temAudio?'<button class="btn sm pri" data-act="r168Transcrever" data-r="'+esc(r.id)+'" data-id="'+esc(t.gravId||'')+'">Tentar de novo</button>':'')+'<button class="btn sm" data-act="r168ImportarTr" data-id="'+esc(r.id)+'">Importar transcrição</button>'):'';
+  return r168Card('Transcrição',corpo+(c.transcricao===false&&x.gere?'<p class="sub" style="margin:8px 0 0">A transcrição automática não está ligada no servidor (falta OPENAI_API_KEY). Importe a transcrição do Teams/Meet.</p>':''),acts);
+}
+A.r168Transcrever=async d=>{const j=await r168Post('transcrever',{reunId:d.r,gravId:d.id});r168Msg(j,'Transcrição na fila. A tela atualiza sozinha.');r168Recarrega(d.r);};
+A.r168ImportarTr=d=>{const rid=d.id;modal({title:'Importar transcrição',wide:true,body:'<p class="sub" style="margin:0 0 8px">No Teams: na gravação ou no chat da reunião, Transcrição › Baixar (.vtt ou .docx). No Google Meet: o documento da transcrição no Drive (baixe como .docx ou .txt).</p><label class="f"><span>Arquivo (.vtt, .srt, .docx ou .txt)</span><input type="file" id="r168trf" accept=".vtt,.srt,.docx,.txt,text/vtt,text/plain"></label><label class="f" style="margin-top:8px"><span>Ou cole o texto</span><textarea id="r168trt" rows="8" placeholder="Nome: fala…"></textarea></label><p class="sub" style="margin:8px 0 0">A transcrição importada substitui a que existir.</p>',
+  saveLabel:'Importar',save:()=>{const f=($('#r168trf')||{}).files,f0=f&&f[0],t=String(($('#r168trt')||{}).value||'');if(!f0&&!t.trim()){toast('Escolha o arquivo ou cole o texto.','neg');return false;}
+    (async()=>{let j;if(f0){if(!/\.(vtt|srt|docx|txt)$/i.test(f0.name)){toast('Envie .vtt, .srt, .docx ou .txt.','neg');return;}try{const tipo=/\.docx$/i.test(f0.name)?f0:new File([f0],f0.name,{type:'text/plain'});const a=await r168Sobe(tipo);j=await r168Post('transcricao/importar',{reunId:rid,arq:a});}catch(e){j={erro:e.message};}}else j=await r168Post('transcricao/importar',{reunId:rid,texto:t,nome:'colado.txt'});
+      r168Msg(j,'Transcrição importada.');r168Recarrega(rid);})();}});};
+
+/* ---------- ata: minuta pela IA, revisão, aprovação, assinatura e PDF ---------- */
+function r168SecAta(r,x){
+  const m=x.minuta,t=x.transcr,apr=m&&m.st==='aprovada',c=x.cfg||{};
+  let corpo='';
+  if(!m)corpo='<p class="sub" style="margin:0">'+(t&&t.st==='pronto'?'A transcrição está pronta: gere a minuta com a IA ou escreva à mão.':'Primeiro a transcrição (gravação ou importada); depois a IA monta a minuta: resumo, assuntos por item da pauta, decisões, ações com responsável e prazo, pendências e próximos passos.')+'</p>'+(r.ata&&!r.ata168?'<div class="sect">Ata (texto, antes da v168)</div><p style="white-space:pre-wrap;margin:0">'+esc(r.ata)+'</p>':'');
+  else{
+    const nomeP=k=>{const p=(x.participantes||[]).find(y=>y.k===k);return p?p.nome:k.replace(/^x:/,'');};
+    corpo='<p style="margin:0 0 6px">'+(apr?pill('Ata aprovada','pos')+' em '+esc(r168Quando(m.aprovEm))+' por '+esc(nameOf(m.aprovPor)):pill('Minuta em revisão','warn')+(m.ia?' gerada pela IA em '+esc(r168Quando(m.geradaEm)):''))+'</p>'+
+      (m.resumo?'<p style="margin:0 0 6px;white-space:pre-wrap">'+esc(m.resumo)+'</p>':'')+
+      ((m.decisoes||[]).length?'<p style="margin:6px 0 2px"><b>Decisões</b></p><ul style="margin:0;padding-left:18px">'+m.decisoes.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul>':'')+
+      ((m.acoes||[]).length?'<p style="margin:6px 0 2px"><b>Ações ('+m.acoes.length+')</b></p><ul style="margin:0;padding-left:18px">'+m.acoes.map(a=>'<li>'+esc(a.descricao)+' <span class="sub">· '+esc(a.resp?nameOf(a.resp):(a.respNome||'sem responsável'))+' · '+esc(a.prazo?fmtDate(a.prazo):'sem prazo')+'</span></li>').join('')+'</ul>':'')+
+      (apr?'<p class="sub" style="margin:8px 0 0">Presentes: '+esc((m.presentes||[]).map(nomeP).join(', '))+'. Assinaram: '+esc((m.assin||[]).map(a=>a.nome+' ('+r168Quando(a.em)+')').join(', ')||'ninguém ainda')+'.</p>':'');
+  }
+  const eu=actorId(),podeAss=apr&&(m.presentes||[]).includes(eu)&&!(m.assin||[]).some(a=>a.uid===eu);
+  const acts=(x.gere&&!apr?(t&&t.st==='pronto'?'<button class="btn sm'+(m?'':' pri')+'" data-act="r168AtaGerar" data-id="'+esc(r.id)+'">'+(m?'Gerar de novo com a IA':'Gerar minuta com a IA')+'</button>':'')+'<button class="btn sm'+(m?' pri':'')+'" data-act="r168AtaEditar" data-id="'+esc(r.id)+'">'+(m?'Revisar e aprovar':'Escrever a ata')+'</button>':'')+
+    (podeAss?'<button class="btn sm pri" data-act="r168AtaAssinar" data-id="'+esc(r.id)+'">Assinar a ata</button>':'')+(apr?'<button class="btn sm" data-act="r168AtaPdf" data-id="'+esc(r.id)+'">Ata (PDF)</button>':'');
+  return r168Card('Ata',corpo+(x.gere&&!apr&&c.ia===false?'<p class="sub" style="margin:8px 0 0">A IA não está ligada no servidor (ANTHROPIC_API_KEY): escreva a ata à mão.</p>':''),acts);
+}
+A.r168AtaGerar=d=>{const x=V168.x[d.id];const fz=async()=>{toast('A IA está lendo a transcrição… pode levar até um minuto.');const j=await r168Post('ata/gerar',{reunId:d.id});if(r168Msg(j,'Minuta gerada. Revise antes de aprovar.')){V168.x[d.id]=Object.assign({},V168.x[d.id],{minuta:j.minuta});A.r168AtaEditar(d);}r168Recarrega(d.id);};
+  if(x&&x.minuta)confirmBox('Gerar a minuta de novo? O que foi editado na minuta atual será substituído.',fz,'Gerar de novo');else fz();};
+function r168AcLinha(a,P){a=a||{};const us=chUsers(),op=[['','— responsável —']].concat(us.map(u=>[u,nameOf(u)])).concat((P||[]).filter(p=>!p.interno).map(p=>['n:'+p.nome,p.nome+' (de fora)']));
+  const v=a.resp?a.resp:a.respNome?'n:'+a.respNome:'';if(a.respNome&&!op.some(o=>o[0]===v))op.push([v,a.respNome+' (não achado)']);
+  return '<div class="r168ac" data-ac="'+esc(a.id||uid())+'" data-pauta="'+esc(a.pautaId||'')+'"><label class="f r168acd"><span>Ação</span><textarea data-acd rows="2">'+esc(a.descricao||'')+'</textarea></label><label class="f"><span>Responsável</span><select data-acr>'+opt(op,v)+'</select></label><label class="f"><span>Prazo</span><input type="date" data-acp value="'+esc(a.prazo||'')+'"></label><label class="f"><span>Prioridade</span><select data-acq>'+opt([['alta','Alta'],['media','Média'],['baixa','Baixa']],a.prioridade||'media')+'</select></label><button type="button" class="btn sm" data-act="r168AcRem" aria-label="Tirar ação">✕</button></div>';}
+A.r168AcAdd=()=>{const b=$('#r168acs');if(b)b.insertAdjacentHTML('beforeend',r168AcLinha({},(V168.x[window.__r168AtaR]||{}).participantes));};
+A.r168AcRem=(d,el)=>{const row=el&&el.closest?el.closest('[data-ac]'):null;if(row)row.remove();};
+function r168LerMinuta(){
+  const g=s=>String(($(s)||{}).value||''),ln=s=>g(s).split('\n').map(x=>x.trim()).filter(Boolean);
+  return {resumo:g('#r168mres').trim(),
+    assuntos:Array.from(document.querySelectorAll('#mb [data-mas]')).map(el=>({pautaId:el.dataset.pauta||'',titulo:String((el.querySelector('[data-mat]')||{}).value||'').trim(),texto:String((el.querySelector('[data-mtx]')||{}).value||'').trim()})).filter(a=>a.titulo||a.texto),
+    decisoes:ln('#r168mdec'),pendencias:ln('#r168mpen'),proximos:ln('#r168mpro'),
+    presentes:Array.from(document.querySelectorAll('#mb [data-mpres]')).filter(i=>i.checked).map(i=>i.dataset.mpres),
+    acoes:Array.from(document.querySelectorAll('#mb [data-ac]')).map(row=>{const q=s=>row.querySelector(s),rv=String((q('[data-acr]')||{}).value||'');return {id:row.dataset.ac,pautaId:row.dataset.pauta||'',descricao:String((q('[data-acd]')||{}).value||'').trim(),resp:rv&&!/^n:/.test(rv)?rv:'',respNome:/^n:/.test(rv)?rv.slice(2):'',prazo:String((q('[data-acp]')||{}).value||''),prioridade:String((q('[data-acq]')||{}).value||'media')};}).filter(a=>a.descricao)};
+}
+A.r168AtaEditar=d=>{
+  const r=get('reun',d.id),x=V168.x[d.id];if(!r||!x)return;window.__r168AtaR=d.id;
+  const m=x.minuta||{resumo:'',assuntos:[],decisoes:[],acoes:[],pendencias:[],proximos:[],presentes:(x.participantes||[]).map(p=>p.k)},P=x.participantes||[];
+  const pauta=(r.pautaItens||[]),ass=pauta.map(p=>{const a=(m.assuntos||[]).find(y=>y.pautaId===p.id)||{};return {pautaId:p.id,titulo:a.titulo||p.titulo,texto:a.texto||''};}).concat((m.assuntos||[]).filter(a=>!a.pautaId||!pauta.some(p=>p.id===a.pautaId)));
+  const assH=(ass.length?ass:[{titulo:'',texto:''}]).map(a=>'<div data-mas data-pauta="'+esc(a.pautaId||'')+'" style="margin:0 0 8px"><label class="f"><span>'+(a.pautaId?'Item da pauta':'Assunto')+'</span><input data-mat value="'+esc(a.titulo)+'"></label><label class="f"><span>O que foi tratado</span><textarea data-mtx rows="3">'+esc(a.texto)+'</textarea></label></div>').join('');
+  modal({title:'Ata · '+r.titulo,wide:true,nofocus:true,body:(m.ia?'<p class="note" style="margin:0 0 10px">Minuta feita pela IA a partir da transcrição: confira tudo, principalmente responsáveis e prazos, antes de aprovar.'+(m.truncado?' A resposta da IA veio cortada: confira o fim.':'')+'</p>':'')+
+    '<label class="f"><span>Resumo</span><textarea id="r168mres" rows="4">'+esc(m.resumo||'')+'</textarea></label><div class="sect">Assuntos tratados</div>'+assH+
+    '<label class="f"><span>Decisões (uma por linha)</span><textarea id="r168mdec" rows="3">'+esc((m.decisoes||[]).join('\n'))+'</textarea></label>'+
+    '<div class="sect">Ações (viram tarefas quando a ata for aprovada)</div><div id="r168acs">'+(m.acoes||[]).map(a=>r168AcLinha(a,P)).join('')+'</div><button type="button" class="btn sm" data-act="r168AcAdd">+ Ação</button>'+
+    '<label class="f" style="margin-top:10px"><span>Pendências (uma por linha)</span><textarea id="r168mpen" rows="2">'+esc((m.pendencias||[]).join('\n'))+'</textarea></label><label class="f"><span>Próximos passos (um por linha)</span><textarea id="r168mpro" rows="2">'+esc((m.proximos||[]).join('\n'))+'</textarea></label>'+
+    '<div class="sect">Presentes (assinam a ata)</div>'+P.map(p=>'<label class="r168ck"><input type="checkbox" data-mpres="'+esc(p.k)+'"'+((m.presentes||[]).includes(p.k)?' checked':'')+'> '+esc(p.nome)+(p.interno?'':' <span class="sub">de fora</span>')+'</label>').join(''),
+    foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn" data-act="r168AtaSalvar" data-id="'+esc(r.id)+'">Salvar minuta</button><button class="btn pri" data-act="r168AtaAprovar" data-id="'+esc(r.id)+'">Aprovar ata</button>'});
+};
+A.r168AtaSalvar=async d=>{const j=await r168Post('ata/salvar',{reunId:d.id,minuta:r168LerMinuta()});if(r168Msg(j,'Minuta salva.')){V168.x[d.id]=Object.assign({},V168.x[d.id],{minuta:j.minuta});}r168Recarrega(d.id);};
+ACT_GROUP.r168AtaSalvar='agenda';
+A.r168AtaAprovar=async d=>{const m=r168LerMinuta();const falta=m.acoes.filter(a=>(!a.resp&&!a.respNome)||!a.prazo);if(falta.length){toast('Toda ação precisa de responsável e prazo ('+falta.length+' sem).','neg');return;}if(!m.presentes.length){toast('Marque quem esteve presente.','neg');return;}
+  /* guarda a minuta antes de perguntar: se a pessoa voltar, nada do que editou se perde */
+  const s0=await r168Post('ata/salvar',{reunId:d.id,minuta:m});if(s0.erro){toast(s0.erro,'neg');return;}V168.x[d.id]=Object.assign({},V168.x[d.id],{minuta:s0.minuta});
+  confirmBox('Aprovar a ata? Depois de aprovada ela não muda mais, e cada ação ('+m.acoes.length+') vira uma tarefa com aviso ao responsável. A minuta já foi salva.',async()=>{const j=await r168Post('ata/aprovar',{reunId:d.id,minuta:m});if(r168Msg(j,'Ata aprovada'+(j.tarefas?': '+j.tarefas+' tarefa(s) criada(s).':'.')))V168.x[d.id]=Object.assign({},V168.x[d.id],{minuta:j.minuta});r168Recarrega(d.id);},'Aprovar ata');};
+A.r168AtaAssinar=async d=>{const j=await r168Post('ata/assinar',{reunId:d.id});r168Msg(j,'Ata assinada.');r168Recarrega(d.id);};
+A.r168AtaPdf=d=>{const r=get('reun',d.id),x=V168.x[d.id];if(!r||!x||!x.minuta)return;const m=x.minuta,P=x.participantes||[],nomeP=k=>{const p=P.find(y=>y.k===k);return p?p.nome:String(k).replace(/^x:/,'');};
+  const sec=(t,l)=>l&&l.length?'<h2>'+esc(t)+'</h2><ul>'+l.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul>':'';
+  const ass=new Map((m.assin||[]).map(a=>[a.uid,a]));
+  showDoc({tipo:'Ata de reunião',numero:fmtDate(r.data),situacao:'Aprovada',
+    meta:[['Reunião',r.titulo],['Data',fmtDate(r.data)+(r.ini?' das '+r.ini:'')+(r.fim?' às '+r.fim:'')],['Local / link',r.local||(r.link?'Reunião online':'—')],['Organizador',nameOf(r.org)],['Secretário',r.secretario?nameOf(r.secretario):nameOf(r.org)],['Aprovada',r168Quando(m.aprovEm)+' por '+nameOf(m.aprovPor)]],
+    tables:[{title:'Presentes',head:['Nome','Assinatura eletrônica'],rows:(m.presentes||[]).map(k=>[nomeP(k),ass.has(k)?'Assinou em '+r168Quando(ass.get(k).em):'—'])},
+      {title:'Ações e responsáveis',head:['Ação','Responsável','Prazo','Prioridade'],rows:(m.acoes||[]).map(a=>[a.descricao,a.resp?nameOf(a.resp):a.respNome,fmtDate(a.prazo),(R168_PRI[a.prioridade]||['Média'])[0]])}],
+    raw:'<h2>Pauta</h2>'+((r.pautaItens||[]).length?'<ol>'+r.pautaItens.map(p=>'<li>'+esc(p.titulo)+(p.resp?' ('+esc(p.resp)+')':'')+'</li>').join('')+'</ol>':'<p>'+esc(r.pauta||'—').replace(/\n/g,'<br>')+'</p>')+
+      (m.resumo?'<h2>Resumo</h2><p>'+esc(m.resumo).replace(/\n/g,'<br>')+'</p>':'')+((m.assuntos||[]).length?'<h2>Assuntos tratados</h2>'+m.assuntos.map(a=>'<p><b>'+esc(a.titulo)+'</b><br>'+esc(a.texto).replace(/\n/g,'<br>')+'</p>').join(''):'')+
+      sec('Decisões',m.decisoes)+sec('Pendências',m.pendencias)+sec('Próximos passos',m.proximos),
+    obs:'Ata aprovada no sistema'+(m.ia?' (minuta feita pela IA a partir da transcrição e revisada)':'')+'. Assinada pelos presentes.',sign:(m.presentes||[]).map(nomeP)},slug('ata-'+r.data+'-'+r.titulo));};
+
+/* ---------- tarefas ---------- */
+function r168SecTar(r,x){
+  const l=x.tarefas||[];
+  return r168Card('Tarefas desta reunião',l.length?l.map(t=>'<div class="r168li"><div>'+esc(t.descricao)+'<div class="sub">'+esc(t.respNomeV||'—')+' · prazo '+esc(fmtDate(t.prazo))+(t.assunto?' · '+esc(t.assunto):'')+'</div></div><div class="acts">'+r168StPill(t)+'<button class="btn sm" data-act="r168TarVer" data-id="'+esc(t.id)+'" data-r="'+esc(r.id)+'">Abrir</button></div></div>').join(''):'<p class="sub" style="margin:0">As ações da ata viram tarefas quando a ata for aprovada.</p>','<button class="btn sm" data-act="nav" data-tab="r168tar">Todas as tarefas</button>');
+}
+function r168TarAchar(id){const fontes=[V168.tar&&V168.tar.tarefas,V168.minhas&&V168.minhas.tarefas].concat(Object.values(V168.x).map(x=>x&&x.tarefas));for(const l of fontes)if(Array.isArray(l)){const t=l.find(y=>y.id===id);if(t)return t;}return null;}
+A.r168TarVer=d=>{
+  const t=r168TarAchar(d.id);if(!t)return;const eu=actorId(),gere=r168Adm()||t.org===eu,dono=t.resp===eu;
+  modal({title:'Tarefa de reunião',wide:true,nofocus:true,body:'<p style="margin:0 0 6px"><b>'+esc(t.descricao)+'</b></p><p class="sub" style="margin:0 0 8px">Reunião: '+esc(t.reunTitulo)+' ('+esc(fmtDate(t.reunData))+')'+(t.assunto?' · item: '+esc(t.assunto):'')+' · organizador: '+esc(t.orgNome||'')+'</p>'+
+    '<div class="fg">'+(gere?field('Responsável','resp','select',t.resp||'',{opts:chUsers().map(u=>[u,nameOf(u)]),blank:t.respNome?t.respNome+' (de fora)':'—'})+field('Prazo','prazo','date',t.prazo):'<label class="f"><span>Responsável</span><input value="'+esc(t.respNomeV||'—')+'" disabled></label><label class="f"><span>Prazo</span><input value="'+esc(fmtDate(t.prazo))+'" disabled></label>')+
+    ((gere||dono)?field('Situação','status','select',t.status,{opts:Object.entries(R168_ST).filter(([k])=>gere||k!=='cancelada').map(([k,v])=>[k,v[0]])}):'<label class="f"><span>Situação</span><input value="'+esc((R168_ST[t.status]||[t.status])[0])+'" disabled></label>')+'<label class="f"><span>Prioridade</span><input value="'+esc((R168_PRI[t.prioridade]||['Média'])[0])+'" disabled></label></div>'+
+    ((gere||dono)?'<label class="f full" style="margin-top:8px"><span>Nova nota</span><textarea id="r168tn" rows="2"></textarea></label><label class="f" style="margin-top:8px"><span>Evidência (PDF, imagem, planilha…)</span><input type="file" id="r168tev" multiple accept="'+R168_ACEITA+'"></label>':'')+
+    ((t.evid||[]).length?'<div class="sect">Evidências</div>'+t.evid.map(a=>'<div><a href="'+esc(r168Baixar(a))+'">'+esc(a.nome)+'</a> <span class="sub">'+esc(r168Quando(a.em))+'</span></div>').join(''):'')+
+    ((t.notas||[]).length?'<div class="sect">Notas</div>'+t.notas.slice().reverse().map(n=>'<p style="margin:0 0 6px"><span class="sub">'+esc(n.nome||'')+' · '+esc(r168Quando(n.em))+'</span><br>'+esc(n.txt).replace(/\n/g,'<br>')+'</p>').join(''):'')+
+    '<div class="sect">Histórico</div><ul style="margin:0;padding-left:18px">'+(t.hist||[]).slice().reverse().slice(0,30).map(h=>'<li class="sub">'+esc(r168Quando(h.em))+' · '+esc(h.porNome||nameOf(h.por))+' · '+esc(h.st?(R168_ST[h.st]||[h.st])[0]:'')+(h.txt?' '+esc(h.txt):'')+'</li>').join('')+'</ul>',
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(gere||dono?'<button class="btn pri" data-act="r168TarSalvar" data-id="'+esc(t.id)+'" data-r="'+esc(d.r||t.reunId)+'">Salvar</button>':'')});
+};
+A.r168TarSalvar=async d=>{const t=r168TarAchar(d.id);if(!t)return;const v=readForm($('#mb')),b={id:t.id};
+  if(v.status&&v.status!==t.status)b.status=v.status;const nota=String(($('#r168tn')||{}).value||'').trim();if(nota)b.nota=nota;
+  if(v.prazo!==undefined&&v.prazo&&v.prazo!==t.prazo)b.prazo=v.prazo;if(v.resp!==undefined&&v.resp!==(t.resp||''))b.resp=v.resp;
+  const fs=Array.from((($('#r168tev')||{}).files)||[]);if(fs.length){b.evid=[];for(const f of fs){try{b.evid.push(await r168Sobe(f));}catch(e){toast(f.name+': '+e.message,'neg');}}}
+  if(Object.keys(b).length===1){toast('Nada mudou.');return;}
+  const j=await r168Post('tarefa',b);if(r168Msg(j,'Tarefa atualizada.'))closeModal();V168.tarEm=0;V168.minhasEm=0;if(d.r)V168.xEm[d.r]=0;render();};
+function r168TarTabela(l,k){
+  const pg=r168Pag(k,l.length,50);
+  return '<div class="tw r168tw"><table><thead><tr><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Situação</th><th>Reunião</th><th></th></tr></thead><tbody>'+(l.length?l.slice(pg.ini,pg.fim).map(t=>'<tr><td>'+esc(t.descricao)+(t.assunto?'<div class="sub">'+esc(t.assunto)+'</div>':'')+'</td><td>'+esc(t.respNomeV||'—')+'</td><td class="mono">'+esc(fmtDate(t.prazo))+'</td><td>'+r168StPill(t)+' '+(t.prioridade==='alta'?pill('Alta','neg'):'')+'</td><td>'+esc(t.reunTitulo||'')+'<div class="sub">'+esc(fmtDate(t.reunData))+'</div></td><td><button class="btn sm" data-act="r168TarVer" data-id="'+esc(t.id)+'">Abrir</button></td></tr>').join(''):emptyRow(6,'Nenhuma tarefa.'))+'</tbody></table></div>'+pg.html;
+}
+const r168Filtra=(l,f)=>l.filter(t=>(!f.st||f.st==='todas'||(f.st==='abertas'?['afazer','andamento'].includes(t.status):t.status===f.st))&&(!f.resp||t.resp===f.resp||(f.resp==='__fora'&&!t.resp))&&(!f.reun||t.reunId===f.reun)&&(!f.serie||(t.serie||'')===f.serie)&&(!f.atras||t.atrasada));
+V.r168tar=()=>{
+  const m=r168Get('tar','/api/reun168/tarefas'),f=ui.r168tar,head=pageHead('Tarefas de reuniões','Ações das atas aprovadas: responsável, prazo, situação, notas e evidências.','<button class="btn" data-act="nav" data-tab="agenda">← Agenda</button>'+(r168Adm()?'<button class="btn" data-act="r168Varrer">Enviar avisos agora</button>':''));
+  if(!m||m.erro)return head+r168Load(m);
+  const l=m.tarefas||[],fl=r168Filtra(l,f);
+  const resp=[...new Map(l.map(t=>[t.resp||'__fora',t.resp?t.respNomeV:'Responsáveis de fora'])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  const reun=[...new Map(l.map(t=>[t.reunId,t.reunTitulo+' ('+fmtDate(t.reunData)+')'])).entries()],ser=[...new Set(l.map(t=>t.serie).filter(Boolean))].sort();
+  return head+'<div class="stack"><div class="kpis">'+kpi('Abertas',String(l.filter(t=>['afazer','andamento'].includes(t.status)).length),'a fazer e em andamento')+kpi('Atrasadas',String(l.filter(t=>t.atrasada).length),'prazo vencido','neg')+kpi('Concluídas',String(l.filter(t=>t.status==='concluida').length),'','pos')+'</div>'+
+    '<div class="bar"><label class="f"><span>Situação</span><select data-filter="r168tar.st">'+opt([['abertas','Abertas'],['afazer','A fazer'],['andamento','Em andamento'],['concluida','Concluídas'],['cancelada','Canceladas'],['todas','Todas']],f.st)+'</select></label>'+
+    '<label class="f"><span>Responsável</span><select data-filter="r168tar.resp">'+opt(resp,f.resp,'Todos')+'</select></label><label class="f"><span>Reunião</span><select data-filter="r168tar.reun">'+opt(reun,f.reun,'Todas')+'</select></label>'+
+    '<label class="f"><span>Assunto / série</span><select data-filter="r168tar.serie">'+opt(ser.map(s=>[s,s]),f.serie,'Todos')+'</select></label><label class="f"><span>Prazo</span><select data-filter="r168tar.atras">'+opt([['sim','Só as atrasadas']],f.atras,'Todos')+'</select></label></div>'+
+    '<div class="card">'+r168TarTabela(fl,'r168tar')+'</div></div>';
+};
+A.r168Varrer=async()=>{if(!r168Srv()){toast(R168_SEMSRV,'neg');return;}try{const j=await segaPost('/api/admin/reun168/varrer',{});toast('Avisos: '+(j.lembretes||0)+' lembrete(s), '+(j.tarefas||0)+' aviso(s) de tarefa; '+(j.audios||0)+' áudio(s) vencido(s) apagado(s).','pos');}catch(e){toast(e.message,'neg');}};
+V.r168minhas=()=>{
+  const m=r168Get('minhas','/api/reun168/tarefas?minhas=1'),f=ui.r168min,head=pageHead('Minhas tarefas','Ações das reuniões em que você é o responsável.','');
+  if(!m||m.erro)return head+r168Load(m);
+  const l=(m.tarefas||[]),fl=r168Filtra(l,{st:f.st});
+  return head+'<div class="stack"><div class="kpis">'+kpi('Abertas',String(l.filter(t=>['afazer','andamento'].includes(t.status)).length),'')+kpi('Atrasadas',String(l.filter(t=>t.atrasada).length),'','neg')+kpi('Próximos 7 dias',String(l.filter(t=>['afazer','andamento'].includes(t.status)&&t.prazo>=todayStr()&&t.prazo<=addDays(todayStr(),7)).length),'')+'</div>'+
+    '<div class="bar"><label class="f"><span>Situação</span><select data-filter="r168min.st">'+opt([['abertas','Abertas'],['concluida','Concluídas'],['todas','Todas']],f.st)+'</select></label></div>'+
+    (fl.length?fl.slice(0,200).map(t=>'<div class="r168card"><div class="t">'+esc(t.descricao)+'</div><div class="sub">'+esc(t.reunTitulo)+' ('+esc(fmtDate(t.reunData))+')'+(t.assunto?' · '+esc(t.assunto):'')+'</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">'+r168StPill(t)+' <span class="sub">Prazo '+esc(fmtDate(t.prazo))+'</span>'+(t.prioridade==='alta'?pill('Alta','neg'):'')+'<button class="btn sm pri" style="margin-left:auto" data-act="r168TarVer" data-id="'+esc(t.id)+'">Atualizar</button></div></div>').join(''):'<div class="card"><p class="sub" style="margin:0">Nenhuma tarefa'+(f.st==='abertas'?' aberta':'')+'.</p></div>')+'</div>';
+};
+/* alertas: tarefas de reunião atrasadas (as minhas) */
+{const a0=alertasAgenda;alertasAgenda=function(){const it=a0();try{const m=V168.minhas&&V168.minhas.tarefas;if(m){const n=m.filter(t=>t.atrasada).length;if(n)it.push(['r168minhas',n+' tarefa(s) de reunião sua(s) atrasada(s)',String(n)]);}}catch(e){}return it;};}
+function r168Minhas(){if(!r168Srv()||!store.ready)return;if(Date.now()-(V168.minhasEm||0)<10*60e3||V168.minhasCar)return;V168.minhasCar=1;segaPost('/api/reun168/tarefas?minhas=1',null,'GET').then(j=>{V168.minhas=j;V168.minhasEm=Date.now();V168.minhasCar=0;}).catch(()=>{V168.minhasEm=Date.now();V168.minhasCar=0;});}
+
+/* ---------- biblioteca de documentos ---------- */
+const R168_ACESSO={todos:'Todos',perfis:'Perfis escolhidos',usuarios:'Usuários escolhidos'};
+V.r168bib=()=>{
+  const m=r168Get('bib','/api/reun168/biblioteca'),f=ui.r168bib,head=pageHead('Biblioteca de documentos','Pastas por assunto ou obra, com versões e acesso por pasta. Os documentos podem ser anexados às reuniões.','<button class="btn" data-act="nav" data-tab="agenda">← Agenda</button><button class="btn" data-act="r168PastaNova">Nova pasta</button><button class="btn pri" data-act="r168DocBibNovo">Enviar documento</button>');
+  if(!m||m.erro)return head+r168Load(m);
+  const ps=(m.pastas||[]).slice().sort((a,b)=>String(a.nome).localeCompare(String(b.nome))),pm=new Map(ps.map(p=>[p.id,p]));
+  const n=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),q=n(f.q);
+  let ds=(m.docs||[]).filter(d=>(!f.pasta||d.pastaId===f.pasta)&&(!f.tag||(d.tags||[]).includes(f.tag))&&(!q||n(d.titulo+' '+(d.tags||[]).join(' ')+' '+((pm.get(d.pastaId)||{}).nome||'')+' '+((pm.get(d.pastaId)||{}).assunto||'')+' '+(d.projId?projNome(d.projId):'')+' '+(d.versoes||[]).map(v=>v.arq&&v.arq.nome).join(' ')).includes(q)));
+  ds.sort((a,b)=>((b.versoes||[]).slice(-1)[0]||{}).em-((a.versoes||[]).slice(-1)[0]||{}).em);
+  const tags=[...new Set((m.docs||[]).flatMap(d=>d.tags||[]))].sort(),pg=r168Pag('r168bib',ds.length,40),pa=f.pasta&&pm.get(f.pasta);
+  return head+'<div class="r168bib"><div class="card"><button class="r168pasta" data-act="r168Pasta" data-id=""'+(!f.pasta?' aria-current="true"':'')+'><b>Todas as pastas</b><div class="sub">'+(m.docs||[]).length+' documento(s)</div></button>'+ps.map(p=>'<button class="r168pasta" data-act="r168Pasta" data-id="'+esc(p.id)+'"'+(f.pasta===p.id?' aria-current="true"':'')+'><b>'+esc(p.nome)+'</b><div class="sub">'+esc([p.assunto,p.projId?projNome(p.projId):'',R168_ACESSO[(p.acesso||{}).modo||'todos']].filter(Boolean).join(' · '))+'</div></button>').join('')+(ps.length?'':'<p class="sub">Nenhuma pasta. Crie a primeira.</p>')+'</div>'+
+    '<div class="card">'+(pa?'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 8px"><h2 style="margin:0;flex:1">'+esc(pa.nome)+'</h2>'+(pa.edita?'<button class="btn sm" data-act="r168PastaEdit" data-id="'+esc(pa.id)+'">Pasta e acesso</button>':'')+'</div>':'')+
+    '<div class="bar"><label class="f" style="flex:2"><span>Procurar</span><input data-filter="r168bib.q" id="s_r168bq" value="'+esc(f.q)+'" placeholder="Título, etiqueta, pasta, obra ou arquivo"></label><label class="f"><span>Etiqueta</span><select data-filter="r168bib.tag">'+opt(tags.map(t=>[t,t]),f.tag,'Todas')+'</select></label></div>'+
+    (ds.length?ds.slice(pg.ini,pg.fim).map(d=>{const v=(d.versoes||[]).slice(-1)[0]||{};return '<div class="r168li"><div>'+(v.arq?'<a href="'+esc(r168Baixar(v.arq))+'">'+esc(d.titulo)+'</a>':esc(d.titulo))+'<div class="sub">'+esc(((pm.get(d.pastaId)||{}).nome)||'')+' · versão '+(d.versoes||[]).length+' · '+esc(r168Quando(v.em))+(v.porNome?' · '+esc(v.porNome):'')+(d.projId?' · '+esc(projNome(d.projId)):'')+'</div>'+(d.tags||[]).map(t=>'<span class="r168tag">'+esc(t)+'</span>').join('')+'</div><div class="acts"><button class="btn sm" data-act="r168BibVer" data-id="'+esc(d.id)+'">Versões</button></div></div>';}).join(''):'<p class="sub" style="margin:0">Nenhum documento.</p>')+pg.html+'</div></div>';
+};
+if(typeof V154_DEB!=='undefined')V154_DEB.add('r168bib.q');
+A.r168Pasta=d=>{ui.r168bib.pasta=d.id||'';ui.r168bib.pg=0;render();};
+function r168PastaForm(p){p=p||{acesso:{modo:'todos',perfis:[],usuarios:[]}};const a=p.acesso||{},us=chUsers();
+  modal({title:p.id?'Pasta e acesso':'Nova pasta',wide:true,body:'<div class="fg">'+field('Nome *','nome','text',p.nome||'',{full:true})+field('Assunto','assunto','text',p.assunto||'')+field('Obra (opcional)','projId','select',p.projId||'',{opts:projOpts(),blank:'—'})+field('Quem acessa','modo','select',a.modo||'todos',{opts:Object.entries(R168_ACESSO)})+'</div>'+
+    '<div class="sect">Perfis (se “Perfis escolhidos”)</div><div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">'+Object.entries(PERFIS).filter(([k])=>k!=='pendente').map(([k,v])=>'<label class="ch-pk"><input type="checkbox" data-r168pf="'+esc(k)+'"'+((a.perfis||[]).includes(k)?' checked':'')+'> <span>'+esc(v.nome||k)+'</span></label>').join('')+'</div>'+
+    '<div class="sect">Usuários (se “Usuários escolhidos”)</div><div class="ch-pick" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">'+us.map(u=>'<label class="ch-pk"><input type="checkbox" data-r168us="'+esc(u)+'"'+((a.usuarios||[]).includes(u)?' checked':'')+'> <span>'+esc(nameOf(u))+'</span></label>').join('')+'</div><p class="sub" style="margin:8px 0 0">Quem criou a pasta e o Administrador sempre acessam.</p>',
+    saveLabel:'Salvar',save:root=>{const v=readForm(root);(async()=>{const j=await r168Post('bib/pasta',{id:p.id||undefined,nome:v.nome,assunto:v.assunto,projId:v.projId,acesso:{modo:v.modo,perfis:Array.from(document.querySelectorAll('#mb [data-r168pf]')).filter(i=>i.checked).map(i=>i.dataset.r168pf),usuarios:Array.from(document.querySelectorAll('#mb [data-r168us]')).filter(i=>i.checked).map(i=>i.dataset.r168us)}});
+      if(r168Msg(j,'Pasta salva.')){closeModal();ui.r168bib.pasta=j.pasta.id;}V168.bibEm=0;render();})();return false;}});}
+A.r168PastaNova=()=>r168PastaForm(null);
+A.r168PastaEdit=d=>{const p=((V168.bib||{}).pastas||[]).find(x=>x.id===d.id);if(p)r168PastaForm(cl(p));};
+function r168DocForm(d0,versao){const b=V168.bib||{},ps=(b.pastas||[]);if(!ps.length){toast('Crie uma pasta primeiro.','neg');return;}
+  modal({title:versao?'Nova versão: '+d0.titulo:'Enviar documento',wide:true,body:'<div class="fg">'+(versao?'':field('Pasta *','pastaId','select',(d0&&d0.pastaId)||ui.r168bib.pasta||'',{opts:ps.map(p=>[p.id,p.nome]),blank:'Escolha…'})+field('Título','titulo','text','',{full:true,ph:'Se ficar vazio, usa o nome do arquivo'})+field('Etiquetas (separe por vírgula)','tags','text','')+field('Obra (opcional)','projId','select','',{opts:projOpts(),blank:'—'}))+
+    (versao?field('O que mudou nesta versão','nota','text','',{full:true}):'')+'</div><label class="f" style="margin-top:8px"><span>Arquivo * (PDF, xlsx, docx, pptx ou imagem)</span><input type="file" id="r168bf" accept="'+R168_ACEITA+'"></label>',
+    saveLabel:versao?'Enviar versão':'Enviar',save:root=>{const v=readForm(root),f=(($('#r168bf')||{}).files||[])[0];if(!f){toast('Escolha o arquivo.','neg');return false;}if(!versao&&!v.pastaId){toast('Escolha a pasta.','neg');return false;}
+      (async()=>{toast('Enviando '+f.name+'…');let j;try{const a=await r168Sobe(f);j=await r168Post('bib/doc',versao?{id:d0.id,arq:a,nota:v.nota}:{pastaId:v.pastaId,titulo:v.titulo,tags:v.tags,projId:v.projId,arq:a});}catch(e){j={erro:e.message};}if(r168Msg(j,versao?'Nova versão guardada (as anteriores continuam).':'Documento na biblioteca.'))closeModal();V168.bibEm=0;render();})();return false;}});}
+A.r168DocBibNovo=()=>{const b=r168Get('bib','/api/reun168/biblioteca');if(!b||b.erro){toast(b&&b.erro?b.erro:'Carregando…');return;}r168DocForm(null,false);};
+A.r168DocBibVersao=d=>{const x=((V168.bib||{}).docs||[]).find(y=>y.id===d.id);if(x)r168DocForm(x,true);};
+A.r168BibVer=d=>{const b=V168.bib||{},x=(b.docs||[]).find(y=>y.id===d.id);if(!x)return;const p=(b.pastas||[]).find(y=>y.id===x.pastaId)||{},pode=r168Adm()||x.crBy===actorId();
+  modal({title:x.titulo,wide:true,nofocus:true,body:'<p class="sub" style="margin:0 0 8px">'+esc(p.nome||'')+(x.projId?' · '+esc(projNome(x.projId)):'')+'</p>'+(x.versoes||[]).slice().reverse().map(v=>'<div class="r168li"><div><b>Versão '+v.v+'</b> · <a href="'+esc(r168Baixar(v.arq))+'">'+esc(v.arq&&v.arq.nome)+'</a><div class="sub">'+esc(r168Quando(v.em))+' · '+esc(v.porNome||'')+' · '+esc(fmtBytes(v.arq&&v.arq.tam))+(v.nota?' · '+esc(v.nota):'')+'</div></div></div>').join(''),
+    foot:'<button class="btn" data-act="closeModal">Fechar</button>'+(pode?'<button class="btn dng" data-act="r168DocBibExcluir" data-id="'+esc(x.id)+'">Excluir</button>':'')+'<button class="btn pri" data-act="r168DocBibVersao" data-id="'+esc(x.id)+'">Nova versão</button>'});};
+A.r168DocBibExcluir=d=>confirmBox('Excluir o documento e todas as versões da biblioteca?',async()=>{const j=await r168Post('bib/excluir',{id:d.id});r168Msg(j,'Documento excluído.');V168.bibEm=0;render();},'Excluir',true);
+
+/* ---------- busca nas atas e transcrições ---------- */
+V.r168busca=()=>{
+  const b=V168.busca,head=pageHead('Busca em atas e transcrições','Só nas reuniões em que você participou (o Administrador vê todas).','<button class="btn" data-act="nav" data-tab="agenda">← Agenda</button>');
+  const res=b.r?(b.r.erro?'<div class="note">'+esc(b.r.erro)+'</div>':(b.r.itens||[]).length?(b.r.itens||[]).map(i=>'<div class="r168li"><div><b>'+esc(i.titulo)+'</b> <span class="sub">'+esc(fmtDate(i.data))+(i.ini?' '+esc(i.ini):'')+' · '+esc(i.onde)+(i.ms!=null?' em '+esc(r168Hm(i.ms)):'')+'</span><div>'+esc(i.trecho)+'</div></div><div class="acts"><button class="btn sm" data-act="r168Abrir" data-id="'+esc(i.reunId)+'">Abrir a reunião</button></div></div>').join(''):'<p class="sub" style="margin:0">Nada encontrado para “'+esc(b.q)+'”.</p>'):'';
+  return head+'<div class="card"><div class="bar"><label class="f" style="flex:1"><span>Palavras</span><input id="r168q" value="'+esc(b.q)+'" placeholder="Ex.: concretagem bloco B" enterkeyhint="search"></label><div class="acts" style="align-self:flex-end"><button class="btn pri" data-act="r168Buscar">'+(b.car?'Buscando…':'Buscar')+'</button></div></div>'+res+'</div>';
+};
+A.r168Buscar=async()=>{const q=String(($('#r168q')||{}).value||'').trim();V168.busca.q=q;if(q.length<3){toast('Digite ao menos 3 letras.','neg');return;}if(!r168Srv()){V168.busca.r={erro:R168_SEMSRV};render();return;}
+  V168.busca.car=1;render();try{V168.busca.r=await segaPost('/api/reun168/busca?q='+encodeURIComponent(q),null,'GET');}catch(e){V168.busca.r={erro:e.message};}V168.busca.car=0;render();};
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('keydown',e=>{const t=e.target;if(e.key==='Enter'&&t&&t.id==='r168q'){e.preventDefault();A.r168Buscar();}},true);
+
+/* ---------- ícones do app a partir do logotipo da empresa (Sistema › Configurações › Logo da empresa) ---------- */
+const R168_ICO=[['icone-192.png',192,'any'],['icone-512.png',512,'any'],['icone-maskable-192.png',192,'mask'],['icone-maskable-512.png',512,'mask'],['apple-'+'touch-icon.png',180,'apple'] /* v168: o nome partido: v167/pwa167.py procura o nome do ícone do iPhone na página para pôr o ícone do iPhone no cabeçalho */];
+function r168IcoDesenha(img,px,tipo){
+  const c=document.createElement('canvas');c.width=px;c.height=px;const g=c.getContext('2d');if(!g)throw new Error('sem canvas');
+  g.fillStyle='#ffffff';
+  if(tipo==='any'){const r=px*0.18;g.beginPath();g.moveTo(r,0);g.lineTo(px-r,0);g.quadraticCurveTo(px,0,px,r);g.lineTo(px,px-r);g.quadraticCurveTo(px,px,px-r,px);g.lineTo(r,px);g.quadraticCurveTo(0,px,0,px-r);g.lineTo(0,r);g.quadraticCurveTo(0,0,r,0);g.closePath();g.fill();}
+  else g.fillRect(0,0,px,px);
+  const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;if(!iw||!ih)throw new Error('logo vazio');
+  /* área do logotipo: "any" 80% (margem de 10%); iPhone 76%; maskable dentro do círculo seguro de 80% (diagonal ≤ 0,8) */
+  const box=tipo==='mask'?0.8:tipo==='apple'?0.76:0.8,s=Math.min(box*px/iw,box*px/ih,tipo==='mask'?0.78*px/Math.hypot(iw,ih):Infinity);
+  const w=iw*s,h=ih*s;g.imageSmoothingQuality='high';g.drawImage(img,(px-w)/2,(px-h)/2,w,h);
+  return c.toDataURL('image/png');
+}
+async function r168Icones(forcar){
+  if(!r168Srv()||!(me.owner||me.perfil==='admin'))return {pulado:true};
+  const c=cfg();let e={};try{e=await segaPost('/api/icones168',null,'GET');}catch(er){return {erro:er.message};}
+  if(!c.logo){if(e.hash){try{await segaPost('/api/icones168',{limpar:true});}catch(er){}}return {padrao:true};}
+  const h=await sha256Hex(c.logo);if(!h)return {erro:'sem hash'};if(e.hash===h&&!forcar)return {igual:true};
+  const img=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>no(new Error('logo ilegível'));i.src=c.logo;});
+  const icones={};for(const [n,px,t] of R168_ICO)icones[n]=r168IcoDesenha(img,px,t);
+  try{return await segaPost('/api/icones168',{hash:h,icones});}catch(er){return {erro:er.message};}
+}
+RH_POST.push(()=>{
+  if(!store.ready||!r168Srv())return;r168Minhas();if(V168.rec)r168Barra();
+  if(!(me.owner||me.perfil==='admin'))return;const c=cfg(),k=c.logo?'L'+c.logo.length+c.logo.slice(-32):'-';
+  if(k!==V168.icoKey){V168.icoKey=k;setTimeout(()=>{r168Icones(false).catch(()=>{});},1500);}
+});
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='167',APP_DATA='2026-11-07';
+const APP_VER='168',APP_DATA='2026-11-07';
 const CHANGELOG=[
+  ['168','2026-11-07',['Reuniões com pauta em itens: título, responsável e minutos previstos de cada item. A pauta antiga, em texto, continua aparecendo nas reuniões antigas.', 'Documentos da reunião: envie PDF, planilha, documento, apresentação ou imagem, ligue obra, contrato, medição, relatório ou diário, e anexe documentos da biblioteca. Só os participantes, o organizador e o Administrador veem e baixam.', 'Nova Biblioteca de documentos (Agenda › Biblioteca de documentos): pastas por assunto ou obra, etiquetas, versões (as antigas ficam) e busca. Cada pasta diz quem acessa: todos, alguns perfis ou alguns usuários.', 'Convite pelo chat (e por e-mail quando o servidor tiver e-mail) com a pauta, os documentos e o link, e lembrete no chat minutos antes (30 por padrão).', 'Teams é a opção padrão da reunião virtual: o botão abre o Outlook para criar a reunião do Teams e você cola o link. O Jitsi continua como opção.', 'Botão Gravar na reunião: grava só o áudio pelo navegador (microfone e, online no Chrome ou Edge, o áudio da aba), enviado em partes enquanto grava. Antes, o aviso da LGPD registra quem gravou, quem foi avisado e quando.', 'O áudio das reuniões é apagado sozinho depois de 90 dias (ajustável no servidor). A transcrição e a ata ficam.', 'Transcrição automática em segundo plano, com situação (na fila, transcrevendo, pronta, erro) e Tentar de novo. Também dá para importar a transcrição do Teams ou do Meet (.vtt, .docx ou .txt).', 'A IA monta a minuta da ata a partir da transcrição: resumo, assuntos por item da pauta, decisões, ações com responsável, prazo e prioridade, pendências e próximos passos. Você revisa, edita e aprova.', 'Ata aprovada: os presentes assinam no sistema e a ata sai em PDF, com as linhas de assinatura.', 'Cada ação da ata aprovada vira uma tarefa, com aviso ao responsável, aviso 2 dias antes do prazo e aviso de atraso ao responsável e ao organizador.', 'Minha área › Minhas tarefas e a tela Tarefas de reuniões, com filtros por responsável, situação, reunião, assunto e atrasadas, notas e evidências.', 'A próxima reunião da mesma série mostra as tarefas pendentes e concluídas da anterior e leva as pendentes para a pauta com um clique.', 'Busca nas atas e transcrições, com a data e o link da reunião, só para quem participou e para o Administrador.', 'Os ícones do app instalado passam a usar o logotipo da empresa (Sistema › Configurações › Logo da empresa), com fundo branco e margem.']],
   ['167','2026-11-07',['O sistema pode ser instalado no celular como um aplicativo (Android e iPhone), sem loja: botão "Instalar o app" no Android e as instruções do iPhone (Compartilhar › Adicionar à Tela de Início).', 'Novo modo Campo em Minha área: recebimento na obra, diário de obra, entrega de EPI, material na obra, veículo e transferência de guarda numa tela feita para o celular.', 'O modo Campo funciona sem internet: sem conexão, o app abre direto no Campo com os dados baixados no aparelho.', 'Botão "Preparar para uso sem internet": baixa só o necessário das suas obras (pedidos e romaneios a receber, colaboradores, EPI com saldo, material da obra, ferramentas e os veículos que você usa). Com internet, os dados se atualizam sozinhos.', 'Recebimento na obra sem internet: entrega direta do fornecedor e o romaneio de retirada com veículo próprio, com fotos da nota e do material, avarias com foto e assinatura de quem recebeu.', 'Confirmação do recebimento do romaneio e da separação na obra sem internet, com a assinatura da ficha de entrega das ferramentas.', 'Diário de obra sem internet, com o efetivo puxado dos colaboradores da obra e fotos tiradas pela câmera.', 'Entrega de EPI na obra sem internet, só com o estoque que já está no almoxarifado do colaborador. A transferência entre almoxarifados continua precisando de internet, e a tela avisa.', 'Veículo sem internet: reserva, saída e retorno com km, combustível, checklist, fotos e avarias; o retorno de uma saída feita sem internet vai na ordem certa.', 'Tudo o que é feito sem internet fica numa fila no aparelho e é enviado quando a conexão volta, ao abrir o app e, no Android, mesmo com o app fechado.', 'O mesmo registro nunca é gravado duas vezes, mesmo que o envio caia no meio: fotos sobem primeiro, depois o registro.', 'Conflitos aparecem para você e nada é sobrescrito: por exemplo, recebimento já feito por outra pessoa, veículo que já saiu com outro condutor ou EPI sem saldo. O servidor confere tudo de novo.', 'Aviso "Sem internet — N registro(s) aguardando envio" e a tela Pendências de envio, com o motivo de cada recusa, "Tentar de novo" e "Descartar".', 'Se a sessão vencer sem internet, a fila fica guardada e o app pede para entrar de novo antes de enviar.', 'Sair apaga do aparelho os dados do modo Campo e avisa antes quando há registros ainda não enviados. Folha, salários e documentos do RH nunca ficam no aparelho.']],
   ['166','2026-11-07',['Novo menu Terceiros: painel, empresas terceiras, conferência de documentos e locações de equipamentos. O terceiro é o próprio fornecedor do cadastro (nada é duplicado).', 'Documentos da empresa terceira com tipo, arquivo, emissão e validade: contrato social, cartão CNPJ, CND federal, CRF do FGTS, CNDT, certidões estadual e municipal, seguro, alvará e outros. Cada certidão tem o botão para consultar no site oficial.', 'Avisos de vencimento dos documentos (30, 15 e 0 dias, configurável) no chat da Central de Gestão para o RH, a SST e Compras.', 'Obrigações do mês por contrato: folha, guia e comprovante do FGTS e do INSS (DCTFWeb/eSocial), holerites e ponto dos trabalhadores da obra, com situação entregue, aprovado, pendente ou recusado (com motivo).', 'Trabalhadores do terceiro: registro (CTPS digital ou eSocial), ASO, NRs exigidas pela função (configurável: NR-18 para todos, NR-11 e NR-12 para operador, NR-35 para montador), CNH do operador, integração e ficha de EPI, cada um com arquivo e validade. O CPF aparece mascarado.', 'Cada trabalhador fica "Liberado" ou "Não liberado" por obra. O diário de obra recusa trabalhador não liberado (o SST ou o Administrador liberam com justificativa) e a lista do efetivo mostra quem não está liberado.', 'Locação de equipamentos sem operador e com operador: equipamento, nº de série ou patrimônio, obra, período, valor por dia, semana ou mês, franquia de horas, hora excedente e quem paga a manutenção.', 'Retirada com vistoria, fotos, horímetro e responsável; guarda na obra com responsável e local, e transferência entre obras registrada; devolução com vistoria, avarias com foto, horímetro e horas usadas.', 'Alertas da locação: alguns dias antes do fim do período (padrão 3, para não pagar dias a mais) e devolução atrasada.', 'O custo da locação entra só pela nota do locador: a conciliação liga a nota ao contrato, ao equipamento e à obra e mostra o valor previsto (dias × valor + horas excedentes) ao lado do valor da nota.', 'Na locação com operador, o operador é trabalhador do terceiro e as horas do equipamento são lançadas no diário de obra.', 'Contratos de empreiteiros (serviços como impermeabilização) usam os mesmos documentos da empresa, os trabalhadores e as obrigações do mês: não há um tipo de contrato novo.', 'Pagamento "Bloqueado por documentação": a medição ou a nota do terceiro não é paga, aprovada nem baixada (o servidor recusa) com documento da empresa vencido, obrigação do mês não aprovada ou trabalhador não liberado, e a tela mostra exatamente o que falta.', 'Só o Administrador libera um pagamento bloqueado, com justificativa obrigatória que fica na auditoria e aparece na conta.', 'Link para o terceiro enviar documentos, sem senha e sem acesso ao sistema: validade de 30 dias, pode ser revogado, aceita PDF, JPG e PNG, e cada envio fica "aguardando conferência" para o RH ou a SST aprovar ou recusar. A mensagem pronta vai por WhatsApp ou e-mail.']],
   ['165','2026-11-06',['Frota: reserva, saída e retorno agora são telas separadas, feitas para o celular. O condutor pede o veículo (ou "qualquer disponível na minha cidade") com data, hora, retorno previsto, destino e motivo.', 'Cada veículo tem a Cidade/base (Tuiuti ou São Paulo; a lista é configurável) e cada cidade tem um Responsável pela frota com substituto (Configurações › Frota). O responsável aprova, troca o veículo ou recusa a reserva com o motivo, e só vê e gere os veículos da cidade dele.', 'Duas reservas aprovadas no mesmo horário para o mesmo veículo são recusadas. Saída sem reserva só pelo responsável da cidade ou pelo Administrador (a configuração pode liberar).', 'Saída do veículo: escolha pela reserva aprovada, pela lista ou pelo QR do veículo (etiqueta para imprimir em Frota › Veículos), com km do painel, combustível (vazio a cheio), checklist configurável, fotos dos 4 lados e do painel e as avarias que já estavam no veículo. O veículo fica "Em uso por" o condutor.', 'A saída é bloqueada com CNH vencida ou de categoria errada, condutor não autorizado, veículo em manutenção ou com avaria grave aberta, e o motivo aparece na tela.', 'Retorno do veículo: só as saídas abertas da própria pessoa (o responsável vê as da cidade), km de chegada e km rodados, combustível na chegada (até 1/4 gera alerta), checklist, fotos, avarias novas com foto e o abastecimento da viagem com a foto do cupom. Atraso avisa o condutor e o responsável.', 'Painel da frota por cidade: disponíveis, em uso (quem e desde quando), manutenção, retornos atrasados, combustível baixo, avarias novas (abrir a manutenção num toque), reservas pendentes, vencimentos, CNHs e condutores bloqueados.', 'Multas: o cadastro mostra quem estava com o veículo na data e hora da infração e sugere esse condutor.', 'Condutores: nova coluna Autorização (Autorizado, Vence em breve, Bloqueado, Não autorizado), com quem autorizou, validade, tipos de veículo, cidade ou veículos, requisitos (CNH, EAR, exame toxicológico, cursos) e o termo de responsabilidade assinado. Desligados ficam escondidos; desligamento revoga e afastamento suspende a autorização.', 'Os condutores que saíram com veículo nos últimos 90 dias entram como "Autorizado (migração)" por 30 dias, para o Administrador confirmar; os demais começam como "Não autorizado".', 'Abastecimentos: importação do "Relatório Utilização Combustível" da Sem Parar (.xls), com prévia por linha (novo, já importado, casado com recibo, com alerta). Repetir a importação não duplica.', 'Conferências automáticas: km negativo, km alto ou dígito a mais no hodômetro, km baixo e dois abastecimentos no mesmo dia, hodômetro e motorista diferentes da saída, abastecimento sem saída, combustível errado, litros acima do tanque, preço acima da mediana e queda de km/l.', 'Foto do cupom no retorno ou no abastecimento: a IA lê placa, km, litros, valor, AUT e NSU para o condutor conferir; o abastecimento fica provisório até o relatório e vira confirmado quando casa com a linha.', 'O responsável pela cidade ou o Administrador de frota corrige o hodômetro com motivo; o consumo e os alertas usam o valor corrigido e o original fica no histórico.', 'Fatura da Sem Parar: compara o importado do mês com a fatura e lança uma conta a pagar só, com o rateio por obra (sem saída, custo geral da frota da cidade).']],

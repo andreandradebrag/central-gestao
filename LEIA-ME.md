@@ -1174,7 +1174,7 @@ depois de 90 dias). Nenhuma coleção nova, nenhum perfil novo.
   Campo. `sw.js`, `manifest.webmanifest` e `icones/*.png` abrem sem login (o navegador busca sem a sessão); não têm dados.
 - **Instalar** (sem loja): no Android/Chrome aparece o botão **Instalar o app** em Minha área › Campo (ou menu ⋮ › Instalar
   app). No iPhone, pelo **Safari**: Compartilhar › **Adicionar à Tela de Início** (a tela mostra o passo a passo). O ícone
-  "Gestão INA" é a marca "CG" do topo do sistema; para usar o logotipo da INA, troque os arquivos de `public/icones/`
+  "Gestão INA" é a marca "CG" do topo do sistema (desde a v168, desenhado do logotipo de Sistema › Configurações; veja a seção da v168); para usar outro desenho, troque os arquivos de `public/icones/`
   (192 × 192, 512 × 512 e os "maskable" com o desenho no círculo central de 80%; `apple-touch-icon.png` 180 × 180 sem
   transparência) e reconstrua.
 - **Versão nova**: o service worker guarda só o casco do app (página, `shim.js`, manifest, ícones e as bibliotecas de
@@ -1229,6 +1229,74 @@ Store com o Capacitor (o mesmo sistema dentro de um app nativo), separe:
   argumento; se for criar conta dentro do app, também precisa da opção de excluir a conta.
 - **Permissões** declaradas: câmera (fotos da nota, da avaria e do veículo) e armazenamento; notificações e localização só se
   forem usadas.
+
+## Reuniões: documentos, biblioteca, gravação, transcrição, ata pela IA e tarefas (v168)
+
+Arquivos novos no serviço `gestao`: `reun168.js`, `transcricao168.js` e `icones168.js`. Alterados: `regras.js`, `server.js`,
+`Dockerfile`, `perfis.json` (só a data) e `public/` (`index.html` e `sw.js`, versão 168). **Reconstrua a imagem** do serviço
+`gestao`. O banco ganha a tabela `reun168_aviso` (avisos já enviados) e as coleções `reunx168` (o que é dos participantes de
+cada reunião), `bib168p`/`bib168d` (biblioteca) e `tar168` (tarefas), gravadas só pelas telas (o servidor confere quem pode).
+A pasta de dados ganha `reun168/` (partes da gravação enquanto grava; somem ao terminar) e `icones168/`.
+
+- **Pauta em itens** (Agenda › Nova reunião): título, responsável e minutos. Reuniões antigas mostram a pauta em texto, como
+  antes. Também no formulário: **série/assunto recorrente**, **secretário** e **lembrete** (minutos antes; 30 por padrão).
+- **Abrir a reunião** (Detalhes › Abrir a reunião): pauta, reunião anterior da série, documentos, convite, gravação,
+  transcrição, ata e tarefas. Documentos, gravações, transcrição e ata: **só os participantes, o organizador e o
+  Administrador** veem e baixam. Gravar, transcrever, gerar/aprovar a ata e mandar o convite: organizador, secretário ou
+  Administrador. Reunião com ata aprovada ou gravação não se exclui (cancele).
+- **Documentos da reunião**: PDF, xlsx, docx, pptx e imagens (o servidor confere o tipo pelo conteúdo), até
+  `REUNIAO_DOC_MB` (padrão 20 MB); registros do sistema ligados por busca (obra, contrato, medição, relatório mensal,
+  diário de obra); documentos da biblioteca (quem não tem acesso à pasta vê só o título).
+- **Biblioteca de documentos** (Agenda › Biblioteca): pastas com assunto e obra, etiquetas, versões (a nova não apaga as
+  antigas) e busca. Acesso por pasta: todos, perfis escolhidos ou usuários escolhidos (quem criou e o Administrador sempre).
+- **Convite**: no chat (conversa Central de Gestão) com a pauta, os documentos e o link; por e-mail aos participantes da
+  empresa e aos de fora **quando o SMTP estiver configurado** (seção 7.3). O **lembrete** vai no chat X minutos antes.
+- **Reunião virtual**: o padrão agora é **Teams (criar pelo Outlook)**: o botão abre o Outlook na web com a reunião
+  preenchida; ligue "Reunião do Teams", salve e cole o link de participação no sistema. O Jitsi continua como opção, mas o
+  **meet.jit.si pede login de moderador** para abrir a sala e **limita a reunião embutida** em outras páginas; para usar o
+  Jitsi dentro do sistema sem esses limites seria preciso **um Jitsi próprio (auto-hospedado)**.
+- **Gravar** (só áudio, WebM/Opus pelo navegador): presencial = microfone; online = microfone e, no Chrome/Edge, o áudio da
+  aba (o navegador pede para escolher a aba e marcar "Compartilhar áudio da aba"; Safari e Firefox gravam só o microfone).
+  Antes de gravar, o aviso da **LGPD**: a pessoa confirma que avisou os participantes; o servidor registra quem gravou, a
+  lista dos avisados e a hora (também na auditoria). Aviso vermelho "Gravando" no alto de todas as telas. O áudio sobe em
+  partes a cada `REUNIAO_GRAV_PARTE_S` (padrão 30 s): se a aba fechar, o que chegou fica e, depois de 15 min sem parte
+  nova, vira "interrompida" com o áudio montado. Limites: `REUNIAO_GRAV_MAX_MIN` (180) e `REUNIAO_GRAV_MAX_MB` (300).
+- **Retenção do áudio**: `REUNIAO_AUDIO_DIAS` (padrão 90). Uma rotina diária apaga o áudio vencido (arquivo e registro;
+  fica na auditoria). A transcrição e a ata ficam. O organizador também pode "Apagar áudio" antes.
+- **Transcrição automática** (OpenAI): `OPENAI_API_KEY` (crie em platform.openai.com › API keys, num projeto com limite de
+  gasto) e `TRANSCRICAO_MODELO` (padrão `gpt-4o-transcribe`; se a OpenAI recusar o modelo, o sistema usa `whisper-1`), idioma
+  português. O áudio longo é dividido em partes abaixo do limite da API (`TRANSCRICAO_PARTE_MB`, padrão 24, e
+  `TRANSCRICAO_PARTE_MIN`, padrão 10 min), na ordem e com o horário de cada parte; o `whisper-1` devolve também o horário de
+  cada fala. Roda em segundo plano: na fila → transcrevendo → pronta ou erro, com **Tentar de novo**. Sem a chave, a tela
+  explica e oferece a importação. **LGPD**: o áudio vai para a OpenAI; inclua isso no registro de tratamento (ROPA) e no aviso
+  aos participantes (o aviso da tela já diz).
+- **Importar a transcrição** (agora, sem integração): no Teams, a transcrição da reunião › Baixar (.vtt ou .docx); no Meet, o
+  documento da transcrição (.docx ou .txt). Também dá para colar o texto.
+- **Ata pela IA** (`ANTHROPIC_API_KEY`, a mesma IA de sempre, modelo "complex"): vai **só a transcrição, a pauta e os nomes
+  dos participantes** (sem título, obra, e-mails ou link). Volta a minuta: resumo, assuntos por item da pauta, decisões,
+  ações (descrição, responsável casado com um participante ou usuário, prazo, prioridade), pendências e próximos passos.
+  Revise, edite, marque os presentes e **Aprovar ata**: toda ação precisa de responsável e prazo. Depois de aprovada a ata
+  não muda; os presentes **assinam no sistema** e a **Ata (PDF)** sai com as linhas de assinatura. Cada uso da IA fica na
+  auditoria (`IA_USO` e `REUNIAO_ATA_IA_168`) e conta no limite por hora da IA. Sem a IA, a ata pode ser escrita à mão.
+- **Tarefas**: cada ação aprovada vira uma tarefa (a fazer, em andamento, concluída, cancelada), com notas e evidências.
+  Avisos no chat: ao responsável na criação, 2 dias antes do prazo e, atrasada, ao responsável e ao organizador. **Minha
+  área › Minhas tarefas** e **Agenda › Tarefas de reuniões** (filtros: responsável, situação, reunião, assunto/série,
+  atrasadas). O responsável muda a situação, anota e anexa; prazo, responsável e cancelamento ficam com o organizador ou o
+  Administrador. O botão "Enviar avisos agora" (Administrador) roda os lembretes e os avisos na hora.
+- **Série**: a próxima reunião da mesma série (ou do mesmo assunto) mostra as tarefas pendentes e concluídas da anterior e
+  "Levar as pendentes para a pauta".
+- **Busca em atas e transcrições** (Agenda › Buscar em atas): só nas reuniões em que a pessoa participou (o Administrador vê
+  todas), com a data, o trecho, o momento na gravação e o link da reunião.
+- **Ícones do app pelo logotipo**: o logotipo da INA fica no banco (Sistema › Configurações › Logo da empresa), não em
+  arquivo. Quando um Administrador abre o sistema, o navegador desenha os 5 ícones (fundo branco, margem; o "maskable" com
+  o logotipo dentro do círculo seguro) e envia ao servidor, que os serve em `/icones/*.png` no lugar dos padrão ("CG").
+  Trocar o logotipo gera de novo; remover volta ao padrão. O celular que já instalou o app pega o ícone novo na próxima
+  versão (o service worker troca o cache a cada versão).
+- **Planejado (não feito): transcrição do Teams automática** pelo Microsoft Graph (as transcrições das reuniões online do
+  organizador). Depende do **consentimento de administrador do Microsoft 365** (o mesmo que falta para o e-mail),
+  da permissão de aplicativo `OnlineMeetingTranscript.Read.All` e de uma política de acesso de aplicativo do Teams. O
+  servidor já tem a interface (`transcricao168.js`: `transcrever(arquivo) → {texto, segmentos}`; a fonte "teams" está
+  prevista e hoje só avisa que use a importação).
 
 ## Verificação em duas etapas e sessões
 
