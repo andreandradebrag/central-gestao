@@ -1163,6 +1163,73 @@ não é da locação). Tabela nova `ter_link166` (links dos terceiros: o banco g
   (`TERC_LINK_UPLOAD`: link, IP e hora); o RH/SST aprova ou recusa com motivo (o terceiro vê o motivo no link). O terceiro também
   indica trabalhador novo, que entra no cadastro da SST quando aprovado. O ASO enviado só é aberto por RH, SST e Administrador.
 
+## App instalável no celular e modo Campo sem internet (v167)
+
+Arquivo novo no serviço `gestao`: `campo167.js`. Alterados: `regras.js`, `server.js`, `shim.js`, `ajuste164.js`, `Dockerfile`
+e `public/` (`index.html`, `manifest.webmanifest`, `sw.js` novo e a pasta `icones/` nova). **Reconstrua a imagem** do serviço
+`gestao`. O banco ganha só a tabela `campo167` (registros já recebidos do modo Campo, para não gravar duas vezes; limpa sozinha
+depois de 90 dias). Nenhuma coleção nova, nenhum perfil novo.
+
+- **Precisa de HTTPS** (o endereço de sempre, `https://app.…`). Sem HTTPS o navegador não instala o app nem guarda o modo
+  Campo. `sw.js`, `manifest.webmanifest` e `icones/*.png` abrem sem login (o navegador busca sem a sessão); não têm dados.
+- **Instalar** (sem loja): no Android/Chrome aparece o botão **Instalar o app** em Minha área › Campo (ou menu ⋮ › Instalar
+  app). No iPhone, pelo **Safari**: Compartilhar › **Adicionar à Tela de Início** (a tela mostra o passo a passo). O ícone
+  "Gestão INA" é a marca "CG" do topo do sistema; para usar o logotipo da INA, troque os arquivos de `public/icones/`
+  (192 × 192, 512 × 512 e os "maskable" com o desenho no círculo central de 80%; `apple-touch-icon.png` 180 × 180 sem
+  transparência) e reconstrua.
+- **Versão nova**: o service worker guarda só o casco do app (página, `shim.js`, manifest, ícones e as bibliotecas de
+  `/vendor`) num cache com o número da versão; ao subir uma versão nova, o celular troca o cache sozinho na próxima abertura
+  com internet. Respostas da API e anexos nunca vão para esse cache.
+- **Modo Campo** (Minha área › Campo): Recebimento na obra (entrega direta e romaneio de retirada do motorista), confirmação
+  do romaneio/separação na obra (com a ficha de entrega das ferramentas), Diário de obra, Entrega de EPI, Material na obra,
+  Veículo (reserva, saída e retorno: km, combustível, checklist, fotos, condutor) e Transferência de guarda. Fotos pela câmera
+  do celular (reduzidas a 1600 px), assinatura com o dedo no quadro.
+- **Preparar para uso sem internet**: escolha as obras (até 10; as suas já vêm marcadas). O aparelho baixa só: pedidos e
+  romaneios a receber, colaboradores da obra (nome, função, CPF mascarado e o almoxarifado de EPI), EPI com saldo nesse
+  almoxarifado (para RH e SST), saldo de material da obra, ferramentas sob guarda, números do diário e os veículos/reservas
+  da pessoa. Nada de folha, salário, holerite, férias, documentos do RH ou financeiro. Com internet, atualiza sozinho (ao
+  abrir, a cada 20 minutos e depois de cada envio). Motorista sem obra pode preparar só o veículo.
+- **Sem internet** o app abre direto no Campo. O que é feito fica numa fila no celular e é enviado quando a conexão volta, ao
+  abrir o app e, no Android (Chrome), também com o app fechado (Background Sync). Fotos sobem primeiro, depois o registro, pelas
+  mesmas rotas do sistema: **o servidor confere tudo de novo** (permissão, saldo, regras) e **o mesmo registro nunca é
+  gravado duas vezes**, mesmo se a internet cair no meio do envio.
+- **Conflitos** ficam em **Pendências de envio** com a mensagem do servidor e nada é sobrescrito: recebimento já feito por
+  outra pessoa, diário da obra no mesmo dia, veículo que já saiu com outro condutor, EPI sem saldo, perfil sem permissão.
+  A pessoa decide: **Tentar de novo** (depois de resolver) ou **Descartar**. O aviso "Sem internet — N registro(s)
+  aguardando envio" fica sempre visível.
+- **EPI sem internet**: só entrega com estoque no almoxarifado do colaborador. A transferência entre almoxarifados (ex.:
+  Tuiuti → São Paulo) precisa de internet: use Controle de EPI › Nova entrega.
+- **Sessão vencida** sem internet: a fila fica guardada; quando a conexão volta o app pede para **entrar de novo** e só
+  então envia. Registro de outra pessoa no mesmo celular só é enviado quando ela entrar.
+- **Sair** apaga do celular o pacote e a fila da pessoa; se houver registros não enviados, avisa antes ("Ficar e enviar
+  depois" / "Sair e apagar"). Limites no aparelho: pacote até 8 MB, fila até 60 MB e 400 registros, foto até 3 MB; pacote
+  sem uso há 14 dias é apagado (a fila nunca é apagada sozinha). No iPhone use o app instalado (pela Tela de Início): o
+  Safari pode apagar os dados de sites que ficam muitos dias sem uso.
+- **Abastecimento** com cupom no retorno do veículo continua pela tela de sempre, com internet (a leitura do cupom usa a IA do
+  servidor).
+
+### Mais tarde: publicar nas lojas (Capacitor) — o que vai ser preciso
+
+Esta versão não foi para as lojas (decisão: testar primeiro o app instalável). Para publicar depois no Google Play e na App
+Store com o Capacitor (o mesmo sistema dentro de um app nativo), separe:
+
+- **Contas de desenvolvedor**: Google Play Console (taxa única de US$ 25) e Apple Developer Program (US$ 99 por ano), no nome
+  da empresa (CNPJ). Conta de empresa pede o **número D-U-N-S** (gratuito, leva alguns dias) e um site da empresa.
+- **Um Mac com Xcode** para gerar e assinar o app do iPhone; a chave de assinatura do Android (guarde a cópia: sem ela não
+  há atualização do app).
+- **Identificador do app** (ex.: `br.com.inaservicos.gestao`), nome na loja, descrição curta e longa, categoria.
+- **Ícones e imagens**: ícone 1024 × 1024 sem transparência (App Store), ícone 512 × 512 e ícone adaptável do Android
+  (frente e fundo separados), imagem de destaque 1024 × 500 (Google Play) e capturas de tela do celular (e do tablet, se for
+  oferecer no iPad).
+- **Política de privacidade** num endereço público (o que o app coleta: fotos, assinatura, localização se for usada, dados
+  dos colaboradores; para que serve; por quanto tempo; contato do encarregado de dados — LGPD), e os formulários das lojas
+  ("Segurança dos dados" no Google Play e "Privacidade do app" na Apple).
+- **Conta de teste** para a revisão da Apple e do Google (usuário e senha de demonstração com dados fictícios) e instruções
+  de como chegar às telas. A Apple recusa app que só abre um site: o modo Campo (câmera, assinatura, uso sem internet) é o
+  argumento; se for criar conta dentro do app, também precisa da opção de excluir a conta.
+- **Permissões** declaradas: câmera (fotos da nota, da avaria e do veículo) e armazenamento; notificações e localização só se
+  forem usadas.
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

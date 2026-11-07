@@ -2130,6 +2130,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C165 = require('./ajuste165.js')({ q, db, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, cfgEmp, lerJson, json, APP_URL, DATA: X.DATA, nomeConta, gravaCol, ia: (...a) => X.ia(...a), auditarIa: (...a) => auditarIa(...a), antesGravar: (...a) => antesGravar(...a), depois: (...a) => depois(...a) }); /* v165: frota — reserva, saída, retorno, cidade, condutor autorizado, Sem Parar, recibo, fatura (ajuste165.js + frota165.js) */
   const C166 = require('./ajuste166.js')({ db, q, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, gravaGrupo, gravaCol, cfgEmp, lerJson, lerCorpo: X.lerCorpo, json, html: X.html, pag, ipDe, SEG, APP_URL, DATA, nomeConta, leModulo: (c, c0) => leModulo(c, c0) }); /* v166: Terceiros e locações — documentos, trabalhadores, locação, bloqueio do pagamento, link do terceiro (ajuste166.js + terc166.js) */
   const C163 = require('./ajuste163.js')({ col, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, cfgEmp, notaTotais: n => P2.notaTotais(n), lerJson, json, gravaCol, C154: () => C154, leSst: c => leModulo(c, 'epi') }); /* v163: manutenção sem contas a pagar, aprovador de compras da obra, entrega de EPI (ajuste163.js) */
+  const C167 = require('./campo167.js')({ db, q, col, doc, json, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, pode, perfilPermite, gravacaoPermitida, nomeConta, C154: () => C154, C163: () => C163, C164: () => C164, C165: () => C165 }); /* v167: modo Campo — pacote para uso sem internet, envio sem duplicar (campo167.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
@@ -2170,6 +2171,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'vabas' || c0 === 'vman') { e = C158.antesFrota(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v158: correção com motivo e histórico */
       if (c0 === 'vman' || c0 === 'fman' || c0 === 'lanc' || c0 === 'epi' || c0 === 'epitr') { e = C163.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v163: manutenção sem conta a pagar (custo pela nota), quem entrega EPI, pedido de transferência de EPI só pelas rotas */
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
+      if (c0 === 'rdo' && req && req.__campo167) { e = C167.antesRdo(conta, s[1], velho, novo); if (e) return e; } /* v167: diário feito sem internet: já existe ou outro do mesmo dia = conflito; número livre */
       if (C166.COLS.has(c0)) { e = C166.antes(conta, c0, s[1], velho, novo, req); if (e) return e; } /* v166: coleções só pelas rotas; baixa bloqueada por documentação; diário com terceiro não liberado ou equipamento locado fora da obra */
       if (C165.COLS.has(c0)) { e = C165.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v165: escopo da cidade, travas da saída, campos da importação e do recibo, coleções só pelas rotas */
       if (C164.COLS.has(c0)) { e = C164.antes(conta, c0, s[1], velho, novo, req); if (e) return e; } /* v164: campos do aviso na SC, lote, entrega do pedido, romaneio, encerramento da obra, guarda */
@@ -2278,6 +2280,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
+    if (await C167.rota(p, m, req, res, conta)) return true; /* v167: /api/campo167/* */
     if (await C166.rota(p, m, req, res, conta)) return true; /* v166: /api/ter166/* */
     if (await C165.rota(p, m, req, res, conta)) return true; /* v165: /api/frota165/* */
     if (await C164.rota(p, m, req, res, conta)) return true; /* v164: /api/sc164, /api/lote164, /api/rec164, /api/obra164, /api/gua164 */
@@ -2356,5 +2359,6 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const registrarLeitura = (conta, req, col, ids, via) => PRIV.registrarLeitura(conta, req, col, ids, via);
   const auditarIa = (conta, req, corpo, ok, erroIa) => auditar(conta, req, 'IA_USO', '/api/ia', null, PRIV.resumoIa(req, corpo || {}, ok, erroIa));
   return { podeLer, redigir, antesGravar, antesExcluir, depois, excecaoGravacao, auditar, auditarHttp, rota, servirBlob, listarAnexos, excluirAnexo, MODO_LEIT,
+    campo167: (...a) => C167.antes(...a), /* v167 */
     pontoTravado, rotaPublica, aprovadoresDe, avisarAprovadores, enviarResumo, registrarLeitura, ehSaude: PRIV.ehSaude, auditarIa, PRIV };
 };

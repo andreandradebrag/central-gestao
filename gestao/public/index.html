@@ -1,4 +1,4 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#0f1b2d"><script src="/shim.js"></script></head><body><title>Central de Gestão</title>
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" sizes="192x192" href="/icones/icone-192.png"><link rel="apple-touch-icon" href="/icones/apple-touch-icon.png"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gestão INA"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#0f1b2d"><script src="/shim.js"></script></head><body><title>Central de Gestão</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -650,7 +650,7 @@ function render(){
   $('#who').innerHTML=toolsHtml()+whoHtml();
   $('#banner').innerHTML=store.mode==='db'?'<span class="dot"></span>Dados salvos na nuvem e compartilhados com quem tem acesso a esta página':store.mode==='local'?'<span class="dot off"></span>Armazenamento local: os dados ficam apenas neste navegador.':'';
   let html;
-  if(!store.ready)html='<div class="empty">Carregando dados…</div>';
+  if(!store.ready&&ui.tab!=='v167campo')html='<div class="empty">Carregando dados…</div>'; /* v167: o Campo não depende dos cadastros (abre na hora, também no 4G fraco) */
   else if(!nav.length)html=acessoScreen();
   else html=semTela?pfnSemAcessoHtml(ui.tab):(V[ui.tab]||V.painel)();
   const rolAnt=rolGuardar();
@@ -34894,9 +34894,643 @@ document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||t.dat
 /* tutorial curto */
 if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v166Link:'Gera o link para o terceiro enviar os documentos (sem senha, com validade).',v166DocAprovar:'Aprova o documento: a validade passa a contar para o pagamento e para a liberação do trabalhador.',v166Liberar:'Libera o pagamento bloqueado (só o Administrador, com justificativa).'});
 
+/* ===== v167 (relatorios/feito_v167.md): app instalável (PWA) e modo Campo — uso na obra sem internet =====
+   - Instalação: service worker /sw.js (casco do app com a versão), manifest e ícones; botão "Instalar o app" quando o
+     navegador oferece (Android/Chrome) e as instruções do iPhone (Compartilhar › Adicionar à Tela de Início).
+   - Modo Campo (Minha área › Campo): recebimento na obra (direto e romaneio de retirada), confirmação do romaneio/separação
+     na obra, diário de obra, entrega de EPI, Material na obra, reserva/saída/retorno de veículo e transferência de guarda.
+     Funciona sem internet com o pacote baixado em "Preparar para uso sem internet" (IndexedDB, só da pessoa e das obras
+     dela) e a fila de envio (F167, o mesmo fila167.js do service worker). Sem internet, o app abre direto no Campo.
+   - Envio: quando a conexão volta, ao abrir o app e pelo Background Sync (Android). Fotos primeiro, depois o registro,
+     pelas rotas de sempre (o servidor confere tudo de novo); o mesmo registro nunca é gravado duas vezes (x-cg-cid).
+     Conflito fica na fila com a mensagem do servidor (Pendências de envio). Lógica em prefixos v167* e V167. */
+/* fila167.js (v167): a mesma fila do service worker */
+const F167=(function(){const module={exports:{}};
+/* fila167.js — fila de envio do modo Campo (v167, relatorios/feito_v167.md). O mesmo arquivo roda no app (embutido no
+   index.html pelo patch149.py) e no service worker (sw.js, para o Background Sync do Android). IndexedDB do aparelho:
+   - 'pac'  : pacote para uso sem internet, por usuário (chave = uid);
+   - 'fila' : registros feitos no aparelho (chave = cid, identificador gerado aqui), com fotos e assinaturas;
+   - 'meta' : quem entrou por último (para abrir o Campo sem internet).
+   Envio: fotos primeiro (POST /api/assets), depois os passos do registro (as rotas de sempre), cada um com x-cg-cid e
+   x-cg-uid; o servidor (campo167.js) devolve a mesma resposta para o mesmo cid, então nada é gravado duas vezes.
+   Conflito (alguém já recebeu, veículo já saiu, sem saldo…) fica na fila com a mensagem do servidor, para a pessoa ver;
+   nada é tentado de novo sozinho nem sobrescrito. Sem rede, sessão vencida ou outra pessoa no aparelho: a fila fica
+   intacta e o envio para. */
+const F167 = (function () {
+  'use strict';
+  const BD = 'cg-campo167';
+  const LIM = { pac: 8 * 1048576, fila: 60 * 1048576, foto: 3 * 1048576, itens: 400, okDias: 3, pacDias: 14 };
+  const ESPERA = ['pend', 'enviando', 'bloq'];
+  function uuid() {
+    try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, ''); } catch (e) { }
+    let t = ''; for (let i = 0; i < 32; i++) t += 'abcdef0123456789'[Math.floor(Math.random() * 16)]; return t;
+  }
+  /* ---------- armazenamento ---------- */
+  function idb(nome) {
+    let P = null;
+    const abre = () => P || (P = new Promise((ok, er) => {
+      let r; try { r = indexedDB.open(nome || BD, 1); } catch (e) { er(e); return; }
+      r.onupgradeneeded = () => { const d = r.result; ['pac', 'fila', 'meta'].forEach(n => { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n); }); };
+      r.onsuccess = () => ok(r.result); r.onerror = () => er(r.error); r.onblocked = () => er(new Error('IndexedDB bloqueado'));
+    }).catch(e => { P = null; throw e; }));
+    const tx = (st, modo, fn) => abre().then(d => new Promise((ok, er) => {
+      const t = d.transaction(st, modo), o = t.objectStore(st); let v; const rq = fn(o);
+      if (rq) rq.onsuccess = () => { v = rq.result; };
+      t.oncomplete = () => ok(v); t.onerror = () => er(t.error); t.onabort = () => er(t.error || new Error('sem espaço'));
+    }));
+    return {
+      get: (st, k) => tx(st, 'readonly', o => o.get(k)),
+      put: (st, k, v) => tx(st, 'readwrite', o => o.put(v, k)),
+      del: (st, k) => tx(st, 'readwrite', o => o.delete(k)),
+      todos: st => tx(st, 'readonly', o => o.getAll()),
+      limpar: st => tx(st, 'readwrite', o => o.clear()),
+      fechar: () => { const p = P; P = null; return p ? p.then(d => d.close()).catch(() => { }) : Promise.resolve(); }
+    };
+  }
+  function memoria() {
+    const M = { pac: new Map(), fila: new Map(), meta: new Map() };
+    return { _M: M, get: (st, k) => Promise.resolve(M[st].get(k)), put: (st, k, v) => { M[st].set(k, v); return Promise.resolve(); }, del: (st, k) => { M[st].delete(k); return Promise.resolve(); },
+      todos: st => Promise.resolve([...M[st].values()]), limpar: st => { M[st].clear(); return Promise.resolve(); }, fechar: () => Promise.resolve() };
+  }
+  /* ---------- tamanho ---------- */
+  const semBlob = it => JSON.stringify(Object.assign({}, it, { fotos: (it.fotos || []).map(f => Object.assign({}, f, { blob: null })) }));
+  const tamItem = it => semBlob(it).length + (it.fotos || []).reduce((t, f) => t + (f.blob && f.blob.size ? f.blob.size : 0), 0);
+  async function tamanho(io) { return (await io.todos('fila')).reduce((t, it) => t + (it ? tamItem(it) : 0), 0); }
+  /* ---------- fila ---------- */
+  async function listar(io, uid) { return (await io.todos('fila')).filter(x => x && (!uid || x.uid === uid)).sort((a, b) => a.em - b.em); }
+  async function novo(io, it) {
+    const l = await io.todos('fila');
+    if (l.filter(x => x && x.st !== 'ok').length >= LIM.itens) throw new Error('A fila deste aparelho chegou a ' + LIM.itens + ' registros. Conecte-se à internet para enviar antes de fazer outros.');
+    for (const f of it.fotos || []) if (f.blob && f.blob.size > LIM.foto) throw new Error('A foto "' + (f.nome || f.k) + '" é grande demais (' + (f.blob.size / 1048576).toFixed(1) + ' MB).');
+    const x = Object.assign({ cid: uuid(), em: Date.now(), st: 'pend', tent: 0, feito: 0, resp: [], msg: '' }, it);
+    const tot = l.reduce((t, y) => t + (y ? tamItem(y) : 0), 0) + tamItem(x);
+    if (tot > LIM.fila) throw new Error('O espaço do modo Campo neste aparelho está cheio (' + Math.round(LIM.fila / 1048576) + ' MB). Conecte-se à internet para enviar os registros que estão aguardando.');
+    x.tam = tamItem(x);
+    await io.put('fila', x.cid, x); return x;
+  }
+  async function resumo(io, uid) {
+    const l = await listar(io, uid), o = { pend: 0, conflito: 0, erro: 0, ok: 0, total: l.length, outros: 0 };
+    l.forEach(x => { if (ESPERA.includes(x.st)) o.pend++; else if (x.st === 'conflito') o.conflito++; else if (x.st === 'erro') o.erro++; else if (x.st === 'ok') o.ok++; });
+    if (uid) o.outros = (await listar(io)).filter(x => x.uid !== uid && x.st !== 'ok').length;
+    return o;
+  }
+  /* troca as marcas do corpo: "@foto:k" (foto já enviada), "@dep:caminho" (resposta do registro de que este depende) e
+     "@resp:i.caminho" (resposta de um passo anterior deste mesmo registro) */
+  const pega = (o, cam) => String(cam).split('.').reduce((x, k) => x == null ? undefined : x[k], o);
+  function montar(v, it, dep) {
+    if (typeof v === 'string') {
+      if (v.startsWith('@foto:')) { const f = (it.fotos || []).find(z => z.k === v.slice(6)); return f && f.id ? { id: f.id, nome: f.nome || f.k, ct: f.ct || 'image/jpeg' } : null; }
+      if (v.startsWith('@dep:')) return dep ? pega(dep.resp && dep.resp[0], v.slice(5)) : undefined;
+      if (v.startsWith('@resp:')) { const i = v.indexOf('.'); return pega((it.resp || [])[+v.slice(6, i)], v.slice(i + 1)); }
+      return v;
+    }
+    if (Array.isArray(v)) return v.map(x => montar(x, it, dep));
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = montar(v[k], it, dep); }); return o; }
+    return v;
+  }
+  /* resposta do servidor → ok | sessao | outra | rede | conflito | erro */
+  function classe(st, j) {
+    if (st >= 200 && st < 300) return 'ok';
+    if (st === 401 || (st === 403 && j && j.code === 'senha_trocar')) return 'sessao';
+    if (st === 409 && j && j.code === 'outra_conta') return 'outra';
+    if (st === 409 && j && j.code === 'em_andamento') return 'rede';
+    if (st === 409 && j && j.reauth) return 'sessao';
+    if (st === 403 || st === 409) return 'conflito';
+    if (st === 400 || st === 404 || st === 413 || st === 422) return 'erro';
+    return 'rede';
+  }
+  const MSG = { sessao: 'Sua sessão expirou: entre de novo para enviar. O registro continua guardado neste aparelho.', outra: 'Feito por outra pessoa neste aparelho: é enviado quando ela entrar.', rede: 'Sem conexão com o servidor. O envio é tentado de novo sozinho.' };
+  const enxuga = j => { const t = JSON.stringify(j || {}); if (t.length <= 4096) return j; const o = { ok: j.ok, msg: j.msg }; ['saida', 'res', 'gua'].forEach(k => { if (j[k] && j[k].id) o[k] = { id: j[k].id }; }); if (j.id) o.id = j.id; return o; };
+  async function enviarItem(io, it, porCid, fx) {
+    const dep = it.dep ? porCid.get(it.dep) : null;
+    it.st = 'enviando'; it.tent = (it.tent || 0) + 1; it.ult = Date.now(); await io.put('fila', it.cid, it);
+    const para = async (c, j) => {
+      if (c === 'sessao' || c === 'outra' || c === 'rede') { it.st = 'pend'; it.msg = MSG[c]; }
+      else { it.st = c; it.msg = (j && (j.erro || j.message)) || (c === 'conflito' ? 'O servidor recusou (conflito).' : 'O servidor recusou.'); it.msgEm = Date.now(); }
+      await io.put('fila', it.cid, it); return c;
+    };
+    const chama = async (url, o) => { let r; try { r = await fx(url, Object.assign({ credentials: 'same-origin', redirect: 'manual' }, o)); } catch (e) { return { c: 'rede', j: null }; } if (r.type === 'opaqueredirect' || r.status === 0) return { c: 'sessao', j: null }; const j = await r.json().catch(() => ({})); return { c: classe(r.status, j), j }; };
+    for (const f of it.fotos || []) {
+      if (f.id) continue;
+      if (!f.blob) return para('erro', { erro: 'A foto "' + (f.nome || f.k) + '" não está mais neste aparelho. Descarte o registro e faça de novo.' });
+      const { c, j } = await chama('/api/assets', { method: 'POST', headers: { 'content-type': f.ct || f.blob.type || 'image/jpeg', 'x-cg-cid': it.cid + '.f' + String(f.k).replace(/[^A-Za-z0-9_-]/g, '_'), 'x-cg-uid': it.uid }, body: f.blob });
+      if (c !== 'ok') return para(c, j);
+      f.id = j.id; f.blob = null; f.url = ''; await io.put('fila', it.cid, it);
+    }
+    const ps = it.passos || [];
+    for (let i = it.feito || 0; i < ps.length; i++) {
+      const p = ps[i], corpo = montar(p.corpo, it, dep);
+      const url = montar(p.url, it, dep);
+      const { c, j } = await chama(url, { method: p.m || 'POST', headers: { 'content-type': 'application/json', 'x-cg-cid': i ? it.cid + '.' + i : it.cid, 'x-cg-uid': it.uid }, body: JSON.stringify(p.m === 'PUT' || p.m === 'PATCH' ? { data: corpo } : corpo) });
+      if (c !== 'ok') return para(c, j);
+      (it.resp = it.resp || [])[i] = enxuga(j); it.feito = i + 1; await io.put('fila', it.cid, it);
+    }
+    const ult = (it.resp || [])[ps.length - 1] || {};
+    it.st = 'ok'; it.okEm = Date.now(); it.msg = ult.repetido ? 'Enviado (já estava no servidor).' : (ult.msg || 'Enviado.');
+    it.fotos = (it.fotos || []).map(f => ({ k: f.k, nome: f.nome, id: f.id }));
+    it.passos = ps.map(p => ({ m: p.m, url: p.url }));
+    await io.put('fila', it.cid, it); return 'ok';
+  }
+  let ocupado = false;
+  async function trava(fn) {
+    if (typeof navigator !== 'undefined' && navigator.locks && navigator.locks.request) return navigator.locks.request('cg-fila167', { ifAvailable: true }, l => l ? fn() : { ocupado: true });
+    if (ocupado) return { ocupado: true }; ocupado = true; try { return await fn(); } finally { ocupado = false; }
+  }
+  /* envia o que está aguardando, do usuário uid, na ordem em que foi feito */
+  function enviar(io, uid, opc) {
+    return trava(async () => {
+      const fx = (opc && opc.fetch) || ((u, o) => fetch(u, o)), out = { enviados: 0, conflitos: 0, erros: 0, sessao: false, outra: false, semRede: false, restam: 0 };
+      const todos = (await io.todos('fila')).filter(Boolean), porCid = new Map(todos.map(x => [x.cid, x])); /* os mesmos objetos: o estado novo de um registro vale para quem depende dele */
+      const l = todos.filter(x => x.uid === uid).sort((a, b) => a.em - b.em);
+      for (const it of l) {
+        if (!ESPERA.includes(it.st)) continue;
+        if (it.dep) {
+          const d = porCid.get(it.dep);
+          if (!d || d.st !== 'ok') {
+            if (!d || ['conflito', 'erro', 'bloq'].includes(d.st)) { if (it.st !== 'bloq' || !it.msg) { it.st = 'bloq'; it.msg = 'Depende de "' + (d ? d.titulo : 'um registro descartado') + '", que não foi enviado.'; await io.put('fila', it.cid, it); } }
+            continue;
+          }
+        }
+        const c = await enviarItem(io, it, porCid, fx);
+        if (opc && opc.aoItem) try { opc.aoItem(it); } catch (e) { }
+        if (c === 'ok') out.enviados++; else if (c === 'conflito') out.conflitos++; else if (c === 'erro') out.erros++;
+        else { out[c === 'sessao' ? 'sessao' : c === 'outra' ? 'outra' : 'semRede'] = true; break; }
+      }
+      await purgar(io);
+      out.restam = (await listar(io, uid)).filter(x => ESPERA.includes(x.st)).length;
+      return out;
+    });
+  }
+  /* a pessoa manda tentar de novo (conflito resolvido, erro corrigido no servidor) */
+  async function deNovo(io, cid) { const it = await io.get('fila', cid); if (!it || it.st === 'ok') return null; it.st = 'pend'; it.msg = ''; await io.put('fila', cid, it); for (const x of await io.todos('fila')) if (x && x.dep === cid && x.st === 'bloq') { x.st = 'pend'; x.msg = ''; await io.put('fila', x.cid, x); } return it; }
+  async function descartar(io, cid) { await io.del('fila', cid); }
+  /* enviados há mais de LIM.okDias saem da lista; pacote sem uso há LIM.pacDias é apagado (a fila nunca é apagada sozinha) */
+  async function purgar(io) {
+    const ag = Date.now();
+    for (const x of await io.todos('fila')) if (x && x.st === 'ok' && ag - (x.okEm || 0) > LIM.okDias * 864e5) await io.del('fila', x.cid);
+    for (const p of await io.todos('pac')) if (p && ag - (p.usado || p.em || 0) > LIM.pacDias * 864e5) await io.del('pac', p.uid);
+  }
+  /* sair: apaga o pacote e a fila da pessoa (o app pergunta antes quando há registros não enviados) */
+  async function apagarUsuario(io, uid) {
+    await io.del('pac', uid);
+    for (const x of await io.todos('fila')) if (x && x.uid === uid) await io.del('fila', x.cid);
+    const m = await io.get('meta', 'ultimo'); if (m && m.uid === uid) await io.del('meta', 'ultimo');
+  }
+  async function guardarPacote(io, pac) {
+    const t = JSON.stringify(pac).length; if (t > LIM.pac) throw new Error('Os dados passam do limite para uso sem internet (' + Math.round(LIM.pac / 1048576) + ' MB). Escolha menos obras.');
+    for (const p of await io.todos('pac')) if (p && p.uid !== pac.uid) await io.del('pac', p.uid); /* um pacote só: o de quem está usando o aparelho */
+    await io.put('pac', pac.uid, Object.assign({}, pac, { usado: Date.now() }));
+  }
+  return { BD, LIM, ESPERA, uuid, idb, memoria, tamItem, tamanho, listar, novo, resumo, montar, classe, enviar, deNovo, descartar, purgar, apagarUsuario, guardarPacote };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = F167;
+
+return module.exports;})();
+const V167={t:'inicio',obra:'',id:'',f:null,pac:null,fila:[],res:null,on:true,off:false,uid:'',nome:'',inst:null,io:null,ini:false,sessao:false,msg:'',sel:null,obrasLst:null,descarta:'',enviando:false,ult:0};
+const v167Io=()=>V167.io||(V167.io=(typeof window!=='undefined'&&window.__v167mem)||(typeof indexedDB!=='undefined'?F167.idb():F167.memoria()));
+const v167On=()=>V167.on&&(typeof navigator==='undefined'||navigator.onLine!==false);
+const v167Hora=()=>{const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');};
+const v167Agora=()=>todayStr()+'T'+v167Hora();
+const v167Br=d=>d?String(d).slice(0,10).split('-').reverse().join('/')+(String(d).length>11?' '+String(d).slice(11,16):''):'—';
+const v167Ts=ms=>{const d=new Date(ms||0),z=n=>String(n).padStart(2,'0');return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear()+' '+z(d.getHours())+':'+z(d.getMinutes());};
+const v167Q=v=>{const n=parseFloat(String(v==null?'':v).replace(',','.'));return isFinite(n)?Math.round(n*10000)/10000:0;};
+const v167Obra=id=>V167.pac&&(V167.pac.obras||[]).find(o=>o.id===(id||V167.obra))||null;
+const v167Pend=()=>(V167.fila||[]).filter(x=>F167.ESPERA.includes(x.st));
+const v167Ruins=()=>(V167.fila||[]).filter(x=>x.st==='conflito'||x.st==='erro');
+const v167NaFila=ref=>(V167.fila||[]).find(x=>x.ref===ref&&x.st!=='ok')||null;
+const v167Ios=()=>typeof navigator!=='undefined'&&/iphone|ipad|ipod/i.test(navigator.userAgent||'');
+const v167Inst=()=>{try{return (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;}catch(e){return false;}};
+async function v167Get(url){const r=await fetch(url,{credentials:'same-origin',redirect:'manual',headers:{accept:'application/json'}});if(r.status===401||r.type==='opaqueredirect'){V167.sessao=true;throw new Error('Sua sessão expirou: entre de novo.');}const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.erro||('Erro '+r.status));return j;}
+
+/* ---------- carregar, desenhar, aviso ---------- */
+async function v167Carrega(){const io=v167Io();try{V167.pac=V167.uid?(await io.get('pac',V167.uid))||null:null;if(V167.pac&&V167.pac.uid!==V167.uid)V167.pac=null;V167.fila=V167.uid?await F167.listar(io,V167.uid):[];V167.outros=V167.uid?(await F167.listar(io)).filter(x=>x.uid!==V167.uid&&x.st!=='ok').length:0;}catch(e){V167.erroBd=String(e&&e.message||e);}
+  if(V167.pac&&!V167.obra)V167.obra=(V167.pac.obras[0]||{}).id||'';V167.carregado=true;}
+function v167Pinta(){
+  try{if(V167.off){const c=document.getElementById('v167off');if(c){const y=c.scrollTop;c.innerHTML=v167Html(true);c.scrollTop=y;v167Pos(c);}}else if(typeof ui!=='undefined'&&ui.tab==='v167campo')render();}catch(e){}
+  v167Aviso();}
+function v167AvisoTxt(){const n=v167Pend().length,r=v167Ruins().length,on=v167On();
+  return !on?'Sem internet — '+(n?n+' registro(s) aguardando envio':'nada aguardando envio'):(n?n+' registro(s) aguardando envio':'')+(r?(n?' · ':'')+r+' com conflito ou erro':'');}
+function v167Aviso(){if(typeof document==='undefined'||!document.body||!document.getElementById)return;let b=document.getElementById('v167aviso');
+  const txt=v167AvisoTxt(),on=v167On(),r=v167Ruins().length;
+  if(!txt||(!V167.uid&&on)){if(b)b.hidden=true;return;}
+  if(!b){b=document.createElement('button');b.id='v167aviso';b.type='button';b.className='v167aviso';b.dataset.act='v167Ir';b.dataset.t='fila';document.body.appendChild(b);}
+  b.hidden=false;b.textContent=txt;b.classList.toggle('off',!on);b.classList.toggle('topo',!!V167.off); /* no Campo sem internet fica no alto (não cobre o quadro de assinatura) */b.classList.toggle('neg',!!r);b.title='Ver as pendências de envio';}
+
+/* ---------- início: online (dentro do sistema) ---------- */
+async function v167Iniciar(){
+  if(V167.ini)return;if(!me||!me.uid){if((V167.tent=(V167.tent||0)+1)<60)setTimeout(v167Iniciar,500);return;}
+  V167.ini=true;V167.uid=me.uid;V167.nome=me.nome||'';const io=v167Io();
+  try{const m=await io.get('meta','ultimo');if(m&&m.sair){await io.del('meta','ultimo');location.href='/sair';return;}
+    if(m&&m.uid&&m.uid!==V167.uid){const p=await io.get('pac',m.uid);if(p)await io.del('pac',m.uid);} /* outra pessoa entrou neste aparelho: o pacote dela sai (a fila dela fica, sem ser enviada) */
+    await io.put('meta','ultimo',{uid:V167.uid,nome:V167.nome,em:Date.now()});}catch(e){}
+  await v167Carrega();v167Eventos();v167Aviso();
+  if(V167.pac&&Date.now()-(V167.pac.em||0)>20*60000)v167Baixar(V167.pac.obras.map(o=>o.id),true); /* atualiza sozinho com internet */
+  v167Enviar(true);
+}
+/* ---------- início: sem internet (o app abre direto no Campo) ---------- */
+async function v167Offline(){
+  V167.off=true;V167.on=false;const io=v167Io();
+  try{const m=await io.get('meta','ultimo');if(m&&m.uid&&!m.sair){V167.uid=m.uid;V167.nome=m.nome||'';}}catch(e){}
+  await v167Carrega();
+  let c=document.getElementById('v167off');if(!c){c=document.createElement('div');c.id='v167off';c.className='v167off';document.body.appendChild(c);}
+  const h=(location.hash||'').slice(1);if(/^v167/.test(h))V167.t='inicio';
+  v167Eventos();v167Pinta();
+}
+function v167Eventos(){
+  if(V167.ev||typeof window==='undefined'||!window.addEventListener)return;V167.ev=true;
+  window.addEventListener('online',()=>{v167Volta();});
+  window.addEventListener('offline',()=>{V167.on=false;v167Pinta();});
+  setInterval(()=>{if(v167Pend().length&&v167On())v167Enviar(true);},45000);
+  try{if(navigator.serviceWorker)navigator.serviceWorker.addEventListener('message',e=>{if(e.data&&e.data.cg167==='sincronizar')v167Enviar(true);});}catch(e){}
+}
+/* a conexão voltou: confere o servidor e envia */
+async function v167Volta(){
+  try{const r=await fetch('/api/eu',{credentials:'same-origin',redirect:'manual'});
+    if(r.status===401||r.type==='opaqueredirect'){V167.on=true;V167.sessao=true;v167Pinta();return;}
+    if(!r.ok)throw new Error('servidor');const j=await r.json();V167.on=true;V167.sessao=false;
+    if(V167.off&&j.id&&V167.uid&&j.id!==V167.uid)V167.msg='Quem está conectado agora é outra pessoa: os registros feitos por '+(V167.nome||'quem usou o Campo')+' esperam o login dela.';
+  }catch(e){V167.on=false;v167Pinta();return;}
+  v167Pinta();await v167Enviar(false);
+}
+/* ---------- envio da fila ---------- */
+async function v167Enviar(silencioso){
+  if(!V167.uid||V167.enviando)return;if(!v167On()){if(!silencioso)toast('Sem internet: os registros ficam guardados e vão quando a conexão voltar.','neg');return;}
+  if(!v167Pend().length&&silencioso)return;
+  V167.enviando=true;v167Aviso();let r=null;
+  try{r=await F167.enviar(v167Io(),V167.uid,{fetch:(u,o)=>fetch(u,o),aoItem:()=>{}});}catch(e){r={erro:String(e&&e.message||e)};}
+  V167.enviando=false;V167.res=r;V167.ult=Date.now();
+  if(r&&r.sessao)V167.sessao=true;else if(r&&!r.ocupado&&!r.semRede&&!r.erro)V167.sessao=false;
+  if(r&&r.semRede&&V167.off)V167.on=false;
+  await v167Carrega();
+  if(r&&(r.enviados||r.conflitos||r.erros)){toast((r.enviados?r.enviados+' registro(s) enviado(s).':'')+(r.conflitos||r.erros?' '+(r.conflitos+r.erros)+' com conflito ou erro: veja em Pendências de envio.':''),r.conflitos||r.erros?'neg':'pos');
+    if(r.enviados&&V167.pac&&!V167.off)v167Baixar(V167.pac.obras.map(o=>o.id),true);}
+  else if(!silencioso&&r&&r.sessao)toast('Sua sessão expirou. Entre de novo para enviar: os registros continuam guardados neste aparelho.','neg');
+  v167Pinta();return r;
+}
+/* ---------- preparar para uso sem internet ---------- */
+async function v167Baixar(obras,silencioso){obras=obras||[];
+  try{const p=await v167Get('/api/campo167/pacote?obras='+encodeURIComponent(obras.join(',')));if(!p||!p.uid||p.uid!==V167.uid||!Array.isArray(p.obras))throw new Error('Resposta inválida do servidor: os dados guardados continuam.');await F167.guardarPacote(v167Io(),p);V167.pac=p;if(!obras.includes(V167.obra))V167.obra=obras[0]||'';
+    if(!silencioso){toast('Pronto: '+obras.length+' obra(s) neste aparelho para usar sem internet.','pos');V167.t='inicio';}}
+  catch(e){if(!silencioso)toast(String(e.message||e),'neg');}
+  v167Pinta();
+}
+function v167RegSync(){try{if(navigator.serviceWorker&&navigator.serviceWorker.ready)navigator.serviceWorker.ready.then(r=>{if(r&&r.sync&&r.sync.register)return r.sync.register('cg-fila167');}).catch(()=>{});}catch(e){}}
+async function v167Enfileira(it){
+  try{const x=await F167.novo(v167Io(),Object.assign({uid:V167.uid,uNome:V167.nome,obra:V167.obra},it));V167.f=null;V167.t='fila';V167.id='';await v167Carrega();
+    toast(v167On()?'Registro guardado. Enviando…':'Sem internet: registro guardado neste aparelho. Vai quando a conexão voltar.','pos');v167RegSync();v167Pinta();if(v167On())v167Enviar(true);return x;}
+  catch(e){toast(String(e.message||e),'neg');return null;}
+}
+
+/* ---------- campos do formulário (estado em V167.f; o desenho de novo não perde o que foi digitado) ---------- */
+const v167G=p=>String(p).split('.').reduce((o,k)=>o==null?undefined:o[k],V167.f);
+function v167S(p,v){const ks=String(p).split('.');let o=V167.f;ks.slice(0,-1).forEach((k,i)=>{if(o[k]==null)o[k]=/^\d+$/.test(ks[i+1])?[]:{};o=o[k];});o[ks[ks.length-1]]=v;}
+const v167In=(l,p,tp,o)=>{o=o||{};if(tp==='select'&&o.blank===undefined&&(o.opts||[]).length&&(v167G(p)==null||v167G(p)===''))v167S(p,o.opts[0][0]); /* a lista sem opção vazia mostra a primeira: o estado também */
+  const v=v167G(p);const id='v7_'+String(p).replace(/\W/g,'_');
+  if(tp==='textarea')return '<label class="f full" for="'+id+'"><span>'+l+'</span><textarea id="'+id+'" data-v7="'+esc(p)+'" rows="'+(o.rows||3)+'">'+esc(v==null?'':v)+'</textarea></label>';
+  if(tp==='select')return '<label class="f'+(o.full?' full':'')+'" for="'+id+'"><span>'+l+'</span><select id="'+id+'" data-v7="'+esc(p)+'">'+(o.blank!==undefined?'<option value="">'+esc(o.blank)+'</option>':'')+(o.opts||[]).map(x=>'<option value="'+esc(x[0])+'"'+(String(x[0])===String(v==null?'':v)?' selected':'')+'>'+esc(x[1])+'</option>').join('')+'</select></label>';
+  if(tp==='checkbox')return '<label class="f chk v167chk" for="'+id+'"><input type="checkbox" id="'+id+'" data-v7="'+esc(p)+'"'+(v?' checked':'')+'><span>'+l+'</span></label>';
+  return '<label class="f'+(o.full?' full':'')+'" for="'+id+'"><span>'+l+'</span><input id="'+id+'" type="'+tp+'" data-v7="'+esc(p)+'" value="'+esc(v==null?'':v)+'"'+(tp==='number'?' inputmode="decimal" step="any" min="0"':'')+(o.r?' data-v7r="1"':'')+(o.max?' max="'+esc(o.max)+'"':'')+(o.ph?' placeholder="'+esc(o.ph)+'"':'')+'></label>';};
+const v167Foto=(k,l,obrig)=>{const f=V167.f.fotos&&V167.f.fotos[k];return '<div class="v167foto'+(f?' tem':'')+'"><div class="v167fl">'+esc(l)+(obrig?' *':'')+'</div>'+(f&&f.url?'<img src="'+esc(f.url)+'" alt="'+esc(l)+'">':'')+
+  '<label class="btn v167fb"><input type="file" accept="image/*" capture="environment" data-v7foto="'+esc(k)+'" hidden>'+(f?'Tirar outra':'Tirar foto')+'</label>'+(f?'<button type="button" class="btn" data-act="v167FotoTira" data-k="'+esc(k)+'">Remover</button>':'')+'</div>';};
+const v167Pad=(k,l)=>'<div class="v167pad"><div class="v167fl">'+esc(l)+'</div><canvas width="600" height="200" data-v7pad="'+esc(k)+'" aria-label="'+esc(l)+'"></canvas><button type="button" class="btn" data-act="v167PadLimpa" data-k="'+esc(k)+'">Limpar assinatura</button></div>';
+const v167Card=(t,b,sub)=>'<div class="card v167c"><h2>'+esc(t)+'</h2>'+(sub?'<p class="sub">'+sub+'</p>':'')+b+'</div>';
+const v167Bt=(t,act,ds,cl)=>'<button type="button" class="btn '+(cl||'')+'" data-act="'+act+'"'+Object.entries(ds||{}).map(([k,v])=>' data-'+k+'="'+esc(v)+'"').join('')+'>'+t+'</button>';
+const v167Volt=(t)=>v167Bt('‹ Voltar','v167Ir',{t:t||'inicio'},'v167volta');
+if(typeof document!=='undefined'&&document.addEventListener){
+  const at=e=>{const el=e.target;if(!el||!el.dataset||el.dataset.v7===undefined||!V167.f)return;v167S(el.dataset.v7,el.type==='checkbox'?el.checked:el.value);if(el.dataset.v7r!==undefined||el.tagName==='SELECT'||el.type==='checkbox')v167Pinta();};
+  document.addEventListener('input',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.v7!==undefined&&el.tagName!=='SELECT'&&el.type!=='checkbox'&&V167.f)v167S(el.dataset.v7,el.value);});
+  document.addEventListener('change',at);
+  document.addEventListener('change',async e=>{const el=e.target;if(!el||!el.dataset||el.dataset.v7foto===undefined||!V167.f)return;const fl=el.files&&el.files[0];el.value='';if(!fl)return;
+    const b=await v167Reduz(fl);const k=el.dataset.v7foto,f0=V167.f.fotos&&V167.f.fotos[k];if(f0&&f0.url)try{URL.revokeObjectURL(f0.url);}catch(x){}
+    (V167.f.fotos=V167.f.fotos||{})[k]={blob:b,nome:k+'.jpg',ct:b.type||'image/jpeg',url:URL.createObjectURL(b)};v167Pinta();});
+}
+/* foto reduzida (até 1600 px, JPEG): cabe mais no aparelho e sobe rápido no 4G */
+async function v167Reduz(file){try{if(!/^image\//.test(file.type||'')||typeof createImageBitmap!=='function')return file;const bm=await createImageBitmap(file),k=Math.min(1,1600/Math.max(bm.width,bm.height));
+  const c=document.createElement('canvas');c.width=Math.round(bm.width*k);c.height=Math.round(bm.height*k);c.getContext('2d').drawImage(bm,0,0,c.width,c.height);
+  const b=await new Promise(r=>c.toBlob(r,'image/jpeg',0.72));return b&&b.size<file.size?b:file;}catch(e){return file;}}
+function v167Pos(root){if(typeof document==='undefined'||!document.querySelectorAll)return;(root||document).querySelectorAll('canvas[data-v7pad]').forEach(cv=>{if(cv.__v7)return;cv.__v7=1;const k=cv.dataset.v7pad,ctx=cv.getContext('2d');if(!ctx)return;
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#0b1220';
+  const ant=V167.f&&V167.f.pads&&V167.f.pads[k];if(ant){const im=new Image();im.onload=()=>ctx.drawImage(im,0,0);im.src=ant;}
+  let on=false;const pos=e=>{const r=cv.getBoundingClientRect();return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height];};
+  cv.addEventListener('pointerdown',e=>{on=true;try{cv.setPointerCapture(e.pointerId);}catch(x){}const p=pos(e);ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(p[0]+0.1,p[1]+0.1);ctx.stroke();e.preventDefault();});
+  cv.addEventListener('pointermove',e=>{if(!on)return;const p=pos(e);ctx.lineTo(p[0],p[1]);ctx.stroke();e.preventDefault();});
+  const fim=()=>{if(!on)return;on=false;if(V167.f)(V167.f.pads=V167.f.pads||{})[k]=cv.toDataURL('image/png');};
+  ['pointerup','pointerleave','pointercancel'].forEach(t=>cv.addEventListener(t,fim));});}
+if(typeof RH_POST!=='undefined')RH_POST.push(()=>{if(ui.tab==='v167campo')v167Pos();});
+
+/* ---------- telas ---------- */
+const V167T={};
+function v167Html(off){
+  const t=V167T[V167.t]?V167.t:'inicio';let h='';
+  if(off)h+='<div class="v167top"><div class="v167marca"><span class="mark">CG</span><div><b>Modo Campo</b><small>'+esc(V167.nome||'')+'</small></div></div><div class="acts">'+(v167On()?'<span class="pill pos">Conectado</span><a class="btn pri" href="/">Abrir o sistema completo</a>':'<span class="pill neg">Sem internet</span>')+'<a class="btn" href="/sair">Sair</a></div></div>';
+  if(V167.sessao)h+='<div class="note neg v167nota"><b>Sua sessão expirou.</b> Entre de novo para enviar os '+v167Pend().length+' registro(s) aguardando: eles continuam guardados neste aparelho. <a class="btn pri" href="/login">Entrar de novo</a></div>';
+  if(V167.msg)h+='<div class="note v167nota">'+esc(V167.msg)+'</div>';
+  if(V167.erroBd)h+='<div class="note neg v167nota">Este navegador não deixa guardar dados para uso sem internet ('+esc(V167.erroBd)+'). Use o Chrome (Android) ou o Safari (iPhone) fora da navegação anônima.</div>';
+  if(!V167.uid)return '<div class="v167">'+h+v167Card('Modo Campo','<p>Para usar sem internet, entre no sistema uma vez com internet e toque em <b>Preparar para uso sem internet</b>.</p>'+(v167On()?'<a class="btn pri" href="/login">Entrar</a>':''))+'</div>';
+  try{h+=V167T[t]();}catch(e){h+='<div class="note neg">Não foi possível abrir esta tela ('+esc(e.message||e)+').</div>';}
+  return '<div class="v167">'+h+'</div>';
+}
+const v167SemPac=()=>v167Card('Sem dados neste aparelho','<p>'+(v167On()?'Toque em <b>Preparar para uso sem internet</b> e escolha as suas obras.':'Este aparelho ainda não foi preparado. Com internet, abra Minha área › Campo e toque em <b>Preparar para uso sem internet</b>.')+'</p>'+(v167On()?v167Bt('Preparar para uso sem internet','v167Ir',{t:'preparar'},'pri'):''));
+V167T.inicio=()=>{const P=V167.pac,o=v167Obra(),n=v167Pend().length,r=v167Ruins().length;let h='';
+  h+='<div class="ph"><div><h1>Campo</h1><p>Recebimento, diário, EPI, material e veículo — também sem internet.</p></div></div>';
+  h+='<div class="v167st"><div class="v167st1 '+(v167On()?'pos':'neg')+'">'+(v167On()?'Com internet':'Sem internet')+'</div><div>'+(n?'<b>'+n+'</b> aguardando envio':'Nada aguardando envio')+(r?' · <b class="neg">'+r+'</b> com conflito ou erro':'')+'</div>'+v167Bt('Pendências de envio','v167Ir',{t:'fila'})+(n&&v167On()?v167Bt(V167.enviando?'Enviando…':'Enviar agora','v167Enviar',{},'pri'):'')+'</div>';
+  if(!P)return h+v167SemPac()+v167CardInst();
+  h+='<div class="v167st"><div>Dados de <b>'+v167Ts(P.em)+'</b> · '+P.obras.length+' obra(s)</div>'+(v167On()?v167Bt('Atualizar','v167Atualiza')+v167Bt('Trocar obras','v167Ir',{t:'preparar'}):'')+'</div>';
+  if(P.obras.length>1)h+='<div class="fg v167obra">'+'<label class="f full"><span>Obra</span><select data-act-v167obra="1" id="v167obraSel">'+P.obras.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===V167.obra?' selected':'')+'>'+esc(x.nome)+'</option>').join('')+'</select></label></div>';
+  else h+='<p class="v167on"><b>'+esc(o?o.nome:'')+'</b></p>';
+  const nr=o?o.peds.length+o.roms.length:0,pe=o&&o.perm||{};
+  const bts=[['rec','Recebimento na obra',nr?nr+' a receber':'nada a receber',pe.rec||(o&&o.peds.some(p=>p.podeRet))],['diario','Diário de obra',pe.rdo?'novo diário de hoje':'seu perfil não preenche',pe.rdo],['epi','Entrega de EPI',P.perm.epi?'com o estoque do almoxarifado':'RH e SST',P.perm.epi],
+    ['mat','Material na obra',o&&o.mat?o.mat.filter(m=>m.saldo>0).length+' item(ns) com saldo':'—',pe.mat],['veic','Veículo',P.frota?'reserva, saída e retorno':'sem veículo liberado',!!P.frota],['gua','Transferência de guarda',o&&o.ferr?o.ferr.length+' ferramenta(s) na obra':'—',pe.gua]];
+  h+='<div class="v167menu">'+bts.map(b=>'<button type="button" class="v167m"'+(b[3]?' data-act="v167Ir" data-t="'+b[0]+'"':' disabled')+'><b>'+esc(b[1])+'</b><small>'+esc(b[2])+'</small></button>').join('')+'</div>';
+  return h+v167CardInst();};
+function v167CardInst(){if(V167.off)return '';let b;
+  if(v167Inst())b='<p class="sub">O app já está instalado neste aparelho.</p>';
+  else if(V167.inst)b='<p class="sub">Coloque o sistema na tela inicial do celular, como um aplicativo, e use o modo Campo sem internet.</p>'+v167Bt('Instalar o app','v167Instalar',{},'pri');
+  else if(v167Ios())b='<ol class="v167ios"><li>No Safari, toque em <b>Compartilhar</b> (o quadrado com a seta para cima).</li><li>Toque em <b>Adicionar à Tela de Início</b>.</li><li>Toque em <b>Adicionar</b>. O ícone "Gestão INA" aparece na tela inicial.</li></ol>';
+  else b='<p class="sub">No Chrome do Android, toque no menu <b>⋮</b> e em <b>Instalar app</b> (ou "Adicionar à tela inicial"). No computador, use o ícone de instalar na barra de endereço.</p>';
+  return v167Card('Instalar o app',b);}
+V167T.preparar=()=>{let h=v167Volt()+'<div class="ph"><div><h1>Preparar para uso sem internet</h1><p>Baixa para este aparelho só o necessário das obras escolhidas: pedidos e romaneios a receber, colaboradores (CPF mascarado), EPI com saldo, material da obra, ferramentas e os veículos que você usa.</p></div></div>';
+  if(!v167On())return h+'<div class="note neg">Precisa de internet para preparar.</div>';
+  const L=V167.obrasLst;if(!L){v167ObrasLst();return h+'<p class="sub">Carregando as obras…</p>';}
+  if(L.erro)return h+'<div class="note neg">'+esc(L.erro)+'</div>';
+  if(!V167.sel){V167.sel=new Set(V167.pac?V167.pac.obras.map(o=>o.id):L.obras.filter(o=>o.minha).map(o=>o.id));}
+  const ls=L.obras;if(!ls.length)return h+'<div class="note">Você não está ligado a nenhuma obra ativa (responsável pela obra ou encarregado alocado). Dá para preparar só o veículo, se você for condutor.</div><div class="acts v167acts">'+v167Bt('Preparar para uso sem internet','v167Baixar',{},'pri')+'</div>';
+  h+='<div class="card v167c"><h2>Obras <small>até '+L.max+'</small></h2><div class="v167lst">'+ls.map(o=>'<label class="v167li"><input type="checkbox" data-v167sel="'+esc(o.id)+'"'+(V167.sel.has(o.id)?' checked':'')+'><span>'+esc(o.nome)+(o.minha?' '+pill('minha','acc'):'')+'</span></label>').join('')+'</div>'+
+    '<div class="acts v167acts">'+v167Bt('Preparar para uso sem internet','v167Baixar',{},'pri')+'</div><p class="sub">Os dados ficam só neste aparelho e são apagados ao sair. Com internet, o app atualiza sozinho.</p></div>';
+  return h;};
+async function v167ObrasLst(){try{V167.obrasLst=await v167Get('/api/campo167/obras');}catch(e){V167.obrasLst={erro:String(e.message||e)};}v167Pinta();}
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('change',e=>{const el=e.target;if(!el||!el.dataset)return;
+  if(el.dataset.v167sel!==undefined&&V167.sel){if(el.checked)V167.sel.add(el.dataset.v167sel);else V167.sel.delete(el.dataset.v167sel);}
+  if(el.id==='v167obraSel'){V167.obra=el.value;v167Pinta();}});
+
+/* ----- recebimento na obra ----- */
+V167T.rec=()=>{const o=v167Obra();let h=v167Volt()+'<div class="ph"><div><h1>Recebimento na obra</h1><p>'+esc(o?o.nome:'')+'</p></div></div>';if(!o)return h+v167SemPac();
+  const li=(t,s,b)=>'<div class="li v167li2"><div><div class="t">'+t+'</div><div class="sub">'+s+'</div></div><div class="acts">'+b+'</div></div>';
+  const ps=o.peds.map(p=>{const fq=v167NaFila('ped:'+p.id),fr=v167NaFila('ret:'+p.id),itn=p.itens.filter((i,k)=>p.saldos[k]>0).length;
+    const ent=p.entrega164==='retira'?'Retirada com veículo próprio'+(p.veicNome?' ('+esc(p.veicNome)+')':''):'Entrega direto na obra';
+    let b='';if(fq)b=pill('Aguardando envio','acc');
+    else if(p.entrega164==='retira'&&!p.retirada164&&!fr)b=p.podeRet?v167Bt('Romaneio de retirada','v167Abre',{t:'retirada',id:p.id},'pri'):pill('Aguardando a retirada no fornecedor');
+    else if(p.podeRec)b=(fr?pill('Retirada aguardando envio','acc'):'')+v167Bt('Receber','v167Abre',{t:'recped',id:p.id},'pri');
+    return li('Pedido nº '+esc(p.numero)+' · '+esc(p.parcNome||''),ent+' · '+itn+' item(ns) a receber',b);});
+  const rs=o.roms.map(r=>{const fq=v167NaFila('rom:'+r.id);return li('Romaneio nº '+esc(r.numero)+' (separação do almoxarifado)',r.itens.length+' item(ns) em trânsito · '+v167Br(r.data),fq?pill('Aguardando envio','acc'):(o.perm.rec?v167Bt('Confirmar recebimento','v167Abre',{t:'recrom',id:r.id},'pri'):''));});
+  h+=v167Card('Pedidos de compra',ps.length?'<div class="list">'+ps.join('')+'</div>':'<p class="sub">Nenhum pedido a receber nesta obra.</p>');
+  h+=v167Card('Romaneios e separações',rs.length?'<div class="list">'+rs.join('')+'</div>':'<p class="sub">Nenhum romaneio em trânsito para esta obra.</p>');
+  return h+'<p class="sub">Posição de '+v167Ts(V167.pac.em)+'. Se alguém receber antes de você enviar, o servidor avisa e nada é gravado em dobro.</p>';};
+const v167Ped=id=>{const o=v167Obra();return o&&o.peds.find(p=>p.id===id);};
+V167T.recped=()=>{const p=v167Ped(V167.id),F=V167.f;if(!p||!F)return v167Volt('rec')+'<div class="note">Pedido não encontrado.</div>';
+  let h=v167Volt('rec')+'<div class="ph"><div><h1>Receber pedido nº '+esc(p.numero)+'</h1><p>'+esc(p.parcNome||'')+' · '+(p.entrega164==='retira'?'retirada com veículo próprio':'entrega direto na obra')+'</p></div></div>';
+  h+=v167Card('Itens',p.itens.map((i,k)=>{const sd=p.saldos[k];if(!(sd>0))return '';return '<div class="v167it"><div class="t">'+esc(i.desc)+' <small>saldo '+fmtQ(sd)+' '+esc(i.un)+'</small></div><div class="fg">'+v167In('Recebido','it.'+k+'.qtd','number')+v167In('Avaria','it.'+k+'.avaria','number',{r:1})+
+    (i.lote?v167In('Lote *','it.'+k+'.lote','text')+v167In('Validade *','it.'+k+'.val','date'):'')+'</div>'+(v167Q(v167G('it.'+k+'.avaria'))>0?v167Foto('av'+k,'Foto da avaria',true):'')+'</div>';}).join(''),'O que não for informado conta como falta e vira pendência com o fornecedor.');
+  h+=v167Card('Nota e fotos','<div class="v167fotos">'+v167Foto('nota','Nota fiscal ou canhoto',true)+v167Foto('mat','Material recebido')+'</div>');
+  h+=v167Card('Assinatura','<div class="fg">'+v167In('Nome de quem recebeu *','nome','text',{full:true})+v167In('Data','data','date',{max:todayStr()})+'</div>'+v167Pad('rec','Assinatura de quem recebeu *'));
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar recebimento','v167Salva',{},'pri')+'</div>';};
+V167T.retirada=()=>{const p=v167Ped(V167.id),F=V167.f;if(!p||!F)return v167Volt('rec')+'<div class="note">Pedido não encontrado.</div>';
+  let h=v167Volt('rec')+'<div class="ph"><div><h1>Romaneio de retirada · pedido nº '+esc(p.numero)+'</h1><p>'+esc(p.parcNome||'')+(p.motNome?' · motorista '+esc(p.motNome):'')+'</p></div></div>';
+  h+=v167Card('O que foi retirado no fornecedor',p.itens.map((i,k)=>p.saldos[k]>0?'<div class="v167it"><div class="t">'+esc(i.desc)+' <small>saldo '+fmtQ(p.saldos[k])+' '+esc(i.un)+'</small></div><div class="fg">'+v167In('Retirado','it.'+k+'.qtd','number')+'</div></div>':'').join(''));
+  h+=v167Card('Nota fiscal','<div class="v167fotos">'+v167Foto('nota','Foto da nota fiscal',true)+'</div><div class="fg">'+v167In('Data','data','date',{max:todayStr()})+'</div>','Depois a obra confere e assina o recebimento.');
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar retirada','v167Salva',{},'pri')+'</div>';};
+V167T.recrom=()=>{const o=v167Obra(),r=o&&o.roms.find(x=>x.id===V167.id),F=V167.f;if(!r||!F)return v167Volt('rec')+'<div class="note">Romaneio não encontrado.</div>';
+  let h=v167Volt('rec')+'<div class="ph"><div><h1>Romaneio nº '+esc(r.numero)+'</h1><p>Confira o que chegou e assine.</p></div></div>';
+  const mats=r.itens.map((i,k)=>i.origem==='env'||i.origem==='ferr'?'':'<div class="v167it"><div class="t">'+esc(i.desc)+' <small>enviado '+fmtQ(i.qtd)+' '+esc(i.un)+'</small></div><div class="fg">'+v167In('Chegou','it.'+k+'.qtd','number')+v167In('Observação','it.'+k+'.obs','text')+'</div></div>').join('');
+  const fers=r.itens.map((i,k)=>i.origem==='env'||i.origem==='ferr'?'<div class="v167it"><div class="t">'+esc(i.desc)+(i.guarda?' <small>guarda: '+esc(i.guarda)+'</small>':'')+'</div>'+v167In('Não chegou','fe.'+k+'.nao','checkbox')+
+    (v167G('fe.'+k+'.nao')?'':(i.acess||[]).map(a=>v167In(esc(a.desc)+' ('+fmtQ(a.qtd)+')','fe.'+k+'.ac.'+a.id,'select',{opts:[['ok','Acompanha'],['falta','Faltando'],['dano','Danificado']]})).join('')+'<div class="fg">'+v167In('Nome de quem fica com a guarda *','fe.'+k+'.nome','text',{full:true})+'</div>'+v167Pad('fe'+k,'Assinatura da ficha de entrega *'))+'</div>':'').join('');
+  if(mats)h+=v167Card('Material',mats);if(fers)h+=v167Card('Ferramentas',fers);
+  h+=v167Card('Assinatura','<div class="fg">'+v167In('Nome de quem recebeu *','nome','text',{full:true})+v167In('Data','data','date',{max:todayStr()})+'</div>'+v167Pad('rec','Assinatura de quem recebeu *'));
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar recebimento','v167Salva',{},'pri')+'</div>';};
+
+/* ----- diário de obra ----- */
+V167T.diario=()=>{const o=v167Obra(),F=V167.f;if(!o)return v167Volt()+v167SemPac();if(!F)return v167Volt()+'<div class="note">Abra o diário de novo.</div>';
+  const cl=typeof RDO_CLIMA!=='undefined'?RDO_CLIMA:[['bom','Bom']],cd=typeof RDO_COND!=='undefined'?RDO_COND:[['prat','Praticável']];
+  let h=v167Volt()+'<div class="ph"><div><h1>Diário de obra</h1><p>'+esc(o.nome)+' · nº '+esc(F.numero)+' (o número final é dado pelo servidor)</p></div></div>';
+  h+=v167Card('Dia','<div class="fg">'+v167In('Data *','data','date',{max:todayStr()})+v167In('Responsável pelo preenchimento','resp','text')+v167In('Início','hIni','time')+v167In('Fim','hFim','time')+
+    v167In('Clima de manhã','climaM','select',{opts:cl})+v167In('Condição de manhã','condM','select',{opts:cd})+v167In('Clima à tarde','climaT','select',{opts:cl})+v167In('Condição à tarde','condT','select',{opts:cd})+'</div>');
+  h+=v167Card('Efetivo',(F.efetivo||[]).map((x,i)=>'<div class="fg v167ef">'+v167In('Função','efetivo.'+i+'.funcao','text')+v167In('Quantidade','efetivo.'+i+'.qtd','number')+'</div>').join('')+'<div class="acts v167acts">'+v167Bt('+ Linha','v167Linha',{k:'efetivo'})+'</div>','Puxado dos colaboradores da obra; ajuste as quantidades.');
+  h+=v167Card('Atividades e ocorrências','<div class="fg">'+v167In('Atividades executadas','ativ','textarea',{rows:4})+v167In('Ocorrências e paralisações','ocorr','textarea')+v167In('Segurança do trabalho (DDS, inspeções, incidentes)','seg','textarea',{rows:2})+v167In('Materiais recebidos','materiais','textarea',{rows:2})+'</div>');
+  h+=v167Card('Fotos','<div class="v167fotos">'+[0,1,2,3,4,5].filter(i=>i===0||(F.fotos&&F.fotos['f'+(i-1)])).map(i=>v167Foto('f'+i,'Foto '+(i+1))).join('')+'</div>');
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar diário','v167Salva',{},'pri')+'</div>';};
+
+/* ----- entrega de EPI ----- */
+function v167SaldoEpi(pid,alm){const P=V167.pac,p=P&&P.epi&&P.epi.prods.find(x=>x.id===pid);let s=p?(+p.saldos[alm]||0):0;
+  v167Pend().concat((V167.fila||[]).filter(x=>x.st==='ok'&&(x.okEm||0)>(P?P.em:0))).forEach(x=>{if(x.tipo==='epi'&&x.epi)x.epi.forEach(e=>{if(e.prodId===pid&&e.almoxId===alm)s-=e.qtd;});});return Math.round(s*10000)/10000;}
+V167T.epi=()=>{const o=v167Obra(),P=V167.pac,F=V167.f;if(!o||!P.epi)return v167Volt()+'<div class="note">Entrega de EPI é registrada pelo RH ou pela Segurança do trabalho.</div>';if(!F)return v167Volt()+'<div class="note">Abra de novo.</div>';
+  const fs=o.func.filter(f=>f.daObra),f=fs.find(x=>x.id===F.funcId),alm=f?f.almEpi:'',an=(P.epi.almox.find(a=>a.id===alm)||{}).nome||'—';
+  let h=v167Volt()+'<div class="ph"><div><h1>Entrega de EPI</h1><p>'+esc(o.nome)+'</p></div></div>';
+  h+=v167Card('Colaborador','<div class="fg">'+v167In('Colaborador *','funcId','select',{full:true,blank:'Escolha…',opts:fs.map(x=>[x.id,x.nome+(x.funcao?' · '+x.funcao:'')+(x.cpf?' · '+x.cpf:'')])})+'</div>'+(f?'<p class="sub">Sai do almoxarifado <b>'+esc(an)+'</b> (o do colaborador).</p>':''));
+  if(f){const pr=P.epi.prods.filter(p=>(+p.saldos[alm]||0)>0);
+    h+=v167Card('EPI',(F.itens||[]).map((x,i)=>{const p=pr.find(z=>z.id===x.prodId),sd=p?v167SaldoEpi(p.id,alm):0,ven=p&&p.caVal&&p.caVal<todayStr();
+      return '<div class="v167it"><div class="fg">'+v167In('EPI *','itens.'+i+'.prodId','select',{full:true,blank:'Escolha…',opts:pr.map(z=>[z.id,z.nome+(z.tam?' · '+z.tam:'')+' · saldo '+fmtQ(v167SaldoEpi(z.id,alm))])})+v167In('Quantidade','itens.'+i+'.qtd','number')+'</div>'+
+        (p?'<p class="sub">CA '+esc(p.ca||'—')+(p.caVal?' · validade '+v167Br(p.caVal):'')+' · saldo aqui: '+fmtQ(sd)+' '+esc(p.un)+'</p>':'')+(ven?'<div class="note neg">CA vencido: a entrega é bloqueada.</div>':'')+(p&&v167Q(x.qtd||1)>sd?'<div class="note neg">Sem saldo no almoxarifado '+esc(an)+'. Sem internet não dá para pedir a transferência: ela precisa de conexão (Controle de EPI › Nova entrega).</div>':'')+'</div>';}).join('')+
+      '<div class="acts v167acts">'+v167Bt('+ Outro EPI','v167Linha',{k:'itens'})+'</div>','Sem internet: só EPI com saldo no almoxarifado do colaborador. Transferência entre almoxarifados precisa de internet.');
+    h+=v167Card('Assinatura do colaborador','<p class="sub">'+esc(typeof EPI_DECL!=='undefined'?EPI_DECL:'Declaro que recebi o EPI gratuitamente e fui orientado sobre o uso correto.')+'</p><div class="fg">'+v167In('Nome de quem assinou','nome','text',{full:true})+v167In('Data','data','date',{max:todayStr()})+'</div>'+v167Pad('epi','Assinatura do colaborador'));
+    h+='<div class="acts v167acts">'+v167Bt('Guardar entrega','v167Salva',{},'pri')+'</div>';}
+  return h;};
+
+/* ----- material na obra ----- */
+V167T.mat=()=>{const o=v167Obra();if(!o||!o.mat)return v167Volt()+'<div class="note">Seu perfil não vê o material desta obra.</div>';
+  const l=o.mat.filter(m=>m.saldo>0||m.env>0);
+  return v167Volt()+'<div class="ph"><div><h1>Material na obra</h1><p>'+esc(o.nome)+' · posição de '+v167Ts(V167.pac.em)+'</p></div></div>'+
+    '<div class="card v167c"><div class="tw"><table class="v167tb"><thead><tr><th>Material</th><th class="num">Enviado</th><th class="num">Devolvido</th><th class="num">Consumido</th><th class="num">Saldo</th></tr></thead><tbody>'+
+    (l.length?l.map(m=>'<tr><td>'+esc(m.nome)+'</td><td class="num">'+fmtQ(m.env)+'</td><td class="num">'+fmtQ(m.dev+m.tout)+'</td><td class="num">'+fmtQ(m.cons)+'</td><td class="num"><b>'+fmtQ(m.saldo)+'</b> '+esc(m.un)+'</td></tr>').join(''):'<tr><td colspan="5"><div class="empty">Nenhum material enviado para esta obra.</div></td></tr>')+
+    '</tbody></table></div><p class="sub">Não inclui o que está aguardando envio neste aparelho.</p></div>';};
+
+/* ----- veículo ----- */
+const v167Fr=()=>V167.pac&&V167.pac.frota;
+const v167Vn=id=>{const v=(v167Fr().veics||[]).find(x=>x.id===id);return v?[v.placa,v.modelo].filter(Boolean).join(' · '):'veículo';};
+V167T.veic=()=>{const Fr=v167Fr();if(!Fr)return v167Volt()+'<div class="note">Seu usuário não está ligado a um condutor autorizado.</div>';
+  const eu=Fr.eu,sit=eu.sit;let h=v167Volt()+'<div class="ph"><div><h1>Veículo</h1><p>'+esc(eu.nome)+(sit?' · '+esc(sit.txt||''):'')+'</p></div></div>';
+  const li=(t,s,b)=>'<div class="li v167li2"><div><div class="t">'+t+'</div><div class="sub">'+s+'</div></div><div class="acts">'+b+'</div></div>';
+  const resF=(V167.fila||[]).filter(x=>x.tipo==='res'&&x.st!=='ok'),saiF=(V167.fila||[]).filter(x=>x.tipo==='sai'&&x.st!=='conflito'&&x.st!=='erro'&&!(V167.fila||[]).some(y=>y.tipo==='ret'&&y.dep===x.cid));
+  const res=Fr.minhaRes.filter(r=>r.st==='aprovada'&&!v167NaFila('vres:'+r.id)).map(r=>li(esc(v167Vn(r.veicId))+' · reserva aprovada',v167Br(r.ini)+' a '+v167Br(r.fim)+' · '+esc(r.destino),v167Bt('Registrar saída','v167Abre',{t:'sai',id:'r:'+r.id},'pri')))
+    .concat(Fr.minhaRes.filter(r=>r.st==='pendente').map(r=>li((r.veicId?esc(v167Vn(r.veicId)):'Qualquer veículo')+' · aguardando aprovação',v167Br(r.ini)+' a '+v167Br(r.fim),'')))
+    .concat(resF.map(x=>li(esc(x.titulo),'feita neste aparelho',pill('Aguardando envio','acc'))));
+  const abertas=Fr.minhasSai.concat(Fr.saiGerir.filter(s=>!Fr.minhasSai.some(m=>m.id===s.id))).filter(s=>!v167NaFila('vret:'+s.id));
+  const sai=abertas.map(s=>li(esc(v167Vn(s.veicId))+(s.funcNome?' · '+esc(s.funcNome):''),'saiu '+v167Br(s.saidaEm)+' '+esc(s.hora)+' · km '+s.kmSaida+(s.retPrev165?' · volta prevista '+v167Br(s.retPrev165):''),v167Bt('Registrar retorno','v167Abre',{t:'ret',id:'s:'+s.id},'pri')))
+    .concat(saiF.map(x=>li(esc(x.titulo),'saída feita neste aparelho'+(x.st==='ok'?' (já enviada)':' (aguardando envio)'),v167Bt('Registrar retorno','v167Abre',{t:'ret',id:'q:'+x.cid},'pri'))));
+  h+=v167Card('Reservas',(res.length?'<div class="list">'+res.join('')+'</div>':'<p class="sub">Nenhuma reserva aprovada.</p>')+'<div class="acts v167acts">'+v167Bt('Reservar veículo','v167Abre',{t:'res'})+((eu.gestor||Fr.cfg.saidaDireta)?v167Bt('Saída sem reserva','v167Abre',{t:'sai',id:''}):'')+'</div>');
+  h+=v167Card('Veículos em uso',sai.length?'<div class="list">'+sai.join('')+'</div>':'<p class="sub">Nenhuma saída aberta.</p>');
+  return h+'<p class="sub">Veículos e reservas de '+v167Ts(V167.pac.em)+'. Se o veículo já tiver saído com outra pessoa, o servidor recusa e avisa.</p>';};
+V167T.res=()=>{const Fr=v167Fr(),F=V167.f;if(!Fr||!F)return v167Volt('veic');
+  let h=v167Volt('veic')+'<div class="ph"><div><h1>Reservar veículo</h1><p>O responsável pela frota aprova.</p></div></div>';
+  h+=v167Card('Reserva','<div class="fg">'+v167In('Veículo','veicId','select',{full:true,blank:'Qualquer disponível na minha cidade',opts:Fr.veics.map(v=>[v.id,[v.placa,v.modelo].filter(Boolean).join(' · ')+(v.cidade?' · '+v.cidade:'')])})+
+    (F.veicId?'':v167In('Cidade','cidade','select',{opts:(Fr.cfg.cidades||[]).map(c=>[c,c])}))+v167In('Saída *','ini','datetime-local')+v167In('Retorno previsto *','fim','datetime-local')+
+    v167In('Obra','projId','select',{blank:'—',opts:Fr.projs.map(p=>[p.id,p.nome])})+v167In('Destino *','destino','text')+v167In('Motivo *','motivo','text',{full:true})+'</div>');
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar reserva','v167Salva',{},'pri')+'</div>';};
+const v167Ck=(Fr,pre)=>'<div class="v167ck">'+(Fr.cfg.checklist||[]).map((c,i)=>v167In(esc(c),pre+'.'+i,'select',{blank:'—',opts:[['ok','OK'],['nok','Problema']]})).join('')+'</div>'+v167In('Problema encontrado','ckObs','text',{full:true});
+const v167Fts=(Fr,pre)=>'<div class="v167fotos">'+(Fr.fotos||[]).map(x=>v167Foto(pre+x[0],x[1],!!Fr.cfg.fotosObrig)).join('')+'</div>';
+V167T.sai=()=>{const Fr=v167Fr(),F=V167.f;if(!Fr||!F)return v167Volt('veic');const r=F.resId?Fr.minhaRes.find(x=>x.id===F.resId):null,vid=r?r.veicId:F.veicId,v=Fr.veics.find(x=>x.id===vid);
+  let h=v167Volt('veic')+'<div class="ph"><div><h1>Saída do veículo</h1><p>'+(r?'Reserva de '+v167Br(r.ini)+' · '+esc(v167Vn(r.veicId)):'Sem reserva')+'</p></div></div>';
+  h+=v167Card('Veículo e condutor','<div class="fg">'+(r?'':v167In('Veículo *','veicId','select',{full:true,blank:'Escolha…',opts:Fr.veics.map(x=>[x.id,[x.placa,x.modelo].filter(Boolean).join(' · ')+' · '+(x.sitTxt||'')])}))+
+    (Fr.eu.gestor&&!r?v167In('Condutor *','funcId','select',{full:true,blank:'Eu ('+esc(Fr.eu.nome)+')',opts:Fr.cond.filter(c=>c.id!==Fr.eu.funcId).map(c=>[c.id,c.nome])}):'')+
+    v167In('Km do painel *','km','number',{ph:v?'último: '+v.km:''})+v167In('Combustível *','comb','select',{blank:'—',opts:Fr.comb})+v167In('Destino *','destino','text')+v167In('Obra','projId','select',{blank:'—',opts:Fr.projs.map(p=>[p.id,p.nome])})+
+    v167In('Passageiros','pass','text')+v167In('Retorno previsto *','retPrev','datetime-local')+'</div>'+(v&&v.sit&&v.sit!=='disp'&&v.sit!=='livre'?'<p class="sub">Situação na última atualização: '+esc(v.sitTxt||v.sit)+'</p>':''));
+  h+=v167Card('Checklist',v167Ck(Fr,'ck'));h+=v167Card('Fotos',v167Fts(Fr,'s_'));
+  h+=v167Card('Avaria encontrada antes de sair','<div class="fg">'+v167In('Descrição','av.desc','text',{full:true})+v167In('Grave (impede o uso)','av.grave','checkbox')+'</div>'+(v167G('av.desc')?v167Foto('avp','Foto da avaria',true):''),'Fica atribuída ao uso anterior.');
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar saída','v167Salva',{},'pri')+'</div>';};
+V167T.ret=()=>{const Fr=v167Fr(),F=V167.f;if(!Fr||!F)return v167Volt('veic');
+  let h=v167Volt('veic')+'<div class="ph"><div><h1>Retorno do veículo</h1><p>'+esc(F.titulo||'')+'</p></div></div>';
+  h+=v167Card('Chegada','<div class="fg">'+v167In('Km de chegada *','km','number',{ph:F.kmSaida?'saída: '+F.kmSaida:''})+v167In('Combustível *','comb','select',{blank:'—',opts:Fr.comb})+v167In('Observação','obs','text',{full:true})+'</div>');
+  if(F.v165!==false){h+=v167Card('Checklist',v167Ck(Fr,'ck'));h+=v167Card('Fotos',v167Fts(Fr,'r_'));}
+  h+=v167Card('Avaria nova','<div class="fg">'+v167In('Descrição','av.desc','text',{full:true})+v167In('Grave','av.grave','checkbox')+'</div>'+(v167G('av.desc')?v167Foto('avr','Foto da avaria',true):''),'O responsável pela frota é avisado. Abastecimento com cupom: registre com internet em Frota › Retorno do veículo.');
+  return h+'<div class="acts v167acts">'+v167Bt('Guardar retorno','v167Salva',{},'pri')+'</div>';};
+
+/* ----- transferência de guarda ----- */
+V167T.gua=()=>{const o=v167Obra(),F=V167.f;if(!o||!o.perm.gua)return v167Volt()+'<div class="note">Seu perfil não transfere a guarda nesta obra.</div>';if(!F)return v167Volt();
+  const nm=id=>(o.func.find(f=>f.id===id)||{}).nome||'—',com=[...new Set(o.ferr.map(x=>x.funcId))];
+  let h=v167Volt()+'<div class="ph"><div><h1>Transferência de guarda</h1><p>'+esc(o.nome)+'</p></div></div>';
+  h+=v167Card('Quem entrega e quem recebe','<div class="fg">'+v167In('Quem entrega *','de','select',{blank:'Escolha…',opts:com.map(id=>[id,nm(id)])})+v167In('Quem recebe *','para','select',{blank:'Escolha…',opts:o.func.filter(f=>f.daObra&&f.id!==F.de).map(f=>[f.id,f.nome])})+v167In('Data','data','date',{max:todayStr()})+'</div>');
+  if(F.de){const fs=o.ferr.filter(x=>x.funcId===F.de),EST=['Em funcionamento e limpo','Em funcionamento e sujo','Avariado','Não encontrado'];
+    h+=v167Card('Ferramentas',fs.map(x=>'<div class="v167it">'+v167In(esc(x.nome)+(x.cod?' ('+esc(x.cod)+')':''),'it.'+x.fmovId+'.sel','checkbox')+(v167G('it.'+x.fmovId+'.sel')?'<div class="fg">'+v167In('Estado','it.'+x.fmovId+'.estado','select',{opts:EST.map(e=>[e,e])})+'</div>':'')+'</div>').join('')||'<p class="sub">Nenhuma ferramenta com esta pessoa.</p>','Avariada ou não encontrada fica com quem entrega, como pendência.');
+    h+=v167Card('Assinaturas','<div class="fg">'+v167In('Sem a presença de quem entrega','ausente','checkbox')+'</div>'+(F.ausente?'<div class="fg">'+v167In('Testemunha *','testemunha','text',{full:true})+'</div><div class="v167fotos">'+v167Foto('g0','Foto das ferramentas',true)+v167Foto('g1','Outra foto')+'</div>':'<div class="fg">'+v167In('Nome de quem entrega *','nomeDe','text',{full:true})+'</div>'+v167Pad('de','Assinatura de quem entrega *'))+
+      '<div class="fg">'+v167In('Nome de quem recebe *','nomePara','text',{full:true})+'</div>'+v167Pad('para','Assinatura de quem recebe *'));
+    h+='<div class="acts v167acts">'+v167Bt('Guardar transferência','v167Salva',{},'pri')+'</div>';}
+  return h;};
+
+/* ----- pendências de envio ----- */
+const V167_ST={pend:['Aguardando envio','acc'],enviando:['Enviando','acc'],bloq:['Esperando outro registro',''],conflito:['Conflito','neg'],erro:['Recusado','neg'],ok:['Enviado','pos']};
+V167T.fila=()=>{const l=(V167.fila||[]).slice().reverse();let h=v167Volt()+'<div class="ph"><div><h1>Pendências de envio</h1><p>Registros feitos neste aparelho. Conflito e recusa ficam aqui até você decidir: nada é sobrescrito.</p></div><div class="acts">'+(v167Pend().length&&v167On()?v167Bt(V167.enviando?'Enviando…':'Enviar agora','v167Enviar',{},'pri'):'')+'</div></div>';
+  if(V167.outros)h+='<div class="note">'+V167.outros+' registro(s) de outra pessoa neste aparelho esperam o login dela.</div>';
+  if(!l.length)return h+'<div class="card v167c"><p class="sub" style="margin:0">Nenhum registro neste aparelho.</p></div>';
+  return h+'<div class="card v167c"><div class="list">'+l.map(x=>{const s=V167_ST[x.st]||[x.st,''],ruim=x.st==='conflito'||x.st==='erro'||x.st==='bloq';
+    return '<div class="li v167li2"><div><div class="t">'+esc(x.titulo||x.tipo)+' '+pill(s[0],s[1])+'</div><div class="sub">feito em '+v167Ts(x.em)+(x.tent?' · '+x.tent+' tentativa(s)':'')+((x.fotos||[]).length?' · '+x.fotos.length+' foto(s)':'')+'</div>'+(x.msg?'<div class="v167msg'+(ruim?' neg':'')+'">'+esc(x.msg)+'</div>':'')+'</div><div class="acts">'+
+      (ruim?v167Bt('Tentar de novo','v167DeNovo',{cid:x.cid}):'')+(x.st!=='ok'&&x.st!=='enviando'?(V167.descarta===x.cid?v167Bt('Confirmar descarte','v167Descarta',{cid:x.cid,ok:'1'},'dng')+v167Bt('Manter','v167Descarta',{cid:''}):v167Bt('Descartar','v167Descarta',{cid:x.cid})):'')+'</div></div>';}).join('')+'</div></div>';};
+
+/* ---------- ações ---------- */
+A.v167Ir=d=>{V167.t=d.t||'inicio';if(!['recped','retirada','recrom','diario','epi','res','sai','ret','gua'].includes(V167.t))V167.f=null;V167.descarta='';
+  if(!V167.off&&typeof ui!=='undefined'&&ui.tab!=='v167campo'){ui.tab='v167campo';try{history.replaceState(null,'','#v167campo');}catch(e){}}
+  if(V167.t==='preparar'){V167.obrasLst=null;V167.sel=null;}v167Pinta();try{(V167.off?document.getElementById('v167off'):window).scrollTo(0,0);}catch(e){}};
+A.v167Atualiza=()=>{if(V167.pac)v167Baixar(V167.pac.obras.map(o=>o.id),false);};
+A.v167Baixar=()=>{const l=[...(V167.sel||[])];const L=V167.obrasLst;if(L&&l.length>L.max){toast('Escolha no máximo '+L.max+' obras.','neg');return;}if(!l.length&&L&&L.obras.length){toast('Escolha pelo menos uma obra.','neg');return;}toast('Baixando os dados…');v167Baixar(l,false);};
+A.v167Enviar=()=>v167Enviar(false);
+A.v167DeNovo=async d=>{await F167.deNovo(v167Io(),d.cid);await v167Carrega();v167Pinta();v167Enviar(false);};
+A.v167Descarta=async d=>{if(!d.ok){V167.descarta=d.cid||'';v167Pinta();return;}await F167.descartar(v167Io(),d.cid);V167.descarta='';await v167Carrega();toast('Registro descartado deste aparelho.');v167Pinta();};
+A.v167Instalar=async()=>{const e=V167.inst;if(!e)return;V167.inst=null;try{e.prompt();const r=await e.userChoice;if(r&&r.outcome==='accepted')toast('App instalado.','pos');}catch(x){}v167Pinta();};
+A.v167FotoTira=d=>{const f=V167.f&&V167.f.fotos&&V167.f.fotos[d.k];if(f&&f.url)try{URL.revokeObjectURL(f.url);}catch(e){}if(f)delete V167.f.fotos[d.k];v167Pinta();};
+A.v167PadLimpa=d=>{if(V167.f&&V167.f.pads)delete V167.f.pads[d.k];const cv=document.querySelector('canvas[data-v7pad="'+d.k+'"]');if(cv){cv.__v7=0;const c2=cv.cloneNode(false);cv.parentNode.replaceChild(c2,cv);v167Pos(c2.parentNode);}};
+A.v167Linha=d=>{if(!V167.f)return;(V167.f[d.k]=V167.f[d.k]||[]).push(d.k==='itens'?{prodId:'',qtd:'1'}:{funcao:'',qtd:'1'});v167Pinta();};
+A.v167Abre=d=>{const o=v167Obra(),Fr=v167Fr(),t=d.t,base={fotos:{},pads:{},data:todayStr(),nome:''};let f=null;
+  if(t==='recped'||t==='retirada'){const p=v167Ped(d.id);if(!p)return;f=Object.assign(base,{it:p.itens.map((i,k)=>({qtd:p.saldos[k]>0?String(p.saldos[k]):'0',avaria:'',lote:'',val:''}))});}
+  else if(t==='recrom'){const r=o.roms.find(x=>x.id===d.id);if(!r)return;f=Object.assign(base,{it:r.itens.map(i=>({qtd:String(i.qtd),obs:''})),fe:r.itens.map(i=>({nao:false,nome:i.guarda||'',ac:{}}))});}
+  else if(t==='diario'){if(!o||!o.rdo)return;const g={};o.func.filter(x=>x.daObra).forEach(x=>{const k=x.funcao||'Sem função';g[k]=(g[k]||0)+1;});
+    const nf=(V167.fila||[]).filter(x=>x.tipo==='rdo'&&x.obra===o.id&&x.st!=='ok').length;
+    f=Object.assign(base,{id:uid(),numero:o.rdo.prox+nf,resp:V167.nome||'',hIni:'07:00',hFim:'17:00',climaM:'bom',climaT:'bom',condM:'prat',condT:'prat',efetivo:Object.keys(g).map(k=>({funcao:k,qtd:String(g[k])})),ativ:'',ocorr:'',seg:'',materiais:''});}
+  else if(t==='epi')f=Object.assign(base,{funcId:'',itens:[{prodId:'',qtd:'1'}]});
+  else if(t==='res')f=Object.assign(base,{veicId:'',cidade:(Fr&&(Fr.eu.cidade||(Fr.cfg.cidades||[])[0]))||'',ini:'',fim:'',projId:V167.obra||'',destino:o?o.nome:'',motivo:''});
+  else if(t==='sai'){const rid=String(d.id||'').startsWith('r:')?d.id.slice(2):'',r=rid&&Fr.minhaRes.find(x=>x.id===rid);f=Object.assign(base,{resId:rid,veicId:r?r.veicId:'',funcId:'',km:'',comb:'',destino:r?r.destino:(o?o.nome:''),projId:r?r.projId:(V167.obra||''),pass:'',retPrev:r?r.fim:'',ck:{},ckObs:'',av:{desc:'',grave:false},hora:v167Hora()});}
+  else if(t==='ret'){const id=String(d.id||'');let s=null,dep='',tit='';
+    if(id.startsWith('s:')){s=Fr.minhasSai.concat(Fr.saiGerir).find(x=>x.id===id.slice(2));if(!s)return;tit=v167Vn(s.veicId)+' · saiu '+v167Br(s.saidaEm)+' '+(s.hora||'');}
+    else{const q=(V167.fila||[]).find(x=>x.cid===id.slice(2));if(!q)return;dep=q.cid;s={id:'',veicId:q.veicId,kmSaida:q.km,v165:true};tit=q.titulo;}
+    f=Object.assign(base,{vsaiId:s.id,dep,veicId:s.veicId,kmSaida:s.kmSaida,v165:s.v165!==false,titulo:tit,km:'',comb:'',ck:{},ckObs:'',obs:'',av:{desc:'',grave:false},hora:v167Hora()});}
+  else if(t==='gua')f=Object.assign(base,{de:'',para:'',it:{},ausente:false,testemunha:'',nomeDe:'',nomePara:''});
+  V167.f=f;V167.id=d.id||'';V167.t=t;v167Pinta();try{(V167.off?document.getElementById('v167off'):window).scrollTo(0,0);}catch(e){}};
+/* menu do início: os botões que abrem formulário vão pelo v167Abre */
+{const ir=A.v167Ir;A.v167Ir=d=>{if(['diario','epi','gua'].includes(d.t))return A.v167Abre(d);return ir(d);};}
+
+/* ---------- guardar: confere o básico aqui (o servidor confere tudo de novo) e põe na fila ---------- */
+const v167Assin=(k,nome)=>{const img=V167.f.pads&&V167.f.pads[k];return nome&&String(nome).trim().length>=3?{nome:String(nome).trim(),img:img||''}:null;};
+const v167Fotos=ks=>ks.filter(k=>V167.f.fotos&&V167.f.fotos[k]).map(k=>Object.assign({k},V167.f.fotos[k],{url:''}));
+A.v167Salva=async()=>{const F=V167.f,t=V167.t,o=v167Obra(),Fr=v167Fr();if(!F)return;const no=m=>{toast(m,'neg');return false;};
+  const dt=F.data||todayStr();if(dt>todayStr())return no('A data não pode ser futura.');
+  if(t==='recped'){const p=v167Ped(V167.id);const its=[],fk=['nota','mat'];let alg=false;
+    for(const i of p.itens.map((x,k)=>Object.assign({k},x))){const sd=p.saldos[i.k];if(!(sd>0))continue;const x=F.it[i.k]||{},q=v167Q(x.qtd),av=v167Q(x.avaria);
+      if(q<0||av<0)return no('Quantidade negativa em '+i.desc+'.');if(q+av>sd+1e-6)return no(i.desc+': recebido + avaria passa do saldo do pedido ('+fmtQ(sd)+').');
+      if(av>0){if(!(F.fotos&&F.fotos['av'+i.k]))return no('Avaria em '+i.desc+': tire a foto.');fk.push('av'+i.k);}
+      if(i.lote&&q>0&&(!String(x.lote||'').trim()||!x.val))return no(i.desc+': informe o lote e a validade.');
+      if(q>0||av>0)alg=true;its.push({k:i.k,qtd:q,avaria:av,fotoAvaria:av>0?'@foto:av'+i.k:null,lotes:i.lote&&q>0?[{lote:String(x.lote).trim(),qtd:q,val:x.val}]:null});}
+    if(!alg)return no('Informe a quantidade recebida (ou a avaria) de pelo menos um item.');
+    if(!(F.fotos&&F.fotos.nota))return no('Tire a foto da nota fiscal (ou do canhoto).');
+    const as=v167Assin('rec',F.nome);if(!as)return no('Informe o nome de quem recebeu.');if(!as.img)return no('Assine no quadro.');
+    const ret=v167NaFila('ret:'+p.id);
+    return v167Enfileira({tipo:'recObra',ref:'ped:'+p.id,titulo:'Recebimento na obra · pedido nº '+p.numero,dep:ret?ret.cid:'',fotos:v167Fotos(fk),
+      passos:[{m:'POST',url:'/api/rec164/obra',corpo:{pedId:p.id,data:dt,itens:its,anexos:{nota:'@foto:nota',material:F.fotos.mat?'@foto:mat':null},assin:as}}]});}
+  if(t==='retirada'){const p=v167Ped(V167.id);const its=[];for(const [k,i] of p.itens.entries()){const sd=p.saldos[k];if(!(sd>0))continue;const q=v167Q((F.it[k]||{}).qtd);if(q<0)return no('Quantidade negativa.');if(q>sd+1e-6)return no(i.desc+': retirado mais que o saldo do pedido.');if(q>0)its.push({k,qtd:q});}
+    if(!its.length)return no('Informe o que foi retirado.');if(!(F.fotos&&F.fotos.nota))return no('Tire a foto da nota fiscal.');
+    return v167Enfileira({tipo:'retirada',ref:'ret:'+p.id,titulo:'Romaneio de retirada · pedido nº '+p.numero,fotos:v167Fotos(['nota']),passos:[{m:'POST',url:'/api/rec164/retirada',corpo:{pedId:p.id,data:dt,itens:its,notaFoto:'@foto:nota'}}]});}
+  if(t==='recrom'){const r=o.roms.find(x=>x.id===V167.id);const itens=[],ferr=[];
+    for(const [k,i] of r.itens.entries()){if(i.origem==='env'||i.origem==='ferr'){const x=F.fe[k]||{};if(x.nao){ferr.push({k,naoChegou:true});continue;}
+        if(!x.nome||String(x.nome).trim().length<3)return no(i.desc+': informe quem fica com a guarda.');if(!(F.pads&&F.pads['fe'+k]))return no(i.desc+': o responsável pela guarda assina a ficha de entrega.');
+        ferr.push({k,assin:{nome:String(x.nome).trim(),img:F.pads['fe'+k]},acess:(i.acess||[]).map(a=>({id:a.id,st:(x.ac||{})[a.id]||'ok'}))});}
+      else{const x=F.it[k]||{},q=v167Q(x.qtd);if(q<0)return no('Quantidade inválida.');itens.push({k,qtd:q,obs:String(x.obs||'').slice(0,200)});}}
+    const as=v167Assin('rec',F.nome);if(!as)return no('Informe o nome de quem recebeu.');if(!as.img)return no('Assine no quadro.');
+    return v167Enfileira({tipo:'recRom',ref:'rom:'+r.id,titulo:'Recebimento do romaneio nº '+r.numero,passos:[{m:'POST',url:'/api/rec164/romaneio',corpo:{romId:r.id,data:dt,itens,ferr,assin:as}}]});}
+  if(t==='diario'){if(o.rdo.datas.some(x=>x.data===dt))return no('Já existe o diário desta obra nesse dia (nº '+o.rdo.datas.find(x=>x.data===dt).numero+'). Complete o diário existente com internet.');
+    if((V167.fila||[]).some(x=>x.tipo==='rdo'&&x.obra===o.id&&x.dia===dt&&x.st!=='ok'))return no('Você já fez o diário desta obra nesse dia neste aparelho (veja Pendências de envio).');
+    const fs=Object.keys(F.fotos||{}).sort();
+    const r={id:F.id,projId:o.id,data:dt,numero:F.numero,resp:F.resp,hIni:F.hIni,hFim:F.hFim,climaM:F.climaM,climaT:F.climaT,condM:F.condM,condT:F.condT,
+      efetivo:(F.efetivo||[]).filter(x=>x.funcao&&v167Q(x.qtd)>0).map(x=>({funcao:x.funcao,qtd:v167Q(x.qtd),tipo:'proprio',empresa:''})),equip:[],ativ:F.ativ?[{etapaId:'',desc:F.ativ,pct:''}]:[],
+      ocorr:F.ocorr||'',seg:F.seg||'',materiais:F.materiais||'',visitas:'',fotos:fs.map(k=>'@foto:'+k),status:'rascunho',crBy:V167.uid,cr:Date.now(),origem167:'campo'};
+    return v167Enfileira({tipo:'rdo',ref:'rdo:'+F.id,dia:dt,titulo:'Diário de obra · '+o.nome+' · '+v167Br(dt),fotos:v167Fotos(fs),passos:[{m:'PUT',url:'/api/db/doc?path='+encodeURIComponent('rdo/'+F.id),corpo:r}]});}
+  if(t==='epi'){const f=o.func.find(x=>x.id===F.funcId);if(!f)return no('Escolha o colaborador.');const alm=f.almEpi,P=V167.pac,eps=[],us={};
+    for(const x of F.itens||[]){if(!x.prodId)continue;const p=P.epi.prods.find(z=>z.id===x.prodId);if(!p)return no('EPI sem saldo neste aparelho.');const q=v167Q(x.qtd||1);if(!(q>0))return no('Quantidade inválida.');
+      if(p.caVal&&p.caVal<dt)return no('O CA de '+p.nome+' está vencido: entrega bloqueada.');us[p.id]=(us[p.id]||0)+q;
+      if(us[p.id]>v167SaldoEpi(p.id,alm)+1e-9)return no('Sem saldo de '+p.nome+' no almoxarifado do colaborador. A transferência entre almoxarifados precisa de internet.');
+      eps.push({id:'ep'+F167.uuid().slice(0,18),funcId:f.id,prodId:p.id,qtd:q,almoxId:alm,entrega:dt,item:p.nome,tam:p.tam||'',ca:p.ca||'',caVal:p.caVal||''});}
+    if(!eps.length)return no('Escolha o EPI.');
+    const img=F.pads&&F.pads.epi,nome=String(F.nome||f.nome).trim();
+    const passos=[{m:'POST',url:'/api/epi163/entregas',corpo:{epis:eps}}].concat(img?eps.map(e=>({m:'POST',url:'/api/epi/assinar',corpo:{id:e.id,img,nome,disp:'Modo Campo (v167)'}})):[]); /* a assinatura pela rota de sempre (vira anexo restrito, com o hash) */
+    return v167Enfileira({tipo:'epi',epi:eps.map(e=>({prodId:e.prodId,almoxId:e.almoxId,qtd:e.qtd})),titulo:'Entrega de EPI · '+f.nome+' · '+eps.map(e=>e.item).join(', '),passos});}
+  if(t==='res'){if(!F.ini||!F.fim)return no('Informe a saída e o retorno previsto.');if(F.fim<=F.ini)return no('O retorno previsto tem de ser depois da saída.');if(String(F.destino||'').trim().length<2)return no('Informe o destino.');if(String(F.motivo||'').trim().length<3)return no('Informe o motivo.');
+    return v167Enfileira({tipo:'res',titulo:'Reserva · '+(F.veicId?v167Vn(F.veicId):'qualquer veículo')+' · '+v167Br(F.ini),passos:[{m:'POST',url:'/api/frota165/reserva',corpo:{veicId:F.veicId||'',cidade:F.veicId?'':F.cidade,ini:F.ini,fim:F.fim,projId:F.projId||'',destino:F.destino,motivo:F.motivo}}]});}
+  const ckOk=pre=>{const ck={};for(const [i,c] of (Fr.cfg.checklist||[]).entries()){const v=(F.ck||{})[i];if(!v)return {e:'Checklist: marque '+c+'.'};ck[c]=v;}if(Object.values(ck).includes('nok')&&String(F.ckObs||'').trim().length<3)return {e:'Checklist: descreva o problema.'};return {ck};};
+  const ftOk=pre=>{const ks=(Fr.fotos||[]).map(x=>pre+x[0]);if(Fr.cfg.fotosObrig){const f=(Fr.fotos||[]).find(x=>!(F.fotos||{})[pre+x[0]]);if(f)return {e:'Foto obrigatória: '+f[1].toLowerCase()+'.'};}const o2={};(Fr.fotos||[]).forEach(x=>{if((F.fotos||{})[pre+x[0]])o2[x[0]]='@foto:'+pre+x[0];});return {fotos:o2,ks:ks.filter(k=>(F.fotos||{})[k])};};
+  if(t==='sai'){const r=F.resId?Fr.minhaRes.find(x=>x.id===F.resId):null,vid=r?r.veicId:F.veicId,v=Fr.veics.find(x=>x.id===vid);if(!v)return no('Escolha o veículo.');
+    const km=v167Q(F.km);if(!(km>0))return no('Informe o km do painel.');if(km<(+v.km||0))return no('O km do painel ('+km+') é menor que o último registrado ('+v.km+').');if(!F.comb)return no('Marque o combustível.');
+    const c=ckOk();if(c.e)return no(c.e);const ft=ftOk('s_');if(ft.e)return no(ft.e);if(String(F.destino||'').trim().length<2)return no('Informe o destino.');if(!F.retPrev||F.retPrev<=dt+'T'+(F.hora||v167Hora()))return no('Informe o retorno previsto (depois da saída).');
+    const av=F.av&&String(F.av.desc||'').trim();if(av&&av.length<3)return no('Descreva a avaria.');if(av&&!(F.fotos||{}).avp)return no('Tire a foto da avaria.');
+    const corpo={resId:F.resId||'',veicId:F.resId?'':vid,funcId:F.funcId||'',data:dt,hora:F.hora||v167Hora(),km,comb:F.comb,ck:c.ck,ckObs:F.ckObs||'',fotos:ft.fotos,avPre:av?[{desc:av,foto:'@foto:avp',grave:!!F.av.grave}]:[],destino:F.destino,projId:F.projId||'',pass:F.pass||'',retPrev:F.retPrev};
+    return v167Enfileira({tipo:'sai',ref:F.resId?'vres:'+F.resId:'',veicId:vid,km,titulo:'Saída · '+v167Vn(vid)+' · '+v167Br(dt)+' '+corpo.hora,fotos:v167Fotos(ft.ks.concat(av?['avp']:[])),passos:[{m:'POST',url:'/api/frota165/saida',corpo}]});}
+  if(t==='ret'){const km=v167Q(F.km);if(!(km>0))return no('Informe o km de chegada.');if(km<(+F.kmSaida||0))return no('O km de chegada não pode ser menor que o da saída ('+F.kmSaida+').');if(!F.comb)return no('Marque o combustível.');
+    let c={ck:{}},ft={fotos:{},ks:[]};if(F.v165){c=ckOk();if(c.e)return no(c.e);ft=ftOk('r_');if(ft.e)return no(ft.e);}
+    const av=F.av&&String(F.av.desc||'').trim();if(av&&av.length<3)return no('Descreva a avaria.');if(av&&!(F.fotos||{}).avr)return no('Tire a foto da avaria.');
+    const corpo={vsaiId:F.dep?'@dep:saida.id':F.vsaiId,km,comb:F.comb,ck:c.ck,ckObs:F.ckObs||'',fotos:ft.fotos,avarias:av?[{desc:av,foto:'@foto:avr',grave:!!F.av.grave}]:[],data:dt,hora:F.hora||v167Hora(),obs:F.obs||''};
+    return v167Enfileira({tipo:'ret',ref:F.vsaiId?'vret:'+F.vsaiId:'',dep:F.dep||'',titulo:'Retorno · '+(F.titulo||'veículo'),fotos:v167Fotos(ft.ks.concat(av?['avr']:[])),passos:[{m:'POST',url:'/api/frota165/retorno',corpo}]});}
+  if(t==='gua'){if(!F.de)return no('Escolha quem entrega.');if(!F.para)return no('Escolha quem recebe.');const its=Object.entries(F.it||{}).filter(([k,x])=>x&&x.sel).map(([k,x])=>({fmovId:k,estado:x.estado||'Em funcionamento e limpo',acess:[]}));
+    if(!its.length)return no('Escolha as ferramentas.');const asP=v167Assin('para',F.nomePara);if(!asP||!asP.img)return no('Quem recebe assina (nome e assinatura).');
+    let asD=null,fk=[];if(F.ausente){if(String(F.testemunha||'').trim().length<3)return no('Informe a testemunha.');if(!(F.fotos||{}).g0)return no('Tire a foto das ferramentas.');fk=['g0','g1'].filter(k=>(F.fotos||{})[k]);}
+    else{asD=v167Assin('de',F.nomeDe);if(!asD||!asD.img)return no('Quem entrega assina (nome e assinatura).');}
+    const nm=id=>(o.func.find(f=>f.id===id)||{}).nome||'';
+    return v167Enfileira({tipo:'gua',titulo:'Guarda · '+nm(F.de)+' → '+nm(F.para)+' · '+its.length+' ferramenta(s)',fotos:v167Fotos(fk),passos:[{m:'POST',url:'/api/gua164/transferir',corpo:{projId:o.id,de:F.de,para:F.para,paraProj:o.id,data:dt,itens:its,assinDe:asD,assinPara:asP,ausente:!!F.ausente,testemunha:F.testemunha||'',fotos:fk.map(k=>'@foto:'+k)}}]});}
+};
+
+/* ---------- sair: avisa quando há registros não enviados; apaga o pacote e a fila da pessoa ---------- */
+window.__cgAntesSair=async()=>{const u=V167.uid||(typeof me!=='undefined'&&me.uid);if(!u)return true;const io=v167Io();let n=0;
+  try{n=(await F167.listar(io,u)).filter(x=>x.st!=='ok').length;}catch(e){}
+  const apaga=async()=>{try{await F167.apagarUsuario(io,u);if(!v167On())await io.put('meta','ultimo',{sair:true,em:Date.now()});}catch(e){}};
+  if(!n){await apaga();return true;}
+  return new Promise(ok=>{modal({title:'Registros não enviados',body:'<p style="margin:0 0 8px"><b>'+n+' registro(s)</b> feitos neste aparelho ainda não foram enviados ao servidor (ou ficaram com conflito).</p><p class="sub" style="margin:0">Se sair agora, eles serão <b>apagados deste aparelho</b> e não poderão ser recuperados. Para guardar, fique e envie quando houver internet.</p>',
+    foot:'<button class="btn pri" data-act="v167SairNao">Ficar e enviar depois</button><button class="btn dng" data-act="v167SairSim">Sair e apagar</button>',nofocus:true});
+    A.v167SairNao=()=>{closeModal();ok(false);};A.v167SairSim=async()=>{closeModal();await apaga();ok(true);};});};
+
+/* ---------- instalação (Android/Chrome) e service worker ---------- */
+if(typeof window!=='undefined'&&window.addEventListener){
+  window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();V167.inst=e;v167Pinta();});
+  window.addEventListener('appinstalled',()=>{V167.inst=null;v167Pinta();});
+  try{if(window.__SELFHOST&&navigator.serviceWorker&&window.isSecureContext!==false)navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(()=>{});}catch(e){}
+}
+/* ---------- tela no sistema (Minha área › Campo) e início ---------- */
+novaTab('v167campo','Campo (uso sem internet)','Minha área','meu','meu','meu');TAB_COLS.v167campo=[];
+if(typeof GS_SIN!=='undefined')GS_SIN.v167campo='campo offline sem internet celular app instalar recebimento obra diario epi veiculo saida retorno guarda romaneio pendencias envio';
+V.v167campo=()=>{if(!V167.ini&&store.mode==='db')setTimeout(v167Iniciar,0);return v167Html(false);};
+{const b0=boot;boot=async function(){
+  if(window.__SELFHOST){let db=null;try{db=window.claude&&window.claude.use?await window.claude.use('db'):null;}catch(e){db=null;}
+    if(!db&&window.__cgSemRede){try{render();}catch(e){}return v167Offline();}}
+  const r=await b0.apply(this,arguments);if(store.mode==='db'&&window.__SELFHOST)setTimeout(v167Iniciar,0);return r;};}
+const V167_CSS='<style>.v167{max-width:860px;margin:0 auto}.v167 .card.v167c{margin:0 0 12px}.v167 .btn{min-height:44px;padding-inline:14px}.v167 input,.v167 select,.v167 textarea{font-size:16px;min-height:44px}.v167 .fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.v167 .f.full{grid-column:1/-1}'+
+  '.v167menu{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 14px}.v167m{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:84px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--card,#fff);color:inherit;text-align:left;font:inherit;cursor:pointer}.v167m b{font-size:16px}.v167m small{color:var(--muted)}.v167m:disabled{opacity:.45;cursor:not-allowed}'+
+  '.v167st{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}.v167st1{font-weight:600}.v167st1.pos{color:var(--pos,#15803d)}.v167st1.neg,.v167 .neg{color:var(--neg,#b91c1c)}'+
+  '.v167it{padding:10px 0;border-top:1px solid var(--line)}.v167it:first-of-type{border-top:0}.v167it .t{font-weight:600;margin:0 0 6px;overflow-wrap:anywhere}.v167fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.v167foto{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px dashed var(--line);border-radius:8px}.v167foto img{width:100%;height:120px;object-fit:cover;border-radius:6px}.v167fl{font-size:13px;color:var(--muted)}'+
+  '.v167pad{margin:10px 0}.v167pad canvas{display:block;width:100%;max-width:600px;height:auto;aspect-ratio:3/1;border:1px dashed var(--line);border-radius:8px;background:#fff;touch-action:none}.v167pad .btn{margin-top:6px}.v167acts{justify-content:flex-start;flex-wrap:wrap;margin:8px 0 16px}.v167acts .btn.pri{min-width:220px}'+
+  '.v167li2{flex-wrap:wrap;gap:8px}.v167li2>div:first-child{flex:1 1 220px;min-width:0}.v167li2 .acts{margin-left:auto;flex-wrap:wrap}.v167lst{display:flex;flex-direction:column;gap:2px}.v167li{display:flex;gap:10px;align-items:center;min-height:44px;padding:4px 0}.v167li input{width:22px;height:22px;min-height:0}'+
+  '.v167chk{display:flex;align-items:center;gap:10px;min-height:44px}.v167chk input{width:22px;height:22px;min-height:0}.v167ck{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}.v167msg{margin-top:4px;font-size:13px}.v167volta{margin:0 0 8px}.v167nota{margin:0 0 12px}.v167ios{margin:0;padding-left:20px;line-height:1.6}'+
+  '.v167tb{width:100%}.v167tb td,.v167tb th{white-space:nowrap}.v167tb td:first-child{white-space:normal;min-width:140px}.v167on{margin:0 0 10px}'+
+  '.v167off{position:fixed;inset:0;z-index:45;overflow:auto;background:var(--bg,#f6f7f9);padding:calc(64px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}.v167top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0 0 12px}.v167marca{display:flex;gap:10px;align-items:center}.v167top .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.v167top .pill{align-self:center;white-space:nowrap}.v167marca small{display:block;color:var(--muted)}'+
+  '.v167aviso{position:fixed;left:16px;right:16px;margin:0 auto;width:fit-content;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:46;max-width:calc(100vw - 32px);padding:10px 16px;min-height:44px;border-radius:22px;border:0;background:#1f4fd8;color:#fff;font:600 14px/1.25 system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer;white-space:normal;text-align:center}.v167aviso.topo{top:calc(10px + env(safe-area-inset-top,0px));bottom:auto}.v167aviso.off{background:#9a3412}.v167aviso.neg{background:#b91c1c}'+
+  '@media (max-width:600px){.v167 .fg{grid-template-columns:1fr 1fr}.v167 .ph{flex-wrap:wrap}.v167acts .btn.pri{width:100%}.v167menu{grid-template-columns:1fr 1fr}}@media (max-width:380px){.v167 .fg{grid-template-columns:1fr}}</style>';
+if(typeof document!=='undefined'&&document.head&&document.head.insertAdjacentHTML)try{document.head.insertAdjacentHTML('beforeend',V167_CSS);}catch(e){}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='166',APP_DATA='2026-11-07';
+const APP_VER='167',APP_DATA='2026-11-07';
 const CHANGELOG=[
+  ['167','2026-11-07',['O sistema pode ser instalado no celular como um aplicativo (Android e iPhone), sem loja: botão "Instalar o app" no Android e as instruções do iPhone (Compartilhar › Adicionar à Tela de Início).', 'Novo modo Campo em Minha área: recebimento na obra, diário de obra, entrega de EPI, material na obra, veículo e transferência de guarda numa tela feita para o celular.', 'O modo Campo funciona sem internet: sem conexão, o app abre direto no Campo com os dados baixados no aparelho.', 'Botão "Preparar para uso sem internet": baixa só o necessário das suas obras (pedidos e romaneios a receber, colaboradores, EPI com saldo, material da obra, ferramentas e os veículos que você usa). Com internet, os dados se atualizam sozinhos.', 'Recebimento na obra sem internet: entrega direta do fornecedor e o romaneio de retirada com veículo próprio, com fotos da nota e do material, avarias com foto e assinatura de quem recebeu.', 'Confirmação do recebimento do romaneio e da separação na obra sem internet, com a assinatura da ficha de entrega das ferramentas.', 'Diário de obra sem internet, com o efetivo puxado dos colaboradores da obra e fotos tiradas pela câmera.', 'Entrega de EPI na obra sem internet, só com o estoque que já está no almoxarifado do colaborador. A transferência entre almoxarifados continua precisando de internet, e a tela avisa.', 'Veículo sem internet: reserva, saída e retorno com km, combustível, checklist, fotos e avarias; o retorno de uma saída feita sem internet vai na ordem certa.', 'Tudo o que é feito sem internet fica numa fila no aparelho e é enviado quando a conexão volta, ao abrir o app e, no Android, mesmo com o app fechado.', 'O mesmo registro nunca é gravado duas vezes, mesmo que o envio caia no meio: fotos sobem primeiro, depois o registro.', 'Conflitos aparecem para você e nada é sobrescrito: por exemplo, recebimento já feito por outra pessoa, veículo que já saiu com outro condutor ou EPI sem saldo. O servidor confere tudo de novo.', 'Aviso "Sem internet — N registro(s) aguardando envio" e a tela Pendências de envio, com o motivo de cada recusa, "Tentar de novo" e "Descartar".', 'Se a sessão vencer sem internet, a fila fica guardada e o app pede para entrar de novo antes de enviar.', 'Sair apaga do aparelho os dados do modo Campo e avisa antes quando há registros ainda não enviados. Folha, salários e documentos do RH nunca ficam no aparelho.']],
   ['166','2026-11-07',['Novo menu Terceiros: painel, empresas terceiras, conferência de documentos e locações de equipamentos. O terceiro é o próprio fornecedor do cadastro (nada é duplicado).', 'Documentos da empresa terceira com tipo, arquivo, emissão e validade: contrato social, cartão CNPJ, CND federal, CRF do FGTS, CNDT, certidões estadual e municipal, seguro, alvará e outros. Cada certidão tem o botão para consultar no site oficial.', 'Avisos de vencimento dos documentos (30, 15 e 0 dias, configurável) no chat da Central de Gestão para o RH, a SST e Compras.', 'Obrigações do mês por contrato: folha, guia e comprovante do FGTS e do INSS (DCTFWeb/eSocial), holerites e ponto dos trabalhadores da obra, com situação entregue, aprovado, pendente ou recusado (com motivo).', 'Trabalhadores do terceiro: registro (CTPS digital ou eSocial), ASO, NRs exigidas pela função (configurável: NR-18 para todos, NR-11 e NR-12 para operador, NR-35 para montador), CNH do operador, integração e ficha de EPI, cada um com arquivo e validade. O CPF aparece mascarado.', 'Cada trabalhador fica "Liberado" ou "Não liberado" por obra. O diário de obra recusa trabalhador não liberado (o SST ou o Administrador liberam com justificativa) e a lista do efetivo mostra quem não está liberado.', 'Locação de equipamentos sem operador e com operador: equipamento, nº de série ou patrimônio, obra, período, valor por dia, semana ou mês, franquia de horas, hora excedente e quem paga a manutenção.', 'Retirada com vistoria, fotos, horímetro e responsável; guarda na obra com responsável e local, e transferência entre obras registrada; devolução com vistoria, avarias com foto, horímetro e horas usadas.', 'Alertas da locação: alguns dias antes do fim do período (padrão 3, para não pagar dias a mais) e devolução atrasada.', 'O custo da locação entra só pela nota do locador: a conciliação liga a nota ao contrato, ao equipamento e à obra e mostra o valor previsto (dias × valor + horas excedentes) ao lado do valor da nota.', 'Na locação com operador, o operador é trabalhador do terceiro e as horas do equipamento são lançadas no diário de obra.', 'Contratos de empreiteiros (serviços como impermeabilização) usam os mesmos documentos da empresa, os trabalhadores e as obrigações do mês: não há um tipo de contrato novo.', 'Pagamento "Bloqueado por documentação": a medição ou a nota do terceiro não é paga, aprovada nem baixada (o servidor recusa) com documento da empresa vencido, obrigação do mês não aprovada ou trabalhador não liberado, e a tela mostra exatamente o que falta.', 'Só o Administrador libera um pagamento bloqueado, com justificativa obrigatória que fica na auditoria e aparece na conta.', 'Link para o terceiro enviar documentos, sem senha e sem acesso ao sistema: validade de 30 dias, pode ser revogado, aceita PDF, JPG e PNG, e cada envio fica "aguardando conferência" para o RH ou a SST aprovar ou recusar. A mensagem pronta vai por WhatsApp ou e-mail.']],
   ['165','2026-11-06',['Frota: reserva, saída e retorno agora são telas separadas, feitas para o celular. O condutor pede o veículo (ou "qualquer disponível na minha cidade") com data, hora, retorno previsto, destino e motivo.', 'Cada veículo tem a Cidade/base (Tuiuti ou São Paulo; a lista é configurável) e cada cidade tem um Responsável pela frota com substituto (Configurações › Frota). O responsável aprova, troca o veículo ou recusa a reserva com o motivo, e só vê e gere os veículos da cidade dele.', 'Duas reservas aprovadas no mesmo horário para o mesmo veículo são recusadas. Saída sem reserva só pelo responsável da cidade ou pelo Administrador (a configuração pode liberar).', 'Saída do veículo: escolha pela reserva aprovada, pela lista ou pelo QR do veículo (etiqueta para imprimir em Frota › Veículos), com km do painel, combustível (vazio a cheio), checklist configurável, fotos dos 4 lados e do painel e as avarias que já estavam no veículo. O veículo fica "Em uso por" o condutor.', 'A saída é bloqueada com CNH vencida ou de categoria errada, condutor não autorizado, veículo em manutenção ou com avaria grave aberta, e o motivo aparece na tela.', 'Retorno do veículo: só as saídas abertas da própria pessoa (o responsável vê as da cidade), km de chegada e km rodados, combustível na chegada (até 1/4 gera alerta), checklist, fotos, avarias novas com foto e o abastecimento da viagem com a foto do cupom. Atraso avisa o condutor e o responsável.', 'Painel da frota por cidade: disponíveis, em uso (quem e desde quando), manutenção, retornos atrasados, combustível baixo, avarias novas (abrir a manutenção num toque), reservas pendentes, vencimentos, CNHs e condutores bloqueados.', 'Multas: o cadastro mostra quem estava com o veículo na data e hora da infração e sugere esse condutor.', 'Condutores: nova coluna Autorização (Autorizado, Vence em breve, Bloqueado, Não autorizado), com quem autorizou, validade, tipos de veículo, cidade ou veículos, requisitos (CNH, EAR, exame toxicológico, cursos) e o termo de responsabilidade assinado. Desligados ficam escondidos; desligamento revoga e afastamento suspende a autorização.', 'Os condutores que saíram com veículo nos últimos 90 dias entram como "Autorizado (migração)" por 30 dias, para o Administrador confirmar; os demais começam como "Não autorizado".', 'Abastecimentos: importação do "Relatório Utilização Combustível" da Sem Parar (.xls), com prévia por linha (novo, já importado, casado com recibo, com alerta). Repetir a importação não duplica.', 'Conferências automáticas: km negativo, km alto ou dígito a mais no hodômetro, km baixo e dois abastecimentos no mesmo dia, hodômetro e motorista diferentes da saída, abastecimento sem saída, combustível errado, litros acima do tanque, preço acima da mediana e queda de km/l.', 'Foto do cupom no retorno ou no abastecimento: a IA lê placa, km, litros, valor, AUT e NSU para o condutor conferir; o abastecimento fica provisório até o relatório e vira confirmado quando casa com a linha.', 'O responsável pela cidade ou o Administrador de frota corrige o hodômetro com motivo; o consumo e os alertas usam o valor corrigido e o original fica no histórico.', 'Fatura da Sem Parar: compara o importado do mês com a fatura e lança uma conta a pagar só, com o rateio por obra (sem saída, custo geral da frota da cidade).']],
   ['164','2026-11-06',['Solicitação de compra recebida: quem pediu recebe o aviso no chat (Central de Gestão), na lista de pendências e por e-mail quando o envio está configurado, com o que chegou, o que falta e onde retirar (almoxarifado e prateleira) ou "entregue na obra".', 'Recebimento parcial avisa o que chegou e o que falta; o restante gera um aviso novo. O botão "Recebi / retirei" conclui a SC e registra quem retirou e quando; o almoxarife também pode registrar pela pessoa. Depois de 3 dias sem retirada, a pessoa e o almoxarife recebem um lembrete.', 'Lista de SC com as situações Comprada, A caminho, Recebida – aguardando retirada e Concluída.', 'Lote e validade: produto com controle de lote tem saldo por almoxarifado e lote. A entrada pede o lote e a validade (a NF-e já traz os lotes do grupo rastro); sem validade, o sistema calcula pelos dias de validade do produto.', 'Saídas, transferências, romaneios e entrega de EPI usam primeiro o lote que vence antes (FEFO). Lote vencido não sai, a não ser como perda ou descarte com motivo. O saldo antigo fica no lote SEM-LOTE, para identificar no inventário.', 'Nova tela Estoque › Lotes e validades: lotes vencidos e que vencem em 30, 60 e 90 dias por almoxarifado, com o valor em risco, a baixa do vencido como perda, o inventário por lote e a rastreabilidade de cada lote.', 'Pedido de compra com o campo Entrega: no almoxarifado, direto na obra (o endereço da obra vai no pedido) ou retirada com veículo próprio (cria a saída do veículo na frota). Obras › Recebimentos pendentes desta obra: o encarregado ou o responsável pela obra confere item a item, fotografa a nota e o material, registra falta e avaria e assina.', 'Falta e avaria no recebimento na obra avisam o comprador e ficam como pendência com o fornecedor (Suprimentos › Pendências com fornecedores). O material entra e sai como consumo da obra, com o custo do pedido; a nota só é liberada com o recebimento na obra.', 'Desconto no pedido de compra em % ou em R$, no item e no pedido inteiro. O desconto do pedido é rateado pelos itens no custo do estoque e aparece no PDF, no aceite do fornecedor, na nota e nas contas a pagar.', 'O responsável pela obra é preenchido sozinho ao escolher o projeto (etapa da EAP, diário, romaneio, devolução, não conformidade, termo de recebimento, PGR, plano de ação e recebimento na obra). Equipamentos com acessórios, garantia, nota de compra e calibração. O retorno pelo cartão do quadro já abre no item; estados novos: em funcionamento e limpo / e sujo.', 'Nova tela Obras › Material na obra: o que foi enviado, devolvido, transferido e consumido em cada obra, com o saldo e o detalhe de cada envio. A devolução sai do saldo, pelo custo do envio; transferência entre obras leva o custo junto.', 'Romaneio novo só transporta: material por separação (o produto avulso vira separação rápida), ferramenta por Envio de ferramentas e volumes avulsos. A obra recebe e assina (com os acessórios); romaneio de retorno leva sobras e ferramentas de volta ao almoxarifado.', 'Devolução de obra com motivo e estado por item: avariado vai para a quarentena; outros destinos (outra obra, fornecedor, descarte na obra); conferência às cegas no almoxarifado. A obra só é encerrada com o saldo zerado, salvo liberação do Administrador com justificativa.', 'Transferência de guarda das ferramentas na obra entre responsáveis, com checagem conjunta, as duas assinaturas, ficha de entrega e termo de devolução da guarda. Desligamento, afastamento ou mudança de obra de quem tem ferramentas avisa o RH e o almoxarife.', 'Corrigido: no romaneio, o Almoxarife via a lista de veículos vazia. Agora vê os veículos ativos (só placa, modelo, tipo, situação e capacidade, sem valores nem documentos).']],

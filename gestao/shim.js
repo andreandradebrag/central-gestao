@@ -19,7 +19,7 @@
       });
     }, function () { throw erro('unavailable', 'Sem conexão com o servidor.'); });
   }
-  function eu() { if (!euP) euP = api('GET', '/api/eu').then(function (j) { EU = j; persIniciar(j); return j; }); return euP; }
+  function eu() { if (!euP) euP = api('GET', '/api/eu').then(function (j) { EU = j; persIniciar(j); return j; }, function (e) { if (e && e.code === 'unavailable') window.__cgSemRede = true; throw e; }); return euP; } /* v167: sem rede, o app abre o modo Campo */
   var clone = function (o) { return o == null ? o : JSON.parse(JSON.stringify(o)); };
   var META = { fromCache: false, hasPendingWrites: false };
   function docSnap(id, data) { return { id: id, exists: data != null, data: function () { return data == null ? undefined : clone(data); }, metadata: META }; }
@@ -169,7 +169,7 @@
   /* sair: apaga a cópia local antes de encerrar a sessão; recarregar tudo: esquece as revisões e lê de novo do zero */
   window.__cgSair = function () { return persLimpar().catch(function () { }); };
   window.__cgRecarregarDados = function () { CC.clear(); colSubs.forEach(function (set) { set.forEach(function (sub) { sub.rev = null; }); }); return persLimpar().then(function () { if (EU) persIniciar(EU); ressinc(); }); };
-  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('click', function (e) { var a = e.target && e.target.closest && e.target.closest('a[href="/sair"]'); if (!a) return; e.preventDefault(); window.__cgSair().then(function () { location.href = '/sair'; }); }, true);
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('click', function (e) { var a = e.target && e.target.closest && e.target.closest('a[href="/sair"]'); if (!a) return; e.preventDefault(); Promise.resolve().then(function () { return window.__cgAntesSair ? window.__cgAntesSair() : true; }).catch(function () { return true; }).then(function (ok) { if (ok === false) return; window.__cgSair().then(function () { location.href = '/sair'; }); }); }, true); /* v167: o modo Campo avisa antes de apagar registros não enviados */
   function query(q) {
     var o = {
       where: function (f, op, v) { return query(Object.assign({}, q, { where: q.where.concat([[f, op, v]]) })); },

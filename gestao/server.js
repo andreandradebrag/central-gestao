@@ -538,7 +538,8 @@ function estatico(req, res, arq) {
   const h = { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': ext === '.html' ? 'no-store' : 'private, max-age=3600', 'accept-ranges': 'bytes' };
   if (range && /^bytes=\d*-\d*$/.test(range)) { let [a, b] = range.slice(6).split('-'); a = a ? +a : st.size - +b; b = b && range.slice(6)[0] !== '-' ? Math.min(+b, st.size - 1) : st.size - 1; if (!(a >= 0 && a <= b && a < st.size)) { res.writeHead(416, { 'content-range': 'bytes */' + st.size }); res.end(); return true; } res.writeHead(206, Object.assign(h, { 'content-range': 'bytes ' + a + '-' + b + '/' + st.size, 'content-length': b - a + 1 })); fs.createReadStream(p, { start: a, end: b }).pipe(res); return true; }
   if (arq === 'index.html') h['content-security-policy'] = cspApp(p, st);
-  if (C159.estatico(req, res, p, st, ext, h, arq === 'index.html')) return true; /* v159: brotli/gzip conforme o navegador, ETag e 304; a página fica no-cache (sempre confere) */
+  if (arq === 'sw.js') Object.assign(h, { 'service-worker-allowed': '/', 'content-security-policy': "default-src 'self'" }); /* v167: service worker do app (escopo /; sempre confere a versão) */
+  if (C159.estatico(req, res, p, st, ext, h, arq === 'index.html' || arq === 'sw.js')) return true; /* v159: brotli/gzip conforme o navegador, ETag e 304; a página fica no-cache (sempre confere) */
   res.writeHead(200, Object.assign(h, { 'content-length': st.size })); fs.createReadStream(p).pipe(res); return true;
 }
 /* política de conteúdo do sistema: só roda o script da própria página (pelo hash) e as bibliotecas da cdnjs */
@@ -687,6 +688,7 @@ async function rotear(req, res) {
     tentativas.delete('e:' + String(c.email || '').toLowerCase()); END.loginDesbloquear(c.email, []); /* v130.1: senha nova zera o atraso do e-mail */
     return html(res, 200, pag('Senha criada', '<div class="card" style="max-width:420px;margin:40px auto"><h1>Senha salva</h1><div class="msg">Pronto. Agora entre com o seu e-mail e a senha nova.</div><a class="btn pri" href="/login" style="display:block;text-align:center">Ir para o login</a></div>'));
   }
+  if ((m === 'GET' || m === 'HEAD') && (p === '/sw.js' || p === '/manifest.webmanifest' || /^\/icones\/[a-z0-9-]{1,40}\.png$/.test(p)) && estatico(req, res, p.slice(1))) return; /* v167: app instalável — o navegador busca o service worker, o manifest e os ícones sem login */
   if (await REG.rotaPublica(p, m, req, res)) return; /* v111: pesquisa de satisfação respondida pelo cliente (link de uso único) */
   const conta = contaDa(req);
   if (!conta) { if (p.startsWith('/api/') || p.startsWith('/_blob/')) return json(res, 401, { erro: 'Entre novamente.' }); return redir(res, semContas ? '/setup' : '/login'); }
@@ -710,6 +712,7 @@ async function rotear(req, res) {
     return redir(res, '/conta/trocar-senha');
   }
   if (await END.antes(req, res, conta, p, m, u)) return; /* 2FA obrigatória, reautenticação, bibliotecas locais, cota de anexos */
+  if (await REG.campo167(req, res, conta, p, m, u)) return; /* v167: registro feito sem internet (x-cg-cid): o mesmo registro nunca é gravado duas vezes (campo167.js) */
 
   /* ---- segurança da própria conta: duas etapas, aparelhos, senha ---- */
   if (p === '/conta/seguranca' && m === 'GET') return html(res, 200, pagSeguranca(conta, req, ...END.msg(u)));

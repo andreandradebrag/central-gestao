@@ -697,5 +697,5 @@ module.exports = function (X) {
     json(res, 404, { code: 'not_found', erro: 'Rota não encontrada.' }); return true;
   }
   const COLS = new Set(['veic', 'vsai', 'sc', 'mov', 'ped', 'rom', 'proj', 'fmov', 'ferr', 'rec164', 'mob164', 'gua164', 'pend164']); /* depois: também func, desl e afast (aviso de ferramentas sob guarda) */
-  return { COLS, saldoObra, antesRom, razaoSrv, podeObra, saldosLote, gravarLote, antes, antesExcluir, depois, rota, lembrar, progresso, avisarChat };
+  return { COLS, saldoObra, antesRom, razaoSrv, podeObra, saldosLote, rotaPendentes, gravarLote, antes, antesExcluir, depois, rota, lembrar, progresso, avisarChat };
 };
