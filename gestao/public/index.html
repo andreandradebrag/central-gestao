@@ -33394,9 +33394,939 @@ function alertasV164Gua(){if(isColab()||!(mayR('rh')||mayR('ferr')))return [];co
 const V164_VEIC_MIN=['id','placa','modelo','marca','tipo','status','cidade','base','local','capacidade','capKg','capM3','lotacao','ts','ex'];
 ['almoxarife','almoxfab'].forEach(k=>{const p=PERFIS[k];if(p&&!p.custom)p.leMin=Object.assign({},p.leMin||{},{veic:V164_VEIC_MIN.slice()});});
 
+/* ===== v165: frota — reserva, saída e retorno em telas separadas, cidade/base e responsável da frota por cidade, autorização
+   do condutor, relatório da Sem Parar (rede CTF), recibo lido pela IA, conferências e fatura do mês (relatorios/feito_v165.md) =====
+   Regras e contas: V165C (deploy/gestao/frota165.js, o MESMO arquivo do servidor, embutido pelo patch147.py). No servidor
+   próprio as telas usam as rotas /api/frota165/* (ajuste165.js), que conferem tudo de novo; sem servidor (modo local), as
+   mesmas funções gravam direto. Telas (celular primeiro; o estado do formulário fica num objeto simples, V165.f, pronto para
+   a versão sem internet da v166):
+     v165res  Reservar veículo (condutor) e Reservas para aprovar (responsável da cidade)
+     v165sai  Saída do veículo (da reserva aprovada, da lista ou pelo QR do veículo) com checklist, combustível, fotos, avarias
+     v165ret  Retorno do veículo (as saídas abertas do condutor; o responsável vê as da cidade) com abastecimento e recibo
+     v165pn   Painel da frota por cidade
+     v165imp  Importar relatório da Sem Parar (Frota › Abastecimentos)
+     v165fat  Fatura da Sem Parar (Frota e Financeiro)
+   Condutores (v158cond) ganha a coluna Autorização, o registro de autorização e os filtros. Prefixos v165*, V165*. */
+/* frota165.js (deploy/gestao): as mesmas regras e contas do servidor */
+const V165C=(function(){const module={exports:{}};
+'use strict';
+/* v165 (relatorios/feito_v165.md): núcleo da frota — reserva, saída, retorno, cidade/base, responsável da cidade, autorização
+   do condutor, relatório da Sem Parar (CTF), recibo, conferências, consumo, painel por cidade e fatura do mês.
+   O MESMO arquivo roda no servidor (ajuste165.js) e no navegador (patch147.py embute este texto em new_v165.js como V165C),
+   para as regras e as contas darem igual dos dois lados. Só funções puras: quem chama entrega o contexto X:
+     X = { veic, vsai, vres, vaut, vav, vabas, vman, func, afast: arrays; cfg: cfg/empresa.frota165; mig: marca da migração;
+           hoje: 'AAAA-MM-DD', agora: 'AAAA-MM-DDTHH:MM' (hora de Brasília) }
+   e "quem": { uid, funcId, admin, frotaTodos, frotaW, nome }. As funções que gravam devolvem { erro } ou { docs:[{c,d}] }. */
+const r2 = v => Math.round((+v || 0) * 100) / 100;
+const r1 = v => Math.round((+v || 0) * 10) / 10;
+const s = v => v == null ? '' : String(v);
+const norm = t => s(t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const placaN = p => s(p).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const digitos = v => s(v).replace(/\D/g, '');
+const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(s(d));
+const dtOk = d => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s(d));
+const dt = (d, h) => dataOk(d) ? d + 'T' + (/^\d{2}:\d{2}/.test(s(h)) ? s(h).slice(0, 5) : '00:00') : '';
+const maisDias = (d, n) => new Date(Date.parse(s(d).slice(0, 10) + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+const difDias = (a, b) => Math.round((Date.parse(s(a).slice(0, 10) + 'T12:00:00Z') - Date.parse(s(b).slice(0, 10) + 'T12:00:00Z')) / 864e5);
+const minutos = (a, b) => Math.round((Date.parse(s(a) + ':00Z') - Date.parse(s(b) + ':00Z')) / 6e4);
+const br = d => dataOk(s(d).slice(0, 10)) ? s(d).slice(8, 10) + '/' + s(d).slice(5, 7) + '/' + s(d).slice(0, 4) : '';
+const brDt = v => dtOk(v) ? br(v) + ' ' + v.slice(11, 16) : br(v);
+const uniq = a => [...new Set(a.filter(Boolean))];
+/* número em texto brasileiro ("1.234,56", "-12", "55.421") ou número */
+function num(v) {
+  if (v === null || v === undefined || v === '') return null; if (typeof v === 'number') return isFinite(v) ? v : null;
+  let t = s(v).trim().replace(/[^\d,.\-]/g, ''); if (!t || t === '-') return null;
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.'); else if ((t.match(/\./g) || []).length > 1 || /\.\d{3}$/.test(t)) t = t.replace(/\./g, '');
+  const n = parseFloat(t); return isFinite(n) ? n : null;
+}
+
+/* ---------------------------------------------------------------- configuração */
+const TIPOS = [['leve', 'Leve (carro)'], ['utilitario', 'Utilitário / van'], ['caminhao', 'Caminhão'], ['maquina', 'Máquina / empilhadeira']];
+const CURSOS = { dd: 'Direção defensiva', nr11: 'NR-11 (máquinas e empilhadeiras)' };
+const CK_PAD = ['Pneus', 'Luzes', 'Documentos', 'Triângulo', 'Macaco', 'Estepe', 'Limpeza'];
+const FOTOS = [['frente', 'Frente'], ['tras', 'Traseira'], ['esq', 'Lado esquerdo'], ['dir', 'Lado direito'], ['painel', 'Painel (km e combustível)']];
+const COMB4 = [['0', 'Vazio'], ['1/4', '1/4'], ['1/2', '1/2'], ['3/4', '3/4'], ['1', 'Cheio']];
+const COMB8 = [['0', 'Vazio'], ['1/8', '1/8'], ['1/4', '1/4'], ['3/8', '3/8'], ['1/2', '1/2'], ['5/8', '5/8'], ['3/4', '3/4'], ['7/8', '7/8'], ['1', 'Cheio']];
+const fracN = f => { const t = s(f); if (t === '1') return 1; if (t === '0') return 0; const m = /^(\d)\/(\d)$/.exec(t); return m ? +m[1] / +m[2] : null; };
+const combNome = f => (COMB8.find(x => x[0] === s(f)) || [0, s(f) || '—'])[1];
+function cfgPad(c) {
+  c = c && typeof c === 'object' ? c : {};
+  const o = Object.assign({ cidades: ['Tuiuti', 'São Paulo'], resp: {}, saidaDireta: false, fotosObrig: true, frac8: false, checklist: CK_PAD.slice(),
+    diasAviso: 30, autMeses: 12, quedaKmlPct: 20, kmMax: 2000, kmMin: 20, tolKm: 50, precoPct: 15, exigeRecibo: false, tolMatchDias: 1, tolLitros: 0.5, tolValor: 0.5,
+    reqTipo: { leve: { cat: 'B', cursos: [] }, utilitario: { cat: 'B', cursos: ['dd'] }, caminhao: { cat: 'C', cursos: ['dd'] }, maquina: { cat: 'B', cursos: ['nr11'] } } }, c);
+  if (!Array.isArray(o.cidades) || !o.cidades.length) o.cidades = ['Tuiuti', 'São Paulo'];
+  o.cidades = uniq(o.cidades.map(x => s(x).trim()).filter(Boolean)).slice(0, 30);
+  if (!Array.isArray(o.checklist) || !o.checklist.length) o.checklist = CK_PAD.slice();
+  o.resp = o.resp && typeof o.resp === 'object' ? o.resp : {};
+  return o;
+}
+const combOpts = cfg => cfg.frac8 ? COMB8 : COMB4;
+/* responsáveis da cidade (titular e substituto) e as cidades de uma pessoa */
+const respDe = (cfg, cidade) => { const r = (cfg.resp || {})[cidade] || {}; return uniq([r.uid, r.sub]); };
+const cidadesDe = (cfg, uid) => !uid ? [] : cfg.cidades.filter(c => respDe(cfg, c).includes(uid));
+/* escopo de cidades de quem: null = todas; Set = só estas. ver: o que a tela mostra (o frotaadm que é responsável começa na
+   cidade dele e pode ver todas); gerir: o que o servidor deixa aprovar e alterar */
+function escopo(cfg, quem, ver) {
+  if (!quem) return new Set();
+  if (quem.admin) return null;
+  const cs = cidadesDe(cfg, quem.uid);
+  if (cs.length) return quem.frotaTodos && (!ver || quem.todas) ? null : new Set(cs);
+  return quem.frotaTodos || quem.frotaW ? null : new Set();
+}
+const ehResp = (cfg, quem, cidade) => { const e = escopo(cfg, quem, false); return e === null || e.has(cidade); };
+/* aprovar reserva e saída sem reserva: Administrador, Administrador de frota e o responsável da cidade (não basta gravar a frota) */
+const podeAprovar = (cfg, quem, cidade) => !!(quem && (quem.admin || quem.frotaTodos || cidadesDe(cfg, quem.uid).includes(cidade)));
+
+/* ---------------------------------------------------------------- veículo */
+const cidadeDe = v => s(v && (v.cidade || v.base));
+function tipoDe(v) {
+  if (!v) return 'leve'; if (v.tipoAut && TIPOS.some(t => t[0] === v.tipoAut)) return v.tipoAut;
+  const t = norm(v.tipo); return t.startsWith('caminh') ? 'caminhao' : t.startsWith('maquin') || t.startsWith('empilh') ? 'maquina' : t.startsWith('utilit') || t === 'van' ? 'utilitario' : 'leve';
+}
+const tipoNome = t => (TIPOS.find(x => x[0] === t) || [0, t])[1];
+/* combustíveis que o veículo aceita (Flex: gasolina e etanol) */
+function combAceita(v, tipoComb) {
+  const c = norm(v && v.combustivel), t = norm(tipoComb); if (!c || !t) return true;
+  const fam = /diesel|s-?10|s-?500/.test(t) ? 'diesel' : /etanol|alcool/.test(t) ? 'etanol' : /gasolina/.test(t) ? 'gasolina' : /gnv|gas natural/.test(t) ? 'gnv' : /arla/.test(t) ? 'arla' : 'outro';
+  if (fam === 'arla' || fam === 'outro') return true;
+  if (c === 'flex') return fam === 'gasolina' || fam === 'etanol';
+  if (c.startsWith('diesel')) return fam === 'diesel';
+  if (c.startsWith('gasolina')) return fam === 'gasolina';
+  if (c.startsWith('etanol')) return fam === 'etanol';
+  if (c.startsWith('gnv')) return fam === 'gnv' || fam === 'gasolina';
+  if (c.startsWith('eletr')) return false;
+  return true;
+}
+const saidaAberta = (X, vid) => (X.vsai || []).find(x => x.veicId === vid && !x.retornoEm) || null;
+const avariaGrave = (X, vid) => (X.vav || []).find(a => a.veicId === vid && a.grave && a.st !== 'resolvida') || null;
+const manutAberta = (X, v) => v.status === 'oficina' || (X.vman || []).some(m => m.veicId === v.id && m.status === 'agendada' && s(m.data) <= X.hoje && m.parado165 !== false);
+/* situação: disp | uso | manut | grave | baixado */
+function veicSit(X, v) {
+  if (!v) return { k: 'baixado', txt: 'Veículo não encontrado' };
+  if (v.status === 'baixado') return { k: 'baixado', txt: 'Baixado' };
+  const sa = saidaAberta(X, v.id);
+  if (sa) return { k: 'uso', txt: 'Em uso por ' + nomeFunc(X, sa.funcId), s: sa };
+  if (manutAberta(X, v)) return { k: 'manut', txt: 'Em manutenção' };
+  const g = avariaGrave(X, v.id); if (g) return { k: 'grave', txt: 'Avaria grave aberta: ' + s(g.desc).slice(0, 60), av: g };
+  return { k: 'disp', txt: 'Disponível' };
+}
+const nomeFunc = (X, id) => { const f = (X.func || []).find(x => x.id === id); return f ? s(f.nome) : '—'; };
+/* km conhecido mais alto do veículo (saídas, retornos e abastecimentos), sem o registro "exceto" */
+function kmUlt(X, vid, exceto) {
+  let k = 0; const v = (X.veic || []).find(x => x.id === vid); if (v) k = +v.kmInicial || 0;
+  for (const x of X.vsai || []) if (x.veicId === vid && x.id !== exceto) k = Math.max(k, +x.kmSaida || 0, +x.kmRetorno || 0);
+  return k;
+}
+
+/* ---------------------------------------------------------------- autorização do condutor */
+const ORD = ['A', 'B', 'C', 'D', 'E'];
+/* CNH: C, D e E incluem B; D inclui C; E inclui C e D */
+function catOk(cnhCat, precisa) {
+  const c = s(cnhCat).toUpperCase().replace(/[^A-E]/g, ''), p = s(precisa).toUpperCase(); if (!p) return true; if (!c) return false;
+  if (p === 'A') return c.includes('A');
+  const mx = Math.max(...c.split('').filter(x => x !== 'A').map(x => ORD.indexOf(x)), -1);
+  return mx >= ORD.indexOf(p);
+}
+const precisaTox = cnhCat => /[CDE]/.test(s(cnhCat).toUpperCase());
+const temCnh = f => !!(f && (f.cnhNum || f.cnhCat));
+/* afastamento vigente (registro de afastamento ativo hoje ou cadastro "afastado") */
+function afastado(X, f) {
+  if (!f) return false; if (f.status === 'afastado') return true;
+  return (X.afast || []).some(a => a.funcId === f.id && !['encerrado', 'cancelado'].includes(a.status) && dataOk(a.ini) && a.ini <= X.hoje && maisDias(a.ini, Math.max(1, +a.dias || 1) - 1) >= X.hoje && (!a.retorno || a.retorno > X.hoje));
+}
+const autDe = (X, funcId) => (X.vaut || []).find(a => a.funcId === funcId || a.id === funcId) || null;
+/* migração (v165): sem registro de autorização, quem saiu com veículo nos 90 dias antes da migração entra como
+   "Autorizado (migração)" por 30 dias. No servidor a migração grava os registros (X.mig existe); no navegador sem servidor
+   a mesma regra é calculada. */
+function autVirtual(X, f) {
+  if (X.mig || !f || !temCnh(f)) return null;
+  const ini = maisDias(X.hoje, -90);
+  if (!(X.vsai || []).some(x => x.funcId === f.id && s(x.saidaEm) >= ini)) return null;
+  return { id: f.id, funcId: f.id, st: 'ativa', migracao: true, validade: maisDias(X.hoje, 30), tipos: tiposMig(X.cfg, f.cnhCat), virtual: true };
+}
+/* tipos da migração: os que a CNH permite e que não pedem curso (o Administrador confirma e completa depois) */
+const tiposMig = (cfg, cnhCat) => { const l = TIPOS.map(t => t[0]).filter(t => { const r = (cfg.reqTipo || {})[t] || {}; return catOk(cnhCat, r.cat || 'B') && !(r.cursos || []).length; }); return l.length ? l : ['leve']; };
+/* status calculado: aut (Autorizado, verde) | vence (Vence em breve, amarelo) | bloq (Bloqueado, vermelho) | nao (Não autorizado, cinza) */
+function autSit(X, f, a) {
+  const cfg = X.cfg, h = X.hoje, lim = maisDias(h, +cfg.diasAviso || 30), mot = [], venc = [];
+  if (a === undefined) a = f ? (autDe(X, f.id) || autVirtual(X, f)) : null;
+  const R = (k, txt) => ({ k, txt, cor: k === 'aut' ? 'pos' : k === 'vence' ? 'warn' : k === 'bloq' ? 'neg' : '', motivos: mot, venc, a, mig: !!(a && a.migracao) });
+  if (!f) { mot.push('Colaborador não encontrado.'); return R('nao', 'Não autorizado'); }
+  if (f.status === 'desligado') { mot.push('Desligado: a autorização foi revogada.'); return R('nao', 'Não autorizado'); }
+  if (!a || a.st === 'revogada') { mot.push(a ? 'Autorização revogada' + (a.motivo ? ': ' + a.motivo : '') + '.' : 'A empresa ainda não autorizou este condutor (Frota › Condutores › Autorizar).'); return R('nao', 'Não autorizado'); }
+  if (afastado(X, f)) { mot.push('Afastado: a autorização fica suspensa até o retorno.'); return R('bloq', 'Bloqueado'); }
+  const chk = (o, d) => { if (!dataOk(d)) { mot.push(o + ': sem validade informada.'); return; } if (d < h) mot.push(o + ' venceu em ' + br(d) + '.'); else if (d <= lim) venc.push({ o, d }); };
+  if (!temCnh(f)) mot.push('Sem CNH no cadastro.'); else chk('CNH', f.cnhValidade);
+  if (a.migracao) { if (!dataOk(a.validade) || a.validade < h) mot.push('Autorização da migração venceu' + (dataOk(a.validade) ? ' em ' + br(a.validade) : '') + ': confirme o condutor.'); } else chk('Autorização', a.validade); /* migração: 30 dias para confirmar, sem o aviso de "vence em breve" */
+  if (a.dirigeFuncao && !a.ear) mot.push('Dirigir faz parte da função: a CNH precisa ter EAR (exerce atividade remunerada).');
+  if (precisaTox(f.cnhCat)) chk('Exame toxicológico', a.toxVal);
+  const tipos = Array.isArray(a.tipos) && a.tipos.length ? a.tipos : ['leve'];
+  const cursos = uniq([].concat(...tipos.map(t => ((cfg.reqTipo || {})[t] || {}).cursos || [])));
+  cursos.forEach(c => chk('Curso ' + (CURSOS[c] || c), (a.cursos || {})[c]));
+  if (mot.length) return R('bloq', 'Bloqueado');
+  if (venc.length) return R('vence', 'Vence em breve');
+  return R('aut', a.migracao ? 'Autorizado (migração)' : 'Autorizado');
+}
+const autVenceEm = sit => sit.venc.length ? sit.venc.map(x => x.d).sort()[0] : '';
+/* pode dirigir ESTE veículo? '' = pode; senão o motivo (mostrado na tela) */
+function podeDirigir(X, f, v) {
+  const sit = autSit(X, f);
+  if (sit.k !== 'aut' && sit.k !== 'vence') return (f ? s(f.nome) + ': ' : '') + sit.txt.toLowerCase() + ' — ' + sit.motivos.join(' ');
+  if (!v) return '';
+  const a = sit.a, t = tipoDe(v), tipos = Array.isArray(a.tipos) && a.tipos.length ? a.tipos : ['leve'];
+  if (!tipos.includes(t)) return s(f.nome) + ' não está autorizado(a) a dirigir ' + tipoNome(t).toLowerCase() + ' (autorizado: ' + tipos.map(tipoNome).join(', ') + ').';
+  const need = ((X.cfg.reqTipo || {})[t] || {}).cat || 'B';
+  if (s(v.tipo) === 'Moto' ? !catOk(f.cnhCat, 'A') : !catOk(f.cnhCat, need)) return 'A CNH de ' + s(f.nome) + ' (categoria ' + (s(f.cnhCat) || '—') + ') não permite ' + tipoNome(t).toLowerCase() + ' (precisa ' + (s(v.tipo) === 'Moto' ? 'A' : need) + ').';
+  if (Array.isArray(a.veics) && a.veics.length && !a.veics.includes(v.id)) return s(f.nome) + ' só está autorizado(a) para veículos específicos (' + a.veics.length + '), e este não é um deles.';
+  if (a.cidade && cidadeDe(v) && a.cidade !== cidadeDe(v)) return s(f.nome) + ' só está autorizado(a) para veículos de ' + a.cidade + '.';
+  return '';
+}
+/* conferência do registro de autorização (tipos × categoria da CNH) antes de gravar */
+function autValida(X, f, a) {
+  if (!f) return 'Colaborador não encontrado.'; if (f.status === 'desligado') return 'Colaborador desligado não pode ser autorizado.';
+  if (!temCnh(f)) return 'O colaborador não tem CNH no cadastro.';
+  const tipos = Array.isArray(a.tipos) ? a.tipos.filter(t => TIPOS.some(x => x[0] === t)) : [];
+  if (!tipos.length) return 'Escolha os tipos de veículo que o condutor pode dirigir.';
+  for (const t of tipos) { const need = ((X.cfg.reqTipo || {})[t] || {}).cat || 'B'; if (!catOk(f.cnhCat, need)) return 'A CNH categoria ' + (s(f.cnhCat) || '—') + ' não permite ' + tipoNome(t).toLowerCase() + ' (precisa ' + need + ').'; }
+  if (!dataOk(a.validade)) return 'Informe a validade da autorização.';
+  return '';
+}
+
+/* ---------------------------------------------------------------- reserva */
+const RES_ST = { pendente: ['Aguardando aprovação', 'warn'], aprovada: ['Aprovada', 'pos'], recusada: ['Recusada', 'neg'], cancelada: ['Cancelada', ''], usada: ['Usada na saída', 'acc'] };
+const sobrepoe = (a, b) => s(a.ini) < s(b.fim) && s(b.ini) < s(a.fim);
+function conflito(X, veicId, ini, fim, exceto) {
+  return (X.vres || []).find(r => r.id !== exceto && r.veicId === veicId && r.st === 'aprovada' && sobrepoe({ ini, fim }, r)) || null;
+}
+const funcDe = (X, quem) => quem && quem.funcId ? (X.func || []).find(f => f.id === quem.funcId) || null : null;
+/* quem registra para outra pessoa: Administrador, Administrador de frota, quem grava a frota e o responsável da cidade */
+const gestor = (X, quem, cidade) => !!(quem && (quem.admin || quem.frotaTodos || quem.frotaW || (cidade != null ? ehResp(X.cfg, quem, cidade) : cidadesDe(X.cfg, quem.uid).length)));
+function condutorPara(X, quem, funcId, cidade) {
+  const meu = funcDe(X, quem);
+  if (!funcId || (meu && funcId === meu.id)) return meu ? { f: meu } : { erro: 'Seu usuário não está ligado a um colaborador (Pessoal › Colaboradores › usuário do sistema). Peça ao RH.' };
+  if (!gestor(X, quem, cidade)) return { erro: 'Você registra reserva, saída e retorno só para você mesmo(a).' };
+  const f = (X.func || []).find(x => x.id === funcId); return f ? { f } : { erro: 'Condutor não encontrado.' };
+}
+function reservar(X, quem, b, id) {
+  b = b || {}; const cfg = X.cfg;
+  const ini = s(b.ini).slice(0, 16), fim = s(b.fim).slice(0, 16);
+  if (!dtOk(ini) || !dtOk(fim)) return { erro: 'Informe a data e a hora de saída e o retorno previsto.' };
+  if (fim <= ini) return { erro: 'O retorno previsto tem de ser depois da saída.' };
+  if (ini < maisDias(X.hoje, -1) + 'T00:00') return { erro: 'A saída da reserva não pode ser no passado.' };
+  const v = b.veicId ? (X.veic || []).find(x => x.id === b.veicId) : null;
+  if (b.veicId && !v) return { erro: 'Veículo não encontrado.' };
+  const cidade = v ? cidadeDe(v) : s(b.cidade);
+  if (!v && !cfg.cidades.includes(cidade)) return { erro: 'Escolha o veículo ou a cidade ("qualquer disponível na minha cidade").' };
+  const c = condutorPara(X, quem, b.funcId, cidade); if (c.erro) return c;
+  const e = podeDirigir(X, c.f, v); if (e) return { erro: 'Reserva bloqueada: ' + e };
+  if (v) { if (v.status === 'baixado') return { erro: 'Veículo baixado.' }; const k = conflito(X, v.id, ini, fim); if (k) return { erro: 'Este veículo já tem reserva aprovada de ' + brDt(k.ini) + ' a ' + brDt(k.fim) + '. Escolha outro horário ou outro veículo.' }; }
+  if (String(b.destino || '').trim().length < 2) return { erro: 'Informe o destino ou a obra.' };
+  if (String(b.motivo || '').trim().length < 3) return { erro: 'Informe o motivo.' };
+  const r = { id, v165: 1, funcId: c.f.id, uid: quem.uid || '', cidade, veicId: v ? v.id : '', qualquer: !v, ini, fim, projId: s(b.projId).slice(0, 64), destino: s(b.destino).trim().slice(0, 200), motivo: s(b.motivo).trim().slice(0, 300), st: 'pendente', crEm: X.agora };
+  return { docs: [{ c: 'vres165', d: r }], res: r, avisar: respDe(cfg, cidade) };
+}
+function decidir(X, quem, r, b) {
+  b = b || {}; if (!r) return { erro: 'Reserva não encontrada.' };
+  if (r.st !== 'pendente' && !(r.st === 'aprovada' && b.aprovar === false)) return { erro: 'Esta reserva já foi ' + (RES_ST[r.st] || [r.st])[0].toLowerCase() + '.' };
+  const v = b.aprovar === false ? null : (X.veic || []).find(x => x.id === (b.veicId || r.veicId));
+  const cidade = v ? cidadeDe(v) : r.cidade;
+  if (!podeAprovar(X.cfg, quem, r.cidade) || (v && !podeAprovar(X.cfg, quem, cidade))) return { erro: 'Só o responsável pela frota de ' + (v && cidade !== r.cidade ? cidade : r.cidade || 'outra cidade') + ' (ou o Administrador) aprova esta reserva.' };
+  const n = Object.assign({}, r, { decPor: quem.uid || '', decEm: X.agora });
+  if (b.aprovar === false) { if (String(b.motivo || '').trim().length < 3) return { erro: 'Informe o motivo da recusa.' }; n.st = 'recusada'; n.motRec = s(b.motivo).trim().slice(0, 300); }
+  else {
+    if (!v) return { erro: 'Escolha o veículo para aprovar a reserva.' };
+    if (v.status === 'baixado') return { erro: 'Veículo baixado.' };
+    const f = (X.func || []).find(x => x.id === r.funcId), e = podeDirigir(X, f, v); if (e) return { erro: 'Não dá para aprovar: ' + e };
+    const k = conflito(X, v.id, r.ini, r.fim, r.id); if (k) return { erro: 'Reserva sobreposta: este veículo já está reservado de ' + brDt(k.ini) + ' a ' + brDt(k.fim) + ' (' + nomeFunc(X, k.funcId) + ').' };
+    n.st = 'aprovada'; n.veicId = v.id; n.cidade = cidade; if (r.veicId && r.veicId !== v.id) n.trocou = r.veicId;
+  }
+  return { docs: [{ c: 'vres165', d: n }], res: n };
+}
+
+/* ---------------------------------------------------------------- saída e retorno */
+function ckErro(cfg, ck, obs, fase) {
+  ck = ck && typeof ck === 'object' ? ck : {};
+  const falta = cfg.checklist.filter(i => !['ok', 'nok'].includes(ck[i])); if (falta.length) return 'Checklist de ' + fase + ': marque ' + falta.join(', ') + '.';
+  if (cfg.checklist.some(i => ck[i] === 'nok') && String(obs || '').trim().length < 3) return 'Checklist de ' + fase + ': descreva o problema do item reprovado.';
+  return '';
+}
+function fotosErro(cfg, fotos, srv, fase) {
+  if (!cfg.fotosObrig || !srv) return '';
+  const f = fotos && typeof fotos === 'object' ? fotos : {}, falta = FOTOS.filter(x => !(f[x[0]] && f[x[0]].id));
+  return falta.length ? 'Fotos da ' + fase + ': falta ' + falta.map(x => x[1].toLowerCase()).join(', ') + '.' : '';
+}
+const ultFechada = (X, vid) => (X.vsai || []).filter(x => x.veicId === vid && x.retornoEm).sort((a, b) => (dt(b.retornoEm, b.horaRet) + b.id).localeCompare(dt(a.retornoEm, a.horaRet) + a.id))[0] || null;
+const avDocs = (X, lista, base) => (Array.isArray(lista) ? lista : []).slice(0, 20).map((a, i) => ({ c: 'vav165', d: Object.assign({ id: base.id + '_' + i, v165: 1, desc: s(a.desc).trim().slice(0, 300), foto: a.foto && a.foto.id ? { id: s(a.foto.id), nome: s(a.foto.nome).slice(0, 120) } : null, grave: !!a.grave, st: 'aberta', em: X.agora }, base.d) }));
+/* b: { resId | veicId, funcId, data, hora, km, comb, ck, ckObs, fotos, avPre:[{desc,foto,grave}], destino, projId, pass, retPrev, obs } */
+function saida(X, quem, b, id, srv) {
+  b = b || {}; const cfg = X.cfg; let r = null, v = null;
+  if (b.resId) { r = (X.vres || []).find(x => x.id === b.resId); if (!r) return { erro: 'Reserva não encontrada.' }; if (r.st !== 'aprovada') return { erro: 'A reserva não está aprovada (' + (RES_ST[r.st] || [r.st])[0].toLowerCase() + ').' }; v = (X.veic || []).find(x => x.id === r.veicId); }
+  else v = (X.veic || []).find(x => x.id === b.veicId);
+  if (!v) return { erro: 'Escolha o veículo.' };
+  const cidade = cidadeDe(v);
+  const c = condutorPara(X, quem, r ? r.funcId : b.funcId, cidade); if (c.erro) return c;
+  if (!r && !(podeAprovar(cfg, quem, cidade) || cfg.saidaDireta)) return { erro: 'Saída só com reserva aprovada. Peça a reserva em Frota › Reservar veículo (saída direta só pelo responsável pela frota de ' + (cidade || 'cada cidade') + ' ou pelo Administrador).' };
+  if (r && r.funcId !== c.f.id) return { erro: 'Esta reserva é de outro condutor.' };
+  const e = podeDirigir(X, c.f, v); if (e) return { erro: 'Saída bloqueada: ' + e };
+  const sit = veicSit(X, v);
+  if (sit.k === 'uso') return { erro: 'O veículo está em uso (' + sit.txt.replace('Em uso por ', '') + ' desde ' + brDt(dt(sit.s.saidaEm, sit.s.hora)) + '). Registre o retorno antes.' };
+  if (sit.k === 'manut') return { erro: 'Saída bloqueada: o veículo está em manutenção.' };
+  if (sit.k === 'grave') return { erro: 'Saída bloqueada: o veículo tem avaria grave aberta (' + s(sit.av.desc).slice(0, 80) + '). O responsável pela frota resolve antes.' };
+  if (sit.k === 'baixado') return { erro: 'Veículo baixado.' };
+  const km = num(b.km); if (!(km > 0)) return { erro: 'Informe o km do painel.' };
+  const ult = kmUlt(X, v.id); if (km < ult) return { erro: 'O km do painel (' + km + ') é menor que o último registrado (' + ult + '). Confira o painel.' };
+  if (!combOpts(cfg).some(x => x[0] === s(b.comb))) return { erro: 'Marque o combustível no painel.' };
+  let m = ckErro(cfg, b.ck, b.ckObs, 'saída'); if (m) return { erro: m };
+  m = fotosErro(cfg, b.fotos, srv, 'saída'); if (m) return { erro: m };
+  const av = Array.isArray(b.avPre) ? b.avPre.filter(a => a && (a.desc || a.foto)) : [];
+  for (const a of av) { if (String(a.desc || '').trim().length < 3) return { erro: 'Descreva cada avaria encontrada.' }; if (srv && !(a.foto && a.foto.id)) return { erro: 'Tire a foto de cada avaria encontrada antes de sair.' }; }
+  const retPrev = s(b.retPrev || (r && r.fim)).slice(0, 16); if (!dtOk(retPrev)) return { erro: 'Informe o retorno previsto (data e hora).' };
+  const data = dataOk(b.data) ? b.data : X.hoje, hora = /^\d{2}:\d{2}$/.test(s(b.hora)) ? b.hora : X.agora.slice(11, 16);
+  if (retPrev <= dt(data, hora)) return { erro: 'O retorno previsto tem de ser depois da saída.' };
+  const destino = s(b.destino || (r && r.destino)).trim().slice(0, 200); if (destino.length < 2) return { erro: 'Informe o destino ou a obra.' };
+  const sd = { id, v165: 1, veicId: v.id, funcId: c.f.id, condUid: c.f.usrId || (quem.funcId === c.f.id ? quem.uid || '' : ''), resId: r ? r.id : '', cidade, projId: s(b.projId || (r && r.projId)).slice(0, 64), destino,
+    saidaEm: data, hora, kmSaida: km, comb165: s(b.comb), ck165: Object.assign({}, b.ck), ckObs165: s(b.ckObs).slice(0, 300), fotos165: b.fotos || {}, pass165: s(b.pass).slice(0, 300), retPrev165: retPrev,
+    retornoEm: '', kmRetorno: '', obs: s(b.obs).slice(0, 300), regPor: quem.uid || '' };
+  const docs = [{ c: 'vsai', d: sd }];
+  if (r) docs.push({ c: 'vres165', d: Object.assign({}, r, { st: 'usada', vsaiId: id }) });
+  const ant = ultFechada(X, v.id);
+  avDocs(X, av, { id: id + '_pre', d: { veicId: v.id, vsaiId: id, fase: 'saida', atrib: ant ? ant.id : '', atribFunc: ant ? ant.funcId : '', cidade } }).forEach(x => docs.push(x));
+  return { docs, saida: sd, avisar: av.length ? respDe(cfg, cidade) : [] };
+}
+/* b: { km, comb, ck, ckObs, fotos, avarias:[{desc,foto,grave}], abast:[{litros,valor,km,posto,data,hora,foto,dados}], data, hora, obs } */
+function retorno(X, quem, sd, b, srv) {
+  b = b || {}; const cfg = X.cfg;
+  if (!sd) return { erro: 'Saída não encontrada.' }; if (sd.retornoEm) return { erro: 'Esta saída já tem retorno.' };
+  const meu = funcDe(X, quem), proprio = !!((meu && sd.funcId === meu.id) || (quem.uid && sd.condUid === quem.uid && !sd.funcId));
+  if (!proprio && !(quem.admin || ehResp(cfg, quem, sd.cidade || '') || quem.frotaTodos || quem.frotaW)) return { erro: 'Só o condutor da saída (ou o responsável pela frota da cidade) registra o retorno.' };
+  const km = num(b.km); if (!(km > 0)) return { erro: 'Informe o km de chegada.' };
+  if (km < (+sd.kmSaida || 0)) return { erro: 'O km de chegada (' + km + ') não pode ser menor que o da saída (' + (+sd.kmSaida || 0) + ').' };
+  if (!combOpts(cfg).some(x => x[0] === s(b.comb))) return { erro: 'Marque o combustível na chegada.' };
+  const v165 = !!sd.v165;
+  let m = v165 ? ckErro(cfg, b.ck, b.ckObs, 'retorno') : ''; if (m) return { erro: m };
+  m = v165 ? fotosErro(cfg, b.fotos, srv, 'chegada') : ''; if (m) return { erro: m };
+  const av = Array.isArray(b.avarias) ? b.avarias.filter(a => a && (a.desc || a.foto)) : [];
+  for (const a of av) { if (String(a.desc || '').trim().length < 3) return { erro: 'Descreva cada avaria nova.' }; if (srv && !(a.foto && a.foto.id)) return { erro: 'Tire a foto de cada avaria nova.' }; }
+  const data = dataOk(b.data) ? b.data : X.hoje, hora = /^\d{2}:\d{2}$/.test(s(b.hora)) ? b.hora : X.agora.slice(11, 16);
+  if (dt(data, hora) < dt(sd.saidaEm, sd.hora)) return { erro: 'O retorno não pode ser antes da saída.' };
+  const ab = (Array.isArray(b.abast) ? b.abast : []).slice(0, 10);
+  for (const a of ab) { if (!(num(a.litros) > 0) || !(num(a.valor) > 0)) return { erro: 'Abastecimento: informe litros e valor (do cupom).' }; if (srv && !(a.foto && a.foto.id)) return { erro: 'Abastecimento: tire a foto do cupom.' }; }
+  const atraso = sd.retPrev165 && dt(data, hora) > sd.retPrev165 ? minutos(dt(data, hora), sd.retPrev165) : 0;
+  const n = Object.assign({}, sd, { retornoEm: data, horaRet: hora, kmRetorno: km, combRet165: s(b.comb), ckR165: Object.assign({}, b.ck || {}), ckRObs165: s(b.ckObs).slice(0, 300), fotosR165: b.fotos || {}, retPor: quem.uid || '', abast: ab.length > 0 || !!sd.abast, atraso165: atraso || 0, obsRet165: s(b.obs).slice(0, 300) });
+  const docs = [{ c: 'vsai', d: n }];
+  const avs = avDocs(X, av, { id: sd.id + '_ret', d: { veicId: sd.veicId, vsaiId: sd.id, fase: 'retorno', atrib: sd.id, atribFunc: sd.funcId, cidade: sd.cidade || cidadeDe((X.veic || []).find(x => x.id === sd.veicId)) } });
+  avs.forEach(x => docs.push(x));
+  ab.forEach((a, i) => docs.push({ c: 'vabas', d: reciboDoc(X, quem, { veicId: sd.veicId, vsaiId: sd.id, funcId: sd.funcId, projId: sd.projId, cidade: n.cidade, dados: Object.assign({ litros: a.litros, valor: a.valor, km: a.km || km, data: a.data || data, hora: a.hora || hora, posto: a.posto }, a.dados || {}), foto: a.foto }, sd.id + '_ab' + i) }));
+  const baixo = (fracN(b.comb) ?? 1) <= 0.25;
+  return { docs, saida: n, baixo, atraso, avarias: avs.map(x => x.d), avisar: respDe(cfg, n.cidade || '') };
+}
+
+/* ---------------------------------------------------------------- multas: quem estava com o veículo */
+function condutorNa(X, veicId, data, hora) {
+  const t = dt(data, hora || '12:00'), sem = !/^\d{2}:\d{2}/.test(s(hora));
+  const l = (X.vsai || []).filter(x => x.veicId === veicId && dataOk(x.saidaEm)).filter(x => {
+    const a = sem ? x.saidaEm + 'T00:00' : dt(x.saidaEm, x.hora), z = x.retornoEm ? (sem ? x.retornoEm + 'T23:59' : dt(x.retornoEm, x.horaRet || '23:59')) : '9999';
+    return a <= t && t <= z;
+  }).sort((a, b) => dt(b.saidaEm, b.hora).localeCompare(dt(a.saidaEm, a.hora)));
+  return l[0] ? { funcId: l[0].funcId, vsaiId: l[0].id, saida: l[0] } : null;
+}
+
+/* ---------------------------------------------------------------- abastecimentos: recibo, relatório e conferências */
+const kmAbas = a => +(a && a.hodCorr165 && a.hodCorr165.km != null ? a.hodCorr165.km : a && a.km) || 0;
+/* recibo (cupom) lido ou digitado: abastecimento PROVISÓRIO, "aguardando relatório" */
+function reciboDoc(X, quem, o, id) {
+  const d = o.dados || {}, litros = r2(num(d.litros ?? d.volume)), valor = r2(num(d.valor));
+  return { id, v165: 1, veicId: o.veicId, vsaiId: o.vsaiId || '', funcId: o.funcId || '', projId: o.projId || '', comum: !o.projId, cidade: o.cidade || '', data: dataOk(d.data) ? d.data : X.hoje, hora165: /^\d{2}:\d{2}/.test(s(d.hora)) ? s(d.hora).slice(0, 5) : '',
+    km: num(d.km) || 0, litros, valor, combustivel: s(d.comb).slice(0, 40), posto: s(d.posto || d.cnpj).slice(0, 120), cheio: d.cheio !== false, gerarLanc: false, pago: false, lancId: '',
+    st165: 'aguardando', rec165: { aut: digitos(d.aut).slice(0, 20), nsu: digitos(d.nsu).slice(0, 20), placa: placaN(d.placa), km: num(d.km), litros, valor, cnpj: digitos(d.cnpj).slice(0, 14), data: dataOk(d.data) ? d.data : '', hora: s(d.hora).slice(0, 5), comb: s(d.comb).slice(0, 40), ia: !!d.ia, foto: o.foto && o.foto.id ? { id: s(o.foto.id), nome: s(o.foto.nome).slice(0, 120) } : null, por: quem.uid || '', em: X.agora },
+    alertas165: [], obs: 'Recibo do posto (aguardando o relatório da Sem Parar)' };
+}
+/* colunas do relatório "Relatório Utilização Combustível" pelo NOME (Cod. Centro Custo / Nome aparecem duas vezes:
+   a primeira é do motorista e a segunda do veículo) */
+const COLS = [['aut', 'Autorização'], ['autCupom', 'Autorização Cupom'], ['idCli', 'ID Cliente Resp. Portador Cartão'], ['cli', 'Cliente Resp. Portador Cartão'], ['cartao', 'Cartão'], ['data', 'Data'], ['hora', 'Hora'],
+  ['cpf', 'CPF Motorista'], ['motorista', 'Motorista'], ['numFunc', 'Número do Funcionário'], ['ccMot', 'Cod. Centro Custo'], ['ccMotNome', 'Nome'], ['frota', 'Número da Frota'], ['placa', 'Placa'], ['marca', 'Marca'], ['modelo', 'Modelo'],
+  ['ccVei', 'Cod. Centro Custo'], ['ccVeiNome', 'Nome'], ['ano', 'Ano'], ['rede', 'Rede Goodcard'], ['cnpj', 'CNPJ'], ['logradouro', 'Logradouro'], ['bairro', 'Bairro'], ['cidade', 'Cidade'], ['uf', 'UF'], ['cep', 'CEP'],
+  ['tipoComb', 'Tipo Combustível'], ['litros', 'Litros Combustível'], ['valorComb', 'Combustível(R$)'], ['preco', 'Preço/Litro(R$) Combustível'], ['litrosOleo', 'Litros Óleo'], ['valorOleo', 'Óleo(R$)'], ['precoOleo', 'Preço/Litro(R$) Óleo'],
+  ['tipoManut', 'Tipo Manutenção'], ['valorManut', 'Manutenção(R$)'], ['total', 'Valor Total Transação'], ['hodAnt', 'Hodômetro Anterior'], ['hodInf', 'Hodômetro Informado'], ['kmRod', 'Km Rodado'], ['custoKm', 'Custo Km Rodado(R$)'],
+  ['mediaComb', 'Média Comb'], ['mediaArla', 'Média Arla'], ['cont', 'Abastecimento em Contingência'], ['g1m', 'Grupo 1 - Motorista'], ['g2m', 'Grupo 2 - Motorista'], ['g3m', 'Grupo 3 - Motorista'], ['g4m', 'Grupo 4 - Motorista'],
+  ['g1v', 'Grupo 1 - Veículo'], ['g2v', 'Grupo 2 - Veículo'], ['g3v', 'Grupo 3 - Veículo'], ['g4v', 'Grupo 4 - Veículo']];
+const OBRIG = ['aut', 'data', 'placa', 'litros', 'hodInf'];
+const NUMS = ['litros', 'valorComb', 'preco', 'litrosOleo', 'valorOleo', 'precoOleo', 'valorManut', 'total', 'hodAnt', 'hodInf', 'kmRod', 'custoKm', 'mediaComb', 'mediaArla'];
+function mapaColunas(cab) {
+  const nc = cab.map(norm), out = {}, usados = new Set();
+  for (const [k, nome] of COLS) { const n = norm(nome); const i = nc.findIndex((x, j) => x === n && !usados.has(j)); if (i >= 0) { out[k] = i; usados.add(i); } }
+  return out;
+}
+const dataBr = v => { const t = s(v).trim(); let m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(t); if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t); return m ? m[0] : ''; };
+const mascCpf = v => { const d = digitos(v); return d.length === 11 ? d.slice(0, 3) + '.***.***-' + d.slice(9) : d ? '***' : ''; };
+/* linhas da planilha (sheet_to_json header:1, texto) → linhas do relatório. Acha a linha dos nomes das colunas (normalmente a 8ª)
+   e lê até a primeira linha sem Autorização (o total no fim do relatório fica de fora). */
+function lerRelatorio(rows) {
+  rows = Array.isArray(rows) ? rows : [];
+  const hi = rows.findIndex(r => Array.isArray(r) && r.some(c => norm(c) === 'autorizacao') && r.some(c => norm(c) === 'placa'));
+  if (hi < 0) return { erro: 'Não achei a linha dos nomes das colunas (Autorização, Placa…). Use o "Relatório Utilização Combustível" do portal da Sem Parar, em .xls.' };
+  const M = mapaColunas(rows[hi].map(s)), falta = OBRIG.filter(k => M[k] == null);
+  if (falta.length) return { erro: 'Faltam colunas no relatório: ' + falta.map(k => COLS.find(c => c[0] === k)[1]).join(', ') + '.' };
+  const linhas = [];
+  for (let i = hi + 1; i < rows.length && linhas.length < 5000; i++) {
+    const r = rows[i] || [], g = k => M[k] == null ? '' : s(r[M[k]]).trim();
+    if (!digitos(g('aut'))) break;
+    const o = {}; COLS.forEach(([k]) => { if (M[k] != null) o[k] = g(k); });
+    NUMS.forEach(k => { if (o[k] !== undefined) o[k] = num(o[k]); });
+    o.data = dataBr(o.data); o.hora = s(o.hora).slice(0, 5); o.placa = placaN(o.placa); o.aut = digitos(o.aut); o.autCupom = digitos(o.autCupom); o.cpf = digitos(o.cpf); o.cnpj = digitos(o.cnpj);
+    o.cont = /^s/i.test(s(o.cont)); o.linha = i + 1;
+    linhas.push(o);
+  }
+  return { linhas, cab: hi };
+}
+const mediana = a => { const l = a.filter(x => x > 0).sort((x, y) => x - y); if (!l.length) return null; const m = Math.floor(l.length / 2); return l.length % 2 ? l[m] : (l[m - 1] + l[m]) / 2; };
+/* saída que cobre a data/hora (para obra, condutor e km) */
+function saidaNa(X, veicId, data, hora) { const c = condutorNa(X, veicId, data, hora); return c ? c.saida : null; }
+/* consumo do veículo (km/l) entre abastecimentos de tanque cheio, com o hodômetro corrigido */
+function consumoVeic(abasL) {
+  const l = abasL.filter(a => kmAbas(a) > 0).sort((a, b) => kmAbas(a) - kmAbas(b) || s(a.data).localeCompare(s(b.data)));
+  const pares = []; for (let i = 1; i < l.length; i++) { const km = kmAbas(l[i]) - kmAbas(l[i - 1]), lt = +l[i].litros || 0; if (l[i].cheio !== false && l[i - 1].cheio !== false && km > 0 && lt > 0) pares.push({ a: l[i], km, lt, kml: km / lt }); }
+  const km = pares.reduce((t, p) => t + p.km, 0), lt = pares.reduce((t, p) => t + p.lt, 0);
+  return { media: lt > 0 ? km / lt : null, pares, ult: pares.length ? pares[pares.length - 1] : null };
+}
+/* conferências de uma linha do relatório (ou de um abastecimento importado) */
+function checar(X, L, ctx) {
+  const cfg = X.cfg, al = [], A = (k, txt) => al.push({ k, txt });
+  const v = ctx.v, kr = L.kmRod, hod = L.hodCorr != null ? L.hodCorr : L.hodInf, ant = +L.hodAnt || 0;
+  if (!v) A('placa', 'Placa ' + (L.placa || '—') + ' não cadastrada na frota.');
+  if (!ctx.f) A('cpf', 'Motorista do cartão sem colaborador com esse CPF.');
+  if (L.cont) A('cont', 'Abastecimento em contingência (sem senha/km pela rede).');
+  const krE = L.hodCorr != null && ant > 0 ? L.hodCorr - ant : kr;
+  if (krE != null && krE < 0) A('kmNeg', 'Km rodado negativo (' + krE + ' km): hodômetro digitado errado.');
+  else if (krE != null && krE > (+cfg.kmMax || 2000)) A('kmAlto', 'Km rodado alto (' + krE + ' km, limite ' + (+cfg.kmMax || 2000) + ').');
+  if (ant > 0 && hod > 0 && hod / ant > 5 && L.hodCorr == null) A('digito', 'Hodômetro informado ' + hod + ' ≈ 10× o anterior (' + ant + '): provável dígito a mais.');
+  if (krE != null && krE >= 0 && krE < (+cfg.kmMin || 20)) A('kmBaixo', 'Km rodado baixo (' + krE + ' km desde o abastecimento anterior).');
+  if (ctx.mesmoDia) A('doisDia', 'Dois abastecimentos do veículo no mesmo dia' + (ctx.mesmoDia.outroMot ? ' por motoristas diferentes' : '') + '.');
+  const sd = ctx.sd;
+  if (v && !sd) A('semSaida', 'Nenhuma saída do veículo cobre ' + brDt(dt(L.data, L.hora)) + '.');
+  if (sd) {
+    const tol = +cfg.tolKm || 50, lo = (+sd.kmSaida || 0) - tol, hi = (sd.retornoEm ? +sd.kmRetorno || 0 : Infinity) + tol;
+    if (hod > 0 && (hod < lo || hod > hi)) A('hodSaida', 'Hodômetro ' + hod + ' fora do km da saída (' + (+sd.kmSaida || 0) + ' a ' + (sd.retornoEm ? +sd.kmRetorno : 'em uso') + ', tolerância ' + tol + ').');
+    if (ctx.f && sd.funcId && sd.funcId !== ctx.f.id) A('motDif', 'Motorista do cartão (' + s(ctx.f.nome) + ') não é o condutor da saída (' + nomeFunc(X, sd.funcId) + ').');
+  }
+  if (v && L.tipoComb && !combAceita(v, L.tipoComb)) A('combInc', L.tipoComb + ' em veículo ' + (v.combustivel || '') + '.');
+  if (v && +v.tanque > 0 && +L.litros > +v.tanque) A('tanque', r2(L.litros) + ' litros passam da capacidade do tanque (' + v.tanque + ' L).');
+  const pr = +L.preco || (+L.litros > 0 ? +L.valorComb / +L.litros : 0);
+  if (pr > 0 && ctx.medPreco > 0 && pr > ctx.medPreco * (1 + (+cfg.precoPct || 15) / 100)) A('preco', 'R$/litro ' + pr.toFixed(3).replace('.', ',') + ' acima da mediana do posto/cidade (' + ctx.medPreco.toFixed(3).replace('.', ',') + ') em mais de ' + (+cfg.precoPct || 15) + '%.');
+  if (ctx.media > 0 && krE > 0 && +L.litros > 0) { const k = krE / +L.litros; if (k < ctx.media * (1 - (+cfg.quedaKmlPct || 20) / 100)) A('kmlQueda', 'Consumo ' + k.toFixed(1).replace('.', ',') + ' km/l, abaixo da média do veículo (' + ctx.media.toFixed(1).replace('.', ',') + ') em mais de ' + (+cfg.quedaKmlPct || 20) + '%.'); }
+  if (+L.valorOleo > 0 || +L.litrosOleo > 0) A('oleo', 'Óleo na mesma transação (' + r2(L.valorOleo) + '): fica como item separado.');
+  if (+L.valorManut > 0) A('manut', 'Manutenção na transação (' + (L.tipoManut || '') + ' ' + r2(L.valorManut) + '): o custo da manutenção vai pela nota (v163).');
+  return al;
+}
+const ALERTAS = { placa: 'Placa desconhecida', cpf: 'CPF sem colaborador', cont: 'Contingência', kmNeg: 'Km negativo', kmAlto: 'Km alto', digito: 'Dígito a mais', kmBaixo: 'Km baixo', doisDia: 'Dois no mesmo dia', semSaida: 'Sem saída', hodSaida: 'Hodômetro × saída', motDif: 'Motorista ≠ condutor', combInc: 'Combustível errado', tanque: 'Acima do tanque', preco: 'Preço alto', kmlQueda: 'Queda de km/l', oleo: 'Óleo', manut: 'Manutenção', difRecibo: 'Recibo diferente', reciboSem: 'Recibo sem transação', semRecibo: 'Sem recibo' };
+/* linha do relatório → abastecimento (novo ou o mesmo de antes) e as conferências */
+function importar(X, quem, linhas, origem, opc) {
+  opc = opc || {}; const cfg = X.cfg, lote = s(opc.lote) || 'imp', esc = escopo(cfg, quem, false);
+  const porPlaca = new Map((X.veic || []).map(v => [placaN(v.placa), v])), porCpf = new Map((X.func || []).filter(f => digitos(f.cpf).length === 11).map(f => [digitos(f.cpf), f]));
+  const porAut = new Map((X.vabas || []).filter(a => a.imp165 && a.imp165.aut).map(a => [a.imp165.aut, a]));
+  const prov = (X.vabas || []).filter(a => a.st165 === 'aguardando' && a.rec165);
+  const usados = new Set(), docs = [], prev = [];
+  const grupoP = L => (L.cnpj || norm(L.cidade + '/' + L.uf)) + '|' + norm(L.tipoComb).split(' ')[0];
+  const precos = new Map(); const addP = (k, p) => { if (p > 0) { if (!precos.has(k)) precos.set(k, []); precos.get(k).push(p); } };
+  (X.vabas || []).forEach(a => { if (a.imp165 && a.imp165.orig) addP(grupoP(a.imp165.orig), +a.imp165.orig.preco || 0); });
+  linhas.forEach(L => addP(grupoP(L), +L.preco || (+L.litros > 0 ? +L.valorComb / +L.litros : 0)));
+  const dias = new Map(); const addD = (vid, d, f, id) => { const k = vid + '|' + d; if (!dias.has(k)) dias.set(k, []); dias.get(k).push({ f, id }); };
+  (X.vabas || []).forEach(a => { if (a.veicId && !(a.imp165 && linhas.some(L => L.aut === a.imp165.aut))) addD(a.veicId, a.data, a.funcId, a.id); });
+  linhas.forEach(L => { const v = porPlaca.get(L.placa), f = porCpf.get(L.cpf); if (v) addD(v.id, L.data, f ? f.id : L.cpf, 'L' + L.aut); });
+  const hist = new Map(); (X.vabas || []).forEach(a => { if (!a.veicId) return; if (!hist.has(a.veicId)) hist.set(a.veicId, []); hist.get(a.veicId).push(a); });
+  let ini = '', fim = '';
+  for (const L of linhas) {
+    const v = porPlaca.get(L.placa) || null, f = porCpf.get(L.cpf) || null, ex = porAut.get(L.aut) || null;
+    if (!ini || L.data < ini) ini = L.data; if (!fim || L.data > fim) fim = L.data;
+    const cid = cidadeDe(v), fora = !!(esc && v && !esc.has(cid)) || !!(esc && !v);
+    const sd = v ? saidaNa(X, v.id, L.data, L.hora) : null;
+    const mesmo = v ? (dias.get(v.id + '|' + L.data) || []).filter(x => x.id !== 'L' + L.aut && x.id !== (ex && ex.id)) : [];
+    const ctx = { v, f, sd, medPreco: mediana(precos.get(grupoP(L)) || []), media: v ? consumoVeic((hist.get(v.id) || []).filter(a => !(a.imp165 && a.imp165.aut === L.aut))).media : null, mesmoDia: mesmo.length ? { outroMot: mesmo.some(x => x.f && x.f !== (f ? f.id : L.cpf)) } : null };
+    if (ex && ex.hodCorr165) L.hodCorr = ex.hodCorr165.km;
+    const al = checar(X, L, ctx);
+    let rec = null;
+    if (!ex && v) { const tol = +cfg.tolMatchDias || 1; rec = prov.find(a => !usados.has(a.id) && a.veicId === v.id && L.autCupom && a.rec165.aut && a.rec165.aut.replace(/^0+/, '') === L.autCupom.replace(/^0+/, '') && (!a.rec165.placa || a.rec165.placa === L.placa) && Math.abs(difDias(a.rec165.data || a.data, L.data)) <= tol) || null; }
+    if (rec) { usados.add(rec.id); const R = rec.rec165, d = [];
+      if (R.km != null && Math.abs((+R.km || 0) - (+L.hodInf || 0)) > (+cfg.tolKm || 50)) d.push('km ' + R.km + ' × ' + L.hodInf);
+      if (R.litros != null && Math.abs((+R.litros || 0) - (+L.litros || 0)) > (+cfg.tolLitros || 0.5)) d.push('litros ' + r2(R.litros) + ' × ' + r2(L.litros));
+      if (R.valor != null && Math.abs((+R.valor || 0) - (+L.valorComb || +L.total || 0)) > (+cfg.tolValor || 0.5)) d.push('valor ' + r2(R.valor) + ' × ' + r2(L.valorComb || L.total));
+      if (d.length) al.push({ k: 'difRecibo', txt: 'Recibo diferente do relatório: ' + d.join('; ') + '.' }); }
+    else if (!ex && cfg.exigeRecibo) al.push({ k: 'semRecibo', txt: 'Abastecimento sem recibo (cupom) registrado.' });
+    const st = fora ? 'fora' : ex ? 'dup' : rec ? 'casado' : 'novo';
+    prev.push({ linha: L.linha, aut: L.aut, autCupom: L.autCupom, placa: L.placa, veicId: v ? v.id : '', data: L.data, hora: L.hora, motorista: f ? s(f.nome) : s(L.motorista), funcId: f ? f.id : '', cpfMasc: mascCpf(L.cpf), litros: r2(L.litros), valor: r2(L.valorComb), total: r2(L.total), tipoComb: s(L.tipoComb), kmRod: L.kmRod, hodInf: L.hodInf, cont: !!L.cont, projId: sd ? s(sd.projId) : '', cidade: cid, st, alertas: al, vabasId: ex ? ex.id : rec ? rec.id : 'sp_' + L.aut });
+    if (fora || !v) continue;
+    const base = ex || rec || {};
+    const orig = { hodAnt: L.hodAnt, hodInf: L.hodInf, kmRod: L.kmRod, litros: L.litros, valorComb: L.valorComb, preco: L.preco, total: L.total, tipoComb: s(L.tipoComb), cnpj: L.cnpj, cidade: s(L.cidade), uf: s(L.uf), litrosOleo: L.litrosOleo, valorOleo: L.valorOleo, tipoManut: s(L.tipoManut), valorManut: L.valorManut, mediaComb: L.mediaComb, frota: s(L.frota), data: L.data, hora: L.hora };
+    const itens = []; if (+L.valorOleo > 0 || +L.litrosOleo > 0) itens.push({ tipo: 'oleo', litros: r2(L.litrosOleo), valor: r2(L.valorOleo) }); if (+L.valorManut > 0) itens.push({ tipo: 'manut', desc: s(L.tipoManut).slice(0, 80), valor: r2(L.valorManut), viaNota: true });
+    const d = Object.assign({}, base, { id: base.id || 'sp_' + L.aut, v165: 1, veicId: v.id, data: L.data, hora165: L.hora, km: base.hodCorr165 ? base.hodCorr165.km : (+L.hodInf || 0), litros: r2(L.litros), valor: r2(L.valorComb != null ? L.valorComb : L.total),
+      combustivel: s(L.tipoComb).slice(0, 40), posto: [s(L.rede), s(L.cidade) + (L.uf ? '/' + s(L.uf) : '')].filter(Boolean).join(' · ').slice(0, 120), cheio: base.cheio !== undefined ? base.cheio : true,
+      gerarLanc: false, pago: base.pago || false, lancId: base.lancId || '', funcId: f ? f.id : (base.funcId || ''), vsaiId: sd ? sd.id : (base.vsaiId || ''), projId: sd ? s(sd.projId) : (base.projId || ''), comum: !(sd && sd.projId), cidade: cid,
+      st165: 'confirmado', alertas165: al, itens165: itens,
+      imp165: { lote, origem: s(origem).slice(0, 40), aut: L.aut, autCupom: L.autCupom, cartao: s(L.cartao).slice(0, 30), cpfMasc: mascCpf(L.cpf), motorista: f ? '' : s(L.motorista).slice(0, 80), numFunc: s(L.numFunc).slice(0, 20), cont: !!L.cont, orig, em: X.agora, por: quem.uid || '', reimp: ex ? ((ex.imp165 && ex.imp165.reimp) || 0) + 1 : 0 } });
+    if (rec) d.rec165 = Object.assign({}, rec.rec165, { casadoEm: X.agora });
+    docs.push({ c: 'vabas', d });
+  }
+  /* recibo sem transação: provisório até o fim do período do relatório que não casou com nenhuma linha */
+  const semTx = [];
+  if (fim) for (const a of prov) { if (usados.has(a.id)) continue; const v = (X.veic || []).find(x => x.id === a.veicId); if (esc && !esc.has(cidadeDe(v))) continue; if (s(a.rec165.data || a.data) > fim) continue;
+    const al = (a.alertas165 || []).filter(x => x.k !== 'reciboSem').concat([{ k: 'reciboSem', txt: 'Recibo sem transação no relatório da Sem Parar importado em ' + br(X.hoje) + '.' }]);
+    semTx.push(a.id); docs.push({ c: 'vabas', d: Object.assign({}, a, { alertas165: al }) }); }
+  const resumo = { n: linhas.length, novos: prev.filter(p => p.st === 'novo').length, dups: prev.filter(p => p.st === 'dup').length, casados: prev.filter(p => p.st === 'casado').length, fora: prev.filter(p => p.st === 'fora').length,
+    semPlaca: prev.filter(p => !p.veicId).length, comAlerta: prev.filter(p => p.alertas.length).length, reciboSem: semTx.length, ini, fim, total: r2(prev.filter(p => p.st !== 'fora').reduce((t, p) => t + (+p.total || +p.valor || 0), 0)) };
+  return { prev, docs, resumo };
+}
+/* correção do hodômetro (o original fica no histórico); as conferências do veículo são refeitas */
+function corrigirHod(X, quem, a, km, motivo) {
+  if (!a) return { erro: 'Abastecimento não encontrado.' };
+  const v = (X.veic || []).find(x => x.id === a.veicId);
+  if (!podeAprovar(X.cfg, quem, cidadeDe(v))) return { erro: 'Só o responsável pela frota da cidade do veículo ou o Administrador de frota corrige o hodômetro.' };
+  km = num(km); if (!(km > 0)) return { erro: 'Informe o hodômetro corrigido.' };
+  if (String(motivo || '').trim().length < 5) return { erro: 'Informe o motivo da correção (obrigatório).' };
+  const orig = a.hodCorr165 ? a.hodCorr165.orig : (a.imp165 && a.imp165.orig ? a.imp165.orig.hodInf : a.km);
+  const h = (Array.isArray(a.hodHist165) ? a.hodHist165 : []).concat([{ de: kmAbas(a), para: km, motivo: s(motivo).trim().slice(0, 300), por: quem.uid || '', em: X.agora }]);
+  const n = Object.assign({}, a, { km, hodCorr165: { km, orig, motivo: s(motivo).trim().slice(0, 300), por: quem.uid || '', em: X.agora }, hodHist165: h });
+  if (n.imp165 && n.imp165.orig) {
+    const o = n.imp165.orig, L = Object.assign({}, o, { placa: v ? placaN(v.placa) : '', hodCorr: km, cont: !!n.imp165.cont });
+    const outros = (X.vabas || []).filter(x => x.veicId === a.veicId && x.id !== a.id);
+    const sd = saidaNa(X, a.veicId, o.data || a.data, o.hora || a.hora165), f = (X.func || []).find(x => x.id === a.funcId) || null;
+    const al = checar(X, L, { v, f, sd, media: consumoVeic(outros).media, medPreco: 0, mesmoDia: outros.some(x => x.data === a.data) ? { outroMot: outros.some(x => x.data === a.data && x.funcId !== a.funcId) } : null });
+    n.alertas165 = al.concat((a.alertas165 || []).filter(x => ['preco', 'difRecibo', 'reciboSem', 'semRecibo'].includes(x.k)));
+  }
+  return { docs: [{ c: 'vabas', d: n }], abas: n };
+}
+/* fatura do mês: total importado, rateio por veículo, obra e cidade (sem saída: custo geral da frota da cidade) */
+function fatura(X, mes, esc) {
+  const l = (X.vabas || []).filter(a => a.imp165 && s(a.data).slice(0, 7) === mes && (!esc || esc.has(s(a.cidade))));
+  const soma = (k, f) => { const m = new Map(); l.forEach(a => { const x = f(a); m.set(x, r2((m.get(x) || 0) + (+a.valor || 0) + (a.itens165 || []).filter(i => i.tipo === 'oleo').reduce((t, i) => t + (+i.valor || 0), 0))); }); return [...m.entries()].map(([kk, valor]) => ({ [k]: kk, valor })).sort((a, b) => b.valor - a.valor); };
+  const total = r2(l.reduce((t, a) => t + (+a.valor || 0) + (a.itens165 || []).filter(i => i.tipo === 'oleo').reduce((x, i) => x + (+i.valor || 0), 0), 0));
+  const manut = r2(l.reduce((t, a) => t + (a.itens165 || []).filter(i => i.tipo === 'manut').reduce((x, i) => x + (+i.valor || 0), 0), 0));
+  const porObra = soma('projId', a => a.projId || ''), porCidade = soma('cidade', a => s(a.cidade)), porVeic = soma('veicId', a => a.veicId);
+  const rateio = porObra.filter(o => o.projId).map(o => ({ projId: o.projId, valor: o.valor, pct: total > 0 ? Math.round(o.valor / total * 10000) / 100 : 0 }));
+  const geral = porObra.filter(o => !o.projId).reduce((t, o) => t + o.valor, 0);
+  return { mes, n: l.length, total, manut, porObra, porCidade, porVeic, rateio, geral: r2(geral), ids: l.map(a => a.id), faturados: l.filter(a => a.fat165).length };
+}
+
+/* ---------------------------------------------------------------- painel por cidade */
+function painel(X, esc) {
+  const cfg = X.cfg, h = X.hoje, lim = maisDias(h, +cfg.diasAviso || 30), okC = c => !esc || esc.has(c);
+  const vs = (X.veic || []).filter(v => v.status !== 'baixado' && okC(cidadeDe(v))), ids = new Set(vs.map(v => v.id)), de = r => r && ids.has(r.veicId);
+  const o = { disp: [], uso: [], manut: [], grave: [], atrasados: [], combBaixo: [], avarias: [], resPend: [], venc: [], cnh: [], bloq: [], autVenc: [], abasAl: [], kml: [], desligEmUso: [] };
+  vs.forEach(v => { const st = veicSit(X, v); (st.k === 'disp' ? o.disp : st.k === 'uso' ? o.uso : st.k === 'manut' ? o.manut : o.grave).push({ v, st });
+    [['Licenciamento', v.licenciamento], ['Seguro', v.seguro], ['IPVA', v.ipva]].forEach(([t, d]) => { if (dataOk(d) && d <= lim) o.venc.push({ v, t, d }); }); });
+  (X.vman || []).forEach(m => { if (de(m) && m.status !== 'agendada' && dataOk(m.proxData) && m.proxData <= lim) o.venc.push({ v: (X.veic || []).find(x => x.id === m.veicId), t: 'Revisão', d: m.proxData }); });
+  o.venc.sort((a, b) => a.d.localeCompare(b.d));
+  (X.vsai || []).forEach(x => { if (!de(x)) return;
+    if (!x.retornoEm && x.retPrev165 && x.retPrev165 < X.agora) o.atrasados.push({ s: x, min: minutos(X.agora, x.retPrev165) });
+    if (x.retornoEm && x.v165 && (fracN(x.combRet165) ?? 1) <= 0.25) { const t = dt(x.retornoEm, x.horaRet), depois = (X.vabas || []).some(a => a.veicId === x.veicId && a.vsaiId !== x.id && dt(a.data, a.hora165 || '23:59') >= t) || (X.vsai || []).some(y => y.veicId === x.veicId && y.id !== x.id && dt(y.saidaEm, y.hora) >= t && (fracN(y.comb165) ?? 0) > 0.25); if (!depois) o.combBaixo.push({ s: x }); }
+    if (!x.retornoEm) { const f = (X.func || []).find(y => y.id === x.funcId); if (f && f.status === 'desligado') o.desligEmUso.push({ s: x, f }); } });
+  o.combBaixo = o.combBaixo.filter((x, i, a) => a.findIndex(y => y.s.veicId === x.s.veicId) === i);
+  o.avarias = (X.vav || []).filter(a => de(a) && a.st !== 'resolvida').sort((a, b) => s(b.em).localeCompare(s(a.em)));
+  o.resPend = (X.vres || []).filter(r => r.st === 'pendente' && okC(r.cidade)).sort((a, b) => s(a.ini).localeCompare(s(b.ini)));
+  o.abasAl = (X.vabas || []).filter(a => de(a) && (a.alertas165 || []).some(x => !['cont', 'oleo'].includes(x.k)) && s(a.data) >= maisDias(h, -60)).sort((a, b) => s(b.data).localeCompare(s(a.data)));
+  vs.forEach(v => { const c = consumoVeic((X.vabas || []).filter(a => a.veicId === v.id)); if (c.ult && c.media > 0 && c.ult.kml < c.media * (1 - (+cfg.quedaKmlPct || 20) / 100)) o.kml.push({ v, ult: c.ult.kml, media: c.media }); });
+  (X.func || []).filter(f => f.status !== 'desligado' && temCnh(f)).forEach(f => {
+    const a = autDe(X, f.id) || autVirtual(X, f); if (a && a.cidade && esc && !esc.has(a.cidade)) return;
+    if (dataOk(f.cnhValidade) && f.cnhValidade <= lim) o.cnh.push({ f, d: f.cnhValidade });
+    if (!a || a.st === 'revogada') return;
+    const st = autSit(X, f, a); if (st.k === 'bloq') o.bloq.push({ f, st }); else if (st.k === 'vence') o.autVenc.push({ f, st, d: autVenceEm(st) }); });
+  o.cnh.sort((a, b) => a.d.localeCompare(b.d)); o.autVenc.sort((a, b) => a.d.localeCompare(b.d));
+  o.vs = vs; return o;
+}
+
+/* ---------------------------------------------------------------- modelo das telas de reserva, saída e retorno */
+function modelo(X, quem) {
+  const cfg = X.cfg, f = funcDe(X, quem), esc = escopo(cfg, quem, true);
+  const cs = cidadesDe(cfg, quem.uid), sit = f ? autSit(X, f) : null;
+  const veicMin = v => { const st = veicSit(X, v); return { id: v.id, placa: s(v.placa), modelo: s(v.modelo), marca: s(v.marca), tipo: s(v.tipo), tipoAut: tipoDe(v), cidade: cidadeDe(v), combustivel: s(v.combustivel), tanque: +v.tanque || 0, sit: st.k, sitTxt: st.txt, km: kmUlt(X, v.id) }; };
+  const cidadeMinha = (sit && sit.a && sit.a.cidade) || cs[0] || '';
+  const vsVer = (X.veic || []).filter(v => v.status !== 'baixado' && (gestor(X, quem) ? (!esc || esc.has(cidadeDe(v))) : (!cidadeMinha || cidadeDe(v) === cidadeMinha)));
+  const minhaRes = f ? (X.vres || []).filter(r => r.funcId === f.id).sort((a, b) => s(b.ini).localeCompare(s(a.ini))).slice(0, 30) : [];
+  const minhasSai = f ? (X.vsai || []).filter(x => x.funcId === f.id && !x.retornoEm) : [];
+  const gere = gestor(X, quem);
+  const resGerir = gere ? (X.vres || []).filter(r => (r.st === 'pendente' || (r.st === 'aprovada' && s(r.fim) >= X.agora)) && (!esc || esc.has(r.cidade))).sort((a, b) => s(a.ini).localeCompare(s(b.ini))).slice(0, 100) : [];
+  const saiGerir = gere ? (X.vsai || []).filter(x => !x.retornoEm && (!esc || esc.has(x.cidade || cidadeDe((X.veic || []).find(v => v.id === x.veicId))))).slice(0, 200) : [];
+  const cond = gere ? (X.func || []).filter(x => x.status !== 'desligado' && temCnh(x)).map(x => ({ id: x.id, nome: s(x.nome), sit: autSit(X, x).k })) : [];
+  return { cfg: { cidades: cfg.cidades, checklist: cfg.checklist, fotosObrig: !!cfg.fotosObrig, frac8: !!cfg.frac8, saidaDireta: !!cfg.saidaDireta, resp: cfg.resp },
+    eu: { uid: quem.uid, funcId: f ? f.id : '', nome: f ? s(f.nome) : s(quem.nome), sit: sit ? { k: sit.k, txt: sit.txt, motivos: sit.motivos, tipos: sit.a && sit.a.tipos || [], cidade: sit.a && sit.a.cidade || '' } : null, cidades: cs, gestor: gere, admin: !!quem.admin, frotaTodos: !!quem.frotaTodos, todas: !!quem.todas, cidade: cidadeMinha },
+    veics: vsVer.map(veicMin), minhaRes, minhasSai, resGerir, saiGerir, cond, agora: X.agora };
+}
+
+module.exports = { num, norm, placaN, digitos, dt, dtOk, dataOk, maisDias, br, brDt, mascCpf, TIPOS, CURSOS, FOTOS, COMB4, COMB8, CK_PAD, RES_ST, ALERTAS, COLS, cfgPad, combOpts, combNome, fracN,
+  respDe, cidadesDe, escopo, ehResp, cidadeDe, tipoDe, tipoNome, combAceita, veicSit, kmUlt, catOk, precisaTox, temCnh, afastado, autDe, autVirtual, autSit, autVenceEm, tiposMig, podeDirigir, autValida,
+  conflito, podeAprovar, reservar, decidir, saida, retorno, condutorNa, reciboDoc, lerRelatorio, mapaColunas, importar, checar, consumoVeic, kmAbas, corrigirHod, fatura, painel, modelo, gestor, saidaAberta };
+
+return module.exports;})();
+const V165={m:null,em:0,car:0,f:null,pn:null,pnEm:0,pnCar:0,todas:false,imp:null,fat:{},qr:''};
+const v165Srv=()=>typeof SEGA_SRV==='function'&&SEGA_SRV();
+const v165Agora=()=>{const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+'T'+z(d.getHours())+':'+z(d.getMinutes());};
+const v165Cfg=()=>V165C.cfgPad((cfg()||{}).frota165);
+const v165Admin=()=>store.mode!=='db'||me.owner||!!(PERFIS[me.perfil]&&PERFIS[me.perfil].w==='*');
+const v165MeuFunc=()=>me.uid?(S.func||[]).find(f=>f.usrId===me.uid&&f.status!=='desligado')||null:null;
+function v165Quem(){const ad=v165Admin();return {uid:actorId(),funcId:(v165MeuFunc()||{}).id||'',admin:ad,frotaTodos:ad||me.perfil==='frotaadm',frotaW:ad||mayW('frota'),todas:!!V165.todas,nome:me.nome||''};}
+function v165X(){const c=v165Cfg();return {veic:S.veic||[],vsai:S.vsai||[],vres:S.vres165||[],vaut:S.vaut165||[],vav:S.vav165||[],vabas:S.vabas||[],vman:S.vman||[],func:S.func||[],afast:S.afast||[],cfg:c,mig:get('cfg','frota165mig'),hoje:todayStr(),agora:v165Agora()};}
+const v165Cid=()=>V165C.cidadesDe(v165Cfg(),actorId());
+const v165Gestor=()=>V165C.gestor(v165X(),v165Quem());
+const v165Condutor=()=>{const f=v165MeuFunc();return !!(f&&(V165C.temCnh(f)||(S.vaut165||[]).some(a=>a.funcId===f.id)));};
+const v165Q=(v,n)=>{const x=+v;return isFinite(x)?x.toLocaleString('pt-BR',{maximumFractionDigits:n==null?2:n}):'—';};
+const v165Km=v=>(+v||0).toLocaleString('pt-BR');
+const v165DtIn=v=>String(v||'').slice(0,16);
+
+/* ---------- coleções novas ---------- */
+function v165Col(c,nome){if(!COLS.includes(c)){COLS.push(c);S[c]=S[c]||[];IDX[c]=new Map();}if(typeof LIVE_COLS!=='undefined'&&!LIVE_COLS.includes(c))LIVE_COLS.push(c);COL_NOME[c]=nome;}
+v165Col('vres165','Reserva de veículo');v165Col('vaut165','Autorização de condutor');v165Col('vav165','Avaria de veículo');v165Col('vimp165','Importação da Sem Parar');v165Col('vfat165','Fatura da Sem Parar');
+/* quem lê a frota lê as coleções novas (o servidor só aceita a gravação pelas rotas) */
+GROUP_OF_TAB.v165frota='frota';TAB_COLS.v165frota=['vres165','vaut165','vav165','vimp165','vfat165'];
+Object.assign(FLABEL,{cidade:'Cidade/base',tipoAut:'Tipo do veículo (autorização)'});
+
+/* ---------- modelo das telas (rota no servidor; o mesmo cálculo sem servidor) ---------- */
+function v165Modelo(){
+  if(!v165Srv()){const m=V165C.modelo(v165X(),v165Quem());m.projs=(S.proj||[]).filter(p=>!['concluido','concluida','encerrado','cancelado'].includes(p.status)).map(p=>({id:p.id,nome:projNome(p.id)}));m.nomes={};(S.func||[]).forEach(f=>{m.nomes[f.id]=f.nome;});m.usrNomes={};return m;}
+  if((!V165.m||Date.now()-V165.em>30000)&&!V165.car){V165.car=1;segaPost('/api/frota165/meu'+(V165.todas?'?todas=1':''),null,'GET').then(j=>{V165.m=j;V165.em=Date.now();V165.car=0;render();}).catch(e=>{V165.car=0;V165.m=V165.m||{erro:e.message};render();});}
+  return V165.m;}
+function v165Local(r){if(r&&r.erro)return r;(r.docs||[]).forEach(x=>put(x.c,x.d));return Object.assign({ok:true},r);}
+/* ação: rota no servidor ou o núcleo aqui; devolve {erro} ou {ok,msg} */
+async function v165Acao(rota,body,local){
+  if(v165Srv()){try{const j=await segaPost('/api/frota165/'+rota,body);if(mayR('frota'))(j.docs||[]).forEach(d=>segaLocal(d.col,Object.assign({},d.data,{id:d.id})));V165.m=null;V165.pn=null;return j;}catch(e){return {erro:e.message};}}
+  try{const r=local();if(r&&r.erro)return r;return v165Local(r);}catch(e){return {erro:e.message||String(e)};}}
+const v165Msg=(r,ok)=>{if(r&&r.erro){toast(r.erro,'neg');return false;}toast((r&&r.msg)||ok||'Feito.','pos');return true;};
+
+/* ---------- acesso às telas novas ---------- */
+const V165_TELAS=['v165res','v165sai','v165ret','v165pn','v165imp','v165fat','v165fatf'];
+function v165TabOk(tab){if(store.mode!=='db'||me.owner)return true;const q=v165Quem(),cid=v165Cid().length>0;
+  if(tab==='v165res'||tab==='v165sai'||tab==='v165ret')return v165Condutor()||cid||q.frotaTodos||mayW('frota');
+  if(tab==='v165pn')return cid||q.frotaTodos||mayR('frota');
+  if(tab==='v165imp')return cid||q.frotaTodos;
+  if(tab==='v165fat')return cid||q.frotaTodos||mayW('fin');
+  if(tab==='v165fatf')return mayR('fin');
+  return true;}
+{const t0=pfnTabOk;pfnTabOk=function(tab,pf){if(V165_TELAS.includes(tab)&&!pf)return v165TabOk(tab);if(V165_TELAS.includes(tab)&&pf)return true;return t0.apply(this,arguments);};}
+novaTab('v165res','Reservar veículo','Frota','meu','frota','vsai');
+novaTab('v165sai','Saída do veículo','Frota','meu','frota','v165res');
+novaTab('v165ret','Retorno do veículo','Frota','meu','frota','v165sai');
+novaTab('v165pn','Painel da frota por cidade','Frota','meu','frota','v165ret');
+novaTab('v165imp','Importar relatório da Sem Parar','Frota','meu','frota','vabas');
+novaTab('v165fat','Fatura da Sem Parar','Frota','meu','frota','v165imp');
+novaTab('v165fatf','Fatura da Sem Parar (frota)','Financeiro','fin','finan'); /* a mesma tela, para o Financeiro (grupo fin: só quem lê o financeiro vê no menu) */
+Object.assign(GS_SIN,{v165res:'reserva reservar veiculo carro frota condutor',v165sai:'saida veiculo checklist km combustivel fotos qr',v165ret:'retorno veiculo chegada km combustivel avaria abastecimento recibo',v165pn:'painel frota cidade tuiuti sao paulo atraso combustivel avaria',v165imp:'sem parar ctf relatorio abastecimento importar cartao combustivel',v165fat:'fatura sem parar combustivel conta a pagar rateio obra'});
+if(typeof TIP_ACT!=='undefined')Object.assign(TIP_ACT,{v165Reservar:'Pede o veículo ao responsável pela frota da cidade.',v165SaiSalvar:'Registra a saída: o veículo fica "Em uso" até o retorno.',v165RetSalvar:'Registra o retorno, o km rodado e o combustível.'});
+
+/* ---------- estilos (toque fácil no celular) ---------- */
+const V165_CSS='<style>.v165c{display:flex;flex-wrap:wrap;gap:6px}.v165c label{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer;min-height:36px}.v165c input{width:auto;margin:0}.v165c label.on{border-color:var(--acc,#2563eb);font-weight:600}'+
+  '.v165ck{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}.v165ck>div{border:1px solid var(--line);border-radius:8px;padding:8px}.v165ck b{display:block;margin-bottom:4px}'+
+  '.v165f{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}.v165f .btn{width:100%;min-height:44px;white-space:normal}.v165cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}'+
+  '.v165cards .card{margin:0}.v165big{min-height:46px;font-size:15px}.v165row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}@media(max-width:560px){.v165hide{display:none}.v165f{grid-template-columns:1fr 1fr}}</style>';
+const v165Pill=k=>{const o=V165C.RES_ST[k]||[k,''];return pill(o[0],o[1]);};
+const v165AutPill=sit=>sit?pill(sit.txt,sit.cor):'<span class="mut">—</span>';
+const v165Sel=(k,lst,val,blank,extra)=>'<select data-v165="'+k+'"'+(extra||'')+'>'+opt(lst,val,blank)+'</select>';
+const v165In=(k,t,val,ph,extra)=>'<input type="'+(t==='dec'?'text" inputmode="decimal':t)+'" data-v165="'+k+'" value="'+esc(val==null?'':val)+'"'+(ph?' placeholder="'+esc(ph)+'"':'')+(t==='number'?' inputmode="decimal" step="any"':'')+(extra||'')+'>';
+const v165Lab=(l,inner,full)=>'<label class="f'+(full?' full':'')+'"><span>'+l+'</span>'+inner+'</label>';
+function v165Chips(k,lst,val){return '<div class="v165c">'+lst.map(o=>'<label class="'+(String(val)===String(o[0])?'on':'')+'"><input type="radio" name="v165_'+k+'" data-v165="'+k+'" value="'+esc(o[0])+'"'+(String(val)===String(o[0])?' checked':'')+'>'+esc(o[1])+'</label>').join('')+'</div>';}
+/* o formulário guarda o que se digita em V165.f (sem perder ao redesenhar) */
+document.addEventListener('input',e=>{const t=e.target;if(!t||!t.dataset||!t.dataset.v165||!V165.f)return;v165Set(t.dataset.v165,t.type==='checkbox'?t.checked:t.value);});
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||!t.dataset.v165||!V165.f)return;v165Set(t.dataset.v165,t.type==='checkbox'?t.checked:t.value);if(t.type==='radio'||t.dataset.v165r)render();});
+function v165Set(k,v){const p=String(k).split('.');let o=V165.f;for(let i=0;i<p.length-1;i++){if(o[p[i]]==null||typeof o[p[i]]!=='object')o[p[i]]={};o=o[p[i]];}o[p[p.length-1]]=v;}
+const v165Proj=(m,val)=>v165Sel('projId',(m.projs||[]).map(p=>[p.id,p.nome]),val,'Sem obra (uso geral)');
+function v165Foto(cb){if(!v165Srv()){toast('A foto é enviada ao servidor da empresa: abra o sistema pelo endereço da empresa.','neg');return;}v164Upload('image/*',cb);}
+const v165FotoBtn=(k,lbl,cur,act)=>'<button type="button" class="btn'+(cur&&cur.id?' pri':'')+'" data-act="'+(act||'v165FotoTirar')+'" data-k="'+esc(k)+'">'+(cur&&cur.id?'✓ ':'📷 ')+esc(lbl)+'</button>';
+A.v165FotoTirar=d=>v165Foto(f=>{if(!V165.f)return;V165.f.fotos=V165.f.fotos||{};V165.f.fotos[d.k]=f;render();});
+const v165Head=(m,extra)=>{const e=m&&m.eu;if(!e)return '';const sit=e.sit;
+  return '<div class="card"><div class="v165row"><b>'+esc(e.nome||'—')+'</b>'+(sit?v165AutPill(sit):'<span class="sub">sem colaborador ligado ao usuário</span>')+(e.cidades&&e.cidades.length?pill('Responsável pela frota: '+e.cidades.join(', '),'acc'):'')+
+    ((e.frotaTodos&&!e.admin&&e.cidades.length)?'<label class="f chk" style="margin:0"><input type="checkbox" data-act="v165Todas"'+(V165.todas?' checked':'')+'><span>Ver todas as cidades</span></label>':'')+(extra||'')+'</div>'+
+    (sit&&sit.motivos&&sit.motivos.length?'<p class="sub" style="margin:6px 0 0">'+esc(sit.motivos.join(' '))+'</p>':'')+'</div>';};
+A.v165Todas=()=>{V165.todas=!V165.todas;V165.m=null;V165.pn=null;render();};
+const v165Carregando=m=>!m?'<div class="card"><p class="sub" style="margin:0">Carregando…</p></div>':m.erro?'<div class="note">'+esc(m.erro)+'</div>':'';
+
+/* =================================================================== 1. reserva */
+V.v165res=()=>{const m=v165Modelo(),w=v165Carregando(m);if(w)return pageHead('Reservar veículo','')+w;
+  const f=V165.f&&V165.f.k==='res'?V165.f:(V165.f={k:'res',veicId:'',cidade:m.eu.cidade||m.cfg.cidades[0]||'',ini:'',fim:'',projId:'',destino:'',motivo:'',funcId:''});
+  const vs=m.veics.filter(v=>!f.cidade||v.cidade===f.cidade||!m.eu.gestor);
+  const form='<div class="card"><h2>Nova reserva</h2><div class="fg">'+
+    (m.eu.gestor?v165Lab('Condutor',v165Sel('funcId',(m.cond||[]).map(c=>[c.id,c.nome+(c.sit==='aut'||c.sit==='vence'?'':' (não autorizado)')]),f.funcId,'Eu mesmo(a)'),false):'')+
+    v165Lab('Cidade',v165Sel('cidade',m.cfg.cidades.map(c=>[c,c]),f.cidade,null,' data-v165r="1"'))+
+    v165Lab('Veículo',v165Sel('veicId',vs.map(v=>[v.id,v.placa+' · '+v.modelo+' ('+v.sitTxt+')']),f.veicId,'Qualquer disponível em '+(f.cidade||'minha cidade')),true)+
+    v165Lab('Saída (data e hora)',v165In('ini','datetime-local',f.ini))+v165Lab('Retorno previsto',v165In('fim','datetime-local',f.fim))+
+    v165Lab('Obra',v165Proj(m,f.projId))+v165Lab('Destino ou obra',v165In('destino','text',f.destino,'Ex.: obra P488, fornecedor em Bragança'),true)+v165Lab('Motivo',v165In('motivo','text',f.motivo,'Para que vai usar o veículo'),true)+
+    '</div><div class="acts" style="justify-content:flex-start;margin-top:10px"><button class="btn pri v165big" data-act="v165Reservar">Pedir reserva</button></div><p class="sub" style="margin:8px 0 0">A reserva precisa da aprovação do responsável pela frota da cidade (pela internet). Dois pedidos para o mesmo veículo no mesmo horário: o segundo é recusado.</p></div>';
+  const minhas='<div class="card"><h2>Minhas reservas <small>'+m.minhaRes.length+'</small></h2>'+(m.minhaRes.length?'<div class="list">'+m.minhaRes.map(r=>'<div class="li"><div><div class="t">'+esc(V165C.brDt(r.ini))+' → '+esc(V165C.brDt(r.fim))+' '+v165Pill(r.st)+'</div><div class="sub">'+esc(r.veicId?v165VNome(m,r.veicId):'Qualquer veículo em '+r.cidade)+' · '+esc(r.destino)+(r.motRec?' · recusada: '+esc(r.motRec):'')+'</div></div><div class="acts">'+
+    (r.st==='aprovada'?'<button class="btn sm pri" data-act="v165SairRes" data-id="'+esc(r.id)+'">Registrar a saída</button>':'')+(['pendente','aprovada'].includes(r.st)?'<button class="btn sm" data-act="v165ResCancelar" data-id="'+esc(r.id)+'">Cancelar</button>':'')+'</div></div>').join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma reserva.</p>')+'</div>';
+  const ger=m.eu.gestor?'<div class="card"><h2>Reservas para aprovar e aprovadas <small>'+m.resGerir.length+'</small></h2>'+(m.resGerir.length?'<div class="v165cards">'+m.resGerir.map(r=>{const op=m.veics.filter(v=>v.cidade===r.cidade).map(v=>[v.id,v.placa+' · '+v.modelo+' ('+v.sitTxt+')']);
+      return '<div class="card"><div class="v165row"><b>'+esc((m.nomes||{})[r.funcId]||'Condutor')+'</b>'+v165Pill(r.st)+pill(r.cidade,'')+'</div><div class="sub">'+esc(V165C.brDt(r.ini))+' → '+esc(V165C.brDt(r.fim))+'<br>'+esc(r.destino)+' · '+esc(r.motivo)+'</div>'+
+        (r.st==='pendente'?'<label class="f" style="margin-top:6px"><span>Veículo</span><select id="v165ap_'+esc(r.id)+'">'+opt(op,r.veicId,r.veicId?undefined:'Escolha o veículo')+'</select></label><div class="acts" style="justify-content:flex-start"><button class="btn sm pri" data-act="v165Aprovar" data-id="'+esc(r.id)+'">Aprovar</button><button class="btn sm dng" data-act="v165Recusar" data-id="'+esc(r.id)+'">Recusar</button></div>':'<div class="sub">'+esc(v165VNome(m,r.veicId))+'</div>')+'</div>';}).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma reserva pendente nas suas cidades.</p>')+'</div>':'';
+  return pageHead('Reservar veículo','Peça o veículo com data, hora, retorno previsto e destino. O responsável pela frota da cidade aprova (pode trocar o veículo) ou recusa com o motivo.')+V165_CSS+'<div class="stack">'+v165Head(m)+(m.eu.sit||m.eu.gestor?form:'<div class="note">Seu usuário não está ligado a um colaborador com CNH. Peça ao RH para ligar o usuário ao seu cadastro.</div>')+ger+minhas+'</div>';};
+const v165VNome=(m,id)=>{const v=(m.veics||[]).find(x=>x.id===id);return v?v.placa+' · '+v.modelo:(get('veic',id)?veicNome(id):'Veículo');};
+A.v165Reservar=async()=>{const f=V165.f||{};const b={veicId:f.veicId,cidade:f.cidade,ini:v165DtIn(f.ini),fim:v165DtIn(f.fim),projId:f.projId,destino:f.destino,motivo:f.motivo,funcId:f.funcId};
+  const r=await v165Acao('reserva',b,()=>V165C.reservar(v165X(),v165Quem(),b,uid()));if(v165Msg(r,'Reserva enviada para aprovação.')){V165.f=null;render();}};
+A.v165Aprovar=async d=>{const s=document.getElementById('v165ap_'+d.id),b={id:d.id,aprovar:true,veicId:s?s.value:''};const r=await v165Acao('reserva/decidir',b,()=>V165C.decidir(v165X(),v165Quem(),get('vres165',d.id),b));if(v165Msg(r,'Reserva aprovada.'))render();};
+A.v165Recusar=d=>modal({title:'Recusar reserva',body:field('Motivo da recusa','motivo','text','',{full:true,ph:'Ex.: veículo em manutenção nesse dia'}),saveLabel:'Recusar',save:root=>{const v=readForm(root),b={id:d.id,aprovar:false,motivo:v.motivo};
+  v165Acao('reserva/decidir',b,()=>V165C.decidir(v165X(),v165Quem(),get('vres165',d.id),b)).then(r=>{if(v165Msg(r,'Reserva recusada.')){closeModal();render();}});return false;}});
+A.v165ResCancelar=d=>confirmBox('Cancelar esta reserva?',()=>{v165Acao('reserva/cancelar',{id:d.id},()=>{const r=get('vres165',d.id);return r?{docs:[{c:'vres165',d:Object.assign(cl(r),{st:'cancelada',canPor:actorId(),canEm:v165Agora()})}]}:{erro:'Reserva não encontrada.'};}).then(r=>{v165Msg(r,'Reserva cancelada.');render();});},'Cancelar reserva');
+A.v165SairRes=d=>{const m=V165.m||v165Modelo(),r=(m&&m.minhaRes||[]).find(x=>x.id===d.id)||get('vres165',d.id);if(!r)return;V165.f=v165SaiNovo(m,r.veicId,r);ui.tab='v165sai';render();};
+
+/* =================================================================== 2. saída */
+function v165SaiNovo(m,veicId,res){const v=(m.veics||[]).find(x=>x.id===veicId)||{};return {k:'sai',resId:res?res.id:'',veicId,funcId:'',km:'',comb:'',ck:{},ckObs:'',fotos:{},avPre:[],destino:res?res.destino:'',projId:res?res.projId:'',pass:'',retPrev:res?res.fim:'',obs:'',kmRef:v.km||0};}
+V.v165sai=()=>{const m=v165Modelo(),w=v165Carregando(m);if(w)return pageHead('Saída do veículo','')+w;
+  if(location&&String(location.hash||'').indexOf('#v165sai/')===0){const id=decodeURIComponent(String(location.hash).slice(9));try{history.replaceState(null,'','#');}catch(e){}if(id&&m.veics.some(v=>v.id===id))V165.f=v165SaiNovo(m,id,m.minhaRes.find(r=>r.st==='aprovada'&&r.veicId===id));}
+  if(V165.f&&V165.f.k==='sai')return v165SaiForm(m);
+  const ap=m.minhaRes.filter(r=>r.st==='aprovada'),direta=m.cfg.saidaDireta||m.eu.admin||m.eu.frotaTodos||(m.eu.cidades||[]).length;
+  const dis=m.veics.filter(v=>v.sit==='disp');
+  return pageHead('Saída do veículo','Escolha a reserva aprovada (ou o veículo, se a saída direta é permitida para você). No celular, o QR do veículo abre esta tela já com o veículo.')+V165_CSS+'<div class="stack">'+v165Head(m)+
+    '<div class="card"><h2>Minhas reservas aprovadas <small>'+ap.length+'</small></h2>'+(ap.length?'<div class="v165cards">'+ap.map(r=>'<div class="card"><b>'+esc(v165VNome(m,r.veicId))+'</b><div class="sub">'+esc(V165C.brDt(r.ini))+' → '+esc(V165C.brDt(r.fim))+' · '+esc(r.destino)+'</div><button class="btn pri v165big" style="width:100%;margin-top:8px" data-act="v165SairRes" data-id="'+esc(r.id)+'">Sair com este veículo</button></div>').join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma reserva aprovada. <a href="#" data-act="nav" data-tab="v165res">Reservar veículo</a>.</p>')+'</div>'+
+    (direta?'<div class="card"><h2>Saída sem reserva <small>'+dis.length+' disponível(is)</small></h2><p class="sub" style="margin:0 0 8px">'+(m.cfg.saidaDireta?'A configuração da frota permite a saída direta.':'Só o responsável pela frota da cidade e o Administrador fazem saída sem reserva.')+'</p><div class="v165cards">'+m.veics.map(v=>'<div class="card"><div class="v165row"><b class="mono">'+esc(v.placa)+'</b>'+pill(v.sitTxt,v.sit==='disp'?'pos':v.sit==='uso'?'warn':'neg')+'</div><div class="sub">'+esc(v.modelo)+' · '+esc(v.cidade||'sem cidade')+' · '+v165Km(v.km)+' km</div>'+(v.sit==='disp'?'<button class="btn v165big" style="width:100%;margin-top:8px" data-act="v165SairVeic" data-id="'+esc(v.id)+'">Saída deste veículo</button>':'')+'</div>').join('')+'</div></div>':'')+'</div>';};
+A.v165SairVeic=d=>{const m=V165.m||v165Modelo();V165.f=v165SaiNovo(m,d.id,null);render();};
+A.v165Cancelar=()=>{V165.f=null;render();};
+function v165CkHtml(m,ck,pre){return '<div class="v165ck">'+m.cfg.checklist.map(i=>'<div><b>'+esc(i)+'</b>'+v165Chips(pre+'.'+i,[['ok','OK'],['nok','Problema']],(ck||{})[i])+'</div>').join('')+'</div>';}
+const v165Combs=m=>m.cfg.frac8?V165C.COMB8:V165C.COMB4;
+function v165AvHtml(lst,k){return (lst||[]).map((a,i)=>'<div class="card" style="margin:6px 0"><div class="fg">'+v165Lab('Avaria '+(i+1),v165In(k+'.'+i+'.desc','text',a.desc,'Onde e o quê (ex.: risco na porta traseira direita)'),true)+'<label class="f chk"><input type="checkbox" data-v165="'+k+'.'+i+'.grave"'+(a.grave?' checked':'')+'><span>Grave (impede o uso)</span></label></div><div class="v165row">'+v165FotoBtn(k+'|'+i,'Foto da avaria',a.foto,'v165AvFoto')+'<button type="button" class="btn sm" data-act="v165AvDel" data-k="'+k+'|'+i+'">Remover</button></div></div>').join('');}
+A.v165AvAdd=d=>{if(!V165.f)return;const k=d.k;V165.f[k]=Array.isArray(V165.f[k])?V165.f[k]:Object.values(V165.f[k]||{});V165.f[k].push({desc:'',grave:false,foto:null});render();};
+A.v165AvDel=d=>{const [k,i]=String(d.k).split('|');if(!V165.f)return;V165.f[k]=Object.values(V165.f[k]||{});V165.f[k].splice(+i,1);render();};
+A.v165AvFoto=d=>{const [k,i]=String(d.k).split('|');v165Foto(f=>{if(!V165.f)return;V165.f[k]=Object.values(V165.f[k]||{});if(V165.f[k][+i])V165.f[k][+i].foto=f;render();});};
+function v165SaiForm(m){const f=V165.f,v=m.veics.find(x=>x.id===f.veicId)||{placa:'?',modelo:'',km:0};
+  return pageHead('Saída do veículo',v.placa+' · '+v.modelo+(f.resId?' · reserva aprovada':' · sem reserva'),'<button class="btn" data-act="v165Cancelar">Voltar</button>')+V165_CSS+'<div class="stack">'+v165Head(m)+
+    '<div class="card"><h2>Painel</h2><div class="fg">'+(m.eu.gestor&&!f.resId?v165Lab('Condutor',v165Sel('funcId',(m.cond||[]).map(c=>[c.id,c.nome]),f.funcId,'Eu mesmo(a)')):'')+v165Lab('Km do painel (último: '+v165Km(v.km)+')',v165In('km','dec',f.km,'Ex.: '+(v.km||''))) +'</div><div style="margin-top:8px"><b>Combustível</b>'+v165Chips('comb',v165Combs(m),f.comb)+'</div></div>'+
+    '<div class="card"><h2>Checklist de saída</h2>'+v165CkHtml(m,f.ck,'ck')+'<div class="fg" style="margin-top:8px">'+v165Lab('Problemas encontrados',v165In('ckObs','text',f.ckObs,'Descreva o item com problema'),true)+'</div></div>'+
+    '<div class="card"><h2>Fotos '+(m.cfg.fotosObrig?'<small>obrigatórias</small>':'')+'</h2><div class="v165f">'+V165C.FOTOS.map(x=>v165FotoBtn(x[0],x[1],(f.fotos||{})[x[0]])).join('')+'</div></div>'+
+    '<div class="card"><h2>Avarias que já estavam no veículo</h2><p class="sub" style="margin:0 0 6px">Registre com foto antes de sair: ficam para o uso anterior.</p>'+v165AvHtml(Object.values(f.avPre||{}),'avPre')+'<button class="btn" data-act="v165AvAdd" data-k="avPre">+ Avaria encontrada</button></div>'+
+    '<div class="card"><h2>Viagem</h2><div class="fg">'+v165Lab('Destino ou obra',v165In('destino','text',f.destino),true)+v165Lab('Obra',v165Proj(m,f.projId))+v165Lab('Retorno previsto',v165In('retPrev','datetime-local',v165DtIn(f.retPrev)))+v165Lab('Passageiros',v165In('pass','text',f.pass,'Nomes'),true)+v165Lab('Observações',v165In('obs','text',f.obs),true)+'</div></div>'+
+    '<div class="acts" style="justify-content:flex-start"><button class="btn pri v165big" data-act="v165SaiSalvar">Registrar saída</button><button class="btn" data-act="v165Cancelar">Cancelar</button></div></div>';}
+A.v165SaiSalvar=async()=>{const f=V165.f;if(!f)return;const b={resId:f.resId,veicId:f.veicId,funcId:f.funcId,km:f.km,comb:f.comb,ck:f.ck,ckObs:f.ckObs,fotos:f.fotos,avPre:Object.values(f.avPre||{}),destino:f.destino,projId:f.projId,pass:f.pass,retPrev:v165DtIn(f.retPrev),obs:f.obs};
+  const r=await v165Acao('saida',b,()=>V165C.saida(v165X(),v165Quem(),b,uid(),false));if(v165Msg(r,'Saída registrada.')){V165.f=null;render();}};
+
+/* =================================================================== 3. retorno */
+V.v165ret=()=>{const m=v165Modelo(),w=v165Carregando(m);if(w)return pageHead('Retorno do veículo','')+w;
+  if(V165.f&&V165.f.k==='ret')return v165RetForm(m);
+  const minhas=m.minhasSai,outras=(m.saiGerir||[]).filter(x=>!minhas.some(y=>y.id===x.id)),ag=m.agora||v165Agora();
+  const card=x=>{const atr=x.retPrev165&&x.retPrev165<ag;return '<div class="card"><div class="v165row"><b>'+esc(v165VNome(m,x.veicId))+'</b>'+(atr?pill('Atrasado','neg'):'')+'</div><div class="sub">'+esc((m.nomes||{})[x.funcId]||m.eu.nome||'')+' · saiu '+esc(V165C.brDt(V165C.dt(x.saidaEm,x.hora)))+' com '+v165Km(x.kmSaida)+' km'+(x.retPrev165?' · previsto '+esc(V165C.brDt(x.retPrev165)):'')+'<br>'+esc(x.destino||'')+'</div><button class="btn pri v165big" style="width:100%;margin-top:8px" data-act="v165RetAbrir" data-id="'+esc(x.id)+'">Registrar retorno</button></div>';};
+  return pageHead('Retorno do veículo','Km de chegada, combustível, checklist, fotos, avarias novas e o abastecimento feito na viagem (com a foto do cupom).')+V165_CSS+'<div class="stack">'+v165Head(m)+
+    '<div class="card"><h2>Minhas saídas abertas <small>'+minhas.length+'</small></h2>'+(minhas.length?'<div class="v165cards">'+minhas.map(card).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma saída aberta no seu nome.</p>')+'</div>'+
+    (m.eu.gestor?'<div class="card"><h2>Saídas abertas da cidade <small>'+outras.length+'</small></h2>'+(outras.length?'<div class="v165cards">'+outras.map(card).join('')+'</div>':'<p class="sub" style="margin:0">Nenhuma.</p>')+'</div>':'')+'</div>';};
+A.v165RetAbrir=d=>{const m=V165.m||v165Modelo(),x=(m.minhasSai||[]).concat(m.saiGerir||[]).find(y=>y.id===d.id)||get('vsai',d.id);if(!x)return;V165.f={k:'ret',vsaiId:x.id,s:x,km:'',comb:'',ck:{},ckObs:'',fotos:{},avarias:[],abast:[],obs:''};ui.tab='v165ret';render();};
+function v165RetForm(m){const f=V165.f,x=f.s||{},rod=V165C.num(f.km)>0?V165C.num(f.km)-(+x.kmSaida||0):null,baixo=f.comb!==''&&(V165C.fracN(f.comb)??1)<=0.25,ag=m.agora||v165Agora(),atr=x.retPrev165&&x.retPrev165<ag;
+  const ab=Object.values(f.abast||{});
+  return pageHead('Retorno do veículo',v165VNome(m,x.veicId)+' · saiu '+V165C.brDt(V165C.dt(x.saidaEm,x.hora)),'<button class="btn" data-act="v165Cancelar">Voltar</button>')+V165_CSS+'<div class="stack">'+v165Head(m)+
+    (atr?'<div class="note" style="border-color:#b91c1c">Retorno atrasado: o previsto era '+esc(V165C.brDt(x.retPrev165))+'. O responsável pela frota já foi avisado.</div>':'')+
+    '<div class="card"><h2>Chegada</h2><div class="fg">'+v165Lab('Km de chegada (saiu com '+v165Km(x.kmSaida)+')',v165In('km','dec',f.km,'',' data-v165r="1"'))+'<div class="f"><span>Km rodados</span><b class="mono">'+(rod==null?'—':rod<0?'<span class="neg">menor que a saída</span>':v165Km(rod))+'</b></div></div><div style="margin-top:8px"><b>Combustível na chegada</b>'+v165Chips('comb',v165Combs(m),f.comb)+'</div>'+(baixo?'<p class="neg" style="margin:6px 0 0">Combustível baixo (até 1/4): o Painel da Frota e o responsável pela frota da cidade recebem o alerta.</p>':'')+'</div>'+
+    (x.v165?'<div class="card"><h2>Checklist de retorno</h2>'+v165CkHtml(m,f.ck,'ck')+'<div class="fg" style="margin-top:8px">'+v165Lab('Problemas encontrados',v165In('ckObs','text',f.ckObs),true)+'</div></div>'+
+    '<div class="card"><h2>Fotos '+(m.cfg.fotosObrig?'<small>obrigatórias</small>':'')+'</h2><div class="v165f">'+V165C.FOTOS.map(y=>v165FotoBtn(y[0],y[1],(f.fotos||{})[y[0]])).join('')+'</div></div>':'')+
+    '<div class="card"><h2>Avarias novas nesta saída</h2>'+v165AvHtml(Object.values(f.avarias||{}),'avarias')+'<button class="btn" data-act="v165AvAdd" data-k="avarias">+ Avaria nova</button></div>'+
+    '<div class="card"><h2>Abastecimento durante a viagem</h2><p class="sub" style="margin:0 0 6px">Tire a foto do cupom: o sistema lê placa, km, litros, valor e AUT; confira antes de salvar. Fica provisório até o relatório da Sem Parar.</p>'+
+      ab.map((a,i)=>'<div class="card" style="margin:6px 0"><div class="v165row">'+v165FotoBtn('abast|'+i,'Foto do cupom',a.foto,'v165AbFoto')+(a.lendo?'<span class="sub">lendo o cupom…</span>':a.dados&&a.dados.ia?pill('Lido pela IA: confira','acc'):'')+'<button type="button" class="btn sm" data-act="v165AvDel" data-k="abast|'+i+'">Remover</button></div><div class="fg">'+
+        [['litros','Litros','dec'],['valor','Valor (R$)','dec'],['km','Km no cupom','dec'],['aut','AUT','text'],['nsu','NSU','text'],['data','Data','date'],['hora','Hora','time'],['cnpj','CNPJ do posto','text']].map(c=>v165Lab(c[1],v165In('abast.'+i+'.'+c[0],c[2],a[c[0]]))).join('')+'</div></div>').join('')+
+      '<button class="btn" data-act="v165AbAdd">+ Abastecimento</button></div>'+
+    '<div class="card"><div class="fg">'+v165Lab('Observações',v165In('obs','text',f.obs),true)+'</div></div>'+
+    '<div class="acts" style="justify-content:flex-start"><button class="btn pri v165big" data-act="v165RetSalvar">Registrar retorno</button><button class="btn" data-act="v165Cancelar">Cancelar</button></div></div>';}
+A.v165AbAdd=()=>{if(!V165.f)return;V165.f.abast=Object.values(V165.f.abast||{});V165.f.abast.push({litros:'',valor:'',km:'',aut:'',nsu:'',data:todayStr(),hora:'',cnpj:'',foto:null});render();};
+A.v165AbFoto=d=>{const i=+String(d.k).split('|')[1];v165Foto(async f=>{if(!V165.f)return;V165.f.abast=Object.values(V165.f.abast||{});const a=V165.f.abast[i];if(!a)return;a.foto=f;a.lendo=1;render();
+  try{const j=await segaPost('/api/frota165/recibo',{arqId:f.id,vsaiId:V165.f.vsaiId});const x=j.dados||{};a.dados=x;['litros','valor','km','aut','nsu','data','hora','cnpj'].forEach(k=>{if(x[k]!=null&&x[k]!=='')a[k]=x[k];});if(x.placa&&V165.f.s&&V165.m){const v=(V165.m.veics||[]).find(y=>y.id===V165.f.s.veicId);if(v&&V165C.placaN(v.placa)!==x.placa)toast('A placa do cupom ('+x.placa+') não é a do veículo. Confira.','neg');}}
+  catch(e){toast((e&&e.message)||'Não li o cupom: digite os dados.','neg');}a.lendo=0;render();});};
+A.v165RetSalvar=async()=>{const f=V165.f;if(!f)return;const ab=Object.values(f.abast||{}).map(a=>({litros:a.litros,valor:a.valor,km:a.km,data:a.data,hora:a.hora,foto:a.foto,dados:Object.assign({},a.dados||{},{litros:a.litros,valor:a.valor,km:a.km,aut:a.aut,nsu:a.nsu,data:a.data,hora:a.hora,cnpj:a.cnpj})}));
+  const b={vsaiId:f.vsaiId,km:f.km,comb:f.comb,ck:f.ck,ckObs:f.ckObs,fotos:f.fotos,avarias:Object.values(f.avarias||{}),abast:ab,obs:f.obs};
+  const r=await v165Acao('retorno',b,()=>{const x=V165C.retorno(v165X(),v165Quem(),get('vsai',f.vsaiId),b,false);if(!x.erro&&x.baixo)x.msg='Retorno registrado. Combustível baixo: alerta no Painel da Frota.';return x;});
+  if(v165Msg(r,'Retorno registrado.')){V165.f=null;render();}};
+
+/* =================================================================== 4. painel por cidade */
+function v165PainelDados(){
+  if(!v165Srv()){const X=v165X(),q=v165Quem(),esc=V165C.escopo(X.cfg,q,true),P=V165C.painel(X,esc);const v=x=>x?{id:x.id,placa:x.placa,modelo:x.modelo||'',cidade:V165C.cidadeDe(x)}:null,f=x=>x?{id:x.id,nome:x.nome}:null,sd=x=>Object.assign({},x,{nome:funcNome(x.funcId)});
+    return {esc:esc?[...esc]:null,cidades:X.cfg.cidades,minhas:V165C.cidadesDe(X.cfg,q.uid),veics:P.vs.map(v),disp:P.disp.map(x=>v(x.v)),uso:P.uso.map(x=>({v:v(x.v),s:sd(x.st.s)})),manut:P.manut.map(x=>v(x.v)),grave:P.grave.map(x=>({v:v(x.v),txt:x.st.txt})),atrasados:P.atrasados.map(x=>({s:sd(x.s),min:x.min})),combBaixo:P.combBaixo.map(x=>sd(x.s)),
+      avarias:P.avarias.map(a=>Object.assign({},a,{nome:funcNome(a.atribFunc)})),resPend:P.resPend.map(r=>Object.assign({},r,{nome:funcNome(r.funcId)})),venc:P.venc.map(x=>({v:v(x.v),t:x.t,d:x.d})),cnh:P.cnh.map(x=>({f:f(x.f),d:x.d})),bloq:P.bloq.map(x=>({f:f(x.f),txt:x.st.txt,motivos:x.st.motivos})),autVenc:P.autVenc.map(x=>({f:f(x.f),d:x.d})),
+      abasAl:P.abasAl.slice(0,100).map(a=>({id:a.id,veicId:a.veicId,data:a.data,km:a.km,litros:a.litros,alertas:a.alertas165,st165:a.st165||''})),kml:P.kml.map(x=>({v:v(x.v),ult:x.ult,media:x.media})),desligEmUso:P.desligEmUso.map(x=>({s:sd(x.s),f:f(x.f)}))};}
+  if((!V165.pn||Date.now()-V165.pnEm>30000)&&!V165.pnCar){V165.pnCar=1;segaPost('/api/frota165/painel'+(V165.todas?'?todas=1':''),null,'GET').then(j=>{V165.pn=j;V165.pnEm=Date.now();V165.pnCar=0;render();}).catch(e=>{V165.pn={erro:e.message};V165.pnCar=0;render();});}
+  return V165.pn;}
+const v165PvN=(P,id)=>{const v=(P.veics||[]).find(x=>x.id===id)||get('veic',id);return v?v.placa+(v.modelo?' · '+v.modelo:''):'—';};
+function v165PainelHtml(P,curto){
+  if(!P)return '<div class="card"><p class="sub" style="margin:0">Carregando o painel…</p></div>';if(P.erro)return '<div class="note">'+esc(P.erro)+'</div>';
+  const L=(t,rows,vazio,n)=>'<div class="card"><h2>'+esc(t)+' <small>'+rows.length+'</small></h2>'+(rows.length?'<div class="list">'+rows.slice(0,n||12).map(r=>'<div class="li"><div><div class="t">'+r[0]+'</div>'+(r[1]?'<div class="sub">'+r[1]+'</div>':'')+'</div>'+(r[2]?'<div class="acts">'+r[2]+'</div>':'')+'</div>').join('')+'</div>':'<p class="sub" style="margin:0">'+esc(vazio)+'</p>')+'</div>';
+  const pode=!!(v165Admin()||me.perfil==='frotaadm'||(P.minhas||[]).length);
+  const k=kpi('Disponíveis',String(P.disp.length),P.veics.length+' veículo(s)',P.disp.length?'pos':'')+kpi('Em uso',String(P.uso.length),'agora')+kpi('Em manutenção',String(P.manut.length+P.grave.length),P.grave.length?P.grave.length+' com avaria grave':'',P.manut.length+P.grave.length?'warn':'')+
+    kpi('Retornos atrasados',String(P.atrasados.length),'',P.atrasados.length?'neg':'')+kpi('Combustível baixo',String(P.combBaixo.length),'voltaram com 1/4 ou menos',P.combBaixo.length?'warn':'')+kpi('Avarias abertas',String(P.avarias.length),'',P.avarias.length?'warn':'')+
+    kpi('Reservas pendentes',String(P.resPend.length),'para aprovar',P.resPend.length?'acc':'')+kpi('Condutores bloqueados',String(P.bloq.length),P.autVenc.length+' autorização(ões) vencendo',P.bloq.length?'neg':'');
+  if(curto)return '<div class="card"><h2>Frota por cidade'+(P.esc?' <small>'+esc(P.esc.join(', '))+'</small>':'')+'</h2><div class="kpis">'+k+'</div><div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="nav" data-tab="v165pn">Abrir o painel por cidade</button></div></div>';
+  return '<div class="kpis">'+k+'</div>'+'<div class="grid2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px">'+
+    L('Em uso',P.uso.map(x=>[esc(x.v.placa+' · '+x.v.modelo),esc(x.s.nome)+' desde '+esc(V165C.brDt(V165C.dt(x.s.saidaEm,x.s.hora)))+(x.s.retPrev165?' · volta '+esc(V165C.brDt(x.s.retPrev165)):'')]),'Nenhum veículo em uso.')+
+    L('Retornos atrasados',P.atrasados.map(x=>[esc(v165PvN(P,x.s.veicId)),esc(x.s.nome)+' · previsto '+esc(V165C.brDt(x.s.retPrev165))+' · '+Math.round(x.min/60*10)/10+' h de atraso']),'Nenhum retorno atrasado.')+
+    L('Combustível baixo (até 1/4)',P.combBaixo.map(x=>[esc(v165PvN(P,x.veicId)),'voltou com '+esc(V165C.combNome(x.combRet165))+' em '+esc(V165C.brDt(V165C.dt(x.retornoEm,x.horaRet)))+' · '+esc(x.nome)]),'Nenhum veículo com combustível baixo.')+
+    L('Avarias abertas',P.avarias.map(a=>[esc(v165PvN(P,a.veicId))+(a.grave?' '+pill('Grave','neg'):'')+(a.st==='manutencao'?' '+pill('Em manutenção','warn'):''),esc(a.desc)+' · '+(a.fase==='saida'?'encontrada na saída, do uso anterior':'nesta saída')+(a.nome&&a.nome!=='—'?' ('+esc(a.nome)+')':''),pode?(a.st!=='manutencao'?'<button class="btn sm pri" data-act="v165Manut" data-id="'+esc(a.id)+'">Abrir manutenção</button>':'')+'<button class="btn sm" data-act="v165AvOk" data-id="'+esc(a.id)+'">Resolvida</button>':'']),'Nenhuma avaria aberta.')+
+    L('Reservas pendentes',P.resPend.map(r=>[esc(r.nome)+' · '+esc(r.veicId?v165PvN(P,r.veicId):'qualquer em '+r.cidade),esc(V165C.brDt(r.ini))+' → '+esc(V165C.brDt(r.fim))+' · '+esc(r.destino),'<button class="btn sm" data-act="nav" data-tab="v165res">Aprovar</button>']),'Nenhuma reserva pendente.')+
+    L('Revisão, licenciamento e seguro vencendo',P.venc.map(x=>[esc(x.v?x.v.placa+' · '+x.v.modelo:'—'),esc(x.t)+' · '+esc(V165C.br(x.d))]),'Nada vencendo.')+
+    L('CNHs vencendo',P.cnh.map(x=>[esc(x.f.nome),'CNH '+(x.d<todayStr()?'vencida em ':'vence em ')+esc(V165C.br(x.d))]),'Nenhuma CNH vencendo.')+
+    L('Condutores bloqueados',P.bloq.map(x=>[esc(x.f.nome),esc((x.motivos||[]).join(' '))]),'Nenhum condutor bloqueado.')+
+    L('Autorização ou exame vencendo',P.autVenc.map(x=>[esc(x.f.nome),'vence em '+esc(V165C.br(x.d))]),'Nada vencendo.')+
+    L('Abastecimentos com alerta (60 dias)',P.abasAl.map(a=>[esc(v165PvN(P,a.veicId))+' · '+esc(V165C.br(a.data)),(a.alertas||[]).filter(x=>!['cont','oleo'].includes(x.k)).map(x=>esc(x.txt)).join('<br>'),pode?'<button class="btn sm" data-act="v165Hod" data-id="'+esc(a.id)+'" data-km="'+esc(a.km)+'">Corrigir hodômetro</button>':'']),'Nenhum abastecimento com alerta.',30)+
+    L('Queda de consumo (km/l)',P.kml.map(x=>[esc(x.v.placa+' · '+x.v.modelo),'último '+v165Q(x.ult,1)+' km/l × média '+v165Q(x.media,1)]),'Nenhuma queda de consumo.')+
+    (P.desligEmUso.length?L('Desligados com veículo em uso',P.desligEmUso.map(x=>[esc(x.f.nome),esc(v165PvN(P,x.s.veicId))+' desde '+esc(V165C.br(x.s.saidaEm))]),''):'')+'</div>';}
+V.v165pn=()=>{const P=v165PainelDados();const c=v165Cfg(),ad=v165Admin()||me.perfil==='frotaadm';
+  return pageHead('Painel da frota por cidade','Disponíveis, em uso (quem e desde quando), manutenção, retornos atrasados, combustível baixo, avarias, reservas, vencimentos, CNHs e condutores bloqueados.',(ad?'<button class="btn" data-act="v165CfgAbrir">Configurações da frota</button>':'')+'<button class="btn" data-act="nav" data-tab="v165res">Reservas</button>')+V165_CSS+'<div class="stack">'+
+    (P&&!P.erro?'<div class="bar"><p class="sub" style="margin:0;align-self:center">'+(P.esc?'Cidade(s): <b>'+esc(P.esc.join(', '))+'</b>':'Todas as cidades')+'</p>'+((P.minhas||[]).length&&me.perfil==='frotaadm'&&!v165Admin()?'<label class="f chk" style="margin:0"><input type="checkbox" data-act="v165Todas"'+(V165.todas?' checked':'')+'><span>Ver todas as cidades</span></label>':'')+'</div>':'')+
+    (c.cidades.some(x=>!V165C.respDe(c,x).length)&&ad?'<div class="note">Cidade sem responsável pela frota: '+esc(c.cidades.filter(x=>!V165C.respDe(c,x).length).join(', '))+'. Defina em Configurações da frota.</div>':'')+v165PainelHtml(P)+'</div>';};
+{const v0=V.pnFrota;if(v0)V.pnFrota=function(){const h=v0.apply(this,arguments);if(!(v165Srv()||(S.vaut165||[]).length||(S.vres165||[]).length||S.veic.some(v=>v.cidade)))return h;const P=v165PainelDados(),k='<div class="stack">',i=h.indexOf(k);const card=v165PainelHtml(P,true);return i>=0?h.slice(0,i+k.length)+card+h.slice(i+k.length):h+card;};}
+A.v165Manut=async d=>{const r=await v165Acao('manut',{avId:d.id},()=>{const a=get('vav165',d.id);if(!a)return {erro:'Avaria não encontrada.'};const mid=uid();return {docs:[{c:'vman',d:Object.assign(MODS2.vman.blank(),{id:mid,veicId:a.veicId,data:todayStr(),tipo:'Correção de defeito',status:'agendada',desc:'Avaria'+(a.grave?' grave':'')+': '+a.desc,gerarLanc:false,valor:'',vsaiId:a.vsaiId||'',origem:'avaria165',av165:a.id})},{c:'vav165',d:Object.assign(cl(a),{vmanId:mid,st:'manutencao'})}]};});if(v165Msg(r,'Manutenção aberta (Frota › Manutenção). O custo entra pela nota.'))render();};
+A.v165AvOk=d=>modal({title:'Avaria resolvida',body:field('Como foi resolvida','como','text','',{full:true}),saveLabel:'Salvar',save:root=>{const v=readForm(root);v165Acao('avaria/resolver',{avId:d.id,como:v.como},()=>{const a=get('vav165',d.id);if(!a)return {erro:'Avaria não encontrada.'};if(String(v.como||'').trim().length<3)return {erro:'Diga como foi resolvida.'};return {docs:[{c:'vav165',d:Object.assign(cl(a),{st:'resolvida',como:v.como,okPor:actorId(),okEm:v165Agora()})}]};}).then(r=>{if(v165Msg(r,'Avaria resolvida.')){closeModal();render();}});return false;}});
+A.v165Hod=d=>modal({title:'Corrigir hodômetro',body:'<p class="sub" style="margin:0 0 8px">O valor original fica no histórico; o consumo e os alertas passam a usar o corrigido.</p><div class="fg">'+field('Hodômetro corrigido','km','number',d.km||'',{})+field('Motivo (obrigatório)','motivo','text','',{full:true,ph:'Ex.: motorista digitou um dígito a mais na bomba'})+'</div>',saveLabel:'Corrigir',save:root=>{const v=readForm(root),b={id:d.id,km:v.km,motivo:v.motivo};
+  v165Acao('hodometro',b,()=>V165C.corrigirHod(v165X(),v165Quem(),get('vabas',d.id),b.km,b.motivo)).then(r=>{if(v165Msg(r,'Hodômetro corrigido.')){closeModal();render();}});return false;}});
+
+/* ---------- configurações da frota (Configurações › Frota) ---------- */
+A.v165CfgAbrir=()=>{if(!(v165Admin()||me.perfil==='frotaadm')){toast('Só o Administrador e o Administrador de frota alteram.','neg');return;}const c=v165Cfg();
+  const us=(S.usr||[]).filter(u=>u.ativo!==false&&u.uid&&u.perfil!=='pendente').map(u=>[u.uid,nameOf(u.uid)||u.apelido||'Usuário']).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  modal({title:'Configurações da frota',wide:true,body:'<div class="fg">'+field('Cidades/bases (uma por linha)','cidades','textarea',c.cidades.join('\n'),{full:true,rows:3})+'</div>'+
+    '<div class="sect">Responsável pela frota de cada cidade</div><div class="fg">'+c.cidades.map((cid,i)=>field(esc(cid)+': responsável','r_'+i,'select',(c.resp[cid]||{}).uid||'',{opts:us,blank:'—'})+field(esc(cid)+': substituto','s_'+i,'select',(c.resp[cid]||{}).sub||'',{opts:us,blank:'—'})).join('')+'</div>'+
+    '<div class="sect">Saída e retorno</div><div class="fg">'+field('Permitir saída sem reserva para qualquer condutor autorizado','saidaDireta','checkbox',c.saidaDireta,{full:true})+field('Fotos obrigatórias (4 lados e painel)','fotosObrig','checkbox',c.fotosObrig,{full:true})+field('Combustível em 1/8','frac8','checkbox',c.frac8,{full:true})+field('Itens do checklist (um por linha)','checklist','textarea',c.checklist.join('\n'),{full:true,rows:4})+'</div>'+
+    '<div class="sect">Condutores e abastecimentos</div><div class="fg">'+field('Aviso de vencimento (dias)','diasAviso','number',c.diasAviso)+field('Validade da autorização (meses)','autMeses','number',c.autMeses)+field('Queda de km/l para alerta (%)','quedaKmlPct','number',c.quedaKmlPct)+field('Km rodado máximo','kmMax','number',c.kmMax)+field('Km rodado mínimo','kmMin','number',c.kmMin)+field('Tolerância do hodômetro × saída (km)','tolKm','number',c.tolKm)+field('Preço acima da mediana (%)','precoPct','number',c.precoPct)+field('Tolerância do recibo × relatório (dias)','tolMatchDias','number',c.tolMatchDias)+field('Exigir recibo de todo abastecimento','exigeRecibo','checkbox',c.exigeRecibo,{full:true})+'</div>',
+    saveLabel:'Salvar',save:root=>{const v=readForm(root),cids=[...new Set(String(v.cidades||'').split('\n').map(x=>x.trim()).filter(Boolean))];const resp={};cids.forEach(cid=>{const i=c.cidades.indexOf(cid);resp[cid]=i>=0?{uid:v['r_'+i]||'',sub:v['s_'+i]||''}:{uid:'',sub:''};});
+      const n=Object.assign({},c,{cidades:cids,resp,saidaDireta:!!v.saidaDireta,fotosObrig:!!v.fotosObrig,frac8:!!v.frac8,exigeRecibo:!!v.exigeRecibo,checklist:String(v.checklist||'').split('\n').map(x=>x.trim()).filter(Boolean)});['diasAviso','autMeses','quedaKmlPct','kmMax','kmMin','tolKm','precoPct','tolMatchDias'].forEach(k=>{if(v[k]!=null&&isFinite(v[k]))n[k]=v[k];});
+      v165Acao('cfg',{frota165:n},()=>({docs:[{c:'cfg',d:Object.assign(cl(get('cfg','empresa')||{id:'empresa'}),{id:'empresa',frota165:n})}]})).then(r=>{if(v165Msg(r,'Configurações da frota salvas.')){closeModal();render();}});return false;}});};
+{const v0=V.cfg;V.cfg=function(){const h=v0.apply(this,arguments);if(!(v165Admin()||me.perfil==='frotaadm'))return h;const c=v165Cfg();
+  const card='<div class="card"><h2>Frota</h2><p class="sub" style="margin:0 0 8px">Cidades/bases: '+esc(c.cidades.join(', '))+' · responsáveis: '+c.cidades.map(x=>esc(x)+' '+(V165C.respDe(c,x).length?esc(V165C.respDe(c,x).map(nameOf).join(' / ')):'<b class="neg">sem responsável</b>')).join(' · ')+' · saída sem reserva '+(c.saidaDireta?'permitida':'só responsável e Administrador')+'.</p><button class="btn" data-act="v165CfgAbrir">Configurações da frota</button></div>';
+  const i=h.lastIndexOf('</div>');return i>0?h.slice(0,i)+card+h.slice(i):h+card;};}
+
+/* =================================================================== veículos: cidade/base, tipo, situação e QR */
+{const d=MODS2.veic,f0=d.fields,b0=d.blank,c0=d.cols;
+  d.fields=r=>{const fs=f0(r),c=v165Cfg(),o=c.cidades.map(x=>[x,x]);if(r.cidade&&!c.cidades.includes(r.cidade))o.push([r.cidade,r.cidade+' (removida)']);const i=fs.findIndex(x=>x.k==='status');
+    fs.splice(i>=0?i+1:fs.length,0,F('cidade','Cidade/base','select',{o,blank:'Sem cidade definida'}),F('tipoAut','Tipo (autorização do condutor)','select',{o:V165C.TIPOS,blank:'Pelo tipo do veículo'}));
+    if(!fs.some(x=>x.k==='tanque'))fs.push(F('tanque','Capacidade do tanque (litros)','number'));return fs;};
+  d.blank=()=>Object.assign(b0(),{cidade:'',tipoAut:''});
+  d.cols=c0.map(c=>c[0]==='Situação'?['Situação',r=>{const st=V165C.veicSit(v165X(),r);return c[1](r)+(st.k==='uso'?'<div class="sub">'+esc(st.txt)+'</div>':st.k==='grave'?'<div class="sub neg">'+esc(st.txt)+'</div>':'');}]:c);
+  if(!d.cols.some(c=>c[0]==='Cidade'))d.cols.splice(1,0,['Cidade',r=>r.cidade?esc(r.cidade):'<span class="sub">—</span>']);
+  d.filters=(d.filters||[]).concat([{k:'cid',l:'Cidade/base',opts:()=>v165Cfg().cidades.map(x=>[x,x]).concat([['_sem','Sem cidade']]),match:(r,v)=>v==='_sem'?!r.cidade:r.cidade===v}]);
+  const ra=d.rowActs;d.rowActs=r=>(ra?ra(r):'')+'<button class="btn sm" data-act="v165Qr" data-id="'+r.id+'">Etiqueta QR</button>';d.extraActs=(d.extraActs||[]).concat(['v165Qr']);ACT_GROUP.v165Qr=null;}
+A.v165Qr=d=>{const v=get('veic',d.id);if(!v)return;const url='/api/frota165/qr?veicId='+encodeURIComponent(v.id);
+  const et='<div style="border:2px solid #111;border-radius:10px;padding:14px;max-width:320px;text-align:center;font-family:sans-serif"><div style="font-size:26px;font-weight:700;letter-spacing:2px">'+esc(v.placa)+'</div><div>'+esc([v.marca,v.modelo].filter(Boolean).join(' '))+'</div>'+(v165Srv()?'<img src="'+url+'" alt="QR do veículo" style="width:200px;height:200px;margin:8px auto;display:block">':'<p class="sub">O QR aparece no servidor da empresa.</p>')+'<div style="font-size:12px">Leia o QR para registrar a saída e o retorno · '+esc(v.cidade||'')+'</div></div>';
+  modal({title:'Etiqueta QR · '+v.placa,body:'<div id="v165et">'+et+'</div><p class="sub" style="margin:10px 0 0">Cole a etiqueta no painel ou no para-sol. A leitura do QR pelo celular abre a Saída do veículo já com o veículo (o leitor no aplicativo vem na v166).</p>',foot:'<button class="btn" data-act="closeModal">Fechar</button><button class="btn pri" data-act="v165QrPrint">Imprimir</button>',nofocus:true});};
+A.v165QrPrint=()=>{const pa=$('#printArea'),e=$('#v165et');if(!pa||!e){toast('Impressão indisponível nesta tela.','neg');return;}pa.innerHTML=e.innerHTML;try{window.print();}catch(x){toast('Não foi possível imprimir aqui.','neg');}};
+
+/* =================================================================== saídas (vsai): a "Nova saída" abre a tela de saída */
+A.vsaiNovo=()=>{V165.f=null;ui.tab='v165sai';render();};
+A.vsaiRetorno=x=>{V165.f=null;ui.tab='v165ret';const s=get('vsai',x.id);if(s){V165.f={k:'ret',vsaiId:s.id,s:cl(s),km:'',comb:'',ck:{},ckObs:'',fotos:{},avarias:[],abast:[],obs:''};}render();};
+{const d=MODS2.vsai,v0=d.validate,c0=d.cols;
+  d.validate=(r,isNew)=>{const e=v0?v0(r,isNew):'';if(e)return e;if(!isNew||/^(rom|ped)164_/.test(r.id||''))return '';const X=v165X(),f=get('func',r.funcId),v=get('veic',r.veicId);
+    const m=f?V165C.podeDirigir(X,f,v):'';if(m)return 'Saída bloqueada: '+m;const st=V165C.veicSit(X,v);if(st.k==='manut'||st.k==='grave')return 'Saída bloqueada: '+st.txt.toLowerCase()+'.';return '';};
+  d.cols=c0.concat([['Combustível e prazo',r=>!r.v165?'<span class="mut">—</span>':esc(V165C.combNome(r.comb165))+(r.retornoEm?' → '+esc(V165C.combNome(r.combRet165)):'')+(r.retPrev165?'<div class="sub">previsto '+esc(V165C.brDt(r.retPrev165))+(r.atraso165>0?' · '+Math.round(r.atraso165/6)/10+' h de atraso':'')+'</div>':'')]]);
+  d.sub='Quem saiu com qual veículo. A saída e o retorno são registrados em telas separadas (Frota › Saída do veículo e Retorno do veículo), com reserva, checklist, combustível, fotos e avarias.';}
+
+/* =================================================================== multas: quem estava com o veículo */
+{const d=MODS2.multa;if(d){const p0=d.pre,f0=d.fields;
+  d.pre=(r,n)=>{if(!r.funcId&&r.veicId&&r.data){const c=V165C.condutorNa(v165X(),r.veicId,r.data,r.hora);if(c)r.funcId=c.funcId;}if(p0)p0(r,n);};
+  d.fields=r=>{const fs=f0(r);const h=v165MultaTxt(r);fs.splice(Math.min(fs.length,4),0,{t:'sect',l:h||'Quem estava com o veículo: escolha o veículo, a data e a hora da infração'});return fs;};}}
+function v165MultaTxt(r){if(!r||!r.veicId||!r.data)return '';const c=V165C.condutorNa(v165X(),r.veicId,r.data,r.hora);if(!c)return 'Nenhuma saída do veículo cobre '+fmtDate(r.data)+(r.hora?' '+r.hora:'')+': confira com a frota.';const s=c.saida;
+  return 'Com o veículo nesta data/hora: '+funcNome(c.funcId)+' (saída de '+V165C.brDt(V165C.dt(s.saidaEm,s.hora))+(s.retornoEm?' a '+V165C.brDt(V165C.dt(s.retornoEm,s.horaRet||'')):' · ainda fora')+'). Sugerido como condutor.';}
+const v165MultaSug=(veicId,data,hora)=>{const c=V165C.condutorNa(v165X(),veicId,data,hora);return c?c.funcId:'';};
+document.addEventListener('change',e=>{const t=e.target;if(!t||!t.dataset||!['veicId','data','hora'].includes(t.dataset.f))return;const mb=$('#mb');if(!mb||!mb.innerHTML||mb.innerHTML.indexOf('Quem estava com o veículo')<0&&mb.innerHTML.indexOf('Com o veículo nesta data')<0)return;
+  const g=k=>{const x=$('#f_'+k);return x?x.value:'';},fid=v165MultaSug(g('veicId'),g('data'),g('hora')),sel=$('#f_funcId');if(fid&&sel&&!sel.value){sel.value=fid;toast('Condutor sugerido pela saída do veículo: '+funcNome(fid)+'.','pos');}});
+
+/* =================================================================== abastecimentos: conferência, recibo, hodômetro */
+{const d=MODS2.vabas,c0=d.cols,ra=d.rowActs;
+  d.cols=c0.concat([['Conferência',r=>{const a=(r.alertas165||[]).filter(x=>x.k!=='oleo');return (r.st165==='aguardando'?pill('Aguardando relatório','warn'):r.st165==='confirmado'?pill(r.rec165?'Confirmado (recibo)':'Importado','pos'):'')+(r.imp165&&r.imp165.cont?' '+pill('Contingência','neg'):'')+(a.length?'<div class="sub">'+a.slice(0,3).map(x=>esc(V165C.ALERTAS[x.k]||x.k)).join(' · ')+(a.length>3?' +'+(a.length-3):'')+'</div>':'')+(r.hodCorr165?'<div class="sub">hodômetro corrigido (era '+v165Km(r.hodCorr165.orig)+')</div>':'');}]]);
+  d.rowActs=r=>(ra?ra(r):'')+(r.imp165||r.rec165?'<button class="btn sm" data-act="v165Hod" data-id="'+r.id+'" data-km="'+esc(r.km)+'">Corrigir hodômetro</button>':'');
+  d.headActs=(d.headActs||'')+'<button class="btn" data-act="nav" data-tab="v165imp">Importar relatório da Sem Parar</button><button class="btn" data-act="v165Recibo">Recibo (foto do cupom)</button>';
+  ACT_GROUP.v165Recibo=null;ACT_GROUP.v165Hod=null;}
+A.v165Recibo=()=>{const vs=(S.veic||[]).filter(v=>v.status!=='baixado');V165.rc={foto:null,dados:{}};
+  const body=()=>'<div class="fg">'+field('Veículo','veicId','select',V165.rc.veicId||'',{opts:vs.map(v=>[v.id,veicNome(v.id)]),blank:'Selecione…',full:true})+'</div><div class="v165row" style="margin:8px 0">'+'<button type="button" class="btn'+(V165.rc.foto?' pri':'')+'" data-act="v165RcFoto">'+(V165.rc.foto?'✓ Foto do cupom':'📷 Foto do cupom')+'</button>'+(V165.rc.lendo?'<span class="sub">lendo…</span>':V165.rc.dados.ia?pill('Lido pela IA: confira','acc'):'')+'</div><div class="fg">'+
+    [['litros','Litros','number'],['valor','Valor (R$)','number'],['km','Km','number'],['aut','AUT','text'],['nsu','NSU','text'],['data','Data','date'],['hora','Hora','time'],['cnpj','CNPJ do posto','text']].map(c=>field(c[1],c[0],c[2],V165.rc.dados[c[0]]==null?'':V165.rc.dados[c[0]])).join('')+'</div>';
+  V165.rcBody=body;
+  modal({title:'Recibo do abastecimento',body:'<div id="v165rc">'+body()+'</div>',saveLabel:'Salvar provisório',save:root=>{const v=readForm(root);const b={veicId:v.veicId,dados:Object.assign({},V165.rc.dados,v),foto:V165.rc.foto};
+    v165Acao('recibo/salvar',b,()=>{const ve=get('veic',v.veicId);if(!ve)return {erro:'Escolha o veículo.'};return {docs:[{c:'vabas',d:V165C.reciboDoc(v165X(),v165Quem(),{veicId:ve.id,cidade:V165C.cidadeDe(ve),dados:b.dados,foto:b.foto},uid())}]};}).then(r=>{if(v165Msg(r,'Abastecimento provisório registrado.')){closeModal();render();}});return false;}});};
+A.v165RcFoto=()=>v165Foto(async f=>{V165.rc.foto=f;V165.rc.lendo=1;const keep=readForm($('#mb')||document);Object.assign(V165.rc.dados,keep);V165.rc.veicId=keep.veicId;const box=$('#v165rc');if(box)box.innerHTML=V165.rcBody();
+  try{const j=await segaPost('/api/frota165/recibo',{arqId:f.id});Object.assign(V165.rc.dados,j.dados||{});if(j.dados&&j.dados.placa&&!V165.rc.veicId){const v=(S.veic||[]).find(x=>V165C.placaN(x.placa)===j.dados.placa);if(v)V165.rc.veicId=v.id;}}catch(e){toast((e&&e.message)||'Não li o cupom: digite os dados.','neg');}
+  V165.rc.lendo=0;const b2=$('#v165rc');if(b2)b2.innerHTML=V165.rcBody();});
+
+/* =================================================================== importação do relatório da Sem Parar */
+V.v165imp=()=>{const I=V165.imp;
+  const tab=I&&I.prev?'<div class="tw"><table style="min-width:900px"><thead><tr><th>Linha</th><th>Situação</th><th>Veículo</th><th>Data</th><th>Motorista</th><th class="num">Litros</th><th class="num">Valor</th><th class="num">Km rodado</th><th>Obra</th><th style="min-width:300px">Alertas</th></tr></thead><tbody>'+
+    v165ImpPag(I.prev).map(p=>'<tr><td class="mono">'+p.linha+'</td><td>'+({novo:pill('Novo','acc'),dup:pill('Já importado','') ,casado:pill('Casado com recibo','pos'),fora:pill('Fora da sua cidade','neg')}[p.st]||esc(p.st))+(p.alertas.length?' '+pill('Com alerta','warn'):'')+(p.cont?' '+pill('Contingência','neg'):'')+'</td><td class="mono">'+esc(p.placa)+(p.veicId?'':'<div class="sub neg">placa desconhecida</div>')+'</td><td class="mono">'+esc(V165C.br(p.data))+' '+esc(p.hora||'')+'</td><td>'+esc(p.motorista||'—')+'<div class="sub mono">'+esc(p.cpfMasc||'')+'</div></td><td class="num">'+v165Q(p.litros)+'</td><td class="num">'+money(p.valor)+'</td><td class="num">'+(p.kmRod==null?'—':v165Km(p.kmRod))+'</td><td>'+(p.projId?esc(projNome(p.projId)):'<span class="sub">frota '+esc(p.cidade||'')+'</span>')+'</td><td style="min-width:300px">'+(p.alertas.length?p.alertas.map(a=>'<div class="sub">'+esc(a.txt)+'</div>').join(''):'<span class="mut">—</span>')+'</td></tr>').join('')+'</tbody></table></div>'+v165ImpNav(I.prev):'';
+  const R=I&&I.resumo;
+  return pageHead('Importar relatório da Sem Parar','Portal da Sem Parar › "Relatório Utilização Combustível" em .xls. Cada linha vira um abastecimento ligado ao veículo pela placa e ao colaborador pelo CPF (guardado só mascarado). Repetir a importação não duplica (pela Autorização).','<button class="btn" data-act="v165Fatura">Fatura do mês</button>')+V165_CSS+'<div class="stack">'+
+    '<div class="card"><div class="v165row"><button class="btn pri v165big" data-act="v165ImpArq">Escolher o arquivo .xls</button>'+(I&&I.arquivo?'<span class="sub">'+esc(I.arquivo)+'</span>':'')+'</div><p class="sub" style="margin:8px 0 0">O arquivo é lido aqui no navegador; só as linhas vão para o servidor. Integração automática: pergunte ao gerente da conta da Sem Parar se há API ou envio automático do relatório (o sistema já tem a entrada pronta).</p></div>'+
+    (R?'<div class="kpis">'+kpi('Linhas',String(R.n),V165C.br(R.ini)+' a '+V165C.br(R.fim))+kpi('Novos',String(R.novos),'')+kpi('Já importados',String(R.dups),'não duplicam')+kpi('Casados com recibo',String(R.casados),'viram confirmados')+kpi('Com alerta',String(R.comAlerta),'',R.comAlerta?'warn':'')+kpi('Total',money(R.total),R.fora?R.fora+' fora da sua cidade':'')+(R.reciboSem?kpi('Recibos sem transação',String(R.reciboSem),'','neg'):'')+'</div>':'')+
+    (I&&I.prev&&!I.feito?'<div class="acts" style="justify-content:flex-start"><button class="btn pri v165big" data-act="v165ImpConfirmar">Confirmar importação</button><button class="btn" data-act="v165ImpLimpar">Descartar</button></div>':'')+(I&&I.feito?'<div class="note">Importação gravada (lote '+esc(I.lote||'')+').</div>':'')+tab+'</div>';};
+const v165ImpPag=l=>{const p=V165.impPag||0;return l.slice(p*100,p*100+100);};
+const v165ImpNav=l=>l.length>100?'<div class="acts" style="justify-content:flex-start">'+Array.from({length:Math.ceil(l.length/100)},(x,i)=>'<button class="btn sm'+(i===(V165.impPag||0)?' pri':'')+'" data-act="v165ImpPg" data-p="'+i+'">'+(i*100+1)+'–'+Math.min(l.length,i*100+100)+'</button>').join('')+'</div>':'';
+A.v165ImpPg=d=>{V165.impPag=+d.p||0;render();};
+A.v165ImpLimpar=()=>{V165.imp=null;render();};
+/* linhas da planilha (texto) → linhas do relatório (V165C.lerRelatorio); também usada nos testes */
+function v165LerPlanilha(buf){const wb=window.XLSX.read(buf,{type:'array'}),ws=wb.Sheets[wb.SheetNames[0]];return V165C.lerRelatorio(window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''}));}
+A.v165ImpArq=()=>{const inp=document.createElement('input');inp.type='file';inp.accept='.xls,.xlsx,application/vnd.ms-excel';inp.onchange=async()=>{const file=inp.files&&inp.files[0];if(!file)return;
+  try{await loadScript(XLSX_URL,()=>!!window.XLSX);const r=v165LerPlanilha(await file.arrayBuffer());if(r.erro){toast(r.erro,'neg');return;}await v165ImpPrev(r.linhas,file.name);}catch(e){toast('Não consegui ler a planilha: '+((e&&e.message)||e),'neg');}};if(inp.click)inp.click();};
+async function v165ImpPrev(linhas,arquivo){V165.impPag=0;const b={linhas,origem:'arquivo',arquivo};
+  if(v165Srv()){try{const j=await segaPost('/api/frota165/importar',b);V165.imp={linhas,arquivo,prev:j.prev,resumo:j.resumo};}catch(e){toast(e.message,'neg');return;}}
+  else{const r=V165C.importar(v165X(),v165Quem(),linhas,'arquivo',{lote:uid()});V165.imp={linhas,arquivo,prev:r.prev,resumo:r.resumo,docs:r.docs};}
+  render();}
+A.v165ImpConfirmar=async()=>{const I=V165.imp;if(!I)return;const b={linhas:I.linhas,origem:'arquivo',arquivo:I.arquivo,confirmar:true};
+  const r=await v165Acao('importar',b,()=>{const x=V165C.importar(v165X(),v165Quem(),I.linhas,'arquivo',{lote:uid()});if(!x.docs.length)return {erro:'Nada a gravar.'};return {docs:x.docs.concat([{c:'vimp165',d:{id:uid(),em:v165Agora(),por:actorId(),origem:'arquivo',arquivo:I.arquivo,resumo:x.resumo}}]),prev:x.prev,resumo:x.resumo};});
+  if(v165Msg(r,'Relatório importado.')){V165.imp=Object.assign(I,{feito:true,lote:r.lote||'',prev:r.prev||I.prev,resumo:r.resumo||I.resumo});render();}};
+
+/* =================================================================== fatura do mês */
+A.v165Fatura=()=>{ui.tab='v165fat';render();};
+V.v165fat=()=>{const mes=V165.fatMes||ym(todayStr()),F0=V165.fat[mes];
+  if(v165Srv()&&(!F0||Date.now()-F0.em>30000)&&!V165.fatCar){V165.fatCar=1;segaPost('/api/frota165/fatura?mes='+mes,null,'GET').then(j=>{V165.fat[mes]=Object.assign(j,{em:Date.now()});V165.fatCar=0;render();}).catch(e=>{V165.fat[mes]={erro:e.message,em:Date.now()};V165.fatCar=0;render();});}
+  const J=v165Srv()?F0:{fat:V165C.fatura(v165X(),mes,null),lancada:get('vfat165','fat_'+mes),podeLancar:v165Admin()||mayW('fin')};
+  const tb=(t,l,k)=>'<div class="card"><h2>'+esc(t)+'</h2><div class="tw" style="border:0"><table><tbody>'+(l.length?l.map(x=>'<tr><td>'+esc(x.nome||(k==='cidade'?(x.cidade||'Sem cidade'):k==='veic'?veicNome(x.veicId):x.projId?projNome(x.projId):'Frota (sem obra)'))+'</td><td class="num">'+money(x.valor)+'</td></tr>').join(''):emptyRow(2,'Nada no mês.'))+'</tbody></table></div></div>';
+  const body=!J?'<div class="card"><p class="sub" style="margin:0">Carregando…</p></div>':J.erro?'<div class="note">'+esc(J.erro)+'</div>':(()=>{const f=J.fat,L=J.lancada;
+    return '<div class="kpis">'+kpi('Importado no mês',money(f.total),f.n+' abastecimento(s)')+kpi('Com obra',money(f.total-f.geral),f.rateio.length+' obra(s)')+kpi('Frota geral (sem saída)',money(f.geral),'custo da cidade do veículo')+(f.manut?kpi('Manutenção na transação',money(f.manut),'vai pela nota (v163)','warn'):'')+'</div>'+
+      (L?'<div class="note">Fatura lançada em '+esc(V165C.brDt(L.em))+': '+money(L.valor)+(L.dif?' (diferença '+money(L.dif)+': '+esc(L.motivoDif||'')+')':'')+'. Uma conta a pagar com o rateio por obra.</div>':
+        J.podeLancar?'<div class="card"><h2>Lançar a fatura da Sem Parar</h2><div class="fg">'+field('Valor da fatura (R$)','fatValor','number','',{})+field('Vencimento','fatVenc','date','',{})+field('Motivo da diferença (se houver)','fatMot','text','',{full:true})+'</div><div class="v165row" style="margin-top:8px"><button class="btn'+(V165.fatArq?' pri':'')+'" data-act="v165FatArq">'+(V165.fatArq?'✓ PDF da fatura':'Anexar o PDF da fatura')+'</button><button class="btn pri" data-act="v165FatLancar">Lançar no contas a pagar</button></div><p class="sub" style="margin:8px 0 0">Uma conta só para a fatura (não uma por abastecimento), categoria Veículos e frota, com o rateio por obra. A diferença entre a fatura e o importado precisa de motivo.</p></div>':'<div class="note">O Financeiro lança a fatura no contas a pagar.</div>')+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">'+tb('Por obra',f.porObra,'obra')+tb('Por cidade',f.porCidade,'cidade')+tb('Por veículo',f.porVeic,'veic')+'</div>';})();
+  return pageHead('Fatura da Sem Parar','Compare o total importado do mês com a fatura e lance uma conta a pagar com o rateio por veículo e obra (sem saída: custo geral da frota da cidade).')+V165_CSS+'<div class="stack"><div class="bar"><label class="f"><span>Mês</span><input type="month" value="'+esc(mes)+'" id="v165fatmes"></label><button class="btn" data-act="v165FatMesIr">Ver</button></div>'+body+'</div>';};
+V.v165fatf=()=>V.v165fat();
+A.v165FatMesIr=()=>{const e=$('#v165fatmes');if(e&&/^\d{4}-\d{2}$/.test(e.value)){V165.fatMes=e.value;render();}};
+A.v165FatArq=()=>{if(!v165Srv()){toast('O anexo vai para o servidor da empresa.','neg');return;}v164Upload('application/pdf',f=>{V165.fatArq=f;render();});};
+A.v165FatLancar=async()=>{const mes=V165.fatMes||ym(todayStr()),g=k=>{const e=$('#f_'+k);return e?e.value:'';};const b={mes,valor:g('fatValor'),venc:g('fatVenc'),motivoDif:g('fatMot'),arq:V165.fatArq||null};
+  const r=await v165Acao('fatura',b,()=>{const f=V165C.fatura(v165X(),mes,null),valor=+String(b.valor).replace(',','.')||0;if(!(valor>0))return {erro:'Informe o valor da fatura.'};if(!f.n)return {erro:'Nenhum abastecimento importado neste mês.'};const dif=r2(valor-f.total);if(Math.abs(dif)>0.05&&String(b.motivoDif||'').trim().length<3)return {erro:'A fatura difere do importado em '+money(dif)+'. Informe o motivo.'};if(!b.venc)return {erro:'Informe o vencimento.'};
+    const lid=uid(),rat=f.rateio.filter(x=>x.pct>0);return {docs:[{c:'lanc',d:{id:lid,tipo:'pagar',status:'aberto',estoqueValor:0,desc:'Fatura Sem Parar · combustível '+fmtYm(mes),valor,venc:b.venc,comp:mes,categoria:'Veículos e frota',projId:rat.length===1&&f.geral<0.01?rat[0].projId:'',rateioProj:rat.length>=2?rat.map(x=>({projId:x.projId,pct:x.pct})):[],comum:false,pago:'',fat165:'fat_'+mes}},{c:'vfat165',d:{id:'fat_'+mes,mes,valor,total:f.total,dif,motivoDif:b.motivoDif,lancId:lid,rateio:f.rateio,porCidade:f.porCidade,porVeic:f.porVeic,geral:f.geral,n:f.n,por:actorId(),em:v165Agora()}}]};});
+  if(v165Msg(r,'Fatura lançada.')){delete V165.fat[mes];V165.fatArq=null;render();}};
+
+/* =================================================================== 10. condutores: autorização */
+ui.v158cond=Object.assign({q:'',cnh:'',aut:'',tipo:'',cid:'',desl:false},ui.v158cond||{});
+{const t0=pfnTabOk;pfnTabOk=function(tab,pf){if(tab==='v158cond'&&store.mode==='db'&&!pf&&!me.owner&&v165Cid().length&&mayR('frota'))return true;return t0.apply(this,arguments);};}
+const v165PodeAut=f=>{if(v165Admin()||me.perfil==='frotaadm')return true;const cs=v165Cid();if(!cs.length)return false;const a=(S.vaut165||[]).find(x=>x.funcId===f.id);return !a||!a.cidade||cs.includes(a.cidade);};
+V.v158cond=()=>{const u=ui.v158cond,q=gsNorm(u.q||''),X=v165X(),h=todayStr(),em30=addDays(h,30);
+  const cnhK=x=>!x.cnhNum&&!x.cnhCat?'sem':!x.cnhValidade?'semval':x.cnhValidade<h?'venc':x.cnhValidade<=em30?'avenc':'ok';
+  const base=(S.func||[]).filter(x=>x&&(u.desl||x.status!=='desligado'));
+  const linhas=base.map(x=>{const a=V165C.autDe(X,x.id)||V165C.autVirtual(X,x);return {x,a,sit:V165C.autSit(X,x,a)};});
+  const fs=linhas.filter(o=>!q||gsNorm([o.x.nome,o.x.funcao,o.x.cargo,o.x.cnhNum,o.x.cnhCat].join(' ')).includes(q)).filter(o=>!u.cnh||cnhK(o.x)===u.cnh).filter(o=>!u.aut||o.sit.k===u.aut).filter(o=>!u.tipo||(o.a&&(o.a.tipos||[]).includes(u.tipo))).filter(o=>!u.cid||(o.a&&(o.a.cidade===u.cid||(!o.a.cidade&&u.cid))))
+    .sort((a,b)=>byNome(a.x,b.x));
+  const ativos=linhas.filter(o=>o.x.status!=='desligado'&&V165C.temCnh(o.x)),n=k=>ativos.filter(o=>o.sit.k===k).length,mig=(S.vaut165||[]).filter(a=>a.migracao).length||ativos.filter(o=>o.a&&o.a.virtual).length;
+  const cnhPill=x=>{const s=cnhK(x);return s==='venc'?pill('CNH vencida','neg'):s==='avenc'?pill('Vence em até 30 dias','warn'):s==='ok'?pill('Em dia','pos'):s==='semval'?pill('Sem validade','warn'):'<span class="mut">Sem CNH</span>';};
+  const rows=fs.slice(0,(V165.condN||200)).map(o=>{const x=o.x,a=o.a,s=o.sit;return '<tr><td><b>'+esc(x.nome||'')+'</b>'+(x.status==='desligado'?' '+pill('Desligado',''):'')+'<div class="sub">'+esc(x.funcao||x.cargo||'—')+'</div></td><td class="mono">'+esc(x.cnhNum||'—')+'<div class="sub">'+esc(x.cnhCat||'—')+'</div></td><td><span class="mono">'+(x.cnhValidade?fmtDate(x.cnhValidade):'—')+'</span> '+cnhPill(x)+'</td><td class="mono v158cpf">'+esc(v158MascCpf(x)||'—')+'</td>'+
+    '<td>'+pill(s.txt,s.cor)+(s.motivos.length?'<div class="sub">'+esc(s.motivos.join(' '))+'</div>':s.venc.length?'<div class="sub">'+esc(s.venc.map(v=>v.o+' '+fmtDate(v.d)).join(' · '))+'</div>':'')+(a&&!a.virtual&&a.st!=='revogada'?'<div class="sub">'+esc((a.tipos||[]).map(V165C.tipoNome).join(', '))+(a.cidade?' · '+esc(a.cidade):'')+(a.veics&&a.veics.length?' · '+a.veics.length+' veículo(s)':'')+' · até '+esc(fmtDate(a.validade))+(a.autPor&&a.autPor!=='migracao'?' · por '+esc(a.autPorNome||nameOf(a.autPor)):'')+'</div>':'')+'</td>'+
+    '<td class="act">'+(x.status!=='desligado'&&V165C.temCnh(x)&&v165PodeAut(x)?'<button class="btn sm pri" data-act="v165Autorizar" data-id="'+esc(x.id)+'">'+(a&&!a.virtual&&a.st!=='revogada'?'Renovar / alterar':'Autorizar')+'</button>'+(a&&!a.virtual&&a.st!=='revogada'?'<button class="btn sm dng" data-act="v165Revogar" data-id="'+esc(x.id)+'">Revogar</button>':''):'')+(a&&a.termo?'<button class="btn sm" data-act="v165TermoVer" data-id="'+esc(x.id)+'">Termo</button>':'')+'</td></tr>';}).join('');
+  return pageHead('Condutores','Quem pode dirigir: autorização da empresa (quem autorizou, validade, tipos de veículo, cidade, termo assinado) e os requisitos (CNH, EAR, exame toxicológico, cursos). O CPF aparece mascarado (LGPD).')+
+    '<div class="stack"><div class="kpis">'+kpi('Autorizados',String(n('aut')),mig?mig+' pela migração (confirmar)':'',n('aut')?'pos':'')+kpi('Vence em breve',String(n('vence')),'em até '+(X.cfg.diasAviso||30)+' dias',n('vence')?'warn':'')+kpi('Bloqueados',String(n('bloq')),'requisito vencido ou afastado',n('bloq')?'neg':'')+kpi('Não autorizados',String(n('nao')),'têm CNH, a empresa não autorizou')+'</div>'+
+    '<div class="bar"><label class="f grow"><span>Buscar</span><input id="q_v158cond" data-filter="v158cond.q" value="'+esc(u.q||'')+'" placeholder="Nome, função ou CNH"></label>'+
+    '<label class="f"><span>Autorização</span><select data-filter="v158cond.aut">'+opt([['aut','Autorizado'],['vence','Vence em breve'],['bloq','Bloqueado'],['nao','Não autorizado']],u.aut||'','Todas')+'</select></label>'+
+    '<label class="f"><span>Tipo de veículo</span><select data-filter="v158cond.tipo">'+opt(V165C.TIPOS,u.tipo||'','Todos')+'</select></label>'+
+    '<label class="f"><span>Cidade</span><select data-filter="v158cond.cid">'+opt(X.cfg.cidades.map(c=>[c,c]),u.cid||'','Todas')+'</select></label>'+
+    '<label class="f"><span>CNH</span><select id="s_v158cond" data-filter="v158cond.cnh">'+opt([['ok','Em dia'],['avenc','Vence em 30 dias'],['venc','Vencida'],['semval','Sem validade'],['sem','Sem CNH']],u.cnh||'','Todas')+'</select></label>'+
+    '<label class="f chk" style="align-self:flex-end"><input type="checkbox" data-act="v165Desl"'+(u.desl?' checked':'')+'><span>Mostrar desligados</span></label></div>'+
+    '<div class="tw"><table style="min-width:900px"><thead><tr><th>Nome</th><th>CNH</th><th>Validade</th><th>CPF</th><th>Autorização</th><th></th></tr></thead><tbody>'+(rows||emptyRow(6,'Nenhum colaborador encontrado.'))+'</tbody></table></div>'+(fs.length>(V165.condN||200)?'<div class="acts"><button class="btn" data-act="v165CondMais">Mostrar mais ('+(fs.length-(V165.condN||200))+')</button></div>':'')+
+    '<p class="sub">Desligamento revoga a autorização; afastamento suspende até o retorno. Os desligados ficam no histórico (multas): use "Mostrar desligados".</p></div>';};
+A.v165Desl=()=>{ui.v158cond.desl=!ui.v158cond.desl;render();};
+A.v165CondMais=()=>{V165.condN=(V165.condN||200)+200;render();};
+A.v165Autorizar=d=>{const f=get('func',d.id);if(!f)return;const X=v165X(),a=V165C.autDe(X,f.id),c=X.cfg,tipos=new Set(a&&a.st!=='revogada'?a.tipos||[]:['leve']),vs=(S.veic||[]).filter(v=>v.status!=='baixado'),vSel=new Set((a&&a.veics)||[]);
+  V165.aut={funcId:f.id,termo:a&&a.termo||null};
+  modal({title:'Autorizar condutor · '+f.nome,wide:true,body:'<p class="sub" style="margin:0 0 8px">CNH '+esc(f.cnhCat||'—')+' · validade '+esc(f.cnhValidade?fmtDate(f.cnhValidade):'—')+'. Os tipos de veículo são conferidos com a categoria da CNH.</p><div class="fg">'+
+    field('Validade da autorização','validade','date',a&&a.st!=='revogada'&&!a.migracao?a.validade:addDays(todayStr(),Math.round(30.44*(+c.autMeses||12))),{})+field('Só veículos da cidade','cidade','select',(a&&a.cidade)||'',{opts:c.cidades.map(x=>[x,x]),blank:'Todas as cidades'})+'</div>'+
+    '<div class="sect">Tipos de veículo</div><div class="fg">'+V165C.TIPOS.map(t=>field(t[1]+' (CNH '+(((c.reqTipo||{})[t[0]]||{}).cat||'B')+')','tp_'+t[0],'checkbox',tipos.has(t[0]),{})).join('')+'</div>'+
+    '<div class="sect">Requisitos</div><div class="fg">'+field('Dirigir faz parte da função (exige EAR na CNH)','dirigeFuncao','checkbox',!!(a&&a.dirigeFuncao),{full:true})+field('A CNH tem EAR (exerce atividade remunerada)','ear','checkbox',!!(a&&a.ear),{full:true})+
+      (V165C.precisaTox(f.cnhCat)?field('Exame toxicológico: validade (C, D e E)','toxVal','date',(a&&a.toxVal)||'',{}):'')+Object.keys(V165C.CURSOS).map(k=>field('Curso '+V165C.CURSOS[k]+': validade','cu_'+k,'date',((a&&a.cursos)||{})[k]||'',{})).join('')+'</div>'+
+    '<div class="sect">Veículos específicos (opcional: sem marcar, todos do tipo)</div><div class="fg" style="max-height:180px;overflow:auto">'+vs.map(v=>field(esc(veicNome(v.id)),'vs_'+v.id,'checkbox',vSel.has(v.id),{})).join('')+'</div>'+
+    '<div class="sect">Termo de responsabilidade do condutor</div><div class="v165row"><button type="button" class="btn" data-act="v165TermoGerar" data-id="'+esc(f.id)+'">Gerar o termo para assinar</button><button type="button" class="btn'+(V165.aut.termo?' pri':'')+'" data-act="v165TermoAnexar" id="v165termoBtn">'+(V165.aut.termo?'✓ Termo assinado anexado':'Anexar o termo assinado (PDF)')+'</button></div>',
+    saveLabel:'Autorizar',save:root=>{const v=readForm(root),b={funcId:f.id,validade:v.validade,cidade:v.cidade,tipos:V165C.TIPOS.map(t=>t[0]).filter(t=>v['tp_'+t]),veics:vs.filter(x=>v['vs_'+x.id]).map(x=>x.id),dirigeFuncao:!!v.dirigeFuncao,ear:!!v.ear,toxVal:v.toxVal||'',cursos:{},termo:V165.aut.termo};Object.keys(V165C.CURSOS).forEach(k=>{if(v['cu_'+k])b.cursos[k]=v['cu_'+k];});
+      v165Acao('autorizar',b,()=>{const X2=v165X(),ant=V165C.autDe(X2,f.id),n={id:f.id,funcId:f.id,st:'ativa',migracao:false,validade:b.validade,tipos:b.tipos,veics:b.veics,cidade:b.cidade,dirigeFuncao:b.dirigeFuncao,ear:b.ear,toxVal:b.toxVal,cursos:b.cursos,termo:b.termo||(ant&&ant.termo)||null,autPor:actorId(),autPorNome:me.nome||'',autEm:v165Agora(),hist:((ant&&ant.hist)||[]).concat([{em:v165Agora(),por:actorId(),o:ant?'Renovada/alterada':'Autorizado'}])};
+        const e=V165C.autValida(X2,f,n);if(e)return {erro:e};if(!n.termo&&v165Srv())return {erro:'Anexe o termo assinado.'};return {docs:[{c:'vaut165',d:n}]};}).then(r=>{if(v165Msg(r,'Condutor autorizado.')){closeModal();render();}});return false;}});};
+A.v165TermoAnexar=()=>{if(!v165Srv()){toast('O termo assinado vai para o servidor da empresa.','neg');return;}v164Upload('application/pdf,image/*',f=>{if(V165.aut)V165.aut.termo=f;const b=$('#v165termoBtn');if(b){b.className='btn pri';b.textContent='✓ Termo assinado anexado';}});};
+A.v165TermoVer=d=>{const a=(S.vaut165||[]).find(x=>x.funcId===d.id);if(!a||!a.termo)return;try{window.open('/_blob/'+encodeURIComponent(a.termo.id),'_blank');}catch(e){toast('Abra pelo servidor da empresa.','neg');}};
+ACT_GROUP.v165TermoVer=null;
+A.v165TermoGerar=d=>{const f=get('func',d.id);if(!f)return;const c=cfg();
+  showDoc({tipo:'Termo de responsabilidade do condutor',numero:'',meta:[['Empresa',c.razao||c.fantasia||''],['Condutor',f.nome],['CPF',v158MascCpf(f)],['CNH',(f.cnhNum||'—')+' · categoria '+(f.cnhCat||'—')+' · validade '+(f.cnhValidade?fmtDate(f.cnhValidade):'—')],['Data',fmtDate(todayStr())]],tables:[],
+    raw:'<p>Declaro que recebi as regras de uso dos veículos da empresa e me comprometo a:</p><ol><li>Usar o veículo só a serviço, com reserva aprovada, registrando a saída e o retorno (km, combustível, checklist e fotos) no sistema.</li><li>Dirigir apenas com a CNH válida e da categoria exigida, respeitando o Código de Trânsito Brasileiro, sem álcool ou substâncias que alterem a capacidade de dirigir.</li><li>Não emprestar o veículo nem transportar pessoas ou cargas não autorizadas.</li><li><b>Multas:</b> as infrações cometidas enquanto o veículo estiver comigo são de minha responsabilidade; serei indicado(a) como condutor(a) ao órgão autuador e autorizo o desconto nos termos do art. 462, § 1º, da CLT, após apuração.</li><li><b>Avarias:</b> comunicar e registrar com foto toda avaria antes de sair e no retorno. Danos causados por dolo ou culpa poderão ser descontados nos termos do art. 462, § 1º, da CLT, após apuração.</li><li>Abastecer só com o cartão da frota, digitando o km correto, e guardar o cupom (foto no retorno).</li><li>Devolver o veículo limpo, no prazo previsto, e avisar o responsável pela frota de qualquer atraso.</li></ol><p>A autorização pode ser suspensa ou revogada a qualquer tempo, e é revogada no desligamento.</p><p style="margin-top:40px">_____________________________________<br>'+esc(f.nome)+'</p><p style="margin-top:30px">_____________________________________<br>Responsável pela frota</p>'});};
+A.v165Revogar=d=>{const f=get('func',d.id);if(!f)return;modal({title:'Revogar a autorização · '+f.nome,body:field('Motivo','motivo','text','',{full:true}),saveLabel:'Revogar',save:root=>{const v=readForm(root);
+  v165Acao('revogar',{funcId:f.id,motivo:v.motivo},()=>{const a=(S.vaut165||[]).find(x=>x.funcId===f.id);if(!a)return {erro:'Autorização não encontrada.'};if(String(v.motivo||'').trim().length<3)return {erro:'Informe o motivo.'};return {docs:[{c:'vaut165',d:Object.assign(cl(a),{st:'revogada',motivo:v.motivo,revPor:actorId(),revEm:v165Agora()})}]};}).then(r=>{if(v165Msg(r,'Autorização revogada.')){closeModal();render();}});return false;}});};
+/* sem servidor: o desligamento revoga a autorização também aqui (no servidor quem faz é o ajuste165.js) */
+{const p0=put;put=function(col,rec){const old=col==='func'&&rec&&rec.id?get('func',rec.id):null;const r=p0.apply(this,arguments);
+  try{if(col==='func'&&rec&&rec.status==='desligado'&&(!old||old.status!=='desligado')&&!v165Srv()){const a=(S.vaut165||[]).find(x=>x.funcId===rec.id);if(a&&a.st!=='revogada')p0('vaut165',Object.assign(cl(a),{st:'revogada',motivo:'Desligamento',revPor:'sistema',revEm:v165Agora()}));}}catch(e){}return r;};}
+
 /* ===== v14: versão, novidades e tutoriais ===== */
-const APP_VER='164',APP_DATA='2026-11-06';
+const APP_VER='165',APP_DATA='2026-11-06';
 const CHANGELOG=[
+  ['165','2026-11-06',['Frota: reserva, saída e retorno agora são telas separadas, feitas para o celular. O condutor pede o veículo (ou "qualquer disponível na minha cidade") com data, hora, retorno previsto, destino e motivo.', 'Cada veículo tem a Cidade/base (Tuiuti ou São Paulo; a lista é configurável) e cada cidade tem um Responsável pela frota com substituto (Configurações › Frota). O responsável aprova, troca o veículo ou recusa a reserva com o motivo, e só vê e gere os veículos da cidade dele.', 'Duas reservas aprovadas no mesmo horário para o mesmo veículo são recusadas. Saída sem reserva só pelo responsável da cidade ou pelo Administrador (a configuração pode liberar).', 'Saída do veículo: escolha pela reserva aprovada, pela lista ou pelo QR do veículo (etiqueta para imprimir em Frota › Veículos), com km do painel, combustível (vazio a cheio), checklist configurável, fotos dos 4 lados e do painel e as avarias que já estavam no veículo. O veículo fica "Em uso por" o condutor.', 'A saída é bloqueada com CNH vencida ou de categoria errada, condutor não autorizado, veículo em manutenção ou com avaria grave aberta, e o motivo aparece na tela.', 'Retorno do veículo: só as saídas abertas da própria pessoa (o responsável vê as da cidade), km de chegada e km rodados, combustível na chegada (até 1/4 gera alerta), checklist, fotos, avarias novas com foto e o abastecimento da viagem com a foto do cupom. Atraso avisa o condutor e o responsável.', 'Painel da frota por cidade: disponíveis, em uso (quem e desde quando), manutenção, retornos atrasados, combustível baixo, avarias novas (abrir a manutenção num toque), reservas pendentes, vencimentos, CNHs e condutores bloqueados.', 'Multas: o cadastro mostra quem estava com o veículo na data e hora da infração e sugere esse condutor.', 'Condutores: nova coluna Autorização (Autorizado, Vence em breve, Bloqueado, Não autorizado), com quem autorizou, validade, tipos de veículo, cidade ou veículos, requisitos (CNH, EAR, exame toxicológico, cursos) e o termo de responsabilidade assinado. Desligados ficam escondidos; desligamento revoga e afastamento suspende a autorização.', 'Os condutores que saíram com veículo nos últimos 90 dias entram como "Autorizado (migração)" por 30 dias, para o Administrador confirmar; os demais começam como "Não autorizado".', 'Abastecimentos: importação do "Relatório Utilização Combustível" da Sem Parar (.xls), com prévia por linha (novo, já importado, casado com recibo, com alerta). Repetir a importação não duplica.', 'Conferências automáticas: km negativo, km alto ou dígito a mais no hodômetro, km baixo e dois abastecimentos no mesmo dia, hodômetro e motorista diferentes da saída, abastecimento sem saída, combustível errado, litros acima do tanque, preço acima da mediana e queda de km/l.', 'Foto do cupom no retorno ou no abastecimento: a IA lê placa, km, litros, valor, AUT e NSU para o condutor conferir; o abastecimento fica provisório até o relatório e vira confirmado quando casa com a linha.', 'O responsável pela cidade ou o Administrador de frota corrige o hodômetro com motivo; o consumo e os alertas usam o valor corrigido e o original fica no histórico.', 'Fatura da Sem Parar: compara o importado do mês com a fatura e lança uma conta a pagar só, com o rateio por obra (sem saída, custo geral da frota da cidade).']],
   ['164','2026-11-06',['Solicitação de compra recebida: quem pediu recebe o aviso no chat (Central de Gestão), na lista de pendências e por e-mail quando o envio está configurado, com o que chegou, o que falta e onde retirar (almoxarifado e prateleira) ou "entregue na obra".', 'Recebimento parcial avisa o que chegou e o que falta; o restante gera um aviso novo. O botão "Recebi / retirei" conclui a SC e registra quem retirou e quando; o almoxarife também pode registrar pela pessoa. Depois de 3 dias sem retirada, a pessoa e o almoxarife recebem um lembrete.', 'Lista de SC com as situações Comprada, A caminho, Recebida – aguardando retirada e Concluída.', 'Lote e validade: produto com controle de lote tem saldo por almoxarifado e lote. A entrada pede o lote e a validade (a NF-e já traz os lotes do grupo rastro); sem validade, o sistema calcula pelos dias de validade do produto.', 'Saídas, transferências, romaneios e entrega de EPI usam primeiro o lote que vence antes (FEFO). Lote vencido não sai, a não ser como perda ou descarte com motivo. O saldo antigo fica no lote SEM-LOTE, para identificar no inventário.', 'Nova tela Estoque › Lotes e validades: lotes vencidos e que vencem em 30, 60 e 90 dias por almoxarifado, com o valor em risco, a baixa do vencido como perda, o inventário por lote e a rastreabilidade de cada lote.', 'Pedido de compra com o campo Entrega: no almoxarifado, direto na obra (o endereço da obra vai no pedido) ou retirada com veículo próprio (cria a saída do veículo na frota). Obras › Recebimentos pendentes desta obra: o encarregado ou o responsável pela obra confere item a item, fotografa a nota e o material, registra falta e avaria e assina.', 'Falta e avaria no recebimento na obra avisam o comprador e ficam como pendência com o fornecedor (Suprimentos › Pendências com fornecedores). O material entra e sai como consumo da obra, com o custo do pedido; a nota só é liberada com o recebimento na obra.', 'Desconto no pedido de compra em % ou em R$, no item e no pedido inteiro. O desconto do pedido é rateado pelos itens no custo do estoque e aparece no PDF, no aceite do fornecedor, na nota e nas contas a pagar.', 'O responsável pela obra é preenchido sozinho ao escolher o projeto (etapa da EAP, diário, romaneio, devolução, não conformidade, termo de recebimento, PGR, plano de ação e recebimento na obra). Equipamentos com acessórios, garantia, nota de compra e calibração. O retorno pelo cartão do quadro já abre no item; estados novos: em funcionamento e limpo / e sujo.', 'Nova tela Obras › Material na obra: o que foi enviado, devolvido, transferido e consumido em cada obra, com o saldo e o detalhe de cada envio. A devolução sai do saldo, pelo custo do envio; transferência entre obras leva o custo junto.', 'Romaneio novo só transporta: material por separação (o produto avulso vira separação rápida), ferramenta por Envio de ferramentas e volumes avulsos. A obra recebe e assina (com os acessórios); romaneio de retorno leva sobras e ferramentas de volta ao almoxarifado.', 'Devolução de obra com motivo e estado por item: avariado vai para a quarentena; outros destinos (outra obra, fornecedor, descarte na obra); conferência às cegas no almoxarifado. A obra só é encerrada com o saldo zerado, salvo liberação do Administrador com justificativa.', 'Transferência de guarda das ferramentas na obra entre responsáveis, com checagem conjunta, as duas assinaturas, ficha de entrega e termo de devolução da guarda. Desligamento, afastamento ou mudança de obra de quem tem ferramentas avisa o RH e o almoxarife.', 'Corrigido: no romaneio, o Almoxarife via a lista de veículos vazia. Agora vê os veículos ativos (só placa, modelo, tipo, situação e capacidade, sem valores nem documentos).']],
   ['163','2026-11-06',['Medições ao cliente passou para o menu Comercial (Comercial › Medições ao cliente). A tela e as permissões são as mesmas; favoritos e links antigos continuam funcionando.', 'Manutenção de veículos e de equipamentos não lança mais conta a pagar. O custo vem da nota fiscal da oficina ou da compra de peças, ligada à manutenção (a nota inteira ou só algumas linhas).', 'A ligação pode ser feita na manutenção (Editar › Ligar nota fiscal) ou na própria nota (Ver nota › Ligar a veículo ou equipamento). A manutenção mostra o número, o fornecedor e o valor de cada nota; manutenção antiga com conta a pagar fica como está.', 'Cadastro da obra: novo campo Aprovador de compras (nível 1) e o Substituto. A SC da obra vai para esse aprovador; quando ele está ausente (Matriz de aprovadores), vai para o substituto. A lista mostra "Aguardando aprovação de" com o nome.', 'EPI: só o RH e a Segurança do trabalho registram a entrega. O sistema escolhe o almoxarifado do colaborador (São Paulo ou Tuiuti, ou o Almoxarifado de EPI do cadastro) e mostra os EPI em uso, as trocas próximas e o último tamanho.', 'Nova entrega de EPI: o EPI vem do estoque, com tamanho, CA, validade e saldo por almoxarifado; CA vencido bloqueia. Com saldo, a baixa e a ficha saem na hora. Só em Tuiuti para quem é de São Paulo: o romaneio de transferência é criado e a entrega aguarda a chegada. Sem estoque: SC de RH.', 'Entrega de vários EPI de uma vez (kit de admissão) e painel de EPI: trocas, CA vencendo, estoque abaixo do mínimo e entregas aguardando transferência. A troca abre a próxima entrega já preenchida.', 'Solicitação de compra em rascunho: cada item mostra se será separado ou comprado e o motivo (item sem produto, tipo Reposição, saldo reservado por outra SC, saldo zero). Item livre pode ser ligado a um produto do estoque.', 'O botão mostra a divisão, por exemplo "Enviar (1 para separação · 0 para compra)". Corrigido: a lista e o documento da SC em rascunho mostravam números diferentes do formulário; agora todos usam o estoque do momento.']],
   ['162','2026-11-06',['Medições: novo botão "Importar medições de PDF" no detalhe do contrato e em Medições ao cliente (com o contrato escolhido no filtro). Escolha um ou vários PDFs do mesmo contrato.', 'A IA do servidor lê cada PDF (também escaneado) e devolve o período, o número, a data, os itens, o total e as dúvidas. Vai para a IA só o PDF e a lista de itens do contrato.', 'Cada PDF vira uma medição em rascunho, com o PDF anexado. Nada é aprovado sozinho.', 'Na revisão o PDF fica ao lado das linhas lidas. A linha ganha um alerta quando o item não está no contrato, o preço é diferente, a quantidade passa do contratado ou do teto, ou o total não bate com quantidade × preço.', 'Você corrige a quantidade, escolhe o item do contrato ou remove a linha. "Aprovar e criar medição" grava os itens com o preço do contrato; depois a medição segue o caminho de sempre (enviar para aprovação). "Descartar" apaga o rascunho e o PDF.', 'O sistema avisa quando já existe medição com o mesmo número ou o mesmo período no contrato.', 'Limites: 20 MB e 50 páginas por PDF, uma leitura por PDF. Mensagem clara quando a IA não está ligada ou o limite de uso foi atingido. Quem importou e quem aprovou ficam registrados.']],

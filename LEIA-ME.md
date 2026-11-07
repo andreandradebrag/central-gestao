@@ -1082,6 +1082,46 @@ Auditoria nova: `SC_RECEBIDA_AVISO`, `SC_RETIRADA`, `LOTE_IDENTIFICADO`, `REC_OB
 `PEND_164_RESOLVIDA`, `OBRA_MOV_164`, `OBRA_DEVOL_164`, `ROM_RECEBIDO_OBRA_164`, `ROM_RETORNO_164`,
 `GUARDA_TRANSFERIDA_164`, `OBRA_ENCERRAMENTO_RECUSADO_164`.
 
+## Frota: reserva, saída e retorno, cidade/base, condutor autorizado e Sem Parar (v165)
+
+Arquivos novos no serviço `gestao`: `ajuste165.js` e `frota165.js` (este roda também no navegador, para as regras darem igual).
+Alterados: `regras.js`, `server.js`, `Dockerfile`, `perfis.json` e `public/index.html`. **Reconstrua a imagem** do serviço
+`gestao`. Coleções novas: `vres165` (reservas), `vaut165` (autorização de condutor; uma por colaborador), `vav165` (avarias),
+`vimp165` (importações da Sem Parar) e `vfat165` (fatura do mês). Essas só são gravadas pelas telas (rotas `/api/frota165/*`).
+
+- **Primeiro, configure**: Configurações › Frota (ou Frota › Painel da frota por cidade › Configurações da frota): cidades/bases
+  (padrão Tuiuti e São Paulo), o **Responsável pela frota** de cada cidade e o substituto. Depois marque a **Cidade/base** de cada
+  veículo (Frota › Veículos). Veículo sem cidade só aparece para o Administrador e o Administrador de frota.
+- **Responsável da cidade** vê e gere só os veículos da cidade dele (aprova reservas, saída sem reserva, avarias, hodômetro,
+  importação). O servidor recusa aprovar ou alterar veículo de outra cidade. O Administrador de frota que também for responsável
+  começa na cidade dele e pode marcar "Ver todas as cidades".
+- **Condutor**: todo colaborador com CNH e usuário do sistema ligado ao cadastro (Pessoal › Colaboradores) já tem Frota › Reservar
+  veículo, Saída do veículo e Retorno do veículo, sem perfil novo, e só para ele mesmo. Sem o usuário ligado, a tela avisa.
+- **Saída sem reserva** só pelo responsável da cidade, pelo Administrador e pelo Administrador de frota (a configuração pode
+  liberar para todos). Fotos dos 4 lados e do painel são obrigatórias (configurável). A "Nova saída" antiga abre a tela nova;
+  saídas antigas ficam como estavam e as que não têm retorno aparecem como abertas.
+- **Etiqueta QR**: Frota › Veículos › Etiqueta QR (imprima e cole no veículo). O leitor no celular vem na v166.
+- **Autorização do condutor** (Frota › Condutores): quem autorizou, validade (padrão 12 meses), tipos de veículo (conferidos com a
+  categoria da CNH), cidade ou veículos, EAR, exame toxicológico (C, D, E), cursos e o **termo de responsabilidade assinado**
+  (botão "Gerar o termo", assine e anexe o PDF). Desligamento revoga; afastamento suspende até o retorno.
+- **Migração**: na primeira subida, quem saiu com veículo nos últimos 90 dias entra como **"Autorizado (migração)" por 30 dias**;
+  os demais começam como "Não autorizado". A quantidade fica na auditoria (`FROTA_MIGRACAO_165`) e em `cfg/frota165mig`
+  (`migrados` de `condutores`). Nesta cópia de teste: 0 (banco sem dados reais). **Confirme cada um** em Frota › Condutores
+  dentro de 30 dias (o filtro "Autorizado" mostra a contagem da migração no indicador).
+- **Sem Parar (rede CTF)**: Frota › Importar relatório da Sem Parar: portal › "Relatório Utilização Combustível" em .xls. Prévia
+  por linha (novo, já importado, casado com recibo, com alerta), depois Confirmar. Repetir não duplica (pela Autorização). O CPF
+  serve só para achar o colaborador: fica guardado mascarado. Importam: Administrador, Administrador de frota e o responsável
+  da cidade (só os veículos dele).
+- **Recibo (cupom)**: no retorno ou em Abastecimentos › Recibo, a foto do cupom é lida pela IA do servidor (a mesma
+  `ANTHROPIC_API_KEY`, modelo "complex"; conta no limite de uso por hora da IA) e o condutor confere. Fica "aguardando relatório"
+  e vira confirmado quando a importação acha a linha (Autorização Cupom = AUT do cupom, placa e data).
+- **Fatura** (Frota › Fatura da Sem Parar; Financeiro › Fatura da Sem Parar): compare com o valor da fatura e lance **uma** conta
+  a pagar, com o rateio por obra; o combustível sem saída fica como custo geral da frota da cidade. Só o Financeiro (ou o
+  Administrador) lança. O PDF da fatura é só anexado (o valor é digitado).
+- **Integração**: a entrada `importarAbastecimentos(linhas, origem)` (ajuste165.js) está pronta para uma API ou envio automático.
+  **Pergunte ao gerente da conta da Sem Parar** se há API do relatório de utilização ou envio automático do arquivo (e-mail/SFTP).
+- Atraso de retorno: o servidor avisa o condutor e o responsável a cada hora (uma vez por saída).
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

@@ -972,7 +972,7 @@ async function rotear(req, res) {
       res.writeHead(st, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); return res.end(st === 502 ? JSON.stringify({ erro: 'Consulta indisponível (' + r.status + ').' }) : corpo);
     } catch (e) { return json(res, 502, { erro: 'Consulta indisponível agora.' }); }
   }
-  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf') && m === 'POST') { /* v162: a leitura de PDF de medição conta no mesmo limite */
+  if ((p === '/api/ia' || p === '/api/ia/medicao-pdf' || p === '/api/frota165/recibo') && m === 'POST') { /* v165: o recibo lido pela IA conta no mesmo limite (frota165) */ /* v162: a leitura de PDF de medição conta no mesmo limite */
     if (NIV[conta.nivel] < NIV.interact) return json(res, 403, { code: 'not_granted', erro: 'Sem permissão para usar a IA.' });
     const ui0 = usoIa.get(conta.id) || { n: 0, ini: Date.now() }; if (Date.now() - ui0.ini > 3600e3) { ui0.n = 0; ui0.ini = Date.now(); } ui0.n++; usoIa.set(conta.id, ui0);
     if (ui0.n > (NIV[conta.nivel] >= NIV.admin ? 120 : 30)) return json(res, 429, { code: 'rate_limited', erro: 'Limite de uso da IA nesta hora atingido.' });
@@ -1068,7 +1068,7 @@ async function rotear(req, res) {
 /* regras de negócio aplicadas pelo servidor (aprovações, bancos, competência, anexos, auditoria...) */
 const REG = require('./regras.js')({ db, q, json, html, lerJson, lerCorpo, avisarDoc, perfilDe, perfilEm, NIV, EMAIL, ipDe, PERM, APP_URL, esc, pag, DATA, uid, cookies, SEG, SENS_RH, PERF_RH,
   papelDe, veRh, perfcCompilar, perfcGrupoValido, PERFC_ID, PERF_BASE, PERFC_PROIBIDOS, perfaCompilar, perfaBaseOk, perfaEditavel, PERFA_ID, PERFA_SISTEMA, /* v127 */ FN, perfaGrupos, /* v142 */
-  pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa, BACKUP });
+  pode, perfilPermite, podeVer, gravacaoPermitida, veFuncCompleto, END, contaDa, BACKUP, ia }); /* v165: ia() para a leitura do recibo (ajuste165.js › /api/frota165/recibo) */
 /* v111: a sincronização da Sólides não grava ponto (pmmes) de mês travado (Fontes do ponto) nem de competência fechada; o que foi ignorado vai para a auditoria */
 const solIgnorados = new Set();
 const solQ = Object.assign({}, q, { docPut: { run: (dp, parent, id, txt, ts) => { if (/^pmmes\//.test(dp) && REG.pontoTravado(dp, txt)) { solIgnorados.add(dp); return { changes: 0 }; } return q.docPut.run(dp, parent, id, txt, ts); } } });

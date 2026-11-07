@@ -2124,6 +2124,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C161 = require('./demanda161.js')({ col, doc, erro, auditar: (...a) => auditar(...a) }); /* v161: teto do contrato sob demanda (demanda161.js) */
   const C162 = require('./iamed162.js')({ fn: () => ({}) }); /* v162: medição importada de PDF (iamed162.js) */
   const C164 = require('./ajuste164.js')({ q, db, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, papelConta, papelDe, cfgEmp, lerJson, json, EMAIL, APP_URL, nomeConta, gravaCol, pode, perfilPermite, gravacaoPermitida, C153: () => C153, pedPend: r => { try { return !!C152.quem('ped', r).pend; } catch (e) { return false; } }, antesGravar: (...a) => antesGravar(...a), depois: (...a) => depois(...a) }); /* v164: SC recebida, lote, entrega do pedido, material na obra, romaneio, devolução, guarda (ajuste164.js) */
+  const C165 = require('./ajuste165.js')({ q, db, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, cfgEmp, lerJson, json, APP_URL, DATA: X.DATA, nomeConta, gravaCol, ia: (...a) => X.ia(...a), auditarIa: (...a) => auditarIa(...a), antesGravar: (...a) => antesGravar(...a), depois: (...a) => depois(...a) }); /* v165: frota — reserva, saída, retorno, cidade, condutor autorizado, Sem Parar, recibo, fatura (ajuste165.js + frota165.js) */
   const C163 = require('./ajuste163.js')({ col, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, cfgEmp, notaTotais: n => P2.notaTotais(n), lerJson, json, gravaCol, C154: () => C154, leSst: c => leModulo(c, 'epi') }); /* v163: manutenção sem contas a pagar, aprovador de compras da obra, entrega de EPI (ajuste163.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
@@ -2165,6 +2166,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
       if (c0 === 'vabas' || c0 === 'vman') { e = C158.antesFrota(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v158: correção com motivo e histórico */
       if (c0 === 'vman' || c0 === 'fman' || c0 === 'lanc' || c0 === 'epi' || c0 === 'epitr') { e = C163.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v163: manutenção sem conta a pagar (custo pela nota), quem entrega EPI, pedido de transferência de EPI só pelas rotas */
       if (c0 === 'sc') { e = C153.antes(conta, s[1], velho, novo); if (e) return e; } /* v153: tipos de SC do perfil e almoxarifado de origem */
+      if (C165.COLS.has(c0)) { e = C165.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v165: escopo da cidade, travas da saída, campos da importação e do recibo, coleções só pelas rotas */
       if (C164.COLS.has(c0)) { e = C164.antes(conta, c0, s[1], velho, novo, req); if (e) return e; } /* v164: campos do aviso na SC, lote, entrega do pedido, romaneio, encerramento da obra, guarda */
       if (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig') { e = C154.antes(conta, c0, s[1], velho, novo); if (e) return e; } /* v154: EPI com baixa e higienização só pelas rotas */
       if (c0 === 'mov' || c0 === 'prod' || c0 === 'prodinat') { e = C155.antes(conta, req, c0, s[1], velho, novo); if (e) return e; } /* v155: estorno, motivo da entrada/saída manual, campos fiscais do produto */
@@ -2228,6 +2230,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (s.length === 2 && (c0 === 'mov' || c0 === 'epi' || c0 === 'epihig')) { const e = C154.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v154 */
     if (s.length === 2 && c0 === 'epitr') { const e = C163.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v163 */
     if (s.length === 2 && C164.COLS.has(c0)) { const e = C164.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v164 */
+    if (s.length === 2 && C165.COLS.has(c0)) { const e = C165.antesExcluir(conta, c0, s[1], velho); if (e) return e; } /* v165 */
     if (s.length === 2 && c0 === 'prodfam') { const e = C156.antesExcluir(conta, req, c0, s[1], velho); if (e) return e; } /* v156: família só sai sem produtos; Almoxarife não exclui */
     if (s.length === 2) { const e = (c0 === 'sc' ? C158.antesExcluirSc(conta, req, s[1], velho) : null) || C158.antesExcluirFrota(conta, req, c0, s[1], velho); if (e) return e; } /* v158: SC só as próprias; o Administrador de frota não exclui registros da frota */
     if (s.length === 2 && c0 === 'sc') { const e = C157.antesExcluirSc(conta, req, s[1], velho); if (e) return e; } /* v157: o Almoxarife não exclui SC em rascunho (usa Cancelar) */
@@ -2254,6 +2257,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (v && v.ctx) for (const a of v.ctx.alertas) alertar(a[0], a[1], req, a[2]);
     if (v && v.ctx && v.ctx.v152) try { C152.depois(conta, req, v.ctx.v152); } catch (e) { console.error('[v152]', e.message); } /* v152: a recusada ganha a ligação com a SC nova */
     try { C164.depois(conta, req, metodo, p, antes, depois_); } catch (e) { console.error('[v164]', e.message); } /* v164: aviso de SC recebida (gerado no servidor) */
+    try { C165.depois(conta, req, metodo, p, antes, depois_); } catch (e) { console.error('[v165]', e.message); } /* v165: desligamento revoga a autorização de condutor */
   }
 
   /* =====================================================================
@@ -2268,6 +2272,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
+    if (await C165.rota(p, m, req, res, conta)) return true; /* v165: /api/frota165/* */
     if (await C164.rota(p, m, req, res, conta)) return true; /* v164: /api/sc164, /api/lote164, /api/rec164, /api/obra164, /api/gua164 */
     if (await C163.rota(p, m, req, res, conta)) return true; /* v163: /api/epi163/*; quem entrega EPI e CA vencido nas rotas da v154 */
     if (await C154.rota(p, m, req, res, conta)) return true; /* v154: /api/epi/entrega, /api/epi/devolucao, /api/epihig, /api/epi/migrar */

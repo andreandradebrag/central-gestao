@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-06T19:52:47.361Z",
+ "gerado": "2026-11-07T11:43:31.112Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -1977,6 +1977,21 @@
   "mob164": [
    "proj"
   ],
+  "vres165": [
+   "frota"
+  ],
+  "vaut165": [
+   "frota"
+  ],
+  "vav165": [
+   "frota"
+  ],
+  "vimp165": [
+   "frota"
+  ],
+  "vfat165": [
+   "frota"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -2473,6 +2488,21 @@
   ],
   "mob164": [
    "proj"
+  ],
+  "vres165": [
+   "frota"
+  ],
+  "vaut165": [
+   "frota"
+  ],
+  "vav165": [
+   "frota"
+  ],
+  "vimp165": [
+   "frota"
+  ],
+  "vfat165": [
+   "frota"
   ],
   "ctremp": [
    "proj",
@@ -3155,6 +3185,21 @@
     "multa",
     "veic",
     "func"
+   ],
+   "vaut165": [
+    "vaut165"
+   ],
+   "vav165": [
+    "vav165"
+   ],
+   "vfat165": [
+    "vfat165"
+   ],
+   "vimp165": [
+    "vimp165"
+   ],
+   "vres165": [
+    "vres165"
    ]
   },
   "ponto": {
