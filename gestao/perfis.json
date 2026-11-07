@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-07T15:19:15.884Z",
+ "gerado": "2026-11-07T16:27:12.551Z",
  "perfis": {
   "admin": {
    "w": "*",
@@ -231,7 +231,8 @@
     "chat",
     "agenda",
     "empdoc",
-    "ter"
+    "ter",
+    "ac"
    ],
    "r": [
     "proj",
@@ -246,6 +247,9 @@
     "ter": [
      "ter166",
      "tdc166"
+    ],
+    "ac": [
+     "ac170cr"
     ]
    },
    "padFn": {
@@ -312,7 +316,12 @@
     "v164mat",
     "v164recobra",
     "v164val",
-    "v164pendf"
+    "v164pendf",
+    "a170pn",
+    "a170pt",
+    "a170gr",
+    "a170vis",
+    "a170log"
    ],
    "itensFora": [
     "sstq:tterc"
@@ -619,7 +628,8 @@
     "proj",
     "cad",
     "meu",
-    "ajuda"
+    "ajuda",
+    "ac"
    ],
    "so": {
     "est": [
@@ -764,7 +774,12 @@
     "frloc",
     "nfse",
     "arqf",
-    "supctl"
+    "supctl",
+    "a170pn",
+    "a170pt",
+    "a170cr",
+    "a170gr",
+    "a170vis"
    ],
    "itensFora": [
     "fisc:nf"
@@ -1126,7 +1141,8 @@
     "proj",
     "cad",
     "meu",
-    "ajuda"
+    "ajuda",
+    "ac"
    ],
    "so": {
     "est": [
@@ -1275,7 +1291,12 @@
     "frloc",
     "nfse",
     "arqf",
-    "supctl"
+    "supctl",
+    "a170pn",
+    "a170pt",
+    "a170cr",
+    "a170gr",
+    "a170vis"
    ],
    "itensFora": [
     "fisc:nf"
@@ -1330,6 +1351,7 @@
     "agenda",
     "empdoc",
     "ter",
+    "ac",
     "comp"
    ],
    "r": [
@@ -1345,6 +1367,9 @@
     "ter": [
      "ter166",
      "tdc166"
+    ],
+    "ac": [
+     "ac170cr"
     ],
     "comp": [
      "sc"
@@ -1431,6 +1456,11 @@
     "v164recobra",
     "v164val",
     "v164pendf",
+    "a170pn",
+    "a170pt",
+    "a170gr",
+    "a170vis",
+    "a170log",
     "pnSup",
     "cot",
     "ped",
@@ -1547,6 +1577,24 @@
     "adm"
    ],
    "nome": "Administrador de frota"
+  },
+  "segpat": {
+   "w": [
+    "ac",
+    "chat",
+    "agenda"
+   ],
+   "r": [
+    "meu",
+    "ajuda"
+   ],
+   "telasFora": [
+    "v164mat",
+    "v164recobra",
+    "v164val",
+    "v164pendf"
+   ],
+   "nome": "Segurança patrimonial / controle de acesso"
   }
  },
  "colecoes": {
@@ -2053,6 +2101,15 @@
   ],
   "tnl166": [
    "ter"
+  ],
+  "ac170cad": [
+   "ac"
+  ],
+  "ac170cr": [
+   "ac"
+  ],
+  "ac170ev": [
+   "ac"
   ],
   "ctremp": [
    "proj",
@@ -2581,6 +2638,15 @@
   "tnl166": [
    "ter"
   ],
+  "ac170cad": [
+   "ac"
+  ],
+  "ac170cr": [
+   "ac"
+  ],
+  "ac170ev": [
+   "ac"
+  ],
   "ctremp": [
    "proj",
    "fin"
@@ -2737,6 +2803,10 @@
   [
    "ter",
    "Terceiros e locações: empresas terceiras, documentos, trabalhadores e locação de equipamentos"
+  ],
+  [
+   "ac",
+   "Controle de acesso: crachás, portas, portões, visitantes e registro de acessos"
   ],
   [
    "ajuda",
@@ -3636,6 +3706,17 @@
    ],
    "tnl166": [
     "tnl166"
+   ]
+  },
+  "ac": {
+   "ac170cad": [
+    "ac170cad"
+   ],
+   "ac170cr": [
+    "ac170cr"
+   ],
+   "ac170ev": [
+    "ac170ev"
    ]
   }
  }

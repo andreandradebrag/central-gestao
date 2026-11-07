@@ -1,0 +1,24 @@
+# systemd (Linux): copie para /etc/systemd/system/ponte-acesso.service e ajuste o caminho e o usuário.
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ponte-acesso
+#   journalctl -u ponte-acesso -f        (ver o que a ponte está fazendo)
+[Unit]
+Description=Ponte de acesso (Central de Gestão) - controladores Intelbras CT 3000
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ponte
+WorkingDirectory=/opt/ponte-acesso
+ExecStart=/usr/bin/node /opt/ponte-acesso/ponte.js
+Restart=always
+RestartSec=5
+# endurecimento: só lê o programa e grava na pasta dados/
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ponte-acesso/dados
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

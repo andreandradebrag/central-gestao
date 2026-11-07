@@ -1,0 +1,14 @@
+{
+  "name": "ponte-acesso",
+  "version": "1.0.0",
+  "description": "Ponte de acesso da Central de Gestão (v170): liga os controladores Intelbras CT 3000 da rede local ao sistema, sem abrir portas na empresa.",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "ponte.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node ponte.js",
+    "testar": "node ponte.js --testar",
+    "simulador": "node simulador-ct3000.js --porta 8081 --portas 4"
+  }
+}

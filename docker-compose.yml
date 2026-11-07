@@ -51,6 +51,11 @@ services:
       BACKUP_S3_CHAVE: ${BACKUP_S3_CHAVE:-}
       BACKUP_S3_SEGREDO: ${BACKUP_S3_SEGREDO:-}
       BACKUP_S3_PASTA: ${BACKUP_S3_PASTA:-central}
+      # v170: controle de acesso (nuvem Tuya da fechadura e do relé do portão; guarda do registro de acessos em dias)
+      TUYA_CLIENT_ID: ${TUYA_CLIENT_ID:-}
+      TUYA_SECRET: ${TUYA_SECRET:-}
+      TUYA_REGIAO: ${TUYA_REGIAO:-us}
+      ACESSO_LOG_DIAS: ${ACESSO_LOG_DIAS:-365}
     volumes:
       - gestao-dados:/data
       # só a pasta do BB (vazia até ligar o extrato); NUNCA /opt/central/certs aqui

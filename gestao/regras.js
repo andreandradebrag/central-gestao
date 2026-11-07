@@ -1682,6 +1682,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   async function rotaPublica(p, m, req, res) {
     if (await ACEITE.publica(p, m, req, res)) return true; /* v150: aceite do pedido e verificação do código */
     if (await C166.publica(p, m, req, res)) return true; /* v166: link do terceiro para enviar documentos */
+    if (await C170.publica(p, m, req, res)) return true; /* v170: API da ponte de acesso (token da ponte, sem login) */
     const mp = p.match(/^\/pesquisa\/([A-Za-z0-9_-]{32,64})$/), ma = p.match(/^\/api\/pub\/pesquisa\/([A-Za-z0-9_-]{32,64})$/);
     if (!mp && !ma) return false;
     if (mp) { X.html(res, 200, pag('Pesquisa de satisfação', '<style>' + PAG_PESQ_CSS + '</style><div class="card" style="max-width:560px;margin:30px auto"><h1>Pesquisa de satisfação</h1><div id="c"><p class="sub">Carregando…</p></div></div><script>' + PAG_PESQ_JS + '</script>'), { 'x-robots-tag': 'noindex' }); return true; }
@@ -2133,6 +2134,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
   const C163 = require('./ajuste163.js')({ col, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, cfgEmp, notaTotais: n => P2.notaTotais(n), lerJson, json, gravaCol, C154: () => C154, leSst: c => leModulo(c, 'epi') }); /* v163: manutenção sem contas a pagar, aprovador de compras da obra, entrega de EPI (ajuste163.js) */
   const C167 = require('./campo167.js')({ db, q, col, doc, json, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, pode, perfilPermite, gravacaoPermitida, nomeConta, C154: () => C154, C163: () => C163, C164: () => C164, C165: () => C165 }); /* v167: modo Campo — pacote para uso sem internet, envio sem duplicar (campo167.js) */
   const C168 = require('./reun168.js')({ db, q, col, doc, erro, json, lerJson, lerCorpo: X.lerCorpo, avisarDoc, EMAIL, APP_URL, DATA, auditar: (...a) => auditar(...a), auditarIa: (...a) => auditarIa(...a), ia: (...a) => X.ia(...a), ehDono, perfilEm, perfilDe, papelDe: (...a) => X.papelDe(...a), nomeConta, gravaGrupo, podeVer }); /* v168: reuniões — documentos, biblioteca, gravação, transcrição, ata pela IA e tarefas (reun168.js) */
+  const C170 = require('./acesso170.js')({ db, q, col, doc, erro, auditar: (...a) => auditar(...a), avisarDoc, ehDono, perfilEm, gravaGrupo, gravaCol, cfgEmp, lerJson, json, ipDe, nomeConta, leModulo: (c, c0) => leModulo(c, c0), PERM: () => PERM }); /* v170: controle de acesso — crachás, grupos, pontes de acesso (CT 3000), Tuya, registro e alertas (acesso170.js + acesso170c.js + tuya170.js) */
   const C155 = require('./est155.js')({ db, doc, erro, auditar: (...a) => auditar(...a), ehDono, perfilEm, papelConta, acaoNeg, rotaNota: () => P2N.rotaNota() }); /* v155: regras do Estoque (est155.js) */
   function antesGravar(conta, p, velho, novo, req) {
     const s = p.split('/'), c0 = s[0], ctx = { alertas: [] };
@@ -2270,6 +2272,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (v && v.ctx && v.ctx.v152) try { C152.depois(conta, req, v.ctx.v152); } catch (e) { console.error('[v152]', e.message); } /* v152: a recusada ganha a ligação com a SC nova */
     try { C164.depois(conta, req, metodo, p, antes, depois_); } catch (e) { console.error('[v164]', e.message); } /* v164: aviso de SC recebida (gerado no servidor) */
     try { C165.depois(conta, req, metodo, p, antes, depois_); } catch (e) { console.error('[v165]', e.message); } /* v165: desligamento revoga a autorização de condutor */
+    try { C170.depois(conta, req, metodo, p); } catch (e) { console.error('[v170]', e.message); } /* v170: desligamento, afastamento, terceiro e condutor mudam o acesso na próxima sincronização */
   }
 
   /* =====================================================================
@@ -2284,6 +2287,7 @@ CREATE INDEX IF NOT EXISTS blobcit_path ON blobcit(path);`);
     if (await ACEITE.rota(p, m, req, res, conta)) return true; /* v150 */
     if (await TREINO.rota(p, m, req, res, conta)) return true; /* v151 */
     if (await C152.rota(p, m, req, res, conta)) return true; /* v152: /api/aprov/lembrete e /api/aprov/quem */
+    if (await C170.rota(p, m, req, res, conta)) return true; /* v170: /api/ac170/* */
     if (await C168.rota(p, m, req, res, conta)) return true; /* v168: /api/reun168/* */
     if (await C167.rota(p, m, req, res, conta)) return true; /* v167: /api/campo167/* */
     if (await C166.rota(p, m, req, res, conta)) return true; /* v166: /api/ter166/* */

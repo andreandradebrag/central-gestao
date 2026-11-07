@@ -1352,6 +1352,116 @@ clique em Editar, use "Sugerir pelos nomes" (ou escolha na lista), confira as co
 
 Confira também as metas (valores padrão sugeridos, todos editáveis) e ponha um limite de custo do mês antes de ativar.
 
+## Controle de acesso: crachás, Intelbras CT 3000 pela ponte de acesso e Tuya (v170)
+
+Arquivos novos no serviço `gestao`: `acesso170.js`, `acesso170c.js` e `tuya170.js`. Alterados: `regras.js`, `Dockerfile`,
+`perfis.json` e `public/` (`index.html` e `sw.js`, versão 170). **Reconstrua a imagem** do serviço `gestao`. Variáveis novas
+(em `docker-compose.yml` e `.env.exemplo`): `TUYA_CLIENT_ID`, `TUYA_SECRET`, `TUYA_REGIAO` (padrão `us`) e
+`ACESSO_LOG_DIAS` (padrão 365). O banco ganha as tabelas `ac170_doc` (cadastros), `ac170_tok` (hash do token de cada ponte),
+`ac170_est` (o que foi mandado a cada controlador, com a versão), `ac170_meta`, `ac170_ev` (registro de acessos),
+`ac170_cmd` (comandos para a ponte) e `ac170_alerta`. Nada disso passa pela leitura comum da API.
+
+Programa novo **fora da imagem**: `ponte-acesso/` (a "Ponte de acesso"), que roda num mini PC em cada local. Instalação,
+configuração, serviço do Linux (systemd) e do Windows (NSSM), simulador e a configuração da nuvem Tuya:
+**`ponte-acesso/README.md`**.
+
+> **Os registros de acesso não são registro oficial de ponto.** Servem para segurança e, no máximo, para comparação
+> (Registro de acessos › "Comparação com o ponto"). O ponto oficial continua sendo o de sempre.
+
+### Como funciona
+
+- **Ponte de acesso** (Node.js, sem dependências) num mini PC sempre ligado na rede de SP e na de Tuiuti. Ela **liga para o
+  servidor** (HTTPS de saída, espera longa), com um **token por ponte** criado no sistema e **revogável**. Nenhuma porta é
+  aberta na empresa. Fala com os controladores **Intelbras CT 3000** da rede local pela API HTTP (CGI com digest). O
+  InControl Web não tem API (só importa CSV), por isso a ponte fala direto com os controladores.
+- **O servidor é a fonte da verdade.** A ponte recebe as mudanças numeradas (crachás, portas, horários, feriados), aplica,
+  responde o que aplicou e os erros; o que falha é tentado de novo. Os **eventos** (liberado, negado, porta forçada, aberta
+  além do tempo, violação) ficam numa fila em disco com id próprio e só saem quando o servidor confirma: **sem internet nada
+  se perde e nada é gravado duas vezes**. Os controladores continuam abrindo sem internet com a lista que já têm.
+- **Tuya** (fechadura do almoxarifado de SP e relé NovaDigital do portão de Tuiuti): o servidor fala com a nuvem Tuya
+  (abrir, senha temporária quando a fechadura aceita, registro de aberturas a cada 5 minutos, online/offline).
+- ⚠️ **Validar com o aparelho real**: o adaptador do CT 3000 foi feito pela API HTTP de controle de acesso da Intelbras e
+  testado só com o simulador. Endereços e campos ficam num arquivo só (`ponte-acesso/adaptadores/mapa-ct3000.js`): confira
+  com o primeiro CT 3000 instalado (roteiro no README da ponte) antes de cadastrar as pessoas de verdade. O mesmo para os
+  caminhos da fechadura Tuya (`gestao/tuya170.js`).
+
+### Telas (menu Acesso)
+
+- **Painel do controle de acesso**: pontes e dispositivos online/offline, alertas (com "Visto") e os botões **Abrir**.
+- **Pontos, dispositivos e pontes**: locais (SP, Tuiuti) › pontos de acesso (porta, entrada, escritório, almoxarifado,
+  portão de veículos) com o dispositivo (CT 3000 + número da porta, ou aparelho Tuya), a ponte e a anotação
+  **"reaproveita a fechadura existente"**; a lista de pontes e dispositivos com online/offline e a **última sincronização**;
+  token da ponte (mostrado uma vez; "Novo token" revoga o anterior; "Revogar token"); **Configuração** (responsáveis de cada
+  local, bloqueios, alertas, horário de funcionamento, feriados).
+- **Crachás** (tag MIFARE 13,56 MHz no crachá): UID por colaborador ou trabalhador terceiro (v166), **lido no leitor**
+  ("Ler crachá": espera até 30 s o próximo crachá apresentado no leitor escolhido, pela ponte) ou digitado. **Um crachá ativo
+  por pessoa**; perdido (com o motivo), substituído, devolvido; o histórico fica guardado. O RH também cuida dos crachás.
+- **Grupos de acesso**: pontos + horário da semana (faixas por dia) + feriados (bloqueia ou libera), atribuídos por
+  **função**, **perfil** do usuário, **pessoa**, **condutores autorizados** (v165) ou **todos os terceiros**; opção "abre
+  pelo sistema". Exemplos: "Almoxarifado Tuiuti: almoxarifes, 7h–18h seg–sáb"; "Portão de veículos: condutores autorizados".
+- **Visitantes**: crachá temporário ou abertura pelo sistema, com **validade**, **anfitrião** (avisado no chat) e **motivo**;
+  o documento fica guardado só com os 3 últimos dígitos.
+- **Registro de acessos**: quem, onde, quando, resultado e motivo, com filtros, **exportação CSV** (auditada) e a comparação
+  com o ponto (primeira e última passagem do dia; só comparação).
+- **Minha área › Abrir porta ou portão**: para quem tem grupo com "abre pelo sistema", dentro do horário do grupo.
+- **Frota › Saída e Retorno do veículo**: botão **Abrir portão** para o condutor da saída aberta (portão de veículos do local
+  do veículo). Tudo fica no registro e na auditoria (`AC170_ABRIR`, `AC170_ABRIR_RECUSADO`, `AC170_PORTAO`).
+
+### Bloqueios automáticos (valem na próxima sincronização, em segundos)
+
+Desligado (sempre); afastado; terceiro **não liberado** (v166); terceiro com **documentação da empresa pendente** (v166,
+opcional); **condutor não autorizado** no portão de veículos (v165); opcional: **ASO** ou **integração** vencidos. O motivo
+aparece na pessoa (Crachás) e no registro (tentativa negada: "Bloqueado: Desligado", "Condutor não autorizado…").
+
+### Alertas (chat dos responsáveis de cada local; sem responsável, os administradores)
+
+Porta forçada; porta aberta além de N segundos (por ponto ou o padrão, 60 s); negativas repetidas (padrão 3 em 10 min);
+acesso fora do horário de funcionamento (padrão seg–sáb 06:00–20:00 e feriados); ponte ou dispositivo offline (padrão 5 min).
+
+### Quem faz o quê (Sistema › Perfis de acesso › módulo "Controle de acesso")
+
+- **Administrador** e o perfil novo **"Segurança patrimonial / controle de acesso"**: tudo (ou um perfil que grave "Controle
+  de acesso: pontos, dispositivos…" no módulo).
+- **RH** (e Recursos humanos e compras): só **crachás** (não vê o registro).
+- **Responsáveis de cada local** (Configuração): alertas, registro do local, visitantes e abertura no local.
+- **Almoxarife**: só o **registro do almoxarifado** em que é responsável ou substituto (Almoxarifados, v153; o ponto aponta
+  o almoxarifado).
+- Colaborador: só os botões "Abrir" do grupo dele, dentro do horário.
+
+### LGPD
+
+Registro guardado por `ACESSO_LOG_DIAS` dias (padrão 365) e apagado depois; CPF sempre mascarado; registro visível só para
+os perfis autorizados acima; exportação auditada. Inclua o controle de acesso no registro de tratamento (ROPA).
+
+### O que fazer, em ordem
+
+1. Subir os arquivos do `gestao`, preencher as variáveis Tuya e reconstruir a imagem.
+2. Em Acesso › Pontos, dispositivos e pontes: **Configuração** (responsáveis de SP e de Tuiuti), uma **ponte** por local
+   (copiar o token), os **dispositivos** e os **pontos** (marcar "reaproveita a fechadura existente").
+3. Instalar a ponte em cada mini PC (`ponte-acesso/README.md`), rodar `node ponte.js --testar` e **validar com o primeiro
+   CT 3000** (roteiro do README).
+4. Configurar a nuvem Tuya (README da ponte), **trocar a senha do app Smart Life/NovaDigital e remover quem não precisa mais**.
+5. Criar os grupos de acesso, dar o perfil "Segurança patrimonial / controle de acesso" a quem cuida, cadastrar os crachás.
+
+### Lista de compras (SP: 6 pontos; Tuiuti: 7 pontos; reaproveitando todas as fechaduras instaladas)
+
+| Item | São Paulo | Tuiuti |
+|---|---|---|
+| Controlador **Intelbras CT 3000** | 1× **4PB** + 1× **2PB** (= 6 portas), ou 3× **2PB** se os leitores ficarem longe de um ponto central (Wiegand até 50 m; RS-485 até 100 m do controlador) | 2× **4PB** (= 8 portas para 7 pontos; sobra 1) |
+| **Leitor MIFARE compatível com CT 3000 (Wiegand/RS-485), confirmar com o revendedor Intelbras** | 1 por ponto (6) + opcionais de saída | 1 por ponto (7) + opcionais de saída |
+| Leitor de **pedestal** para o portão de veículos (mesmo leitor MIFARE, em pedestal na altura da janela do carro) | 1 | 1 |
+| Fechaduras existentes (porta social/entrada, escritório, almoxarifado SP e portão de veículos em SP; portão de Tuiuti) | conferir se cada uma aceita **contato seco ou acionamento 12 V** e ligar no relé do CT 3000; a que não aceitar: **eletroímã para porta metálica** ou **fecho elétrico** | portão (hoje no relé NovaDigital): ligar também no CT 3000 se quiser o leitor de pedestal |
+| Portas novas (metálicas) | 2: **eletroímã com suporte para porta metálica** ou **fecho elétrico de embutir** | 6 (almoxarifados etc.): idem |
+| **Botão de saída**, **sensor magnético de porta** e **acionador de emergência** (botoeira quebra-vidro) nas rotas de fuga | 1 jogo por porta | 1 jogo por porta |
+| **Fonte 12 V com bateria** (nobreak da fechadura) | 1 por controlador | 1 por controlador |
+| **Tags MIFARE 13,56 MHz** (adesivo para o crachá) | 1 por pessoa + reserva para visitantes | idem |
+| **Mini PC** sempre ligado (baixo consumo, sem ventoinha; Windows ou Linux) com **no-break** | 1 | 1 |
+| Cabo de rede (ou PoE) para os controladores e cabo do leitor (Wiegand ou RS-485, blindado) | conforme o projeto | conforme o projeto |
+
+A fechadura **Tuya** do almoxarifado de SP pode continuar como está (pela nuvem) ou ser trocada por uma fechadura ligada ao
+CT 3000 (assim abre com o crachá e funciona sem internet). Confirme quantidades e modelos com o revendedor Intelbras e
+com o eletricista (distâncias, tipo de porta, rotas de fuga).
+
 ## Verificação em duas etapas e sessões
 
 Cada pessoa liga a verificação em duas etapas em **Segurança** (botão no topo do sistema, ou `/conta/seguranca`): lê o QR Code com um aplicativo autenticador (Google Authenticator, Microsoft Authenticator) e guarda os 10 códigos de recuperação. Na mesma tela aparecem os aparelhos conectados e o botão "Sair de todos os outros aparelhos".

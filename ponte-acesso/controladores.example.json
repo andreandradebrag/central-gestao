@@ -1,0 +1,4 @@
+[
+  { "disp": "COLE_O_ID_DO_DISPOSITIVO_NO_SISTEMA", "url": "http://192.168.0.50", "usuario": "admin", "senha": "senha-do-controlador" },
+  { "disp": "OUTRO_ID", "url": "http://192.168.0.51", "usuario": "admin", "senha": "senha-do-controlador" }
+]

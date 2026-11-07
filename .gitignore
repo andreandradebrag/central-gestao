@@ -15,3 +15,6 @@ data/
 *.cg
 segredos.env
 backups/
+# v170: ponte de acesso (no mini PC): senhas dos controladores e a fila local de eventos
+ponte-acesso/controladores.json
+ponte-acesso/dados/
